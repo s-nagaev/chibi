@@ -1,0 +1,7 @@
+version: '3'
+services:
+  chibi:
+   restart: unless-stopped
+   image: pysergio/chibi:test
+   env_file:
+     - .env

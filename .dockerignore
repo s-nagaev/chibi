@@ -1,0 +1,13 @@
+.DS_Store
+.git
+.github
+.idea
+.pylintrc
+.pytest_cache
+.python-version
+.vscode
+.mypy_cache
+.env
+docker-compose.*yml
+*.bak
+data/*.pkl

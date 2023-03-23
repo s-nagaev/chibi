@@ -1,0 +1,85 @@
+import logging
+from functools import lru_cache
+from typing import Any, Optional
+
+from pydantic import BaseSettings, Field
+
+logger = logging.getLogger(__name__)
+
+
+class GPTSettings(BaseSettings):
+    api_key: str = Field(env="OPENAI_API_KEY")
+    show_usage: bool = Field(env="SHOW_USAGE", default=False)
+    proxy: Optional[str] = Field(env="PROXY", default=None)
+    max_history_size: int = Field(env="MAX_HISTORY_SIZE", default=10)
+    max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
+    assistant_prompt: str = Field(
+        env="ASSISTANT_PROMPT",
+        default="You're helpful & friendly assistant. Your name is Chibi",
+    )
+    max_tokens: int = Field(env="MAX_TOKENS", default=4000)
+    model: str = Field(env="MODEL", default="gpt-3.5-turbo-0301")
+    temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
+    n_choices: int = Field(env="OPENAI_N_CHOICES", default=1)
+    image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=4)
+    presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
+    frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
+    image_size: str = Field(env="IMAGE_SIZE", default="512x512")
+    timeout: int = Field(env="TIMEOUT", default=15)
+
+    class Config:
+        env_file = ".env"
+
+
+class TelegramSettings(BaseSettings):
+    token: str = Field(env="TELEGRAM_BOT_TOKEN")
+    users_whitelist: Optional[list[str]] = Field(env="USERS_WHITELIST", default=None)
+    groups_whitelist: Optional[list[int]] = Field(env="GROUPS_WHITELIST", default=None)
+    proxy: Optional[str] = Field(env="PROXY", default=None)
+    bot_name: str = Field(env="BOT_NAME", default="Chibi")
+    message_for_disallowed_users: str = Field(
+        env="MESSAGE_FOR_DISALLOWED_USERS",
+        default="You're not allowed to interact with me, sorry. Contact my owner first, please.",
+    )
+
+    class Config:
+        env_file = ".env"
+
+        @classmethod
+        def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
+            if field_name == "users_whitelist":
+                return [str(username).strip().strip("@") for username in raw_val.split(",")]
+            if field_name == "groups_whitelist":
+                return [int(group_id) for group_id in raw_val.split(",")]
+            return cls.json_loads(raw_val)
+
+
+class ApplicationSettings(BaseSettings):
+    redis: Optional[str] = Field(env="REDIS", default=None)
+    local_data_path: str = Field(env="LOCAL_DATA_PATH", default="/app/data")
+
+    class Config:
+        env_file = ".env"
+
+
+@lru_cache()
+def _get_gpt_settings() -> GPTSettings:
+    logger.info("Loading config settings from the environment...")
+    return GPTSettings()
+
+
+@lru_cache()
+def _get_telegram_settings() -> TelegramSettings:
+    logger.info("Loading config settings from the environment...")
+    return TelegramSettings()
+
+
+@lru_cache()
+def _get_application_settings() -> ApplicationSettings:
+    logger.info("Loading config settings from the environment...")
+    return ApplicationSettings()
+
+
+gpt_settings = _get_gpt_settings()
+telegram_settings = _get_telegram_settings()
+application_settings = _get_application_settings()

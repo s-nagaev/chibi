@@ -1,0 +1,31 @@
+name: Quality Gate
+on: push
+
+jobs:
+  Flake8:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Flake8
+        run: |
+          pip install flake8 flake8-isort
+      - name: Run Flake8
+        run: |
+          flake8
+  Mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v1
+        with:
+          python-version: "3.9"
+      - uses: actions/checkout@v2
+      - name: Install Poetry
+        run: |
+          pip install poetry
+      - name: Install Deps
+        run: |
+          python -m poetry config virtualenvs.create false && poetry install
+      - name: Run Mypy
+        run: |
+          mypy .
