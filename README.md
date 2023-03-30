@@ -1,10 +1,14 @@
 <h1 align="center"><img width=150 src="https://github.com/s-nagaev/chibi/raw/main/docs/logo.png" alt="logo"></h1>
 
-Chibi is a Python-based Telegram chatbot that allows users to interact with the powerful ChatGPT 3.5 and DALL-E neural networks. The bot is asynchronous, providing fast response times and serving multiple users simultaneously without blocking each other's requests. Chibi supports session management, enabling ChatGPT to remember the user's conversation history. The conversation history is stored for a configurable duration and is preserved even if the bot is restarted. The bot offers a wide range of settings through environment variables and can operate in both private and public modes. 
-
-It is distributed as a Docker image, with support for amd64, arm64, and armv7 platforms (Raspberry Pi supported!).
+Chibi is a Python-based Telegram chatbot that allows users to interact with the powerful ChatGPT 3.5 and DALL-E neural networks. The bot is asynchronous, providing fast response times and serving multiple users simultaneously without blocking each other's requests. Chibi supports session management, enabling ChatGPT to remember the user's conversation history. The conversation history is stored for a configurable duration and is preserved even if the bot is restarted.
 
 [Docker Hub](https://hub.docker.com/r/pysergio/chibi)
+
+## Supported platforms
+
+- linux/amd64
+- linux/arm64
+- linux/arm32/v7 *(Yeah! Your Raspberry Pi is supported!)*
 
 ## Features
 
