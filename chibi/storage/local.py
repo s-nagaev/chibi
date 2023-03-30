@@ -5,7 +5,7 @@ from typing import Optional
 
 from chibi.config import gpt_settings
 from chibi.models import Message, User
-from chibi.storage.database import Database
+from chibi.storage.abc import Database
 
 
 class LocalStorage(Database):
@@ -34,9 +34,6 @@ class LocalStorage(Database):
         with open(filename, "rb") as f:
             return pickle.load(f)
 
-    async def refresh(self, user: User) -> User:
-        return await self.get_or_create_user(user_id=User.id)
-
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
         if ttl:
             expire_at = time.time() + ttl
@@ -51,7 +48,14 @@ class LocalStorage(Database):
         current_time = time.time()
 
         return [
-            msg.dict(exclude={"expire_at"})
+            msg.dict(exclude={"expire_at", "id"})
             for msg in user.messages
             if msg.expire_at is None or msg.expire_at > current_time
         ]
+
+    async def drop_messages(self, user: User) -> None:
+        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
+        user.messages = [
+            initial_message,
+        ]
+        await self.save_user(user=user)

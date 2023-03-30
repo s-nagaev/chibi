@@ -9,18 +9,16 @@ logger = logging.getLogger(__name__)
 
 class GPTSettings(BaseSettings):
     api_key: str = Field(env="OPENAI_API_KEY")
-    show_usage: bool = Field(env="SHOW_USAGE", default=False)
     proxy: Optional[str] = Field(env="PROXY", default=None)
-    max_history_size: int = Field(env="MAX_HISTORY_SIZE", default=10)
+    max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1500)
     max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
     assistant_prompt: str = Field(
         env="ASSISTANT_PROMPT",
-        default="You're helpful & friendly assistant. Your name is Chibi",
+        default="You're helpful and friendly assistant. Your name is Chibi",
     )
     max_tokens: int = Field(env="MAX_TOKENS", default=4000)
-    model: str = Field(env="MODEL", default="gpt-3.5-turbo-0301")
+    model: str = Field(env="MODEL", default="gpt-3.5-turbo")
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
-    n_choices: int = Field(env="OPENAI_N_CHOICES", default=1)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=4)
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
@@ -29,6 +27,10 @@ class GPTSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @property
+    def messages_ttl(self) -> int:
+        return self.max_conversation_age_minutes * 60
 
 
 class TelegramSettings(BaseSettings):

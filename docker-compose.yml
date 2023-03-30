@@ -1,7 +1,13 @@
 version: '3'
+
 services:
   chibi:
    restart: unless-stopped
-   image: pysergio/chibi:test
+   image: pysergio/chibi:0.1.0
    env_file:
      - .env
+   volumes:
+     - chibi_data:/app/data
+
+volumes:
+  chibi_data:

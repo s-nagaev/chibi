@@ -2,6 +2,7 @@ import logging
 
 from openai.error import InvalidRequestError, RateLimitError, TryAgain
 from telegram import InputMediaPhoto, Update, constants
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.services.user import generate_image, get_gtp_chat_answer, reset_chat_history
@@ -26,7 +27,8 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
             f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
         )
-        logging.info(f"{user.name} got GPT answer. {usage_message}")
+        answer_to_log = gpt_answer.replace('\r', '').replace('\n', '')
+        logging.info(f"{user.name} got GPT answer. {usage_message}. Answer: {answer_to_log}")
     except TryAgain as e:
         logging.error(f"{user.name} didn't get a GPT answer due to exception: {e}")
         await send_message(update=update, context=context, text="Service is overloaded. Please, try again later.")
@@ -47,7 +49,13 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         await send_message(update=update, context=context, text=msg)
         return
-    await send_message(update=update, context=context, text=gpt_answer, parse_mode=constants.ParseMode.MARKDOWN)
+    try:
+        await send_message(update=update, context=context, text=gpt_answer, parse_mode=constants.ParseMode.MARKDOWN)
+    except BadRequest as e:
+        logging.error(
+            f"{user.name} got a Telegram Bad Request error while receiving GPT answer: {e}. Trying to re-send it."
+        )
+        await send_message(update=update, context=context, text=gpt_answer)
 
 
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -67,9 +75,27 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         )
         return
 
-    logging.info(f"{update.message.from_user.name} sent image generation request: {prompt}")
+    logging.info(f"{update.message.from_user.username} sent image generation request: {prompt}")
     await context.bot.send_chat_action(chat_id=chat_id, action=constants.ChatAction.UPLOAD_PHOTO)
-    image_urls = await generate_image(user_id=update.message.from_user.id, prompt=prompt)
+    try:
+        image_urls = await generate_image(user_id=update.message.from_user.id, prompt=prompt)
+    except RateLimitError as e:
+        logging.error(f"{update.message.from_user.username} reached a Rate Limit: {e}")
+        await send_message(update=update, context=context, text=f"🤐Rate Limit exceeded: {e}")
+        return
+    except InvalidRequestError as e:
+        logging.error(f"{update.message.from_user.username} got a InvalidRequestError: {e}")
+        await send_message(update=update, context=context, text=f"🤐{e}")
+        return
+    except Exception as e:
+        logging.error(f"{update.message.from_user.username} got an error: {e}")
+        msg = (
+            "I'm sorry, but there seems to be a little hiccup with your request at the moment. Would you mind "
+            "trying again later? Don't worry, I'll be here to assist you whenever you're ready!"
+        )
+        await send_message(update=update, context=context, text=msg)
+        return
+
     await context.bot.send_media_group(
         chat_id=chat_id,
         media=[InputMediaPhoto(url) for url in image_urls],

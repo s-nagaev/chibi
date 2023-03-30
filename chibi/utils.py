@@ -28,7 +28,7 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
                 return await func(*args, **kwargs)
 
         if chat.type in GROUP_CHAT_TYPES:
-            if telegram_settings.groups_whitelist and (chat.id in telegram_settings.groups_whitelist):
+            if not telegram_settings.groups_whitelist or (chat.id in telegram_settings.groups_whitelist):
                 return await func(*args, **kwargs)
 
             message = (
