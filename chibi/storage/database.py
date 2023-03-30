@@ -1,26 +1,41 @@
-from abc import ABC, abstractmethod
+import asyncio
+from functools import wraps
 from typing import Optional
 
-from chibi.models import Message, User
+from chibi.config import application_settings
+from chibi.storage.abc import Database
+from chibi.storage.local import LocalStorage
+from chibi.storage.redis import RedisStorage
 
 
-class Database(ABC):
-    @abstractmethod
-    async def get_or_create_user(self, user_id: int) -> User:
-        ...
+class DatabaseCache:
+    def __init__(self):
+        self._cache: Optional[Database] = None
+        self._lock = asyncio.Lock()
 
-    @abstractmethod
-    async def save_user(self, user: User) -> None:
-        ...
+    async def get_database(self) -> Database:
+        async with self._lock:
+            if self._cache is not None:
+                return self._cache
 
-    @abstractmethod
-    async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
-        ...
+            if application_settings.redis:
+                self._cache = await RedisStorage.create(application_settings.redis)
+            else:
+                self._cache = LocalStorage(application_settings.local_data_path)
 
-    @abstractmethod
-    async def get_messages(self, user: User) -> list[dict[str, str]]:
-        ...
+            return self._cache
 
-    @abstractmethod
-    async def refresh(self, user: User) -> User:
-        ...
+    def clear_cache(self):
+        self._cache = None
+
+
+_db_provider = DatabaseCache()
+
+
+def inject_database(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        db = await _db_provider.get_database()
+        return await func(db, *args, **kwargs)
+
+    return wrapper

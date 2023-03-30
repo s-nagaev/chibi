@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  chibi:
+   restart: unless-stopped
+   image: pysergio/chibi:latest
+   environment:
+     OPENAI_API_KEY: "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+     TELEGRAM_BOT_TOKEN: "9999999999:AAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBB"
+   volumes:
+     - chibi_data:/app/data
+
+volumes:
+  chibi_data:
