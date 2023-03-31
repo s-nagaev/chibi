@@ -47,3 +47,22 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         logging.warning(f"{update.message.from_user.username} is not allowed to work with me. Request rejected.")
 
     return wrapper
+
+
+def api_key_is_plausible(api_key: str) -> bool:
+    """Dummy pre-validator for OpenAI token.
+
+    Just to discard obviously inappropriate data.
+
+    Args:
+        api_key: OpenAI token string.
+
+    Returns:
+        True if token provided looks like a token :) False otherwise.
+    """
+
+    if len(api_key) > 55 or len(api_key) < 51:
+        return False
+    if " " in api_key:
+        return False
+    return True

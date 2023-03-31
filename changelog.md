@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2023-03-31
+
+### Added
+
+- Added the ability to switch between GPT-3 and GPT-4 models.
+- Redis support implemented.
+- Added README and this changelog.
+
+
 ## [0.2.0] - 2023-03-30
 
 ### Added

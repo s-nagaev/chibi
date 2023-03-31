@@ -9,9 +9,16 @@ from chibi.storage.database import inject_database
 
 
 @inject_database
-async def set_token(db: Database, user_id: int, token=str) -> None:
+async def set_api_key(db: Database, user_id: int, api_key=str) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    user.api_token = token
+    user.api_token = api_key
+    await db.save_user(user)
+
+
+@inject_database
+async def set_active_model(db: Database, user_id: int, model_name=str) -> None:
+    user = await db.get_or_create_user(user_id=user_id)
+    user.gpt_model = model_name
     await db.save_user(user)
 
 
@@ -34,7 +41,7 @@ async def summarize(db: Database, user_id: int) -> None:
         },
         {"role": "user", "content": str(chat_history)},
     ]
-    answer, usage = await get_chat_response(api_key=openai_api_key, messages=query_messages)
+    answer, usage = await get_chat_response(api_key=openai_api_key, messages=query_messages, model=user.model)
     answer_message = Message(role="assistant", content=answer)
     await reset_chat_history(user_id=user_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
@@ -48,7 +55,7 @@ async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[
     query_message = Message(role="user", content=prompt)
     await db.add_message(user=user, message=query_message, ttl=gpt_settings.messages_ttl)
     conversation_messages = await db.get_messages(user=user)
-    answer, usage = await get_chat_response(api_key=openai_api_key, messages=conversation_messages)
+    answer, usage = await get_chat_response(api_key=openai_api_key, messages=conversation_messages, model=user.model)
     answer_message = Message(role="assistant", content=answer)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
 
