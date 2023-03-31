@@ -103,8 +103,8 @@ You can configure Chibi using the following environment variables:
 | OPENAI_IMAGE_N_CHOICES       | Number of choices for image generation in DALL-E  | No       | 4                                                                                |
 | OPENAI_PRESENCE_PENALTY      | OpenAI presence penalty                           | No       | 0                                                                                |
 | OPENAI_TEMPERATURE           | OpenAI temperature for response generation        | No       | 1                                                                                |
-| GROUPS_WHITELIST             | Comma-separated list of whitelisted group IDs     | No       | "-799999999,-788888888"                                                          |
-| USERS_WHITELIST              | Comma-separated list of whitelisted usernames     | No       | "@YourName,@YourFriendName,@YourCatName"                                         |
+| GROUPS_WHITELIST             | Comma-separated list of whitelisted group IDs, i.e "-799999999,-788888888"     | No       |                                                           |
+| USERS_WHITELIST              | Comma-separated list of whitelisted usernames, i.e. "@YourName,@YourFriendName,@YourCatName"     | No       |                                          |
 
 Please, visit the [examples](examples) directory for the example of `.env`-file.
 
