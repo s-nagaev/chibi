@@ -17,7 +17,9 @@ class GPTSettings(BaseSettings):
         default="You're helpful and friendly assistant. Your name is Chibi",
     )
     max_tokens: int = Field(env="MAX_TOKENS", default=4000)
-    model: str = Field(env="MODEL", default="gpt-3.5-turbo")
+    model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
+    model_gpt3: str = Field(env="MODEL_GPT3", default="gpt-3.5-turbo")
+    model_gpt4: str = Field(env="MODEL_GPT4", default="gpt-4")
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=4)
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)

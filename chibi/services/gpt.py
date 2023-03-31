@@ -1,12 +1,13 @@
 import openai
+from openai.error import AuthenticationError
 
 from chibi.config import gpt_settings
 
 
-async def get_chat_response(api_key: str, messages: list[dict[str, str]]) -> tuple[str, dict[str, int]]:
+async def get_chat_response(api_key: str, messages: list[dict[str, str]], model: str) -> tuple[str, dict[str, int]]:
     response = await openai.ChatCompletion.acreate(
         api_key=api_key,
-        model=gpt_settings.model,
+        model=model,
         messages=messages,
         temperature=gpt_settings.temperature,
         max_tokens=gpt_settings.max_tokens,
@@ -28,3 +29,15 @@ async def get_images_by_prompt(api_key: str, prompt: str) -> list[str]:
         api_key=api_key, prompt=prompt, size=gpt_settings.image_size, n=gpt_settings.image_n_choices
     )
     return [result["url"] for result in response["data"]]
+
+
+async def api_key_is_valid(api_key: str) -> bool:
+    try:
+        await openai.Completion.acreate(
+            model="text-davinci-003", prompt="This is a test", max_tokens=5, api_key=api_key
+        )
+    except AuthenticationError:
+        return False
+    except Exception:
+        raise
+    return True

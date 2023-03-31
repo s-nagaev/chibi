@@ -3,6 +3,8 @@ import logging
 
 from telegram import (
     BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Update,
@@ -11,6 +13,7 @@ from telegram import (
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     InlineQueryHandler,
@@ -18,8 +21,14 @@ from telegram.ext import (
     filters,
 )
 
-from chibi.config import telegram_settings
-from chibi.services.bot import handle_image_generation, handle_prompt, handle_reset
+from chibi.config import gpt_settings, telegram_settings
+from chibi.services.bot import (
+    handle_image_generation,
+    handle_model_selection,
+    handle_openai_key_set,
+    handle_prompt,
+    handle_reset,
+)
 from chibi.utils import check_user_allowance
 
 logging.basicConfig(format="%(levelname)s \t %(asctime)s    %(message)s", level=logging.INFO)
@@ -39,6 +48,7 @@ class ChibiBot:
             BotCommand(
                 command="reset", description="Reset your conversation history (will reduce prompt and save some tokens)"
             ),
+            BotCommand(command="menu", description="Select GPT model"),
         ]
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -65,6 +75,24 @@ class ChibiBot:
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_prompt(update=update, context=context))
+
+    @check_user_allowance
+    async def set_openai_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        asyncio.create_task(handle_openai_key_set(update=update, context=context))
+
+    @check_user_allowance
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        keyboard = [
+            [InlineKeyboardButton("GPT-3.5", callback_data=gpt_settings.model_gpt3)],
+            [InlineKeyboardButton("GPT-4", callback_data=gpt_settings.model_gpt4)],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
+
+    # @check_user_allowance
+    async def select_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        asyncio.create_task(handle_model_selection(update=update, context=context))
 
     @check_user_allowance
     async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -103,7 +131,10 @@ class ChibiBot:
         app.add_handler(CommandHandler("imagine", self.imagine))
         app.add_handler(CommandHandler("start", self.help))
         app.add_handler(CommandHandler("ask", self.ask))
+        app.add_handler(CommandHandler("set_key", self.set_openai_key))
+        app.add_handler(CommandHandler("menu", self.show_menu))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
+        app.add_handler(CallbackQueryHandler(self.select_model))
         app.add_handler(
             InlineQueryHandler(
                 self.inline_query,
