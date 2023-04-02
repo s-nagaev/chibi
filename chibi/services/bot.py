@@ -1,14 +1,22 @@
 import logging
 
 from openai.error import InvalidRequestError, RateLimitError, TryAgain
-from telegram import InputMediaPhoto, Update, constants
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Update,
+    constants,
+)
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from chibi.config import gpt_settings
 from chibi.services.gpt import api_key_is_valid
 from chibi.services.user import (
     generate_image,
     get_gtp_chat_answer,
+    get_models_available,
     reset_chat_history,
     set_active_model,
     set_api_key,
@@ -23,11 +31,10 @@ async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_T
     user = update.callback_query.from_user
     await set_active_model(user_id=user.id, model_name=model_name)
     logging.info(f"{user.name} switched to model '{model_name}'")
-    await query.edit_message_text(text=f"Selected option: {query.data}")
+    await query.edit_message_text(text=f"Selected model: {query.data}")
 
 
 async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
     user = update.message.from_user
     prompt = update.message.text
     if prompt.startswith("/ask"):
@@ -36,7 +43,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
     logging.info(f"{user.name} sent a new message: {prompt_to_log}")
 
-    await context.bot.send_chat_action(chat_id=chat_id, action=constants.ChatAction.TYPING)
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
 
     try:
         gpt_answer, usage = await get_gtp_chat_answer(user_id=update.message.from_user.id, prompt=prompt)
@@ -125,7 +132,7 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.message.from_user
     logging.info(f"{user.name} provides ones API Key.")
 
-    api_key = update.message.text.replace("/set_token", "", 1).strip()
+    api_key = update.message.text.replace("/set_openai_key", "", 1).strip()
     error_msg = (
         "Sorry, but incorrect API key provided. You can find your API key at "
         "https://platform.openai.com/account/api-keys"
@@ -140,7 +147,21 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
         logging.warning(f"{user.username} provided incorrect API key.")
         return
 
-    await set_api_key(user_id=user.id, token=api_key)
-    msg = "Your OpenAI API Key successfully set, my functionality unlocked."
-    await send_message(update=update, context=context, text=msg)
+    await set_api_key(user_id=user.id, api_key=api_key)
+    msg = (
+        "Your OpenAI API Key successfully set, my functionality unlocked! 🦾\n\n "
+        "Now you also may check available models in /menu."
+    )
+    await send_message(update=update, context=context, reply=False, text=msg)
+    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
     logging.info(f"{user.username} successfully set up OpenAPI Key.")
+
+
+async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
+    user = update.message.from_user
+    can_use_gpt4 = gpt_settings.gpt4_enabled or (
+        gpt_settings.gpt4_whitelist and user.username in gpt_settings.gpt4_whitelist
+    )
+    models_available = await get_models_available(user_id=user.id, include_gpt4=can_use_gpt4)
+    keyboard = [[InlineKeyboardButton(model.upper(), callback_data=model)] for model in models_available]
+    return InlineKeyboardMarkup(keyboard)

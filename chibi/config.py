@@ -9,26 +9,33 @@ logger = logging.getLogger(__name__)
 
 class GPTSettings(BaseSettings):
     api_key: str = Field(env="OPENAI_API_KEY")
-    proxy: Optional[str] = Field(env="PROXY", default=None)
-    max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1500)
-    max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
+
     assistant_prompt: str = Field(
         env="ASSISTANT_PROMPT",
         default="You're helpful and friendly assistant. Your name is Chibi",
     )
-    max_tokens: int = Field(env="MAX_TOKENS", default=4000)
-    model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
-    model_gpt3: str = Field(env="MODEL_GPT3", default="gpt-3.5-turbo")
-    model_gpt4: str = Field(env="MODEL_GPT4", default="gpt-4")
-    temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
-    image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=4)
-    presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
+    gpt4_enabled: bool = Field(env="GPT4_ENABLED", default=True)
+    gpt4_whitelist: Optional[list[str]] = Field(env="GPT4_WHITELIST", default=None)
+    image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=4)
     image_size: str = Field(env="IMAGE_SIZE", default="512x512")
+    max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
+    max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1800)
+    max_tokens: int = Field(env="MAX_TOKENS", default=1000)
+    model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
+    presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
+    proxy: Optional[str] = Field(env="PROXY", default=None)
+    temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
     timeout: int = Field(env="TIMEOUT", default=15)
 
     class Config:
         env_file = ".env"
+
+        @classmethod
+        def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
+            if field_name == "gpt4_whitelist":
+                return [str(username).strip().strip("@") for username in raw_val.split(",")]
+            return cls.json_loads(raw_val)
 
     @property
     def messages_ttl(self) -> int:
@@ -37,14 +44,15 @@ class GPTSettings(BaseSettings):
 
 class TelegramSettings(BaseSettings):
     token: str = Field(env="TELEGRAM_BOT_TOKEN")
-    users_whitelist: Optional[list[str]] = Field(env="USERS_WHITELIST", default=None)
-    groups_whitelist: Optional[list[int]] = Field(env="GROUPS_WHITELIST", default=None)
-    proxy: Optional[str] = Field(env="PROXY", default=None)
+
     bot_name: str = Field(env="BOT_NAME", default="Chibi")
+    groups_whitelist: Optional[list[int]] = Field(env="GROUPS_WHITELIST", default=None)
     message_for_disallowed_users: str = Field(
         env="MESSAGE_FOR_DISALLOWED_USERS",
         default="You're not allowed to interact with me, sorry. Contact my owner first, please.",
     )
+    proxy: Optional[str] = Field(env="PROXY", default=None)
+    users_whitelist: Optional[list[str]] = Field(env="USERS_WHITELIST", default=None)
 
     class Config:
         env_file = ".env"

@@ -3,8 +3,6 @@ import logging
 
 from telegram import (
     BotCommand,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Update,
@@ -23,6 +21,7 @@ from telegram.ext import (
 
 from chibi.config import gpt_settings, telegram_settings
 from chibi.services.bot import (
+    handle_available_model_options,
     handle_image_generation,
     handle_model_selection,
     handle_openai_key_set,
@@ -50,6 +49,12 @@ class ChibiBot:
             ),
             BotCommand(command="menu", description="Select GPT model"),
         ]
+        if not gpt_settings.api_key:
+            self.commands.append(
+                BotCommand(
+                    command="set_openai_key", description="Set your own OpenAI key (e.g. /set_openai_key sk-XXXXX)"
+                )
+            )
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         commands = [f"/{command.command} - {command.description}" for command in self.commands]
@@ -82,11 +87,7 @@ class ChibiBot:
 
     @check_user_allowance
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        keyboard = [
-            [InlineKeyboardButton("GPT-3.5", callback_data=gpt_settings.model_gpt3)],
-            [InlineKeyboardButton("GPT-4", callback_data=gpt_settings.model_gpt4)],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = await handle_available_model_options(update=update, context=context)
 
         await update.message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
 
@@ -131,7 +132,7 @@ class ChibiBot:
         app.add_handler(CommandHandler("imagine", self.imagine))
         app.add_handler(CommandHandler("start", self.help))
         app.add_handler(CommandHandler("ask", self.ask))
-        app.add_handler(CommandHandler("set_key", self.set_openai_key))
+        app.add_handler(CommandHandler("set_openai_key", self.set_openai_key))
         app.add_handler(CommandHandler("menu", self.show_menu))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
         app.add_handler(CallbackQueryHandler(self.select_model))

@@ -1,4 +1,5 @@
 import logging
+from functools import wraps
 from typing import Any, Callable
 
 from telegram import Update, constants
@@ -10,10 +11,13 @@ GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
 
 
-async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, **kwargs: Any) -> None:
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, reply_to_message_id=update.message.message_id, **kwargs
-    )
+async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any) -> None:
+    if reply:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, reply_to_message_id=update.message.message_id, **kwargs
+        )
+        return
+    await context.bot.send_message(chat_id=update.effective_chat.id, **kwargs)
 
 
 def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -45,6 +49,20 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
             disable_web_page_preview=True,
         )
         logging.warning(f"{update.message.from_user.username} is not allowed to work with me. Request rejected.")
+
+    return wrapper
+
+
+def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(func)
+    async def wrapper(*args, **kwargs) -> Any:
+        update: Update = kwargs.get("update") or args[1]
+        context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            # Handle exception here (e.g., log it or raise a custom error)
+            print(f"An error occurred: {str(e)}")
 
     return wrapper
 

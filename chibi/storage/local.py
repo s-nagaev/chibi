@@ -20,38 +20,47 @@ class LocalStorage(Database):
         with open(filename, "wb") as f:
             pickle.dump(user, f)
 
-    async def get_or_create_user(self, user_id: int) -> User:
-        filename = self._get_storage_filename(user_id)
-        if not os.path.exists(filename):
-            user = User(id=user_id)
-            initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-            user.messages = [
-                initial_message,
-            ]
-            await self.save_user(user=user)
-            return user
+    async def create_user(self, user_id: int) -> User:
+        user = User(id=user_id)
+        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
+        user.messages = [
+            initial_message,
+        ]
+        await self.save_user(user=user)
+        return user
 
-        with open(filename, "rb") as f:
-            return pickle.load(f)
+    async def get_user(self, user_id: int) -> Optional[User]:
+        filename = self._get_storage_filename(user_id)
+        if os.path.exists(filename):
+            with open(filename, "rb") as f:
+                return pickle.load(f)
+
+    async def get_or_create_user(self, user_id: int) -> User:
+        if user := await self.get_user(user_id=user_id):
+            return user
+        return await self.create_user(user_id=user_id)
 
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
+        user_refreshed = await self.get_user(user_id=user.id)
         if ttl:
             expire_at = time.time() + ttl
         else:
             expire_at = None
 
         message_with_ttl = Message(role=message.role, content=message.content, expire_at=expire_at)
-        user.messages.append(message_with_ttl)
-        await self.save_user(user)
+        user_refreshed.messages.append(message_with_ttl)
+        await self.save_user(user_refreshed)
 
     async def get_messages(self, user: User) -> list[dict[str, str]]:
+        user_refreshed = await self.get_user(user_id=user.id)
         current_time = time.time()
 
-        return [
+        msgs = [
             msg.dict(exclude={"expire_at", "id"})
-            for msg in user.messages
+            for msg in user_refreshed.messages
             if msg.expire_at is None or msg.expire_at > current_time
         ]
+        return msgs
 
     async def drop_messages(self, user: User) -> None:
         initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
