@@ -38,8 +38,6 @@ async def summarize(db: Database, user_id: int) -> None:
     openai_api_key = user.api_token or gpt_settings.api_key
     logging.info(f"[User ID {user_id}] History is too long. Summarizing...")
     chat_history = await db.get_messages(user=user)
-    print("-" * 120)
-    print(f"Conversation length before summarizing: {len(str(chat_history))}")
     query_messages = [
         {
             "role": "assistant",
@@ -53,10 +51,6 @@ async def summarize(db: Database, user_id: int) -> None:
     answer_message = Message(role="assistant", content=answer)
     await reset_chat_history(user_id=user_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
-
-    print(f"Conversation length after summarizing: {len(str(await db.get_messages(user=user)))}")
-    print("-" * 120)
-
     logging.info(f"[User ID {user_id}] History successfully summarized.")
 
 
