@@ -2,6 +2,7 @@ import logging
 from functools import wraps
 from typing import Any, Callable
 
+from openai.error import InvalidRequestError, RateLimitError, TryAgain
 from telegram import Update, constants
 from telegram.ext import ContextTypes
 
@@ -21,6 +22,23 @@ async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, reply
 
 
 def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator controlling access to the chatbot.
+
+    This deco checks:
+        - if the specific user is allowed to interact with the chatbot, using USERS_WHITELIST.
+        - if the chatbot is allowed to be in a specific group, using a GROUPS_WHITELIST.
+
+    If the specific user is disallowed to interact with the chatbot, the corresponding message will be sent.
+    If the chatbot is disallowed to be in a specific group, it will send the corresponding message
+    and leave it immediately.
+
+    Args:
+        func: async function that may rise openai exception.
+
+    Returns:
+        Wrapper function object.
+    """
+
     async def wrapper(*args, **kwargs) -> Any:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
@@ -54,15 +72,44 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator handling openai module's exceptions.
+
+    If the specific exception occurred, handles it and sends the corresponding message.
+
+    Args:
+        func: async function that may rise openai exception.
+
+    Returns:
+        Wrapper function object.
+    """
+
     @wraps(func)
     async def wrapper(*args, **kwargs) -> Any:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
+        user = update.message.from_user
         try:
             return await func(*args, **kwargs)
+        except TryAgain as e:
+            logging.error(f"{user.name} didn't get a GPT answer due to exception: {e}")
+            await send_message(update=update, context=context, text="🥴Service is overloaded. Please, try again later.")
+            return
+        except InvalidRequestError as e:
+            logging.error(f"{user.name} got a InvalidRequestError: {e}")
+            await send_message(update=update, context=context, text=f"😲{e}")
+            return
+        except RateLimitError as e:
+            logging.error(f"{user.name} reached a Rate Limit: {e}")
+            await send_message(update=update, context=context, text=f"🤐Rate Limit exceeded: {e}")
+            return
         except Exception as e:
-            # Handle exception here (e.g., log it or raise a custom error)
-            print(f"An error occurred: {str(e)}")
+            logging.error(f"{user.name} got an error: {e}")
+            msg = (
+                "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
+                "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
+            )
+            await send_message(update=update, context=context, text=msg)
+            return
 
     return wrapper
 
