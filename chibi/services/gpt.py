@@ -4,16 +4,25 @@ from openai.error import AuthenticationError
 from chibi.config import gpt_settings
 
 
-async def get_chat_response(api_key: str, messages: list[dict[str, str]], model: str) -> tuple[str, dict[str, int]]:
+async def get_chat_response(
+    api_key: str,
+    messages: list[dict[str, str]],
+    model: str,
+    temperature: float = gpt_settings.temperature,
+    max_tokens: int = gpt_settings.max_tokens,
+    presence_penalty: float = gpt_settings.presence_penalty,
+    frequency_penalty: float = gpt_settings.frequency_penalty,
+    timeout: int = gpt_settings.timeout,
+) -> tuple[str, dict[str, int]]:
     response = await openai.ChatCompletion.acreate(
         api_key=api_key,
         model=model,
         messages=messages,
-        temperature=gpt_settings.temperature,
-        max_tokens=gpt_settings.max_tokens,
-        presence_penalty=gpt_settings.presence_penalty,
-        frequency_penalty=gpt_settings.frequency_penalty,
-        timeout=gpt_settings.timeout,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        presence_penalty=presence_penalty,
+        frequency_penalty=frequency_penalty,
+        timeout=timeout,
     )
     if len(response.choices) == 0:
         return "", {}
@@ -41,3 +50,10 @@ async def api_key_is_valid(api_key: str) -> bool:
     except Exception:
         raise
     return True
+
+
+async def retrieve_available_models(api_key: str, include_gpt4: bool) -> list[str]:
+    all_models = await openai.Model.alist(api_key=api_key)
+    if include_gpt4:
+        return [model["id"] for model in all_models.data if "gpt" in model["id"]]
+    return [model["id"] for model in all_models.data if "gpt-3" in model["id"]]

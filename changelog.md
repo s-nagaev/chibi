@@ -7,14 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2023-04-02
+
+### Fixed
+
+- A bug in local data storage management when the conversation summarizing function didn't clean the summarized history.
+
+### Changed
+
+- Now the `/menu` option displays all the available GPT-based models.
+- A `GPT4_ENABLED` setting (default: `True`) allows administrators to exclude GPT-4 models from the available choices in /menu option. The reason for this is that the GPT-4 token is 15 times more expensive than the GPT-3 one.
+- A `GPT4_WHITELIST` setting, that allow andinisstrator to specify users for whom the restriction on using the GPT-4 model does not apply.
+- Now, during the entire waiting time for a response, the user sees the bot's activity such as "typing..." or "uploading photo...".
+- Code slightly refactored.
+- README updated.
+
 ## [0.2.1] - 2023-03-31
 
 ### Added
 
 - Added the ability to switch between GPT-3 and GPT-4 models.
-- Redis support implemented.
-- Added README and this changelog.
-
 
 ## [0.2.0] - 2023-03-30
 
