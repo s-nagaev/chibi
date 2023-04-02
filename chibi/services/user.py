@@ -57,7 +57,6 @@ async def summarize(db: Database, user_id: int) -> None:
 @inject_database
 async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[str, dict[str, int]]:
     user = await db.get_or_create_user(user_id=user_id)
-    logging.warning(await db.get_messages(user=user))
     openai_api_key = user.api_token or gpt_settings.api_key
 
     query_message = Message(role="user", content=prompt)
