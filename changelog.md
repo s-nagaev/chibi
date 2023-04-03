@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2023-04-03
+
+### Added
+
+- Setting `ALLOW_BOTS` with `True` default value. If `ALLOW_BOTS` is set to `True`, it means that other bot requests will be ignored, and only non-bot requests will be processed. 
+
 ## [0.3.0] - 2023-04-02
 
 ### Fixed

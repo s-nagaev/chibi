@@ -53,6 +53,7 @@ class TelegramSettings(BaseSettings):
     )
     proxy: Optional[str] = Field(env="PROXY", default=None)
     users_whitelist: Optional[list[str]] = Field(env="USERS_WHITELIST", default=None)
+    allow_bots: bool = Field(env="ALLOW_BOTS", default=False)
 
     class Config:
         env_file = ".env"
