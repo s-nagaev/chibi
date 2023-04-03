@@ -45,6 +45,10 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         chat = update.effective_chat
         user = update.message.from_user.username
 
+        if not telegram_settings.allow_bots and user.endswith("Bot"):
+            logging.warning(f"Bots are not allowed. {user}'s request ignored.")
+            return
+
         if chat.type in PERSONAL_CHAT_TYPES:
             if not telegram_settings.users_whitelist or (user in telegram_settings.users_whitelist):
                 return await func(*args, **kwargs)
@@ -66,7 +70,7 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
             text=telegram_settings.message_for_disallowed_users,
             disable_web_page_preview=True,
         )
-        logging.warning(f"{update.message.from_user.username} is not allowed to work with me. Request rejected.")
+        logging.warning(f"{user} is not allowed to work with me. Request rejected.")
 
     return wrapper
 
