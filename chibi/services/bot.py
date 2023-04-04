@@ -1,6 +1,6 @@
 import asyncio
-import logging
 
+from loguru import logger
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -30,7 +30,7 @@ async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_T
     model_name = query.data
     user = update.callback_query.from_user
     await set_active_model(user_id=user.id, model_name=model_name)
-    logging.info(f"{user.name} switched to model '{model_name}'")
+    logger.info(f"{user.name} switched to model '{model_name}'")
     await query.edit_message_text(text=f"Selected model: {query.data}")
 
 
@@ -42,7 +42,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         prompt = prompt.replace("/ask", "", 1).strip()
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
-    logging.info(f"{user.name} sent a new message: {prompt_to_log}")
+    logger.info(f"{user.name} sent a new message: {prompt_to_log}")
 
     get_gtp_chat_answer_task = asyncio.ensure_future(
         get_gtp_chat_answer(user_id=update.message.from_user.id, prompt=prompt)
@@ -59,13 +59,13 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
     )
     answer_to_log = gpt_answer.replace("\r", " ").replace("\n", " ")
-    logging.info(f"{user.name} got GPT answer. {usage_message}. Answer: {answer_to_log}")
+    logger.info(f"{user.name} got GPT answer. {usage_message}. Answer: {answer_to_log}")
 
     try:
         await send_message(update=update, context=context, text=gpt_answer, parse_mode=constants.ParseMode.MARKDOWN)
     except BadRequest as e:
         # Trying to handle a exception connected with markdown parsing: just re-sending the message in a text mode.
-        logging.error(
+        logger.error(
             f"{user.name} got a Telegram Bad Request error while receiving GPT answer: {e}. "
             f"Trying to re-send it in plain text mode."
         )
@@ -73,7 +73,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.info(f"{update.message.from_user.name} conversation history reset.")
+    logger.info(f"{update.message.from_user.name} conversation history reset.")
     await reset_chat_history(user_id=update.message.from_user.id)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Done!")
 
@@ -89,7 +89,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
             text="Please provide some description (e.g. /imagine cat)",
         )
 
-    logging.info(f"{update.message.from_user.name} sent image generation request: {prompt}")
+    logger.info(f"{update.message.from_user.name} sent image generation request: {prompt}")
 
     generate_image_task = asyncio.ensure_future(generate_image(user_id=update.message.from_user.id, prompt=prompt))
 
@@ -110,7 +110,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
 
 async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
-    logging.info(f"{user.name} provides ones API Key.")
+    logger.info(f"{user.name} provides ones API Key.")
 
     api_key = update.message.text.replace("/set_openai_key", "", 1).strip()
     error_msg = (
@@ -119,12 +119,12 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     )
     if not api_key_is_plausible(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
-        logging.warning(f"{user.username} provided improbable key.")
+        logger.warning(f"{user.username} provided improbable key.")
         return
 
     if not await api_key_is_valid(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
-        logging.warning(f"{user.username} provided incorrect API key.")
+        logger.warning(f"{user.username} provided incorrect API key.")
         return
 
     await set_api_key(user_id=user.id, api_key=api_key)
@@ -134,7 +134,7 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     )
     await send_message(update=update, context=context, reply=False, text=msg)
     await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
-    logging.info(f"{user.username} successfully set up OpenAPI Key.")
+    logger.info(f"{user.username} successfully set up OpenAPI Key.")
 
 
 async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:

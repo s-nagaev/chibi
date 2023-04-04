@@ -1,7 +1,7 @@
-import logging
 from functools import wraps
 from typing import Any, Callable
 
+from loguru import logger
 from openai.error import InvalidRequestError, RateLimitError, TryAgain
 from telegram import Chat as TelegramChat
 from telegram import Update
@@ -62,11 +62,11 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         user_name = telegram_user.name or f"{telegram_user.first_name} ({telegram_user.id})"
 
         if telegram_user.is_bot and not telegram_settings.allow_bots:
-            logging.warning(f"Bots are not allowed. {user_name}'s request ignored.")
+            logger.warning(f"Bots are not allowed. {user_name}'s request ignored.")
             return None
 
         if chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
-            logging.warning(f"{user_name} is not allowed to work with me. Request rejected.")
+            logger.warning(f"{user_name} is not allowed to work with me. Request rejected.")
             await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
             return None
 
@@ -75,7 +75,7 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
                 f"The group {chat.effective_name} (id: {chat.id}, link: {chat.link}) does not exist in the whitelist. "
                 "Leaving it..."
             )
-            logging.warning(message)
+            logger.warning(message)
             await context.bot.send_message(chat_id=chat.id, text=message, disable_web_page_preview=True)
             await chat.leave()
             return None
@@ -105,22 +105,22 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return await func(*args, **kwargs)
         except TryAgain as e:
-            logging.error(f"{user.name} didn't get a GPT answer due to exception: {e}")
+            logger.error(f"{user.name} didn't get a GPT answer due to exception: {e}")
             await send_message(update=update, context=context, text="🥴Service is overloaded. Please, try again later.")
             return None
 
         except InvalidRequestError as e:
-            logging.error(f"{user.name} got a InvalidRequestError: {e}")
+            logger.error(f"{user.name} got a InvalidRequestError: {e}")
             await send_message(update=update, context=context, text=f"😲{e}")
             return None
 
         except RateLimitError as e:
-            logging.error(f"{user.name} reached a Rate Limit: {e}")
+            logger.error(f"{user.name} reached a Rate Limit: {e}")
             await send_message(update=update, context=context, text=f"🤐Rate Limit exceeded: {e}")
             return None
 
         except Exception as e:
-            logging.error(f"{user.name} got an error: {e}")
+            logger.error(f"{user.name} got an error: {e}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"

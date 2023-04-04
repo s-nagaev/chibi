@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now the `USERS_WHITELIST` setting can also contain telegram user IDs. 
+- Now the `USERS_WHITELIST` setting can also contain telegram user IDs.
+- Logging additionally set up.
 
 
 ## [0.3.1] - 2023-04-03

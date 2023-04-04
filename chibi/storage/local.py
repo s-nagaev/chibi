@@ -3,6 +3,8 @@ import pickle
 import time
 from typing import Optional
 
+from loguru import logger
+
 from chibi.config import gpt_settings
 from chibi.models import Message, User
 from chibi.storage.abc import Database
@@ -11,6 +13,7 @@ from chibi.storage.abc import Database
 class LocalStorage(Database):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
+        logger.info("Local storage initialized.")
 
     def _get_storage_filename(self, user_id: int) -> str:
         return os.path.join(self.storage_path, f"{user_id}.pkl")
