@@ -83,12 +83,11 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
     chat_id = update.effective_chat.id
     prompt = update.message.text.replace("/imagine", "", 1).strip()
     if not prompt:
-        await context.bot.send_message(
+        return await context.bot.send_message(
             chat_id=chat_id,
             reply_to_message_id=update.message.message_id,
             text="Please provide some description (e.g. /imagine cat)",
         )
-        return
 
     logging.info(f"{update.message.from_user.name} sent image generation request: {prompt}")
 

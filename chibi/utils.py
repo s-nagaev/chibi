@@ -3,7 +3,10 @@ from functools import wraps
 from typing import Any, Callable
 
 from openai.error import InvalidRequestError, RateLimitError, TryAgain
-from telegram import Update, constants
+from telegram import Chat as TelegramChat
+from telegram import Update
+from telegram import User as TelegramUser
+from telegram import constants
 from telegram.ext import ContextTypes
 
 from chibi.config import telegram_settings
@@ -21,11 +24,23 @@ async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, reply
     await context.bot.send_message(chat_id=update.effective_chat.id, **kwargs)
 
 
+def user_is_allowed(tg_user: TelegramUser) -> bool:
+    if not telegram_settings.users_whitelist:
+        return True
+    return any(identifier in telegram_settings.users_whitelist for identifier in (tg_user.id, tg_user.name))
+
+
+def group_is_allowed(tg_chat: TelegramChat) -> bool:
+    if not telegram_settings.groups_whitelist:
+        return True
+    return tg_chat.id in telegram_settings.groups_whitelist
+
+
 def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator controlling access to the chatbot.
 
     This deco checks:
-        - if the specific user is allowed to interact with the chatbot, using USERS_WHITELIST.
+        - if the specific user is allowed to interact with the chatbot, using ALLOW_BOTS and USERS_WHITELIST;
         - if the chatbot is allowed to be in a specific group, using a GROUPS_WHITELIST.
 
     If the specific user is disallowed to interact with the chatbot, the corresponding message will be sent.
@@ -43,20 +58,19 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
         chat = update.effective_chat
-        user = update.message.from_user.username
+        telegram_user = update.message.from_user
+        user_name = telegram_user.name or f"{telegram_user.first_name} ({telegram_user.id})"
 
-        if not telegram_settings.allow_bots and user.endswith("Bot"):
-            logging.warning(f"Bots are not allowed. {user}'s request ignored.")
-            return
+        if telegram_user.is_bot and not telegram_settings.allow_bots:
+            logging.warning(f"Bots are not allowed. {user_name}'s request ignored.")
+            return None
 
-        if chat.type in PERSONAL_CHAT_TYPES:
-            if not telegram_settings.users_whitelist or (user in telegram_settings.users_whitelist):
-                return await func(*args, **kwargs)
+        if chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
+            logging.warning(f"{user_name} is not allowed to work with me. Request rejected.")
+            await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
+            return None
 
-        if chat.type in GROUP_CHAT_TYPES:
-            if not telegram_settings.groups_whitelist or (chat.id in telegram_settings.groups_whitelist):
-                return await func(*args, **kwargs)
-
+        if chat.type in GROUP_CHAT_TYPES and not group_is_allowed(tg_chat=chat):
             message = (
                 f"The group {chat.effective_name} (id: {chat.id}, link: {chat.link}) does not exist in the whitelist. "
                 "Leaving it..."
@@ -64,13 +78,9 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
             logging.warning(message)
             await context.bot.send_message(chat_id=chat.id, text=message, disable_web_page_preview=True)
             await chat.leave()
+            return None
 
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text=telegram_settings.message_for_disallowed_users,
-            disable_web_page_preview=True,
-        )
-        logging.warning(f"{user} is not allowed to work with me. Request rejected.")
+        return await func(*args, **kwargs)
 
     return wrapper
 
@@ -97,15 +107,18 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
         except TryAgain as e:
             logging.error(f"{user.name} didn't get a GPT answer due to exception: {e}")
             await send_message(update=update, context=context, text="🥴Service is overloaded. Please, try again later.")
-            return
+            return None
+
         except InvalidRequestError as e:
             logging.error(f"{user.name} got a InvalidRequestError: {e}")
             await send_message(update=update, context=context, text=f"😲{e}")
-            return
+            return None
+
         except RateLimitError as e:
             logging.error(f"{user.name} reached a Rate Limit: {e}")
             await send_message(update=update, context=context, text=f"🤐Rate Limit exceeded: {e}")
-            return
+            return None
+
         except Exception as e:
             logging.error(f"{user.name} got an error: {e}")
             msg = (
@@ -113,7 +126,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
             )
             await send_message(update=update, context=context, text=msg)
-            return
+            return None
 
     return wrapper
 
