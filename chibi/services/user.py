@@ -1,5 +1,6 @@
 import asyncio
-import logging
+
+from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.models import Message
@@ -36,7 +37,7 @@ async def reset_chat_history(db: Database, user_id: int) -> None:
 async def summarize(db: Database, user_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
     openai_api_key = user.api_token or gpt_settings.api_key
-    logging.info(f"[User ID {user_id}] History is too long. Summarizing...")
+    logger.info(f"[User ID {user_id}] History is too long. Summarizing...")
     chat_history = await db.get_messages(user=user)
     query_messages = [
         {
@@ -51,7 +52,7 @@ async def summarize(db: Database, user_id: int) -> None:
     answer_message = Message(role="assistant", content=answer)
     await reset_chat_history(user_id=user_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
-    logging.info(f"[User ID {user_id}] History successfully summarized.")
+    logger.info(f"[User ID {user_id}] History successfully summarized.")
 
 
 @inject_database

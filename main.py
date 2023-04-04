@@ -1,6 +1,6 @@
 import asyncio
-import logging
 
+from loguru import logger
 from telegram import (
     BotCommand,
     InlineQueryResultArticle,
@@ -29,8 +29,6 @@ from chibi.services.bot import (
     handle_reset,
 )
 from chibi.utils import check_user_allowance
-
-logging.basicConfig(format="%(levelname)s \t %(asctime)s    %(message)s", level=logging.INFO)
 
 
 class ChibiBot:
@@ -113,7 +111,7 @@ class ChibiBot:
         await update.inline_query.answer(results)
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logging.error(f"Error occurred while handling an update: {context.error}")
+        logger.error(f"Error occurred while handling an update: {context.error}")
 
     async def post_init(self, application: Application) -> None:
         await application.bot.set_my_commands(self.commands)

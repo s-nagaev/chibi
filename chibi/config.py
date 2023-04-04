@@ -1,10 +1,20 @@
-import logging
+import sys
 from functools import lru_cache
 from typing import Any, Optional
 
+from loguru import logger
 from pydantic import BaseSettings, Field
 
-logger = logging.getLogger(__name__)
+config = {
+    "handlers": [
+        {
+            "sink": sys.stdout,
+            "colorize": True,
+            "format": "<lvl>{level}</lvl>\t| <green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> |  <lvl>{message}</lvl>",
+        },
+    ],
+}
+logger.configure(**config)
 
 
 class GPTSettings(BaseSettings):
@@ -77,19 +87,19 @@ class ApplicationSettings(BaseSettings):
 
 @lru_cache()
 def _get_gpt_settings() -> GPTSettings:
-    logger.info("Loading config settings from the environment...")
+    logger.info("Loading GPT config settings from the environment...")
     return GPTSettings()
 
 
 @lru_cache()
 def _get_telegram_settings() -> TelegramSettings:
-    logger.info("Loading config settings from the environment...")
+    logger.info("Loading Telegram config settings from the environment...")
     return TelegramSettings()
 
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
-    logger.info("Loading config settings from the environment...")
+    logger.info("Loading Application config settings from the environment...")
     return ApplicationSettings()
 
 

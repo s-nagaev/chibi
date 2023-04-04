@@ -1,6 +1,7 @@
 from typing import Optional
 
 import aioredis
+from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.models import Message, User
@@ -13,6 +14,7 @@ class RedisStorage(Database):
         self.connection_string = connection_string
         self.password = password
         self.db = db
+        logger.info("Redis storage initialized.")
 
     @classmethod
     async def create(cls, connection_string: str, password: Optional[str] = None, db: int = 1) -> "RedisStorage":
