@@ -1,5 +1,11 @@
 <h1 align="center"><img width=150 src="https://github.com/s-nagaev/chibi/raw/main/docs/logo.png" alt="logo"></h1>
 
+![build](https://img.shields.io/github/actions/workflow/status/s-nagaev/chibi/build.yml)
+[![docker hub](https://img.shields.io/docker/pulls/pysergio/chibi)](https://hub.docker.com/r/pysergio/chibi)
+[![docker image for](https://img.shields.io/badge/docker%20image%20os/arch-amd64%20%7C%20arm64%20%7C%20armv7-informational)](https://hub.docker.com/r/pysergio/chibi/tags)
+![license](https://img.shields.io/github/license/s-nagaev/chibi)
+
+
 Chibi is a Python-based Telegram chatbot that allows users to interact with the powerful ChatGPT and DALL-E neural networks. The bot is asynchronous, providing fast response times and serving multiple users simultaneously without blocking each other's requests. Chibi supports session management, enabling ChatGPT to remember the user's conversation history. The conversation history is stored for a configurable duration and is preserved even if the bot is restarted.
 
 [Docker Hub](https://hub.docker.com/r/pysergio/chibi)
@@ -11,13 +17,20 @@ Chibi is a Python-based Telegram chatbot that allows users to interact with the 
 - linux/arm/v7 *(Yeah! Your Raspberry Pi is supported!)*
 
 ## Features
-- Switch between GPT-3 & GPT-4 models any time.
-- Asynchronous code for fast and non-blocking performance
-- Session management for ChatGPT  (by storing data locally or using Redis)
-- Wide range of configuration options through environment variables
-- Docker image for easy deployment
-- Cross-platform support (amd64, arm64, armv7)
-- MIT License
+
+- Switch between GPT models (including GPT-4) at any time.
+- Session management for ChatGPT (by storing data locally or using Redis).
+- Request DALL-E to create an image from the same chat.
+- User and group whitelists.
+- Asynchronous code for quick and non-blocking performance.
+- Extensive configuration options through environment variables.
+- Docker image for easy deployment.
+- Cross-platform support (amd64, arm64, armv7).
+- MIT License.
+
+## System Requirements
+
+The application is not resource-demanding at all. It works perfectly on both Raspberry Pi 3A with 512MB RAM and the cheapest AWS EC2 Instance `t4g.nano` (2 arm64 cores, 512MB RAM), while being able to serve many people simultaneously. I would say that if your machine belongs to a supported architecture and can run Docker, the application will work.
 
 ## Prerequisites
 
