@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2023-04-07
+
+### Changed
+
+- Dependencies updated, redundant modules removed.
+- Now, if the telegram bot raises the markdown parse error and the GPT answer contains some code, such an answer will be additionally provided to the user in the MD file as the attachment.
+- Readme updated.
+
 ## [0.3.2] - 2023-04-04
 
 ### Fixed
@@ -17,7 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Now the `USERS_WHITELIST` setting can also contain telegram user IDs.
 - Logging additionally set up.
-
 
 ## [0.3.1] - 2023-04-03
 
@@ -71,3 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dockerfile.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
+
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/s-nagaev/chibi/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/s-nagaev/chibi/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/s-nagaev/chibi/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/s-nagaev/chibi/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/s-nagaev/chibi/tree/v0.2.0

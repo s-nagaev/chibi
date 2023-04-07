@@ -4,6 +4,7 @@ from typing import Any, Callable
 from loguru import logger
 from openai.error import InvalidRequestError, RateLimitError, TryAgain
 from telegram import Chat as TelegramChat
+from telegram import Message as TelegramMessage
 from telegram import Update
 from telegram import User as TelegramUser
 from telegram import constants
@@ -15,13 +16,14 @@ GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
 
 
-async def send_message(update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any) -> None:
+async def send_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any
+) -> TelegramMessage:
     if reply:
-        await context.bot.send_message(
+        return await context.bot.send_message(
             chat_id=update.effective_chat.id, reply_to_message_id=update.message.message_id, **kwargs
         )
-        return
-    await context.bot.send_message(chat_id=update.effective_chat.id, **kwargs)
+    return await context.bot.send_message(chat_id=update.effective_chat.id, **kwargs)
 
 
 def user_is_allowed(tg_user: TelegramUser) -> bool:

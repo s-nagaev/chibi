@@ -1,4 +1,5 @@
 import asyncio
+import io
 
 from loguru import logger
 from telegram import (
@@ -70,6 +71,27 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"Trying to re-send it in plain text mode."
         )
         await send_message(update=update, context=context, text=gpt_answer)
+
+        if "```" in gpt_answer:
+            logger.info(
+                f"{user.name} got and answer containing some code, but face with a markdown parse error. "
+                f"Additionally sending answer as an attachment..."
+            )
+            file = io.BytesIO()
+            file.write(gpt_answer.encode())
+            file.seek(0)
+            explain_message_text = (
+                "Oops! 😯It looks like your answer contains some code, but Telegram can't display it properly. "
+                "I'll additionally add your answer to the markdown file. 👇"
+            )
+
+            explain_message = await send_message(update=update, context=context, text=explain_message_text, reply=False)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                reply_to_message_id=explain_message.message_id,
+                document=file,
+                filename="answer.md",
+            )
 
 
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
