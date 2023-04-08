@@ -55,6 +55,8 @@ class GPTSettings(BaseSettings):
 class TelegramSettings(BaseSettings):
     token: str = Field(env="TELEGRAM_BOT_TOKEN")
 
+    allow_bots: bool = Field(env="ALLOW_BOTS", default=False)
+    answer_direct_messages_only: bool = Field(env="ANSWER_DIRECT_MESSAGES_ONLY", default=True)
     bot_name: str = Field(env="BOT_NAME", default="Chibi")
     groups_whitelist: Optional[list[int]] = Field(env="GROUPS_WHITELIST", default=None)
     message_for_disallowed_users: str = Field(
@@ -63,7 +65,6 @@ class TelegramSettings(BaseSettings):
     )
     proxy: Optional[str] = Field(env="PROXY", default=None)
     users_whitelist: Optional[list[str]] = Field(env="USERS_WHITELIST", default=None)
-    allow_bots: bool = Field(env="ALLOW_BOTS", default=False)
 
     class Config:
         env_file = ".env"

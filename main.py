@@ -28,7 +28,7 @@ from chibi.services.bot import (
     handle_prompt,
     handle_reset,
 )
-from chibi.utils import check_user_allowance
+from chibi.utils import GROUP_CHAT_TYPES, check_user_allowance
 
 
 class ChibiBot:
@@ -73,6 +73,14 @@ class ChibiBot:
 
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat = update.effective_chat
+        prompt = update.message.text
+        if (
+            chat.type in GROUP_CHAT_TYPES
+            and telegram_settings.answer_direct_messages_only
+            and telegram_settings.bot_name not in prompt
+        ):
+            return None
         asyncio.create_task(handle_prompt(update=update, context=context))
 
     @check_user_allowance

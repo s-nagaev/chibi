@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2023-04-08
+
+### Added
+
+- `ANSWER_DIRECT_MESSAGES_ONLY` setting: if it True the bot in group chats will respond only to messages, containing its name (see the `BOT_NAME` setting) 
+
 ## [0.3.3] - 2023-04-07
 
 ### Changed
