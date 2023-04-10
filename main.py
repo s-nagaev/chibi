@@ -28,7 +28,14 @@ from chibi.services.bot import (
     handle_prompt,
     handle_reset,
 )
-from chibi.utils import GROUP_CHAT_TYPES, check_user_allowance
+from chibi.utils import (
+    GROUP_CHAT_TYPES,
+    check_openai_api_key,
+    check_user_allowance,
+    get_telegram_chat,
+    get_telegram_message,
+    log_application_settings,
+)
 
 
 class ChibiBot:
@@ -55,34 +62,45 @@ class ChibiBot:
             )
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        telegram_message = get_telegram_message(update=update)
         commands = [f"/{command.command} - {command.description}" for command in self.commands]
         commands_desc = "\n".join(commands)
         help_text = (
             f"Hey! My name is {telegram_settings.bot_name}, and I'm your ChatGPT experience provider!\n\n"
             f"{commands_desc}"
         )
-        await update.message.reply_text(help_text, disable_web_page_preview=True)
+        await telegram_message.reply_text(help_text, disable_web_page_preview=True)
 
+    @check_openai_api_key
     @check_user_allowance
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_reset(update=update, context=context))
 
+    @check_openai_api_key
     @check_user_allowance
     async def imagine(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_image_generation(update=update, context=context))
 
+    @check_openai_api_key
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        chat = update.effective_chat
-        prompt = update.message.text
+        telegram_chat = get_telegram_chat(update=update)
+        telegram_message = get_telegram_message(update=update)
+        prompt = telegram_message.text
+
+        if not prompt:
+            return None
+
         if (
-            chat.type in GROUP_CHAT_TYPES
+            telegram_chat.type in GROUP_CHAT_TYPES
             and telegram_settings.answer_direct_messages_only
+            and "/ask" not in prompt
             and telegram_settings.bot_name not in prompt
         ):
             return None
         asyncio.create_task(handle_prompt(update=update, context=context))
 
+    @check_openai_api_key
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_prompt(update=update, context=context))
@@ -93,19 +111,22 @@ class ChibiBot:
 
     @check_user_allowance
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        telegram_message = get_telegram_message(update=update)
         reply_markup = await handle_available_model_options(update=update, context=context)
 
-        await update.message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
+        await telegram_message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
 
     # @check_user_allowance
     async def select_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_model_selection(update=update, context=context))
 
+    @check_openai_api_key
     @check_user_allowance
     async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        query = update.inline_query.query
-        if not query:
+        inline_query = update.inline_query
+        if not inline_query:
             return
+        query = inline_query.query
         results = [
             InlineQueryResultArticle(
                 id=query,
@@ -116,23 +137,27 @@ class ChibiBot:
             )
         ]
 
-        await update.inline_query.answer(results)
+        await inline_query.answer(results)
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error occurred while handling an update: {context.error}")
 
-    async def post_init(self, application: Application) -> None:
+    async def post_init(self, application: Application) -> None:  # type: ignore
         await application.bot.set_my_commands(self.commands)
 
     def run(self) -> None:
-        app = (
-            ApplicationBuilder()
-            .token(telegram_settings.token)
-            .proxy_url(telegram_settings.proxy)
-            .get_updates_proxy_url(telegram_settings.proxy)
-            .post_init(self.post_init)
-            .build()
-        )
+        if telegram_settings.proxy:
+            app = (
+                ApplicationBuilder()
+                .token(telegram_settings.token)
+                .proxy_url(telegram_settings.proxy)
+                .get_updates_proxy_url(telegram_settings.proxy)
+                .post_init(self.post_init)
+                .build()
+            )
+        else:
+            app = ApplicationBuilder().token(telegram_settings.token).post_init(self.post_init).build()
+
         app.add_handler(CommandHandler("help", self.help))
         app.add_handler(CommandHandler("reset", self.reset))
         app.add_handler(CommandHandler("imagine", self.imagine))
@@ -153,5 +178,6 @@ class ChibiBot:
 
 
 if __name__ == "__main__":
+    log_application_settings()
     telegram_bot = ChibiBot()
     telegram_bot.run()

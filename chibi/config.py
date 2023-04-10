@@ -5,7 +5,7 @@ from typing import Any, Optional
 from loguru import logger
 from pydantic import BaseSettings, Field
 
-config = {
+config: dict[Any, Any] = {
     "handlers": [
         {
             "sink": sys.stdout,
@@ -18,7 +18,7 @@ logger.configure(**config)
 
 
 class GPTSettings(BaseSettings):
-    api_key: str = Field(env="OPENAI_API_KEY")
+    api_key: Optional[str] = Field(env="OPENAI_API_KEY", default=None)
 
     assistant_prompt: str = Field(
         env="ASSISTANT_PROMPT",
@@ -45,7 +45,7 @@ class GPTSettings(BaseSettings):
         def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
             if field_name == "gpt4_whitelist":
                 return [str(username).strip().strip("@") for username in raw_val.split(",")]
-            return cls.json_loads(raw_val)
+            return cls.json_loads(raw_val)  # type: ignore
 
     @property
     def messages_ttl(self) -> int:
@@ -75,7 +75,7 @@ class TelegramSettings(BaseSettings):
                 return [str(username).strip().strip("@") for username in raw_val.split(",")]
             if field_name == "groups_whitelist":
                 return [int(group_id) for group_id in raw_val.split(",")]
-            return cls.json_loads(raw_val)
+            return cls.json_loads(raw_val)  # type: ignore
 
 
 class ApplicationSettings(BaseSettings):
@@ -88,19 +88,16 @@ class ApplicationSettings(BaseSettings):
 
 @lru_cache()
 def _get_gpt_settings() -> GPTSettings:
-    logger.info("Loading GPT config settings from the environment...")
     return GPTSettings()
 
 
 @lru_cache()
 def _get_telegram_settings() -> TelegramSettings:
-    logger.info("Loading Telegram config settings from the environment...")
     return TelegramSettings()
 
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
-    logger.info("Loading Application config settings from the environment...")
     return ApplicationSettings()
 
 

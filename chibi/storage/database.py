@@ -1,6 +1,6 @@
 import asyncio
 from functools import wraps
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from chibi.config import application_settings
 from chibi.storage.abc import Database
@@ -9,7 +9,7 @@ from chibi.storage.redis import RedisStorage
 
 
 class DatabaseCache:
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: Optional[Database] = None
         self._lock = asyncio.Lock()
 
@@ -25,16 +25,16 @@ class DatabaseCache:
 
             return self._cache
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         self._cache = None
 
 
 _db_provider = DatabaseCache()
 
 
-def inject_database(func):
+def inject_database(func: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
         db = await _db_provider.get_database()
         return await func(db, *args, **kwargs)
 

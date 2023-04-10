@@ -2,7 +2,7 @@
 
 ![build](https://img.shields.io/github/actions/workflow/status/s-nagaev/chibi/build.yml)
 [![docker hub](https://img.shields.io/docker/pulls/pysergio/chibi)](https://hub.docker.com/r/pysergio/chibi)
-[![docker image for](https://img.shields.io/badge/docker%20image%20os/arch-amd64%20%7C%20arm64%20%7C%20armv7-informational)](https://hub.docker.com/r/pysergio/chibi/tags)
+[![docker image arch](https://img.shields.io/badge/docker%20image%20arch-amd64%20%7C%20arm64%20%7C%20armv7-informational)](https://hub.docker.com/r/pysergio/chibi/tags)
 ![license](https://img.shields.io/github/license/s-nagaev/chibi)
 
 
@@ -97,8 +97,8 @@ You can configure Chibi using the following environment variables:
 
 | Variable                     | Description                                                                                                                                       | Required | Default Value                                                                    |
 |------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|----------|----------------------------------------------------------------------------------|
-| OPENAI_API_KEY               | Your OpenAI API key                                                                                                                               | Yes      |                                                                                  |
 | TELEGRAM_BOT_TOKEN           | Your Telegram bot token                                                                                                                           | Yes      |                                                                                  |
+| OPENAI_API_KEY               | OpenAI API key. If not provided, the user will be asked to provide it while interacting with bot.                                                 | No       |                                                                                  |
 | ALLOW_BOTS                   | Allow other bots to interact with Chibi                                                                                                           | No       | false                                                                            |
 | ANSWER_DIRECT_MESSAGES_ONLY  | If True the bot in group chats will respond only to messages, containing its name (see the `BOT_NAME` setting)                                    | NO       | true                                                                             |
 | ASSISTANT_PROMPT             | Initial assistant prompt for OpenAI Client                                                                                                        | No       | "You're helpful and friendly assistant. Your name is Chibi"                      |
@@ -126,9 +126,9 @@ Please, visit the [examples](examples) directory for the example of `.env`-file.
 
 ## The Plan for future versions
 
-- [ ] implement the "Public Mode", when no general `OPENAI_API_KEY` is required, but every user can provide one own;
-- [ ] add MongoDB support;
+- [x] implement the "Public Mode", when no general `OPENAI_API_KEY` is required, but every user can provide one own;
 - [ ] add the option to upload answers containing code to the Pastebin-like service.
+- [ ] add MongoDB support;
 
 ## Versioning
 
