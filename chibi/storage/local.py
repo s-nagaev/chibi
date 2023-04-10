@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
 
@@ -36,7 +36,8 @@ class LocalStorage(Database):
         filename = self._get_storage_filename(user_id)
         if os.path.exists(filename):
             with open(filename, "rb") as f:
-                return pickle.load(f)
+                return cast(User, pickle.load(f))
+        return None
 
     async def get_or_create_user(self, user_id: int) -> User:
         if user := await self.get_user(user_id=user_id):
@@ -44,7 +45,7 @@ class LocalStorage(Database):
         return await self.create_user(user_id=user_id)
 
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
-        user_refreshed = await self.get_user(user_id=user.id)
+        user_refreshed = await self.get_or_create_user(user_id=user.id)
         if ttl:
             expire_at = time.time() + ttl
         else:
@@ -55,7 +56,7 @@ class LocalStorage(Database):
         await self.save_user(user_refreshed)
 
     async def get_messages(self, user: User) -> list[dict[str, str]]:
-        user_refreshed = await self.get_user(user_id=user.id)
+        user_refreshed = await self.get_or_create_user(user_id=user.id)
         current_time = time.time()
 
         msgs = [

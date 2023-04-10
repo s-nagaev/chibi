@@ -22,5 +22,5 @@ class Database(ABC):
         ...
 
     @abstractmethod
-    async def drop_messages(self, user: User) -> User:
+    async def drop_messages(self, user: User) -> None:
         ...

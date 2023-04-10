@@ -1,6 +1,7 @@
 from typing import Optional
 
 import aioredis
+from aioredis import Redis
 from loguru import logger
 
 from chibi.config import gpt_settings
@@ -10,7 +11,7 @@ from chibi.storage.abc import Database
 
 class RedisStorage(Database):
     def __init__(self, connection_string: str, password: Optional[str] = None, db: int = 0) -> None:
-        self.redis = None
+        self.redis: Redis
         self.connection_string = connection_string
         self.password = password
         self.db = db
