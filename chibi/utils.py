@@ -88,7 +88,7 @@ async def send_gpt_answer_message(gpt_answer: str, update: Update, context: Cont
 def user_is_allowed(tg_user: TelegramUser) -> bool:
     if not telegram_settings.users_whitelist:
         return True
-    return any(identifier in telegram_settings.users_whitelist for identifier in (tg_user.id, tg_user.username))
+    return any(identifier in telegram_settings.users_whitelist for identifier in (str(tg_user.id), tg_user.username))
 
 
 def group_is_allowed(tg_chat: TelegramChat) -> bool:
@@ -101,7 +101,7 @@ def user_can_use_gpt4(tg_user: TelegramUser) -> bool:
     if gpt_settings.gpt4_enabled:
         return True
     if gpt_settings.gpt4_whitelist:
-        return any(identifier in gpt_settings.gpt4_whitelist for identifier in (tg_user.id, tg_user.username))
+        return any(identifier in gpt_settings.gpt4_whitelist for identifier in (str(tg_user.id), tg_user.username))
     return False
 
 
