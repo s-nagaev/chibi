@@ -10,6 +10,7 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
+from chibi.config import application_settings
 from chibi.services.gpt import api_key_is_valid
 from chibi.services.user import (
     check_history_and_summarize,
@@ -58,7 +59,9 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         prompt = prompt.replace("/ask", "", 1).strip()
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
-    logger.info(f"{telegram_user.name} sent a new message: {prompt_to_log}")
+    logger.info(
+        f"{telegram_user.name} sent a new message{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
+    )
 
     get_gtp_chat_answer_task = asyncio.ensure_future(get_gtp_chat_answer(user_id=telegram_user.id, prompt=prompt))
 
@@ -73,7 +76,9 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
     )
     answer_to_log = gpt_answer.replace("\r", " ").replace("\n", " ")
-    logger.info(f"{telegram_user.name} got GPT answer. {usage_message}. Answer: {answer_to_log}")
+    logged_answer = f"Answer: {answer_to_log}" if application_settings.log_prompt_data else ""
+
+    logger.info(f"{telegram_user.name} got GPT answer. {usage_message}. {logged_answer}")
     await send_gpt_answer_message(gpt_answer=gpt_answer, update=update, context=context)
     history_is_summarized = await check_history_and_summarize(user_id=telegram_user.id)
     if history_is_summarized:
@@ -106,7 +111,10 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         )
         return None
 
-    logger.info(f"{telegram_user.name} sent image generation request: {prompt}")
+    logger.info(
+        f"{telegram_user.name} sent image generation request"
+        f"{': ' + prompt if application_settings.log_prompt_data else ''}"
+    )
     generate_image_task = asyncio.ensure_future(generate_image(user_id=telegram_user.id, prompt=prompt))
 
     # The user finds it psychologically easier to wait for a response from the chatbot when they see its activity

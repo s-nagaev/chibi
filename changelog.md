@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2023-04-15
+
+### Added
+
+- `LOG_PROMPT_DATA` setting. If true, the application will log user's prompts and GPT answers. The default value is `False`.
+
+### Changed
+
+- The log of disallowed user actions now includes the user's ID.
+
 ## [0.5.0] - 2023-04-15
 
 ### Fixed
@@ -110,7 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/s-nagaev/chibi/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/s-nagaev/chibi/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/s-nagaev/chibi/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/s-nagaev/chibi/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/s-nagaev/chibi/compare/v0.3.2...v0.3.3

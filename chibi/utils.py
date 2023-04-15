@@ -152,7 +152,7 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         if telegram_chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
-            logger.warning(f"{user_name} is not allowed to work with me. Request rejected.")
+            logger.warning(f"{user_name} (id={telegram_user.id}) is not allowed to work with me. Request rejected.")
             await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
             return None
 
