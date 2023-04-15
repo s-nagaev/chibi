@@ -88,7 +88,7 @@ async def send_gpt_answer_message(gpt_answer: str, update: Update, context: Cont
 def user_is_allowed(tg_user: TelegramUser) -> bool:
     if not telegram_settings.users_whitelist:
         return True
-    return any(identifier in telegram_settings.users_whitelist for identifier in (tg_user.id, tg_user.name))
+    return any(identifier in telegram_settings.users_whitelist for identifier in (tg_user.id, tg_user.username))
 
 
 def group_is_allowed(tg_chat: TelegramChat) -> bool:
@@ -101,8 +101,25 @@ def user_can_use_gpt4(tg_user: TelegramUser) -> bool:
     if gpt_settings.gpt4_enabled:
         return True
     if gpt_settings.gpt4_whitelist:
-        return any(identifier in gpt_settings.gpt4_whitelist for identifier in (tg_user.id, tg_user.name))
+        return any(identifier in gpt_settings.gpt4_whitelist for identifier in (tg_user.id, tg_user.username))
     return False
+
+
+def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    telegram_message = get_telegram_message(update=update)
+    prompt = telegram_message.text
+
+    if not prompt:
+        return False
+
+    if context.bot.first_name in prompt or context.bot.username in prompt:
+        return True
+
+    reply_message = telegram_message.reply_to_message
+    if not reply_message or not reply_message.from_user:
+        return False
+
+    return reply_message.from_user.id == context.bot.id
 
 
 def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:

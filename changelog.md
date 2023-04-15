@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2023-04-15
+
+### Fixed
+
+- A bug when the bot didn't answer messages quoting the bot's ones.
+- A bug when the bot checked the user whitelist using the user's username, not the user's name.
+- A bug when setting the application via `.env` was impossible.
+
+### Added
+
+- Now it's possible to connect to Redis via password (using the `REDIS_PASSWORD` setting).
+
+### Changed
+- Settings refactored.
+
 ## [0.4.0] - 2023-04-10
 
 ### Added

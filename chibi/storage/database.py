@@ -19,7 +19,9 @@ class DatabaseCache:
                 return self._cache
 
             if application_settings.redis:
-                self._cache = await RedisStorage.create(application_settings.redis)
+                self._cache = await RedisStorage.create(
+                    connection_string=application_settings.redis, password=application_settings.redis_password
+                )
             else:
                 self._cache = LocalStorage(application_settings.local_data_path)
 

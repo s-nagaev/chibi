@@ -35,6 +35,7 @@ from chibi.utils import (
     get_telegram_chat,
     get_telegram_message,
     log_application_settings,
+    user_interacts_with_bot,
 )
 
 
@@ -95,7 +96,7 @@ class ChibiBot:
             telegram_chat.type in GROUP_CHAT_TYPES
             and telegram_settings.answer_direct_messages_only
             and "/ask" not in prompt
-            and telegram_settings.bot_name not in prompt
+            and not user_interacts_with_bot(update=update, context=context)
         ):
             return None
         asyncio.create_task(handle_prompt(update=update, context=context))
@@ -116,7 +117,6 @@ class ChibiBot:
 
         await telegram_message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
 
-    # @check_user_allowance
     async def select_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         asyncio.create_task(handle_model_selection(update=update, context=context))
 
