@@ -18,7 +18,7 @@ Chibi is a Python-based Telegram chatbot that allows users to interact with the 
 
 ## Features
 
-- Optional "Public Mode", when no master `OPENAI_API_KEY` is required, but every user will be asked to provide it while interacting with the bot.
+- Optional "Public Mode", when no master `OPENAI_API_KEY` is required, but every user will be asked to provide one own while interacting with the bot.
 - Switch between GPT models (including GPT-4) at any time.
 - Session management for ChatGPT (by storing data locally or using Redis).
 - Request DALL-E to create an image from the same chat.
