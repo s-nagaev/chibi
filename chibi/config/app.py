@@ -8,6 +8,7 @@ class ApplicationSettings(BaseSettings):
     redis: Optional[str] = Field(env="REDIS", default=None)
     redis_password: Optional[str] = Field(env="REDIS_PASSWORD", default=None)
     local_data_path: str = Field(env="LOCAL_DATA_PATH", default="/app/data")
+    log_prompt_data: bool = Field(env="LOG_PROMPT_DATA", default=False)
 
     class Config:
         env_file = ".env"
