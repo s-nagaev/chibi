@@ -29,6 +29,12 @@ Chibi is a Python-based Telegram chatbot that allows users to interact with the 
 - Cross-platform support (amd64, arm64, armv7).
 - MIT License.
 
+## Try it!
+
+- You can try a DEMO version of the Chibi bot by using [@ChibiDemoBot](https://t.me/ChibiDemoBot). An OpenAI API Key is not required, but there are only 4 free requests available.
+- You can also use a public version of the Chibi bot by using [@ChibiPublicBot](https://t.me/ChibiPublicBot). An OpenAI Key is required.
+
+
 ## System Requirements
 
 The application is not resource-demanding at all. It works perfectly on both Raspberry Pi 3A with 512MB RAM and the cheapest AWS EC2 Instance `t4g.nano` (2 arm64 cores, 512MB RAM), while being able to serve many people simultaneously. I would say that if your machine belongs to a supported architecture and can run Docker, the application will work.
