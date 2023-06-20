@@ -1,4 +1,4 @@
-FROM python:3.9-alpine3.16 AS builder
+FROM python:3.9-alpine3.18 AS builder
 
 RUN apk update && apk upgrade && apk add --no-cache ca-certificates gcc build-base
 
@@ -7,7 +7,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install -r requirements.txt
 
-FROM python:3.9-alpine3.16
+FROM python:3.9-alpine3.18
 
 LABEL org.label-schema.schema-version = "1.0"
 LABEL org.label-schema.name = "chibi"
