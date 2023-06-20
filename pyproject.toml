@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi"
-version = "0.5.2"
+version = "0.5.3"
 description = "Another one ChatGPT Telegram bot"
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
@@ -10,9 +10,9 @@ readme = "README.md"
 python = "^3.9"
 aioredis = "2.0.1"
 loguru = "0.7.0"
-openai = "0.27.4"
-pydantic = {extras = ["dotenv"], version = "1.10.7"}
-python-telegram-bot = "20.2"
+openai = "0.27.8"
+pydantic = {extras = ["dotenv"], version = "1.10.9"}
+python-telegram-bot = "20.3"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.1.0"
