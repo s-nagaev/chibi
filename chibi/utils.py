@@ -2,8 +2,9 @@ import io
 from functools import wraps
 from typing import Any, Callable
 
+import httpx
 from loguru import logger
-from openai.error import InvalidRequestError, RateLimitError, TryAgain
+from openai import APIConnectionError, APIStatusError, RateLimitError
 from telegram import Chat as TelegramChat
 from telegram import Message as TelegramMessage
 from telegram import Update
@@ -31,6 +32,16 @@ def get_telegram_chat(update: Update) -> TelegramChat:
     raise ValueError(f"Telegram incoming update does not contain valid chat data. Update ID: {update.update_id}")
 
 
+def user_data(update: Update) -> str:
+    user = get_telegram_user(update=update)
+    return f"{user.name} ({user.id})"
+
+
+def chat_data(update: Update) -> str:
+    chat = get_telegram_chat(update=update)
+    return f"{chat.type.upper()} chat ({chat.id})"
+
+
 def get_telegram_message(update: Update) -> TelegramMessage:
     if message := update.effective_message:
         return message
@@ -50,23 +61,36 @@ async def send_message(
     return await context.bot.send_message(chat_id=telegram_chat.id, **kwargs)
 
 
+async def send_long_message(
+    message: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    parse_mode: str | None = None,
+) -> None:
+    chunk_size = constants.MessageLimit.MAX_TEXT_LENGTH
+    text_chunks = [message[i: i + chunk_size] for i in range(0, len(message), chunk_size)]
+    for chunk in text_chunks:
+        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode)
+
+
 async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     try:
-        await send_message(update=update, context=context, text=gpt_answer, parse_mode=constants.ParseMode.MARKDOWN)
+        await send_long_message(
+            message=gpt_answer, update=update, context=context, parse_mode=constants.ParseMode.MARKDOWN
+        )
     except BadRequest as e:
         # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
         logger.error(
-            f"{telegram_user.name} got a Telegram Bad Request error while receiving GPT answer: {e}. "
-            f"Trying to re-send it in plain text mode."
+            f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
+            f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
         )
-        await send_message(update=update, context=context, text=gpt_answer)
+        await send_long_message(message=gpt_answer, update=update, context=context)
 
         if "```" in gpt_answer:
             logger.info(
-                f"{telegram_user.name} got and answer containing some code, but face with a markdown parse error. "
-                f"Additionally sending answer as an attachment..."
+                f"{user_data(update)} got and answer containing some code in the {chat_data(update)}, "
+                f"but face with a markdown parse error. Additionally sending answer as an attachment..."
             )
             file = io.BytesIO()
             file.write(gpt_answer.encode())
@@ -145,14 +169,13 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
         telegram_chat = get_telegram_chat(update=update)
         telegram_user = get_telegram_user(update=update)
-        user_name = telegram_user.name or f"{telegram_user.first_name} ({telegram_user.id})"
 
         if telegram_user.is_bot and not telegram_settings.allow_bots:
-            logger.warning(f"Bots are not allowed. {user_name}'s request ignored.")
+            logger.warning(f"Bots are not allowed. Request from {user_data(update)} was ignored.")
             return None
 
         if telegram_chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
-            logger.warning(f"{user_name} (id={telegram_user.id}) is not allowed to work with me. Request rejected.")
+            logger.warning(f"{user_data(update)} is not allowed to work with me. Request rejected.")
             await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
             return None
 
@@ -187,26 +210,37 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
-        telegram_user = get_telegram_user(update=update)
         try:
             return await func(*args, **kwargs)
-        except TryAgain as e:
-            logger.error(f"{telegram_user.name} didn't get a GPT answer due to exception: {e}")
-            await send_message(update=update, context=context, text="🥴Service is overloaded. Please, try again later.")
+        except APIConnectionError as e:
+            logger.error(
+                f"{user_data(update)} didn't get a GPT answer in the {chat_data(update)} because "
+                f"the server could not be reached: {e.__cause__}"
+            )
+            await send_message(
+                update=update, context=context, text="🥴Service not available at the moment. Please, try again later."
+            )
             return None
 
-        except InvalidRequestError as e:
-            logger.error(f"{telegram_user.name} got a InvalidRequestError: {e}")
-            await send_message(update=update, context=context, text=f"😲{e}")
+        except RateLimitError:
+            logger.error(f"{user_data(update)} reached a Rate Limit in the {chat_data(update)}.")
+            await send_message(update=update, context=context, text="🤐Rate Limit exceeded. We should back off a bit.")
             return None
 
-        except RateLimitError as e:
-            logger.error(f"{telegram_user.name} reached a Rate Limit: {e}")
-            await send_message(update=update, context=context, text=f"🤐Rate Limit exceeded: {e}")
+        except APIStatusError as e:
+            logger.error(
+                f"{user_data(update)} got a status code {e.status_code} response: {e.response} "
+                f"in the {chat_data(update)}"
+            )
+            await send_message(
+                update=update,
+                context=context,
+                text="😲Lol... we got an unexpected response from the OpenAI service! Please, try again a bit later.",
+            )
             return None
 
         except Exception as e:
-            logger.error(f"{telegram_user.name} got an error: {e}")
+            logger.exception(f"{user_data(update)} got an error in the {chat_data(update)}: {e}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
@@ -250,10 +284,9 @@ def check_openai_api_key(func: Callable[..., Any]) -> Callable[..., Any]:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
         telegram_user = get_telegram_user(update=update)
-        user_name = telegram_user.name or f"{telegram_user.first_name} ({telegram_user.id})"
 
         if not await get_api_key(user_id=telegram_user.id, raise_on_absence=False):
-            logger.info(f"{user_name} has no OpenAI API Key. Suggesting to apply one...")
+            logger.info(f"{user_data(update)} has no OpenAI API Key. Suggesting to apply one...")
             text = (
                 "Oops! It looks like you didn't set your OpenAI API Key yet. "
                 "Please, use /set_openai_key command, i.e.\n\n /set_openai_key sk-XXXXXXXXXXXXXXXXXXXXX\n\n"
@@ -266,6 +299,12 @@ def check_openai_api_key(func: Callable[..., Any]) -> Callable[..., Any]:
         return await func(*args, **kwargs)
 
     return wrapper
+
+
+async def download_image(url: str) -> bytes:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url=url)
+    return response.content
 
 
 def log_application_settings() -> None:

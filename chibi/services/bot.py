@@ -23,6 +23,8 @@ from chibi.services.user import (
 )
 from chibi.utils import (
     api_key_is_plausible,
+    chat_data,
+    download_image,
     get_telegram_chat,
     get_telegram_message,
     get_telegram_user,
@@ -30,6 +32,7 @@ from chibi.utils import (
     send_gpt_answer_message,
     send_message,
     user_can_use_gpt4,
+    user_data,
 )
 
 
@@ -41,7 +44,7 @@ async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_T
     model_name = query.data
     telegram_user = get_telegram_user(update=update)
     await set_active_model(user_id=telegram_user.id, model_name=model_name)
-    logger.info(f"{telegram_user.name} switched to model '{model_name}'")
+    logger.info(f"{user_data(update)} switched to model '{model_name}'")
     await query.edit_message_text(text=f"Selected model: {query.data}")
 
 
@@ -60,7 +63,8 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
     logger.info(
-        f"{telegram_user.name} sent a new message{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
+        f"{user_data(update)} sent a new message in the{chat_data(update)}"
+        f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 
     get_gtp_chat_answer_task = asyncio.ensure_future(get_gtp_chat_answer(user_id=telegram_user.id, prompt=prompt))
@@ -70,25 +74,25 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await asyncio.sleep(2.5)
 
     gpt_answer, usage = await get_gtp_chat_answer_task
-    usage_message = (
-        f"Tokens used: {str(usage.get('total_tokens', 'n/a'))} "
-        f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
-        f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
-    )
+    # usage_message = (
+    #     f"Tokens used: {str(usage.get('total_tokens', 'n/a'))} "
+    #     f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
+    #     f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
+    # )
     answer_to_log = gpt_answer.replace("\r", " ").replace("\n", " ")
     logged_answer = f"Answer: {answer_to_log}" if application_settings.log_prompt_data else ""
 
-    logger.info(f"{telegram_user.name} got GPT answer. {usage_message}. {logged_answer}")
+    logger.info(f"{user_data(update)} got GPT answer in the {chat_data(update)}. {logged_answer}")
     await send_gpt_answer_message(gpt_answer=gpt_answer, update=update, context=context)
     history_is_summarized = await check_history_and_summarize(user_id=telegram_user.id)
     if history_is_summarized:
-        logger.info(f"{telegram_user.name}'s history successfully summarized.")
+        logger.info(f"{user_data(update)}: history successfully summarized.")
 
 
 async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_chat = get_telegram_chat(update=update)
     telegram_user = get_telegram_user(update=update)
-    logger.info(f"{telegram_user.name} conversation history reset.")
+    logger.info(f"{user_data(update)}: conversation history reset.")
 
     await reset_chat_history(user_id=telegram_user.id)
     await context.bot.send_message(chat_id=telegram_chat.id, text="Done!")
@@ -112,7 +116,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         return None
 
     logger.info(
-        f"{telegram_user.name} sent image generation request"
+        f"{user_data(update)} sent image generation request in the {chat_data(update)}"
         f"{': ' + prompt if application_settings.log_prompt_data else ''}"
     )
     generate_image_task = asyncio.ensure_future(generate_image(user_id=telegram_user.id, prompt=prompt))
@@ -125,9 +129,11 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
 
     image_urls = await generate_image_task
 
+    image_files = [await download_image(url=url) for url in image_urls]
+
     await context.bot.send_media_group(
         chat_id=telegram_chat.id,
-        media=[InputMediaPhoto(url) for url in image_urls],
+        media=[InputMediaPhoto(url) for url in image_files],
         reply_to_message_id=telegram_message.message_id,
     )
 
@@ -148,12 +154,12 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     )
     if not api_key_is_plausible(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
-        logger.warning(f"{telegram_user.username} provided improbable key.")
+        logger.warning(f"{user_data(update)} provided improbable key.")
         return
 
     if not await api_key_is_valid(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
-        logger.warning(f"{telegram_user.username} provided incorrect API key.")
+        logger.warning(f"{user_data(update)} provided incorrect API key.")
         return
 
     await set_api_key(user_id=telegram_user.id, api_key=api_key)
@@ -163,7 +169,7 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     )
     await send_message(update=update, context=context, reply=False, text=msg)
     await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
-    logger.info(f"{telegram_user.name} successfully set up OpenAPI Key.")
+    logger.info(f"{user_data(update)} successfully set up OpenAPI Key.")
 
 
 async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:

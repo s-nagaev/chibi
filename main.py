@@ -1,4 +1,5 @@
 import asyncio
+from asyncio import Task
 
 from loguru import logger
 from telegram import (
@@ -61,6 +62,7 @@ class ChibiBot:
                     command="set_openai_key", description="Set your own OpenAI key (e.g. /set_openai_key sk-XXXXX)"
                 )
             )
+        self.background_tasks: set[Task] = set()
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
@@ -75,12 +77,16 @@ class ChibiBot:
     @check_openai_api_key
     @check_user_allowance
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        asyncio.create_task(handle_reset(update=update, context=context))
+        task = asyncio.create_task(handle_reset(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_openai_api_key
     @check_user_allowance
     async def imagine(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        asyncio.create_task(handle_image_generation(update=update, context=context))
+        task = asyncio.create_task(handle_image_generation(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_openai_api_key
     @check_user_allowance
@@ -99,16 +105,22 @@ class ChibiBot:
             and not user_interacts_with_bot(update=update, context=context)
         ):
             return None
-        asyncio.create_task(handle_prompt(update=update, context=context))
+        task = asyncio.create_task(handle_prompt(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_openai_api_key
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        asyncio.create_task(handle_prompt(update=update, context=context))
+        task = asyncio.create_task(handle_prompt(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_user_allowance
     async def set_openai_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        asyncio.create_task(handle_openai_key_set(update=update, context=context))
+        task = asyncio.create_task(handle_openai_key_set(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_user_allowance
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -118,7 +130,9 @@ class ChibiBot:
         await telegram_message.reply_text("Please, select GPT model:", reply_markup=reply_markup)
 
     async def select_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        asyncio.create_task(handle_model_selection(update=update, context=context))
+        task = asyncio.create_task(handle_model_selection(update=update, context=context))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
     @check_openai_api_key
     @check_user_allowance
@@ -133,7 +147,7 @@ class ChibiBot:
                 title="Ask ChatGPT",
                 input_message_content=InputTextMessageContent(query),
                 description=query,
-                thumb_url="https://seeklogo.com/images/C/chatgpt-logo-02AFA704B5-seeklogo.com.png",
+                thumbnail_url="https://github.com/s-nagaev/chibi/raw/main/docs/logo.png",
             )
         ]
 
@@ -142,7 +156,7 @@ class ChibiBot:
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error occurred while handling an update: {context.error}")
 
-    async def post_init(self, application: Application) -> None:  # type: ignore
+    async def post_init(self, application: Application) -> None:
         await application.bot.set_my_commands(self.commands)
 
     def run(self) -> None:

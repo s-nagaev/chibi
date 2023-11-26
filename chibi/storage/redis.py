@@ -6,7 +6,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.models import Message, User
-from chibi.storage.abc import Database
+from chibi.storage.abstract import Database
 
 
 class RedisStorage(Database):

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2023-11-26
+
+### Fixed
+- Fixed an issue preventing the bots' use with local data storage
+- Resolved a problem where the bot would lose asynchronous tasks during long server response times from OpenAI
+- Fixed a bug that sometimes prevented sending images to users
+
+### Changed
+- Updated key project dependencies and adapted code for integration with the latest version of the OpenAI library
+- Significantly improved the informativeness of logs
+- Implemented the ability to send large responses across multiple messages
+- Added the option to select the model for generating images (currently only through bot setting using environment variables)
+- Refactored the code
+- Base Docker image updated to `python:3.11-alpine`
+
+
 ## [0.5.3] - 2023-06-20
 
 ### Changed

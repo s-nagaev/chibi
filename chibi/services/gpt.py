@@ -1,50 +1,57 @@
-import openai
-from openai.error import AuthenticationError
+from openai import AsyncOpenAI, AuthenticationError
+from openai.types import CompletionUsage
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat.chat_completion import Choice
 
 from chibi.config import gpt_settings
 
 
 async def get_chat_response(
     api_key: str,
-    messages: list[dict[str, str]],
+    messages: list[ChatCompletionMessageParam],
     model: str,
     temperature: float = gpt_settings.temperature,
     max_tokens: int = gpt_settings.max_tokens,
     presence_penalty: float = gpt_settings.presence_penalty,
     frequency_penalty: float = gpt_settings.frequency_penalty,
     timeout: int = gpt_settings.timeout,
-) -> tuple[str, dict[str, int]]:
-    response = await openai.ChatCompletion.acreate(
-        api_key=api_key,
+) -> tuple[str, CompletionUsage | None]:
+    client = AsyncOpenAI(api_key=api_key)
+    response = await client.chat.completions.create(
         model=model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
         presence_penalty=presence_penalty,
         frequency_penalty=frequency_penalty,
-        timeout=timeout,
+        # timeout=timeout,
     )
     if len(response.choices) == 0:
-        return "", {}
+        return "", None
 
-    answer = response.choices[0]["message"]["content"].strip()
-    usage = dict(response.usage)
+    choices: list[Choice] = response.choices
+    answer = choices[0]
+    usage = response.usage
 
-    return answer, usage
+    return answer.message.content or "", usage
 
 
 async def get_images_by_prompt(api_key: str, prompt: str) -> list[str]:
-    response = await openai.Image.acreate(
-        api_key=api_key, prompt=prompt, size=gpt_settings.image_size, n=gpt_settings.image_n_choices
+    client = AsyncOpenAI(api_key=api_key)
+    response = await client.images.generate(
+        prompt=prompt,
+        quality=gpt_settings.image_quality,
+        model=gpt_settings.dall_e_model,
+        size=gpt_settings.image_size,
+        n=gpt_settings.image_n_choices,
     )
-    return [result["url"] for result in response["data"]]
+    return [image.url for image in response.data if image.url]
 
 
 async def api_key_is_valid(api_key: str) -> bool:
+    client = AsyncOpenAI(api_key=api_key)
     try:
-        await openai.Completion.acreate(
-            model="text-davinci-003", prompt="This is a test", max_tokens=5, api_key=api_key
-        )
+        await client.completions.create(model="text-davinci-003", prompt="This is a test", max_tokens=5)
     except AuthenticationError:
         return False
     except Exception:
@@ -53,7 +60,9 @@ async def api_key_is_valid(api_key: str) -> bool:
 
 
 async def retrieve_available_models(api_key: str, include_gpt4: bool) -> list[str]:
-    all_models = await openai.Model.alist(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key)
+    all_models = await client.models.list()
+
     if include_gpt4:
-        return [model["id"] for model in all_models.data if "gpt" in model["id"]]
-    return [model["id"] for model in all_models.data if "gpt-3" in model["id"]]
+        return sorted([model.id for model in all_models.data if "gpt" in model.id])
+    return sorted([model.id for model in all_models.data if "gpt-3" in model.id])

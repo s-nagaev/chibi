@@ -15,17 +15,14 @@ jobs:
   Mypy:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python 3.10
+      - name: Set up Python 3.11
         uses: actions/setup-python@v1
         with:
-          python-version: "3.9"
+          python-version: "3.11"
       - uses: actions/checkout@v2
-      - name: Install Poetry
-        run: |
-          pip install poetry
       - name: Install Deps
         run: |
-          python -m poetry config virtualenvs.create false && poetry install
+          pip install -r requirements-dev.txt
       - name: Run Mypy
         run: |
           mypy .

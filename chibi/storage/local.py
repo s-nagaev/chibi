@@ -7,7 +7,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.models import Message, User
-from chibi.storage.abc import Database
+from chibi.storage.abstract import Database
 
 
 class LocalStorage(Database):
@@ -32,7 +32,7 @@ class LocalStorage(Database):
         await self.save_user(user=user)
         return user
 
-    async def get_user(self, user_id: int) -> Optional[User]:
+    async def get_user(self, user_id: int) -> User | None:
         filename = self._get_storage_filename(user_id)
         if os.path.exists(filename):
             with open(filename, "rb") as f:
