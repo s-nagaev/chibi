@@ -1,5 +1,12 @@
 from typing import Optional
 
+from openai.types import CompletionUsage
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageParam,
+    ChatCompletionUserMessageParam,
+)
+
 from chibi.config import gpt_settings
 from chibi.models import Message
 from chibi.services.gpt import (
@@ -7,7 +14,7 @@ from chibi.services.gpt import (
     get_images_by_prompt,
     retrieve_available_models,
 )
-from chibi.storage.abc import Database
+from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
 
@@ -49,13 +56,14 @@ async def summarize(db: Database, user_id: int) -> None:
     openai_api_key = await get_api_key(user_id=user_id)
 
     chat_history = await db.get_messages(user=user)
-    query_messages = [
-        {
-            "role": "assistant",
-            "content": "Summarize this conversation in 700 characters or less",
-        },
-        {"role": "user", "content": str(chat_history)},
-    ]
+
+    assistant_message = ChatCompletionAssistantMessageParam(
+        role="assistant", content="Summarize this conversation in 700 characters or less"
+    )
+
+    user_message = ChatCompletionUserMessageParam(role="user", content=str(chat_history))
+
+    query_messages: list[ChatCompletionMessageParam] = [assistant_message, user_message]
     answer, usage = await get_chat_response(
         api_key=openai_api_key, messages=query_messages, model=user.model, max_tokens=200
     )
@@ -65,13 +73,14 @@ async def summarize(db: Database, user_id: int) -> None:
 
 
 @inject_database
-async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[str, dict[str, int]]:
+async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[str, CompletionUsage | None]:
     user = await db.get_or_create_user(user_id=user_id)
     openai_api_key = await get_api_key(user_id=user_id)
 
     query_message = Message(role="user", content=prompt)
     await db.add_message(user=user, message=query_message, ttl=gpt_settings.messages_ttl)
-    conversation_messages = await db.get_messages(user=user)
+    conversation_messages: list[ChatCompletionMessageParam] = await db.get_conversation_messages(user=user)
+
     answer, usage = await get_chat_response(api_key=openai_api_key, messages=conversation_messages, model=user.model)
     answer_message = Message(role="assistant", content=answer)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)

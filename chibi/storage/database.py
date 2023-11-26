@@ -3,9 +3,11 @@ from functools import wraps
 from typing import Any, Callable, Optional
 
 from chibi.config import application_settings
-from chibi.storage.abc import Database
+from chibi.storage.abstract import Database
 from chibi.storage.local import LocalStorage
-from chibi.storage.redis import RedisStorage
+
+if application_settings.redis:
+    from chibi.storage.redis import RedisStorage
 
 
 class DatabaseCache:

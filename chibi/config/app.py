@@ -1,12 +1,11 @@
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import BaseSettings, Field
 
 
 class ApplicationSettings(BaseSettings):
-    redis: Optional[str] = Field(env="REDIS", default=None)
-    redis_password: Optional[str] = Field(env="REDIS_PASSWORD", default=None)
+    redis: str | None = Field(env="REDIS", default=None)
+    redis_password: str | None = Field(env="REDIS_PASSWORD", default=None)
     local_data_path: str = Field(env="LOCAL_DATA_PATH", default="/app/data")
     log_prompt_data: bool = Field(env="LOG_PROMPT_DATA", default=False)
 
