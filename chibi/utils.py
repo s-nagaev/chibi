@@ -309,24 +309,31 @@ async def download_image(url: str) -> bytes:
 
 def log_application_settings() -> None:
     mode = (
-        "PRIVATE (master OpenAI API Key is provided)"
+        "<blue>PRIVATE (master OpenAI API Key is provided)</blue>"
         if gpt_settings.api_key
-        else "PUBLIC (no master OpenAI API Key is provided)"
+        else "<yellow>PUBLIC (no master OpenAI API Key is provided)</yellow>"
     )
-    gpt4_state = "ENABLED" if gpt_settings.gpt4_enabled else "DISABLED"
-    storage = "REDIS" if application_settings.redis else "LOCAL"
+    gpt4_state = "<green>ENABLED</green>" if gpt_settings.gpt4_enabled else "<red>DISABLED</red>"
+    storage = "<red>REDIS</red>" if application_settings.redis else "<blue>LOCAL</blue>"
 
-    message = (
-        f"Application is initialized in the {mode} mode using {storage} storage. \n"
-        f"Bot name is {telegram_settings.bot_name}. \n"
-        f"Initial assistant prompt: {gpt_settings.assistant_prompt}. \n"
-        f"Access to GPT-4 models is {gpt4_state}. \n"
-        f"Proxy is {telegram_settings.proxy or 'UNSET'}. \n"
-        f"Messages TTL: {gpt_settings.max_conversation_age_minutes} minutes. \n"
-        f"Maximum conversation history size: {gpt_settings.max_history_tokens} tokens. \n"
-        f"Maximum answer size: {gpt_settings.max_tokens} tokens. \n"
-        f"GPT-4 access whitelist: {gpt_settings.gpt4_whitelist or 'UNSET'}. \n"
-        f"Users whitelist: {telegram_settings.users_whitelist or 'UNSET'}. \n"
-        f"Groups whitelist: {telegram_settings.groups_whitelist or 'UNSET'}. \n"
+    messages = (
+        f"Application is initialized in the {mode} mode using {storage} storage.",
+        f"Bot name is <blue>{telegram_settings.bot_name}</blue>",
+        f"Initial assistant prompt: <blue>{gpt_settings.assistant_prompt}</blue>",
+        f"Access to GPT-4 models is {gpt4_state}.",
+        f"Proxy is <blue>{telegram_settings.proxy or 'UNSET'}</blue>",
+        f"Messages TTL: <blue>{gpt_settings.max_conversation_age_minutes} minutes</blue>",
+        f"Maximum conversation history size: <blue>{gpt_settings.max_history_tokens}</blue> tokens",
+        f"Maximum answer size: <blue>{gpt_settings.max_tokens}</blue> tokens",
+        f"GPT-4 access whitelist: <blue>{gpt_settings.gpt4_whitelist or 'UNSET'}</blue>",
+        f"Users whitelist: <blue>{telegram_settings.users_whitelist or 'UNSET'}</blue>",
+        f"Groups whitelist: <blue>{telegram_settings.groups_whitelist or 'UNSET'}</blue>",
     )
-    logger.info(message)
+    for message in messages:
+        logger.opt(colors=True).info(message)
+
+    if application_settings.redis_password:
+        logger.opt(colors=True).warning(
+            "`REDIS_PASSWORD` environment variable is <red>deprecated</red>. Use `REDIS` instead, i.e. "
+            "`redis://:password@localhost:6379/0`"
+        )

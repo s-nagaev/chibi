@@ -63,7 +63,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
     logger.info(
-        f"{user_data(update)} sent a new message in the{chat_data(update)}"
+        f"{user_data(update)} sent a new message in the {chat_data(update)}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 

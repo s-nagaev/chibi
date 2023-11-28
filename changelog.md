@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.0] - 2023-11-26
+## [0.6.0] - 2023-11-28
 
 ### Fixed
 - Fixed an issue preventing the bots' use with local data storage
@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the option to select the model for generating images (currently only through bot setting using environment variables)
 - Refactored the code
 - Base Docker image updated to `python:3.11-alpine`
+- `REDIS_PASSWORD` environment variable is deprecated.
 
 
 ## [0.5.3] - 2023-06-20
