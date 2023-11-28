@@ -1,6 +1,7 @@
 import io
 from functools import wraps
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from loguru import logger
@@ -228,10 +229,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except APIStatusError as e:
-            logger.error(
-                f"{user_data(update)} got a status code {e.status_code} response: {e.response} "
-                f"in the {chat_data(update)}"
-            )
+            logger.error(f"{user_data(update)} got a status code {e.status_code} response: {e.response}")
             await send_message(
                 update=update,
                 context=context,
@@ -301,9 +299,12 @@ def check_openai_api_key(func: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-async def download_image(url: str) -> bytes:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url=url)
+async def download_image(image_url: str) -> bytes:
+    parsed_url = urlparse(image_url)
+    params = parse_qs(parsed_url.query)
+    image_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+    response = await httpx.AsyncClient().get(url=image_url, params=params)
+    response.raise_for_status()
     return response.content
 
 

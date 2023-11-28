@@ -129,13 +129,19 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
 
     image_urls = await generate_image_task
 
-    image_files = [await download_image(url=url) for url in image_urls]
-
-    await context.bot.send_media_group(
-        chat_id=telegram_chat.id,
-        media=[InputMediaPhoto(url) for url in image_files],
-        reply_to_message_id=telegram_message.message_id,
-    )
+    image_files = [await download_image(image_url=url) for url in image_urls]
+    try:
+        await context.bot.send_media_group(
+            chat_id=telegram_chat.id,
+            media=[InputMediaPhoto(url) for url in image_files],
+            reply_to_message_id=telegram_message.message_id,
+        )
+    except Exception as e:
+        logger.exception(
+            f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
+            f"due to exception: {e}. Trying to send if via text message..."
+        )
+        await send_message(update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False)
 
 
 async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
