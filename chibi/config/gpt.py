@@ -18,7 +18,7 @@ class GPTSettings(BaseSettings):
     gpt4_whitelist: list[str] | None = Field(env="GPT4_WHITELIST", default=None)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)
     image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = Field(
-        env="IMAGE_SIZE", default="512x512"
+        env="IMAGE_SIZE", default="1024x1024"
     )
     dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
     image_quality: Literal["standard", "hd"] = Field(env="IMAGE_QUALITY", default="standard")
