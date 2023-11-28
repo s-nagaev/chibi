@@ -1,8 +1,8 @@
 from typing import Optional
+from urllib.parse import urlparse
 
-import aioredis
-from aioredis import Redis
 from loguru import logger
+from redis.asyncio import Redis, from_url
 
 from chibi.config import gpt_settings
 from chibi.models import Message, User
@@ -10,21 +10,41 @@ from chibi.storage.abstract import Database
 
 
 class RedisStorage(Database):
-    def __init__(self, connection_string: str, password: Optional[str] = None, db: int = 0) -> None:
+    def __init__(self, url: str, password: str | None = None, db: int = 0) -> None:
         self.redis: Redis
-        self.connection_string = connection_string
+        self.url = url
         self.password = password
         self.db = db
         logger.info("Redis storage initialized.")
 
     @classmethod
-    async def create(cls, connection_string: str, password: Optional[str] = None, db: int = 1) -> "RedisStorage":
-        instance = cls(connection_string, password, db)
+    async def create(cls, url: str, password: str | None = None, db: int = 0) -> "RedisStorage":
+        instance = cls(url, password, db)
         await instance.connect()
         return instance
 
     async def connect(self) -> None:
-        self.redis = await aioredis.from_url(self.connection_string, password=self.password, db=self.db)
+        redis_dsn = self._combine_redis_dsn(base_dsn=self.url, password=self.password)
+        self.redis = await from_url(redis_dsn)
+
+    def _combine_redis_dsn(self, base_dsn: str, password: str | None) -> str:
+        if not password:
+            return base_dsn
+
+        parsed_dsn = urlparse(base_dsn)
+        password_in_dsn = parsed_dsn.password or None
+
+        if password_in_dsn:
+            logger.warning(
+                "Redis password specified twice: in the REDIS_PASSWORD and REDIS environment variables. "
+                "Trying to use the password from the Redis DSN..."
+            )
+            return base_dsn
+
+        if host := parsed_dsn.hostname:
+            return base_dsn.replace(host, f":{password}@{host}")
+
+        raise ValueError("Incorrect Redis DSN string provided.")
 
     async def save_user(self, user: User) -> None:
         user_key = f"user:{user.id}"
@@ -89,3 +109,6 @@ class RedisStorage(Database):
         initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
         user.messages.append(initial_message)
         await self.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
+
+    async def close(self) -> None:
+        await self.redis.close()
