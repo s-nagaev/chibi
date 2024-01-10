@@ -13,15 +13,17 @@ class GPTSettings(BaseSettings):
         env="ASSISTANT_PROMPT",
         default=f"You're helpful and friendly assistant. Your name is {telegram_settings.bot_name}",
     )
+    dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
     frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
     gpt4_enabled: bool = Field(env="GPT4_ENABLED", default=True)
     gpt4_whitelist: list[str] | None = Field(env="GPT4_WHITELIST", default=None)
+    image_generations_monthly_limit: int = Field(env="IMAGE_GENERATIONS_LIMIT", default=0)
+    image_generations_whitelist: list[str] = Field(env="IMAGE_GENERATIONS_WHITELIST", default_factory=list)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)
+    image_quality: Literal["standard", "hd"] = Field(env="IMAGE_QUALITY", default="standard")
     image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = Field(
         env="IMAGE_SIZE", default="1024x1024"
     )
-    dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
-    image_quality: Literal["standard", "hd"] = Field(env="IMAGE_QUALITY", default="standard")
     max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
     max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1800)
     max_tokens: int = Field(env="MAX_TOKENS", default=1000)

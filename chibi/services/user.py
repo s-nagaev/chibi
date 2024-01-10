@@ -101,11 +101,21 @@ async def check_history_and_summarize(db: Database, user_id: int) -> bool:
     return False
 
 
-async def generate_image(user_id: int, prompt: str) -> list[str]:
+@inject_database
+async def generate_image(db: Database, user_id: int, prompt: str) -> list[str]:
     openai_api_key = await get_api_key(user_id=user_id)
-    return await get_images_by_prompt(api_key=openai_api_key, prompt=prompt)
+    images = await get_images_by_prompt(api_key=openai_api_key, prompt=prompt)
+    if user_id not in gpt_settings.image_generations_whitelist:
+        await db.count_image(user_id)
+    return images
 
 
 async def get_models_available(user_id: int, include_gpt4: bool) -> list[str]:
     openai_api_key = await get_api_key(user_id=user_id)
     return await retrieve_available_models(api_key=openai_api_key, include_gpt4=include_gpt4)
+
+
+@inject_database
+async def user_has_reached_images_generation_limit(db: Database, user_id: int) -> bool:
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.has_reached_image_limits
