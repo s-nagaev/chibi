@@ -41,6 +41,8 @@ class LocalStorage(Database):
 
     async def get_or_create_user(self, user_id: int) -> User:
         if user := await self.get_user(user_id=user_id):
+            current_time = time.time()
+            user.images = [img for img in user.images if img.expire_at > current_time]
             return user
         return await self.create_user(user_id=user_id)
 

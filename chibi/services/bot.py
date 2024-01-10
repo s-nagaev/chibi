@@ -10,7 +10,7 @@ from telegram import (
 )
 from telegram.ext import ContextTypes
 
-from chibi.config import application_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.services.gpt import api_key_is_valid
 from chibi.services.user import (
     check_history_and_summarize,
@@ -20,6 +20,7 @@ from chibi.services.user import (
     reset_chat_history,
     set_active_model,
     set_api_key,
+    user_has_reached_images_generation_limit,
 )
 from chibi.utils import (
     api_key_is_plausible,
@@ -104,6 +105,17 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
     if not telegram_message.text:
+        return None
+
+    if await user_has_reached_images_generation_limit(user_id=telegram_user.id):
+        await context.bot.send_message(
+            chat_id=telegram_chat.id,
+            reply_to_message_id=telegram_message.message_id,
+            text=(
+                f"Sorry, you have reached your monthly images generation limit "
+                f"({gpt_settings.image_generations_monthly_limit}). Please, try again later."
+            ),
+        )
         return None
 
     prompt = telegram_message.text.replace("/imagine", "", 1).strip()

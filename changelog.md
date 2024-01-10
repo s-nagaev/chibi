@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2024-01-10
+
+### Added
+- Optional `IMAGE_GENERATIONS_LIMIT` setting to limit the number of images a user can generate within a month using 
+DALL-E (to avoid excessive spending). The default value is 0, which means the feature is turned off, and no limits are 
+applied.
+- Optional `IMAGE_GENERATIONS_WHITELIST` setting for a list of user IDs exempt from image generation limits.
+
+
 ## [0.6.0] - 2023-11-28
 
 ### Fixed

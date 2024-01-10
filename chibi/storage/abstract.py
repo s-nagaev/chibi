@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -8,7 +9,7 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from chibi.models import Message, User
+from chibi.models import ImageMeta, Message, User
 
 CHAT_COMPLETION_CLASSES = {
     "system": ChatCompletionSystemMessageParam,
@@ -48,3 +49,9 @@ class Database(ABC):
                 continue
             conversation_messages.append(wrapper_class(**message))
         return conversation_messages
+
+    async def count_image(self, user_id: int) -> None:
+        user = await self.get_or_create_user(user_id=user_id)
+        expire_at = time.time() + 60 * 750  # ~ 1 month
+        user.images.append(ImageMeta(expire_at=expire_at))
+        await self.save_user(user)
