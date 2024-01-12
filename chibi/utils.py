@@ -329,6 +329,8 @@ def log_application_settings() -> None:
         f"GPT-4 access whitelist: <blue>{gpt_settings.gpt4_whitelist or 'UNSET'}</blue>",
         f"Users whitelist: <blue>{telegram_settings.users_whitelist or 'UNSET'}</blue>",
         f"Groups whitelist: <blue>{telegram_settings.groups_whitelist or 'UNSET'}</blue>",
+        f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit or 'UNSET'}</blue>",
+        f"Images limit whitelist: <blue>{gpt_settings.image_generations_whitelist or 'UNSET'}</blue>",
     )
     for message in messages:
         logger.opt(colors=True).info(message)
