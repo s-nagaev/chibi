@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.1] - 2024-01-10
+## [0.6.1] - 2024-01-12
 
 ### Added
 - Optional `IMAGE_GENERATIONS_LIMIT` setting to limit the number of images a user can generate within a month using 

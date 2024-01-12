@@ -33,6 +33,6 @@ class User(BaseModel):
     def has_reached_image_limits(self) -> bool:
         if not gpt_settings.image_generations_monthly_limit:
             return False
-        if self.id in gpt_settings.image_generations_whitelist:
+        if str(self.id) in gpt_settings.image_generations_whitelist:
             return False
         return len(self.images) >= gpt_settings.image_generations_monthly_limit

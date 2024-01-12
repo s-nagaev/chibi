@@ -38,6 +38,8 @@ class GPTSettings(BaseSettings):
 
         @classmethod
         def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
+            if field_name == "image_generations_whitelist":
+                return raw_val.split(",")
             if field_name == "gpt4_whitelist":
                 return [str(username).strip().strip("@") for username in raw_val.split(",")]
             return cls.json_loads(raw_val)  # type: ignore
