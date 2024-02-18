@@ -27,7 +27,25 @@ class User(BaseModel):
 
     @property
     def model(self) -> str:
-        return self.gpt_model or gpt_settings.model_default
+        """Get user's preferred model.
+
+        If user never set the preferred model, returns the default one.
+        If user's preferred model is not compatible with the models whitelist, returns the default one.
+        If none of the previous conditions are met, returns user's preferred model.
+
+        Returns:
+            The GPT model name.
+        """
+        if not self.gpt_model:
+            return gpt_settings.model_default
+
+        if not gpt_settings.models_whitelist:
+            return self.gpt_model
+
+        if self.gpt_model in gpt_settings.models_whitelist:
+            return self.gpt_model
+
+        return gpt_settings.model_default
 
     @property
     def has_reached_image_limits(self) -> bool:

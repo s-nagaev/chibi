@@ -61,8 +61,13 @@ async def api_key_is_valid(api_key: str) -> bool:
 
 async def retrieve_available_models(api_key: str, include_gpt4: bool) -> list[str]:
     client = AsyncOpenAI(api_key=api_key)
-    all_models = await client.models.list()
+    available_models = await client.models.list()
+
+    if gpt_settings.models_whitelist:
+        allowed_model_names = [model.id for model in available_models.data if model.id in gpt_settings.models_whitelist]
+    else:
+        allowed_model_names = [model.id for model in available_models.data]
 
     if include_gpt4:
-        return sorted([model.id for model in all_models.data if "gpt" in model.id])
-    return sorted([model.id for model in all_models.data if "gpt-3" in model.id])
+        return sorted([model for model in allowed_model_names if "gpt" in model])
+    return sorted([model for model in allowed_model_names if "gpt-3" in model])
