@@ -28,6 +28,7 @@ class GPTSettings(BaseSettings):
     max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1800)
     max_tokens: int = Field(env="MAX_TOKENS", default=1000)
     model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
+    models_whitelist: list[str] = Field(env="MODELS_WHITELIST", default_factory=list)
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     proxy: str | None = Field(env="PROXY", default=None)
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
@@ -38,7 +39,7 @@ class GPTSettings(BaseSettings):
 
         @classmethod
         def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
-            if field_name == "image_generations_whitelist":
+            if field_name in ("image_generations_whitelist", "models_whitelist"):
                 return raw_val.split(",")
             if field_name == "gpt4_whitelist":
                 return [str(username).strip().strip("@") for username in raw_val.split(",")]
