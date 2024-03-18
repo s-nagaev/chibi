@@ -7,7 +7,10 @@ from chibi.config.telegram import telegram_settings
 
 
 class GPTSettings(BaseSettings):
-    api_key: str | None = Field(env="OPENAI_API_KEY", default=None)
+    api_key: str | None = Field(env="OPENAI_API_KEY", default=None)  # Deprecated
+    openai_key: str | None = Field(env="OPENAI_API_KEY", default=None)
+    anthropic_key: str | None = Field(env="ANTHROPIC_API_KEY", default=None)
+    mistralai_key: str | None = Field(env="MISTRALAI_API_KEY", default=None)
 
     assistant_prompt: str = Field(
         env="ASSISTANT_PROMPT",
@@ -31,8 +34,9 @@ class GPTSettings(BaseSettings):
     models_whitelist: list[str] = Field(env="MODELS_WHITELIST", default_factory=list)
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     proxy: str | None = Field(env="PROXY", default=None)
+    public_mode: bool = Field(env="PUBLIC_MODE", default=False)
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
-    timeout: int = Field(env="TIMEOUT", default=120)
+    timeout: int = Field(env="TIMEOUT", default=240)
 
     class Config:
         env_file = ".env"

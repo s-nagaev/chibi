@@ -1,3 +1,4 @@
+import enum
 import io
 from functools import wraps
 from typing import Any, Callable
@@ -15,10 +16,15 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
-from chibi.services.user import get_api_key
 
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
+
+
+class Provider(enum.Enum):
+    ANTHROPIC = "anthropic"
+    MISTRAL = "mistral"
+    OPENAI = "openai"
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -261,10 +267,15 @@ def api_key_is_plausible(api_key: str) -> bool:
         True if token provided looks like a token :) False otherwise.
     """
 
-    if len(api_key) > 55 or len(api_key) < 51:
+    if not api_key.startswith("sk"):
         return False
     if " " in api_key:
         return False
+    if len(api_key) < 30:
+        return False
+    if len(api_key) > 150:
+        return False
+
     return True
 
 
@@ -283,16 +294,16 @@ def check_openai_api_key(func: Callable[..., Any]) -> Callable[..., Any]:
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
         telegram_user = get_telegram_user(update=update)
 
-        if not await get_api_key(user_id=telegram_user.id, raise_on_absence=False):
-            logger.info(f"{user_data(update)} has no OpenAI API Key. Suggesting to apply one...")
-            text = (
-                "Oops! It looks like you didn't set your OpenAI API Key yet. "
-                "Please, use /set_openai_key command, i.e.\n\n /set_openai_key sk-XXXXXXXXXXXXXXXXXXXXX\n\n"
-                "You may find your key in your user settings after creating an OpenAI account "
-                "(https://platform.openai.com/account/api-keys)."
-            )
-            await send_message(update=update, context=context, text=text, reply=False)
-            return None
+        # if not await get_api_key(user_id=telegram_user.id, raise_on_absence=False):
+        #     logger.info(f"{user_data(update)} has no OpenAI API Key. Suggesting to apply one...")
+        #     text = (
+        #         "Oops! It looks like you didn't set your OpenAI API Key yet. "
+        #         "Please, use /set_openai_key command, i.e.\n\n /set_openai_key sk-XXXXXXXXXXXXXXXXXXXXX\n\n"
+        #         "You may find your key in your user settings after creating an OpenAI account "
+        #         "(https://platform.openai.com/account/api-keys)."
+        #     )
+        #     await send_message(update=update, context=context, text=text, reply=False)
+        #     return None
 
         return await func(*args, **kwargs)
 
@@ -311,7 +322,7 @@ async def download_image(image_url: str) -> bytes:
 def log_application_settings() -> None:
     mode = (
         "<blue>PRIVATE (master OpenAI API Key is provided)</blue>"
-        if gpt_settings.api_key
+        if not gpt_settings.public_mode
         else "<yellow>PUBLIC (no master OpenAI API Key is provided)</yellow>"
     )
     gpt4_state = "<green>ENABLED</green>" if gpt_settings.gpt4_enabled else "<red>DISABLED</red>"

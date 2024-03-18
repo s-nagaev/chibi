@@ -1,16 +1,20 @@
 import time
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from chibi.config import gpt_settings
+from chibi.exceptions import NoApiKeyProvidedException
+from chibi.services.anthropic import Anthropic
+from chibi.services.mistralai import MistralAI
+from chibi.services.openai import OpenAI
+from chibi.services.provider import Provider
 
 
 class Message(BaseModel):
     id: int = Field(default_factory=time.time_ns)
     role: str
     content: str
-    expire_at: Optional[float] = None
+    expire_at: float | None = None
 
 
 class ImageMeta(BaseModel):
@@ -20,10 +24,22 @@ class ImageMeta(BaseModel):
 
 class User(BaseModel):
     id: int
-    api_token: Optional[str]
-    gpt_model: Optional[str]
+    anthropic_token: str | None = gpt_settings.anthropic_key
+    openai_token: str | None = gpt_settings.openai_key
+    mistralai_token: str | None = gpt_settings.mistralai_key
+    gpt_model: str | None = None
     messages: list[Message] = Field(default_factory=list)
     images: list[ImageMeta] = Field(default_factory=list)
+
+    @property
+    def api_token(self) -> str | None:
+        return None
+
+    @api_token.setter
+    def api_token(self, value: str) -> None:
+        if value.startswith("sk-"):
+            self.openai_token = value
+        self.mistralai_token = value
 
     @property
     def model(self) -> str:
@@ -46,6 +62,37 @@ class User(BaseModel):
             return self.gpt_model
 
         return gpt_settings.model_default
+
+    @property
+    def active_provider(self) -> Provider:
+        if "mistral" in self.model or "mixtral" in self.model and self.mistralai_token:
+            return MistralAI(token=self.mistralai_token, user=self)
+        if "claude" in self.model and self.anthropic_token:
+            return Anthropic(token=self.anthropic_token, user=self)
+        if "gpt" in self.model and self.openai_token:
+            return OpenAI(token=self.openai_token, user=self)
+        raise NoApiKeyProvidedException
+
+    @property
+    def available_providers(self) -> list[Provider]:
+        providers = []
+        if self.anthropic_token:
+            providers.append(Anthropic(user=self, token=self.anthropic_token))
+        if self.mistralai_token:
+            providers.append(MistralAI(user=self, token=self.mistralai_token))
+        if self.openai_token:
+            providers.append(OpenAI(user=self, token=self.openai_token))
+        return providers
+
+    @property
+    def openai(self) -> OpenAI:
+        return OpenAI(token=self.openai_token, user=self)
+
+    async def get_available_models(self) -> list[str]:
+        models = []
+        for provider in self.available_providers:
+            models.extend(await provider.get_available_models())
+        return models
 
     @property
     def has_reached_image_limits(self) -> bool:

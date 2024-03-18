@@ -1,40 +1,10 @@
-from typing import Optional
-
 from openai.types import CompletionUsage
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionMessageParam,
-    ChatCompletionUserMessageParam,
-)
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionUserMessageParam
 
 from chibi.config import gpt_settings
 from chibi.models import Message
-from chibi.services.gpt import (
-    get_chat_response,
-    get_images_by_prompt,
-    retrieve_available_models,
-)
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
-
-
-@inject_database
-async def get_api_key(db: Database, user_id: int, raise_on_absence: bool = True) -> Optional[str]:
-    if api_key := gpt_settings.api_key:
-        return api_key
-    user = await db.get_or_create_user(user_id=user_id)
-    if hasattr(user, "api_token") and user.api_token:
-        return user.api_token
-    if raise_on_absence:
-        raise ValueError(f"User {user_id} does not have active OpenAI API Key.")
-    return None
-
-
-@inject_database
-async def set_api_key(db: Database, user_id: int, api_key: str) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
-    user.api_token = api_key
-    await db.save_user(user)
 
 
 @inject_database
@@ -53,20 +23,17 @@ async def reset_chat_history(db: Database, user_id: int) -> None:
 @inject_database
 async def summarize(db: Database, user_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    openai_api_key = await get_api_key(user_id=user_id)
 
     chat_history = await db.get_messages(user=user)
 
-    assistant_message = ChatCompletionAssistantMessageParam(
-        role="assistant", content="Summarize this conversation in 700 characters or less"
+    task_message = ChatCompletionUserMessageParam(
+        role="user", content="Summarize this conversation in 1000 characters or less"
     )
 
-    user_message = ChatCompletionUserMessageParam(role="user", content=str(chat_history))
+    user_messages = ChatCompletionUserMessageParam(role="user", content=str(chat_history))
 
-    query_messages: list[ChatCompletionMessageParam] = [assistant_message, user_message]
-    answer, usage = await get_chat_response(
-        api_key=openai_api_key, messages=query_messages, model=user.model, max_tokens=200
-    )
+    query_messages: list[ChatCompletionMessageParam] = [user_messages, task_message]
+    answer, usage = await user.active_provider.get_chat_response(messages=query_messages, max_tokens=250)
     answer_message = Message(role="assistant", content=answer)
     await reset_chat_history(user_id=user_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
@@ -75,16 +42,14 @@ async def summarize(db: Database, user_id: int) -> None:
 @inject_database
 async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[str, CompletionUsage | None]:
     user = await db.get_or_create_user(user_id=user_id)
-    openai_api_key = await get_api_key(user_id=user_id)
-
     query_message = Message(role="user", content=prompt)
     await db.add_message(user=user, message=query_message, ttl=gpt_settings.messages_ttl)
     conversation_messages: list[ChatCompletionMessageParam] = await db.get_conversation_messages(user=user)
 
-    answer, usage = await get_chat_response(api_key=openai_api_key, messages=conversation_messages, model=user.model)
+    answer, usage = await user.active_provider.get_chat_response(messages=conversation_messages)
     answer_message = Message(role="assistant", content=answer)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
-
+    del user
     return answer, usage
 
 
@@ -103,19 +68,33 @@ async def check_history_and_summarize(db: Database, user_id: int) -> bool:
 
 @inject_database
 async def generate_image(db: Database, user_id: int, prompt: str) -> list[str]:
-    openai_api_key = await get_api_key(user_id=user_id)
-    images = await get_images_by_prompt(api_key=openai_api_key, prompt=prompt)
+    user = await db.get_or_create_user(user_id=user_id)
+    images = await user.openai.get_images(prompt=prompt)
     if user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(user_id)
     return images
 
 
-async def get_models_available(user_id: int, include_gpt4: bool) -> list[str]:
-    openai_api_key = await get_api_key(user_id=user_id)
-    return await retrieve_available_models(api_key=openai_api_key, include_gpt4=include_gpt4)
+@inject_database
+async def get_models_available(db: Database, user_id: int, include_gpt4: bool) -> list[str]:
+    user = await db.get_or_create_user(user_id=user_id)
+    return await user.get_available_models()
 
 
 @inject_database
 async def user_has_reached_images_generation_limit(db: Database, user_id: int) -> bool:
     user = await db.get_or_create_user(user_id=user_id)
     return user.has_reached_image_limits
+
+
+@inject_database
+async def set_api_key(db: Database, user_id: int, api_key: str) -> None:
+    # TODO: just very fast & unreliable solution, will be updated in near future.
+    user = await db.get_or_create_user(user_id=user_id)
+
+    if 28 < len(api_key) < 36:
+        user.mistralai_token = api_key
+    elif 45 < len(api_key) < 56:
+        user.openai_token = api_key
+    elif len(api_key) > 96:
+        user.anthropic_token = api_key

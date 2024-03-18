@@ -11,7 +11,6 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.services.gpt import api_key_is_valid
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -165,26 +164,20 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     if not telegram_message.text:
         return None
 
-    api_key = telegram_message.text.replace("/set_openai_key", "", 1).strip()
+    api_key = telegram_message.text.replace("/set_api_key", "", 1).strip()
     error_msg = (
-        "Sorry, but incorrect API key provided. You can find your API key at "
-        "https://platform.openai.com/account/api-keys"
+        "Sorry, but API key you have provided does not seem correct. You can find your API key at:\n "
+        "https://platform.openai.com/account/api-keys\n"
+        "https://console.anthropic.com/settings/keys\n"
+        "https://console.mistral.ai/api-keys"
     )
     if not api_key_is_plausible(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
         logger.warning(f"{user_data(update)} provided improbable key.")
         return
 
-    if not await api_key_is_valid(api_key=api_key):
-        await send_message(update=update, context=context, text=error_msg)
-        logger.warning(f"{user_data(update)} provided incorrect API key.")
-        return
-
     await set_api_key(user_id=telegram_user.id, api_key=api_key)
-    msg = (
-        "Your OpenAI API Key successfully set, my functionality unlocked! 🦾\n\n"
-        "Now you also may check available models in /menu."
-    )
+    msg = "Your API Key successfully set! 🦾\n\n" "Now you may check available models in /menu."
     await send_message(update=update, context=context, reply=False, text=msg)
     await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
     logger.info(f"{user_data(update)} successfully set up OpenAPI Key.")

@@ -56,11 +56,9 @@ class ChibiBot:
             ),
             BotCommand(command="menu", description="Select GPT model"),
         ]
-        if not gpt_settings.api_key:
+        if gpt_settings.public_mode:
             self.commands.append(
-                BotCommand(
-                    command="set_openai_key", description="Set your own OpenAI key (e.g. /set_openai_key sk-XXXXX)"
-                )
+                BotCommand(command="set_openai_key", description="Set your own OpenAI key (e.g. /set_api_key sk-XXXXX)")
             )
         self.background_tasks: set[Task] = set()
 
