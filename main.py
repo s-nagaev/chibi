@@ -31,7 +31,6 @@ from chibi.services.bot import (
 )
 from chibi.utils import (
     GROUP_CHAT_TYPES,
-    check_openai_api_key,
     check_user_allowance,
     get_telegram_chat,
     get_telegram_message,
@@ -72,21 +71,18 @@ class ChibiBot:
         )
         await telegram_message.reply_text(help_text, disable_web_page_preview=True)
 
-    @check_openai_api_key
     @check_user_allowance
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         task = asyncio.create_task(handle_reset(update=update, context=context))
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
-    @check_openai_api_key
     @check_user_allowance
     async def imagine(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         task = asyncio.create_task(handle_image_generation(update=update, context=context))
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
-    @check_openai_api_key
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_chat = get_telegram_chat(update=update)
@@ -107,7 +103,6 @@ class ChibiBot:
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
-    @check_openai_api_key
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         task = asyncio.create_task(handle_prompt(update=update, context=context))
@@ -132,7 +127,6 @@ class ChibiBot:
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
-    @check_openai_api_key
     @check_user_allowance
     async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         inline_query = update.inline_query

@@ -1,42 +1,33 @@
-import httpx
-from httpx import HTTPStatusError, Response
-from httpx._types import RequestData
-from openai.types.chat import ChatCompletionMessageParam
+from httpx import HTTPStatusError
 
 from chibi.config import gpt_settings
-from chibi.schemas.mistralai import (
-    ChatCompletionSchema,
-    GetModelsResponseSchema,
-    UsageSchema,
-)
+from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.mistralai import ChatCompletionSchema, GetModelsResponseSchema
 from chibi.services.provider import Provider
+from chibi.types import ChatCompletionMessageSchema
 
 
 class MistralAI(Provider):
-    async def _request(self, method: str, url: str, data: RequestData | None = None) -> Response:
-        headers = {
+    name = "MistralAI"
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}",
         }
-        transport = httpx.AsyncHTTPTransport(retries=3, proxy=gpt_settings.proxy)
-
-        async with httpx.AsyncClient(
-            transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy
-        ) as client:
-            response = await client.request(method=method, url=url, json=data, headers=headers)
-        return response
 
     async def _get_chat_completion_response(
         self,
-        messages: list[ChatCompletionMessageParam],
+        messages: list[ChatCompletionMessageSchema],
         model: str,
         temperature: float = gpt_settings.temperature,
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
         timeout: int = gpt_settings.timeout,
-    ) -> tuple[str, UsageSchema | None]:
+    ) -> ChatResponseSchema:
         url = "https://api.mistral.ai/v1/chat/completions"
 
         system_message = {"role": "system", "content": gpt_settings.assistant_prompt}
@@ -45,16 +36,19 @@ class MistralAI(Provider):
         response = await self._request(method="POST", url=url, data=data)
 
         if response.status_code != 200:
-            return "", None
+            raise Exception  # TODO
 
         response_data = ChatCompletionSchema(**response.json())
         choices = response_data.choices
-        if not choices:
-            return "", None
+        if choices:
+            answer_data = choices[0]
+            answer = answer_data.message.content
+            usage = response_data.usage
+        else:
+            answer = ""
+            usage = None
 
-        answer = choices[0]
-        usage = response_data.usage
-        return answer.message.content, usage
+        return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
     async def get_available_models(self) -> list[str]:
         url = "https://api.mistral.ai/v1/models"

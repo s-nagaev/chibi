@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from loguru import logger
-from openai import APIConnectionError, APIStatusError, RateLimitError
 from telegram import Chat as TelegramChat
 from telegram import Message as TelegramMessage
 from telegram import Update
@@ -16,15 +15,15 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
+from chibi.exceptions import (
+    NoApiKeyProvidedError,
+    NotAuthorizedError,
+    ServiceRateLimitError,
+    ServiceResponseError,
+)
 
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
-
-
-class Provider(enum.Enum):
-    ANTHROPIC = "anthropic"
-    MISTRAL = "mistral"
-    OPENAI = "openai"
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -217,34 +216,51 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         update: Update = kwargs.get("update") or args[1]
         context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
+        error_msg_prefix = f"{user_data(update)} didn't get a GPT answer in the {chat_data(update)}"
         try:
             return await func(*args, **kwargs)
-        except APIConnectionError as e:
-            logger.error(
-                f"{user_data(update)} didn't get a GPT answer in the {chat_data(update)} because "
-                f"the server could not be reached: {e.__cause__}"
-            )
-            await send_message(
-                update=update, context=context, text="🥴Service not available at the moment. Please, try again later."
-            )
-            return None
-
-        except RateLimitError:
-            logger.error(f"{user_data(update)} reached a Rate Limit in the {chat_data(update)}.")
-            await send_message(update=update, context=context, text="🤐Rate Limit exceeded. We should back off a bit.")
-            return None
-
-        except APIStatusError as e:
-            logger.error(f"{user_data(update)} got a status code {e.status_code} response: {e.response}")
+        except NoApiKeyProvidedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
             await send_message(
                 update=update,
                 context=context,
-                text="😲Lol... we got an unexpected response from the OpenAI service! Please, try again a bit later.",
+                text="Ooops! It looks like you didn't set the API key for this provider.",
+            )
+            return None
+
+        except NotAuthorizedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            await send_message(
+                update=update,
+                context=context,
+                text=(
+                    "We encountered an authorization problem when interacting with a remote service.\n"
+                    f"Please check your {e.provider} API key."
+                ),
+            )
+            return None
+
+        except ServiceResponseError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            await send_message(
+                update=update,
+                context=context,
+                text=(
+                    f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
+                    f"Please, try again a bit later.",
+                ),
+            )
+            return None
+
+        except ServiceRateLimitError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            await send_message(
+                update=update, context=context, text=f"🤐Rate Limit exceeded for {e.provider}. We should back off a bit."
             )
             return None
 
         except Exception as e:
-            logger.exception(f"{user_data(update)} got an error in the {chat_data(update)}: {e}")
+            logger.error(f"{error_msg_prefix}: {e}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
@@ -277,37 +293,6 @@ def api_key_is_plausible(api_key: str) -> bool:
         return False
 
     return True
-
-
-def check_openai_api_key(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator checking if the specific user has an OpenAI API Key.
-
-    Args:
-        func: async function that does any OpenAI API service interaction.
-
-    Returns:
-        Wrapper function object.
-    """
-
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        update: Update = kwargs.get("update") or args[1]
-        context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
-        telegram_user = get_telegram_user(update=update)
-
-        # if not await get_api_key(user_id=telegram_user.id, raise_on_absence=False):
-        #     logger.info(f"{user_data(update)} has no OpenAI API Key. Suggesting to apply one...")
-        #     text = (
-        #         "Oops! It looks like you didn't set your OpenAI API Key yet. "
-        #         "Please, use /set_openai_key command, i.e.\n\n /set_openai_key sk-XXXXXXXXXXXXXXXXXXXXX\n\n"
-        #         "You may find your key in your user settings after creating an OpenAI account "
-        #         "(https://platform.openai.com/account/api-keys)."
-        #     )
-        #     await send_message(update=update, context=context, text=text, reply=False)
-        #     return None
-
-        return await func(*args, **kwargs)
-
-    return wrapper
 
 
 async def download_image(image_url: str) -> bytes:

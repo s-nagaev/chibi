@@ -1,40 +1,34 @@
-import httpx
-from httpx import HTTPStatusError, Response
-from httpx._types import RequestData
-from openai.types.chat import ChatCompletionMessageParam
+from httpx import HTTPStatusError
 
 from chibi.config import gpt_settings
-from chibi.schemas.anthropic import ChatCompletionSchema, UsageSchema
+from chibi.schemas.anthropic import ChatCompletionSchema
+from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.provider import Provider
+from chibi.types import ChatCompletionMessageSchema
 
 
 class Anthropic(Provider):
-    async def _request(self, method: str, url: str, data: RequestData | None = None) -> Response:
-        headers = {
+    name = "Anthropic"
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "x-api-key": self.token,
             "anthropic-version": "2023-06-01",
         }
-        transport = httpx.AsyncHTTPTransport(retries=3, proxy=gpt_settings.proxy)
-
-        async with httpx.AsyncClient(
-            transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy
-        ) as client:
-            response = await client.request(method=method, url=url, json=data, headers=headers)
-
-        return response
 
     async def _get_chat_completion_response(
         self,
-        messages: list[ChatCompletionMessageParam],
+        messages: list[ChatCompletionMessageSchema],
         model: str,
         temperature: float = gpt_settings.temperature,
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
         timeout: int = gpt_settings.timeout,
-    ) -> tuple[str, UsageSchema | None]:
+    ) -> ChatResponseSchema:
         url = "https://api.anthropic.com/v1/messages"
 
         data = {"model": model, "messages": messages, "system": gpt_settings.assistant_prompt, "max_tokens": max_tokens}
@@ -42,12 +36,20 @@ class Anthropic(Provider):
 
         response_data = ChatCompletionSchema(**response.json())
         choices = response_data.content
-        if not choices:
-            return "", None
+        if choices:
+            answer_data = choices[0]
+            answer = answer_data.text
+            print(response_data)
+            usage = UsageSchema(
+                completion_tokens=response_data.usage.output_tokens,
+                prompt_tokens=response_data.usage.input_tokens,
+                total_tokens=response_data.usage.output_tokens + response_data.usage.input_tokens,
+            )
+        else:
+            answer = ""
+            usage = None
 
-        answer = choices[0]
-        usage = response_data.usage
-        return answer.text, usage
+        return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
     async def get_available_models(self) -> list[str]:
         all_models = [

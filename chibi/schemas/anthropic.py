@@ -6,7 +6,7 @@ class ContentItemSchema(BaseModel):
     text: str | None = None
 
 
-class UsageSchema(BaseModel):
+class AnthropicUsageSchema(BaseModel):
     input_tokens: int
     output_tokens: int
 
@@ -19,4 +19,4 @@ class ChatCompletionSchema(BaseModel):
     model: str
     stop_reason: str | None = None
     stop_sequence: str | None = None
-    usage: UsageSchema
+    usage: AnthropicUsageSchema

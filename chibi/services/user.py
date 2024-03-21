@@ -1,10 +1,11 @@
-from openai.types import CompletionUsage
-from openai.types.chat import ChatCompletionMessageParam, ChatCompletionUserMessageParam
+from openai.types.chat import ChatCompletionUserMessageParam
 
 from chibi.config import gpt_settings
 from chibi.models import Message
+from chibi.schemas.app import ChatResponseSchema
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.types import ChatCompletionMessageSchema, UserMessageSchema
 
 
 @inject_database
@@ -32,7 +33,7 @@ async def summarize(db: Database, user_id: int) -> None:
 
     user_messages = ChatCompletionUserMessageParam(role="user", content=str(chat_history))
 
-    query_messages: list[ChatCompletionMessageParam] = [user_messages, task_message]
+    query_messages: list[ChatCompletionMessageSchema] = [user_messages, task_message]
     answer, usage = await user.active_provider.get_chat_response(messages=query_messages, max_tokens=250)
     answer_message = Message(role="assistant", content=answer)
     await reset_chat_history(user_id=user_id)
@@ -40,17 +41,18 @@ async def summarize(db: Database, user_id: int) -> None:
 
 
 @inject_database
-async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> tuple[str, CompletionUsage | None]:
+async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
+    conversation_messages: list[ChatCompletionMessageSchema] = await db.get_conversation_messages(user=user)
+    conversation_messages.append(UserMessageSchema(role="user", content=prompt))
+
+    chat_response = await user.active_provider.get_chat_response(messages=conversation_messages)
+
+    answer_message = Message(role="assistant", content=chat_response.answer)
     query_message = Message(role="user", content=prompt)
     await db.add_message(user=user, message=query_message, ttl=gpt_settings.messages_ttl)
-    conversation_messages: list[ChatCompletionMessageParam] = await db.get_conversation_messages(user=user)
-
-    answer, usage = await user.active_provider.get_chat_response(messages=conversation_messages)
-    answer_message = Message(role="assistant", content=answer)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
-    del user
-    return answer, usage
+    return chat_response
 
 
 @inject_database
@@ -69,6 +71,8 @@ async def check_history_and_summarize(db: Database, user_id: int) -> bool:
 @inject_database
 async def generate_image(db: Database, user_id: int, prompt: str) -> list[str]:
     user = await db.get_or_create_user(user_id=user_id)
+    if not user.openai:
+        raise Exception  # TODO
     images = await user.openai.get_images(prompt=prompt)
     if user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(user_id)

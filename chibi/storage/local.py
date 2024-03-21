@@ -1,7 +1,7 @@
 import os
 import pickle
 import time
-from typing import Optional, cast
+from typing import Optional
 
 from loguru import logger
 
@@ -31,7 +31,8 @@ class LocalStorage(Database):
         filename = self._get_storage_filename(user_id)
         if os.path.exists(filename):
             with open(filename, "rb") as f:
-                return cast(User, pickle.load(f))
+                loaded_user = pickle.load(f)
+                return User(**loaded_user.dict())
         return None
 
     async def get_or_create_user(self, user_id: int) -> User:

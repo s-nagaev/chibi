@@ -11,6 +11,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -62,6 +63,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         prompt = prompt.replace("/ask", "", 1).strip()
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
+
     logger.info(
         f"{user_data(update)} sent a new message in the {chat_data(update)}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
@@ -73,17 +75,20 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.TYPING)
         await asyncio.sleep(2.5)
 
-    gpt_answer, usage = await get_gtp_chat_answer_task
+    chat_response: ChatResponseSchema = await get_gtp_chat_answer_task
     # usage_message = (
     #     f"Tokens used: {str(usage.get('total_tokens', 'n/a'))} "
     #     f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
     #     f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
     # )
-    answer_to_log = gpt_answer.replace("\r", " ").replace("\n", " ")
+    answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
     logged_answer = f"Answer: {answer_to_log}" if application_settings.log_prompt_data else ""
 
-    logger.info(f"{user_data(update)} got GPT answer in the {chat_data(update)}. {logged_answer}")
-    await send_gpt_answer_message(gpt_answer=gpt_answer, update=update, context=context)
+    logger.info(
+        f"{user_data(update)} got {chat_response.provider} ({chat_response.model}) answer in "
+        f"the {chat_data(update)}. {logged_answer}"
+    )
+    await send_gpt_answer_message(gpt_answer=chat_response.answer, update=update, context=context)
     history_is_summarized = await check_history_and_summarize(user_id=telegram_user.id)
     if history_is_summarized:
         logger.info(f"{user_data(update)}: history successfully summarized.")

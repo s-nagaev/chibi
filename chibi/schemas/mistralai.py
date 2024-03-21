@@ -44,7 +44,7 @@ class ChoiceSchema(BaseModel):
     logprobs: str | None = Field(None, alias="logprobs")
 
 
-class UsageSchema(BaseModel):
+class MistralaiUsageSchema(BaseModel):
     prompt_tokens: int
     total_tokens: int
     completion_tokens: int
@@ -56,4 +56,4 @@ class ChatCompletionSchema(BaseModel):
     created: int
     model: str
     choices: list[ChoiceSchema]
-    usage: UsageSchema
+    usage: MistralaiUsageSchema

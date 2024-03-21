@@ -35,6 +35,7 @@ class GPTSettings(BaseSettings):
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     proxy: str | None = Field(env="PROXY", default=None)
     public_mode: bool = Field(env="PUBLIC_MODE", default=False)
+    retries: int = Field(env="RETRIES", default=3)
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
     timeout: int = Field(env="TIMEOUT", default=240)
 

@@ -3,7 +3,7 @@ import time
 from pydantic import BaseModel, Field
 
 from chibi.config import gpt_settings
-from chibi.exceptions import NoApiKeyProvidedException
+from chibi.exceptions import NoApiKeyProvidedError
 from chibi.services.anthropic import Anthropic
 from chibi.services.mistralai import MistralAI
 from chibi.services.openai import OpenAI
@@ -65,17 +65,17 @@ class User(BaseModel):
 
     @property
     def active_provider(self) -> Provider:
-        if "mistral" in self.model or "mixtral" in self.model and self.mistralai_token:
+        if ("mistral" in self.model or "mixtral" in self.model) and self.mistralai_token is not None:
             return MistralAI(token=self.mistralai_token, user=self)
         if "claude" in self.model and self.anthropic_token:
             return Anthropic(token=self.anthropic_token, user=self)
         if "gpt" in self.model and self.openai_token:
             return OpenAI(token=self.openai_token, user=self)
-        raise NoApiKeyProvidedException
+        raise NoApiKeyProvidedError(provider="Any")
 
     @property
     def available_providers(self) -> list[Provider]:
-        providers = []
+        providers: list[Provider] = []
         if self.anthropic_token:
             providers.append(Anthropic(user=self, token=self.anthropic_token))
         if self.mistralai_token:
@@ -85,8 +85,10 @@ class User(BaseModel):
         return providers
 
     @property
-    def openai(self) -> OpenAI:
-        return OpenAI(token=self.openai_token, user=self)
+    def openai(self) -> OpenAI | None:
+        if self.openai_token:
+            return OpenAI(token=self.openai_token, user=self)
+        return None
 
     async def get_available_models(self) -> list[str]:
         models = []

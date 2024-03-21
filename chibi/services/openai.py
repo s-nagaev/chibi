@@ -1,5 +1,13 @@
-from openai import AsyncOpenAI, AuthenticationError
-from openai.types import CompletionUsage
+from functools import wraps
+from typing import Any, Callable, Iterable, Type, TypeVar, Coroutine
+
+from openai import (
+    APIConnectionError,
+    AsyncOpenAI,
+    AuthenticationError,
+    OpenAIError,
+    RateLimitError,
+)
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
@@ -7,27 +15,75 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion import Choice
 
 from chibi.config import gpt_settings
+from chibi.exceptions import (
+    NoApiKeyProvidedError,
+    NotAuthorizedError,
+    ServiceConnectionError,
+    ServiceRateLimitError,
+    ServiceResponseError,
+)
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.provider import Provider
+from chibi.types import ChatCompletionMessageSchema
+
+# TODO: rename
+T = TypeVar("T")
+M = TypeVar('M', bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
+def handle_openai_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        model = kwargs.get("model", "unknown")
+        try:
+            return await func(*args, **kwargs)
+        except APIConnectionError:
+            raise ServiceConnectionError(provider="OpenAI", model=model)
+        except AuthenticationError:
+            raise NotAuthorizedError(provider="OpenAI", model=model)
+        except RateLimitError:
+            raise ServiceRateLimitError(provider="OpenAI", model=model)
+        except OpenAIError:
+            raise ServiceResponseError(provider="OpenAI", model=model)
+
+    return wrapper
+
+
+def decorate_all_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
+    def decorate(cls: Type[T]) -> Type[T]:
+        for attr in cls.__dict__:
+            if callable(getattr(cls, attr)):
+                original_func = getattr(cls, attr)
+                decorated_func = decorator(original_func)
+                setattr(cls, attr, decorated_func)
+        return cls
+
+    return decorate
+
+
+@decorate_all_methods(handle_openai_exceptions)
 class OpenAI(Provider):
+    name = "OpenAI"
+
     @property
     def client(self) -> AsyncOpenAI:
+        if not self.token:
+            raise NoApiKeyProvidedError(provider=self.name, model="unknown")
         return AsyncOpenAI(api_key=self.token)
 
     async def _get_chat_completion_response(
         self,
-        messages: list[ChatCompletionMessageParam],
-        model: str | None = None,
+        messages: list[ChatCompletionMessageSchema],
+        model: str,
         temperature: float = gpt_settings.temperature,
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
         timeout: int = gpt_settings.timeout,
-    ) -> tuple[str, CompletionUsage | None]:
+    ) -> ChatResponseSchema:
         system_message = ChatCompletionSystemMessageParam(role="system", content=gpt_settings.assistant_prompt)
 
-        dialog = [system_message] + messages
+        dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
         response = await self.client.chat.completions.create(
             model=model,
@@ -38,14 +94,16 @@ class OpenAI(Provider):
             frequency_penalty=frequency_penalty,
             timeout=timeout,
         )
-        if len(response.choices) == 0:
-            return "", None
+        if len(response.choices) != 0:
+            choices: list[Choice] = response.choices
+            data = choices[0]
+            answer = data.message.content
+            usage = response.usage
+        else:
+            answer = ""
+            usage = None
 
-        choices: list[Choice] = response.choices
-        answer = choices[0]
-        usage = response.usage
-
-        return answer.message.content or "", usage
+        return ChatResponseSchema(answer=answer or "", provider=self.name, model=model, usage=usage)
 
     async def get_available_models(self) -> list[str]:
         openai_models = await self.client.models.list()
