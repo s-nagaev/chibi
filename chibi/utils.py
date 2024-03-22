@@ -1,4 +1,3 @@
-import enum
 import io
 from functools import wraps
 from typing import Any, Callable
@@ -125,14 +124,6 @@ def group_is_allowed(tg_chat: TelegramChat) -> bool:
     if not telegram_settings.groups_whitelist:
         return True
     return tg_chat.id in telegram_settings.groups_whitelist
-
-
-def user_can_use_gpt4(tg_user: TelegramUser) -> bool:
-    if gpt_settings.gpt4_enabled:
-        return True
-    if gpt_settings.gpt4_whitelist:
-        return any(identifier in gpt_settings.gpt4_whitelist for identifier in (str(tg_user.id), tg_user.username))
-    return False
 
 
 def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -282,9 +273,6 @@ def api_key_is_plausible(api_key: str) -> bool:
     Returns:
         True if token provided looks like a token :) False otherwise.
     """
-
-    if not api_key.startswith("sk"):
-        return False
     if " " in api_key:
         return False
     if len(api_key) < 30:
@@ -305,28 +293,38 @@ async def download_image(image_url: str) -> bytes:
 
 
 def log_application_settings() -> None:
-    mode = (
-        "<blue>PRIVATE (master OpenAI API Key is provided)</blue>"
-        if not gpt_settings.public_mode
-        else "<yellow>PUBLIC (no master OpenAI API Key is provided)</yellow>"
+    mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<blue>PRIVATE</blue>"
+    is_set = "<green>SET</green>"
+    unset = "<red>UNSET</red>"
+    storage = "<red>REDIS</red>" if application_settings.redis else "<yellow>LOCAL</yellow>"
+    proxy = f"<blue>{telegram_settings.proxy}</blue>" if telegram_settings.proxy else unset
+    users_whitelist = (
+        f"<blue>{','.join(telegram_settings.users_whitelist)}</blue>" if telegram_settings.users_whitelist else unset
     )
-    gpt4_state = "<green>ENABLED</green>" if gpt_settings.gpt4_enabled else "<red>DISABLED</red>"
-    storage = "<red>REDIS</red>" if application_settings.redis else "<blue>LOCAL</blue>"
+    groups_whitelist = (
+        f"<blue>{telegram_settings.groups_whitelist}</blue>" if telegram_settings.groups_whitelist else unset
+    )
+    images_whitelist = (
+        f"<blue>{','.join(gpt_settings.image_generations_whitelist)}</blue>"
+        if gpt_settings.image_generations_whitelist
+        else unset
+    )
 
     messages = (
         f"Application is initialized in the {mode} mode using {storage} storage.",
+        f"Anthropic (Claude-3) client set: {is_set if bool(gpt_settings.anthropic_key) else unset }",
+        f"Mistral AI client: {is_set if bool(gpt_settings.mistralai_key) else unset }",
+        f"OpenAI client set: {is_set if bool(gpt_settings.openai_key) else unset }",
         f"Bot name is <blue>{telegram_settings.bot_name}</blue>",
         f"Initial assistant prompt: <blue>{gpt_settings.assistant_prompt}</blue>",
-        f"Access to GPT-4 models is {gpt4_state}.",
-        f"Proxy is <blue>{telegram_settings.proxy or 'UNSET'}</blue>",
+        f"Proxy is {proxy}",
         f"Messages TTL: <blue>{gpt_settings.max_conversation_age_minutes} minutes</blue>",
         f"Maximum conversation history size: <blue>{gpt_settings.max_history_tokens}</blue> tokens",
         f"Maximum answer size: <blue>{gpt_settings.max_tokens}</blue> tokens",
-        f"GPT-4 access whitelist: <blue>{gpt_settings.gpt4_whitelist or 'UNSET'}</blue>",
-        f"Users whitelist: <blue>{telegram_settings.users_whitelist or 'UNSET'}</blue>",
-        f"Groups whitelist: <blue>{telegram_settings.groups_whitelist or 'UNSET'}</blue>",
-        f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit or 'UNSET'}</blue>",
-        f"Images limit whitelist: <blue>{gpt_settings.image_generations_whitelist or 'UNSET'}</blue>",
+        f"Users whitelist: {users_whitelist}",
+        f"Groups whitelist: {groups_whitelist}",
+        f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit}</blue>",
+        f"Images limit whitelist: {images_whitelist}",
     )
     for message in messages:
         logger.opt(colors=True).info(message)

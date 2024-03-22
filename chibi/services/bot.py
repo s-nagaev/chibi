@@ -32,11 +32,11 @@ from chibi.utils import (
     handle_gpt_exceptions,
     send_gpt_answer_message,
     send_message,
-    user_can_use_gpt4,
     user_data,
 )
 
 
+@handle_gpt_exceptions
 async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -160,7 +160,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         await send_message(update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False)
 
 
-async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -188,9 +188,9 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     logger.info(f"{user_data(update)} successfully set up OpenAPI Key.")
 
 
+@handle_gpt_exceptions
 async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
     telegram_user = get_telegram_user(update=update)
-    can_use_gpt4 = user_can_use_gpt4(tg_user=telegram_user)
-    models_available = await get_models_available(user_id=telegram_user.id, include_gpt4=can_use_gpt4)
+    models_available = await get_models_available(user_id=telegram_user.id)
     keyboard = [[InlineKeyboardButton(model.upper(), callback_data=model)] for model in models_available]
     return InlineKeyboardMarkup(keyboard)

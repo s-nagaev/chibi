@@ -80,7 +80,7 @@ async def generate_image(db: Database, user_id: int, prompt: str) -> list[str]:
 
 
 @inject_database
-async def get_models_available(db: Database, user_id: int, include_gpt4: bool) -> list[str]:
+async def get_models_available(db: Database, user_id: int) -> list[str]:
     user = await db.get_or_create_user(user_id=user_id)
     return await user.get_available_models()
 

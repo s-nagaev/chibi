@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Any, Callable, Iterable, Type, TypeVar, Coroutine
+from typing import Any, Callable, Coroutine, Iterable, Type, TypeVar
 
 from openai import (
     APIConnectionError,
@@ -28,7 +28,7 @@ from chibi.types import ChatCompletionMessageSchema
 
 # TODO: rename
 T = TypeVar("T")
-M = TypeVar('M', bound=Callable[..., Coroutine[Any, Any, Any]])
+M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
 def handle_openai_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -115,9 +115,7 @@ class OpenAI(Provider):
         else:
             allowed_model_names = [model.id for model in openai_models.data]
 
-        if gpt_settings.gpt4_enabled:
-            return sorted([model for model in allowed_model_names if "gpt" in model])
-        return sorted([model for model in allowed_model_names if "gpt-3" in model])
+        return sorted([model for model in allowed_model_names if "gpt" in model])
 
     async def api_key_is_valid(self) -> bool:
         try:

@@ -18,8 +18,6 @@ class GPTSettings(BaseSettings):
     )
     dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
     frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
-    gpt4_enabled: bool = Field(env="GPT4_ENABLED", default=True)
-    gpt4_whitelist: list[str] | None = Field(env="GPT4_WHITELIST", default=None)
     image_generations_monthly_limit: int = Field(env="IMAGE_GENERATIONS_LIMIT", default=0)
     image_generations_whitelist: list[str] = Field(env="IMAGE_GENERATIONS_WHITELIST", default_factory=list)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)

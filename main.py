@@ -22,10 +22,10 @@ from telegram.ext import (
 
 from chibi.config import gpt_settings, telegram_settings
 from chibi.services.bot import (
+    handle_api_key_set,
     handle_available_model_options,
     handle_image_generation,
     handle_model_selection,
-    handle_openai_key_set,
     handle_prompt,
     handle_reset,
 )
@@ -110,8 +110,8 @@ class ChibiBot:
         task.add_done_callback(self.background_tasks.discard)
 
     @check_user_allowance
-    async def set_openai_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        task = asyncio.create_task(handle_openai_key_set(update=update, context=context))
+    async def set_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        task = asyncio.create_task(handle_api_key_set(update=update, context=context))
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
@@ -169,7 +169,7 @@ class ChibiBot:
         app.add_handler(CommandHandler("imagine", self.imagine))
         app.add_handler(CommandHandler("start", self.help))
         app.add_handler(CommandHandler("ask", self.ask))
-        app.add_handler(CommandHandler("set_openai_key", self.set_openai_key))
+        app.add_handler(CommandHandler("set_api_key", self.set_api_key))
         app.add_handler(CommandHandler("menu", self.show_menu))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
         app.add_handler(CallbackQueryHandler(self.select_model))

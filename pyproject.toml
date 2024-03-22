@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi"
-version = "0.6.2"
+version = "0.7.0"
 description = "Another one ChatGPT Telegram bot"
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
@@ -20,6 +20,7 @@ black = "^23.1.0"
 flake8 = "^6.0.0"
 isort = "^5.12.0"
 mypy = "^1.1.1"
+flake8-pyproject = "^1.2.3"
 
 [tool.black]
 line-length = 120
@@ -43,7 +44,7 @@ allow_untyped_calls = true
 plugins = [ "pydantic.mypy" ]
 
 [tool.flake8]
-ignore = "E203,E266,H106,H904"
+ignore = "E203,E266,H106,H904,W503"
 max-line-length = 120
 exit-zero = true
 exclude = " .git,__pycache__ "
