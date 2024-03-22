@@ -11,7 +11,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.services.gpt import api_key_is_valid
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -32,11 +32,11 @@ from chibi.utils import (
     handle_gpt_exceptions,
     send_gpt_answer_message,
     send_message,
-    user_can_use_gpt4,
     user_data,
 )
 
 
+@handle_gpt_exceptions
 async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -63,6 +63,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         prompt = prompt.replace("/ask", "", 1).strip()
 
     prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
+
     logger.info(
         f"{user_data(update)} sent a new message in the {chat_data(update)}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
@@ -74,17 +75,20 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.TYPING)
         await asyncio.sleep(2.5)
 
-    gpt_answer, usage = await get_gtp_chat_answer_task
+    chat_response: ChatResponseSchema = await get_gtp_chat_answer_task
     # usage_message = (
     #     f"Tokens used: {str(usage.get('total_tokens', 'n/a'))} "
     #     f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
     #     f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
     # )
-    answer_to_log = gpt_answer.replace("\r", " ").replace("\n", " ")
+    answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
     logged_answer = f"Answer: {answer_to_log}" if application_settings.log_prompt_data else ""
 
-    logger.info(f"{user_data(update)} got GPT answer in the {chat_data(update)}. {logged_answer}")
-    await send_gpt_answer_message(gpt_answer=gpt_answer, update=update, context=context)
+    logger.info(
+        f"{user_data(update)} got {chat_response.provider} ({chat_response.model}) answer in "
+        f"the {chat_data(update)}. {logged_answer}"
+    )
+    await send_gpt_answer_message(gpt_answer=chat_response.answer, update=update, context=context)
     history_is_summarized = await check_history_and_summarize(user_id=telegram_user.id)
     if history_is_summarized:
         logger.info(f"{user_data(update)}: history successfully summarized.")
@@ -156,7 +160,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         await send_message(update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False)
 
 
-async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -165,34 +169,28 @@ async def handle_openai_key_set(update: Update, context: ContextTypes.DEFAULT_TY
     if not telegram_message.text:
         return None
 
-    api_key = telegram_message.text.replace("/set_openai_key", "", 1).strip()
+    api_key = telegram_message.text.replace("/set_api_key", "", 1).strip()
     error_msg = (
-        "Sorry, but incorrect API key provided. You can find your API key at "
-        "https://platform.openai.com/account/api-keys"
+        "Sorry, but API key you have provided does not seem correct. You can find your API key at:\n "
+        "https://platform.openai.com/account/api-keys\n"
+        "https://console.anthropic.com/settings/keys\n"
+        "https://console.mistral.ai/api-keys"
     )
     if not api_key_is_plausible(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
         logger.warning(f"{user_data(update)} provided improbable key.")
         return
 
-    if not await api_key_is_valid(api_key=api_key):
-        await send_message(update=update, context=context, text=error_msg)
-        logger.warning(f"{user_data(update)} provided incorrect API key.")
-        return
-
     await set_api_key(user_id=telegram_user.id, api_key=api_key)
-    msg = (
-        "Your OpenAI API Key successfully set, my functionality unlocked! 🦾\n\n"
-        "Now you also may check available models in /menu."
-    )
+    msg = "Your API Key successfully set! 🦾\n\n" "Now you may check available models in /menu."
     await send_message(update=update, context=context, reply=False, text=msg)
     await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
     logger.info(f"{user_data(update)} successfully set up OpenAPI Key.")
 
 
+@handle_gpt_exceptions
 async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
     telegram_user = get_telegram_user(update=update)
-    can_use_gpt4 = user_can_use_gpt4(tg_user=telegram_user)
-    models_available = await get_models_available(user_id=telegram_user.id, include_gpt4=can_use_gpt4)
+    models_available = await get_models_available(user_id=telegram_user.id)
     keyboard = [[InlineKeyboardButton(model.upper(), callback_data=model)] for model in models_available]
     return InlineKeyboardMarkup(keyboard)

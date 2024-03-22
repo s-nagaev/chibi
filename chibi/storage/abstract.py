@@ -2,19 +2,16 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionMessageParam,
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
+from chibi.models import ImageMeta, Message, User
+from chibi.types import (
+    AssistantMessageSchema,
+    ChatCompletionMessageSchema,
+    UserMessageSchema,
 )
 
-from chibi.models import ImageMeta, Message, User
-
 CHAT_COMPLETION_CLASSES = {
-    "system": ChatCompletionSystemMessageParam,
-    "user": ChatCompletionUserMessageParam,
-    "assistant": ChatCompletionAssistantMessageParam,
+    "user": UserMessageSchema,
+    "assistant": AssistantMessageSchema,
 }
 
 
@@ -39,13 +36,12 @@ class Database(ABC):
     async def drop_messages(self, user: User) -> None:
         ...
 
-    async def get_conversation_messages(self, user: User) -> list[ChatCompletionMessageParam]:
+    async def get_conversation_messages(self, user: User) -> list[ChatCompletionMessageSchema]:
         messages = await self.get_messages(user=user)
-        conversation_messages: list[ChatCompletionMessageParam] = []
+        conversation_messages: list[ChatCompletionMessageSchema] = []
         for message in messages:
             wrapper_class = CHAT_COMPLETION_CLASSES.get(message["role"])
             if not wrapper_class:
-                conversation_messages.append(message)  # type: ignore
                 continue
             conversation_messages.append(wrapper_class(**message))
         return conversation_messages

@@ -1,11 +1,10 @@
 import os
 import pickle
 import time
-from typing import Optional, cast
+from typing import Optional
 
 from loguru import logger
 
-from chibi.config import gpt_settings
 from chibi.models import Message, User
 from chibi.storage.abstract import Database
 
@@ -25,10 +24,6 @@ class LocalStorage(Database):
 
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
-        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        user.messages = [
-            initial_message,
-        ]
         await self.save_user(user=user)
         return user
 
@@ -36,13 +31,15 @@ class LocalStorage(Database):
         filename = self._get_storage_filename(user_id)
         if os.path.exists(filename):
             with open(filename, "rb") as f:
-                return cast(User, pickle.load(f))
+                loaded_user = pickle.load(f)
+                return User(**loaded_user.dict())
         return None
 
     async def get_or_create_user(self, user_id: int) -> User:
         if user := await self.get_user(user_id=user_id):
             current_time = time.time()
-            user.images = [img for img in user.images if img.expire_at > current_time]
+            if hasattr(user, "images"):
+                user.images = [img for img in user.images if img.expire_at > current_time]
             return user
         return await self.create_user(user_id=user_id)
 
@@ -69,8 +66,5 @@ class LocalStorage(Database):
         return msgs
 
     async def drop_messages(self, user: User) -> None:
-        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        user.messages = [
-            initial_message,
-        ]
+        user.messages = []
         await self.save_user(user=user)

@@ -7,7 +7,10 @@ from chibi.config.telegram import telegram_settings
 
 
 class GPTSettings(BaseSettings):
-    api_key: str | None = Field(env="OPENAI_API_KEY", default=None)
+    api_key: str | None = Field(env="OPENAI_API_KEY", default=None)  # Deprecated
+    openai_key: str | None = Field(env="OPENAI_API_KEY", default=None)
+    anthropic_key: str | None = Field(env="ANTHROPIC_API_KEY", default=None)
+    mistralai_key: str | None = Field(env="MISTRALAI_API_KEY", default=None)
 
     assistant_prompt: str = Field(
         env="ASSISTANT_PROMPT",
@@ -15,8 +18,6 @@ class GPTSettings(BaseSettings):
     )
     dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
     frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
-    gpt4_enabled: bool = Field(env="GPT4_ENABLED", default=True)
-    gpt4_whitelist: list[str] | None = Field(env="GPT4_WHITELIST", default=None)
     image_generations_monthly_limit: int = Field(env="IMAGE_GENERATIONS_LIMIT", default=0)
     image_generations_whitelist: list[str] = Field(env="IMAGE_GENERATIONS_WHITELIST", default_factory=list)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)
@@ -31,8 +32,10 @@ class GPTSettings(BaseSettings):
     models_whitelist: list[str] = Field(env="MODELS_WHITELIST", default_factory=list)
     presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
     proxy: str | None = Field(env="PROXY", default=None)
+    public_mode: bool = Field(env="PUBLIC_MODE", default=False)
+    retries: int = Field(env="RETRIES", default=3)
     temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
-    timeout: int = Field(env="TIMEOUT", default=120)
+    timeout: int = Field(env="TIMEOUT", default=240)
 
     class Config:
         env_file = ".env"
