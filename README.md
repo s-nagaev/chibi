@@ -292,8 +292,18 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 |:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
 | `USERS_WHITELIST`             | Comma-separated list of Telegram usernames (with or without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
 | `GROUPS_WHITELIST`            | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                          | `None`        |
-| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |...
+| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |
 | `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit.                             | `None`        |
+
+### Monitoring
+
+| Variable                  | Description                                                                                                        | Default Value |
+|:--------------------------|:-------------------------------------------------------------------------------------------------------------------|:--------------|
+| MONITORING_URL            | Activates monitoring functionality and sends GET request to this url every MONITORING_FREQUENCY_CALL seconds.      | `None`        |
+| MONITORING_FREQUENCY_CALL | If monitoring functionality is active sends GET request to MONITORING_URL every MONITORING_FREQUENCY_CALL seconds. | 300           |
+| MONITORING_RETRY_CALLS    | Logs error response only after MONITORING_RETRY_CALLS tries.                                                       | 3             |
+| MONITORING_PROXY          | Monitoring proxy URL.                                                                                              | `None`        |
+
 
 ## Getting API Keys
 

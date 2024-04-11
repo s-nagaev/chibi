@@ -485,6 +485,25 @@ async def download_image(image_url: str) -> bytes:
     return response.content
 
 
+async def run_monitoring(context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not application_settings.monitoring_url:
+        return
+
+    transport = httpx.AsyncHTTPTransport(
+        retries=application_settings.monitoring_retry_calls,
+        proxy=application_settings.monitoring_proxy
+    )
+
+    async with httpx.AsyncClient(transport=transport, proxy=application_settings.monitoring_proxy) as client:
+        try:
+            result = await client.get(application_settings.monitoring_url)
+        except Exception as error:
+            logger.error(f'Uptime Checker failed with an Exception: {error}')
+            return
+        if result.is_error:
+            logger.error(f'Uptime Checker failed, status_code: {result.status_code}, msg: {result.text}')
+
+
 def _provider_statuses() -> list[str]:
     """Prepare a provider clients statuses data for logging.
 
@@ -537,6 +556,7 @@ def log_application_settings() -> None:
         f"Users whitelist: {users_whitelist}",
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
+        f"Uptime monitoring: {SETTING_SET if application_settings.monitoring_url else SETTING_UNSET}"
     ]
     messages += _provider_statuses()
 

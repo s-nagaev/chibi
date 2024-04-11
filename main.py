@@ -44,6 +44,7 @@ from chibi.utils import (
     get_telegram_message,
     get_user_context,
     log_application_settings,
+    run_monitoring,
     set_user_action,
     set_user_context,
     user_interacts_with_bot,
@@ -308,6 +309,12 @@ class ChibiBot:
             )
         )
         app.add_error_handler(self.error_handler)
+        if not app.job_queue:
+            logger.error('Application job queue was shut down or never started.')
+        else:
+            app.job_queue.run_repeating(callback=run_monitoring,
+                                        interval=application_settings.monitoring_frequency_call,
+                                        first=0.0)
         app.run_polling()
 
 
