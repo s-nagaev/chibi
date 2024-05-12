@@ -229,7 +229,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except APIStatusError as e:
-            logger.error(f"{user_data(update)} got a status code {e.status_code} response: {e.response}")
+            logger.error(f"{user_data(update)} got a status code {e.status_code} response: {e.response.text}")
             await send_message(
                 update=update,
                 context=context,
