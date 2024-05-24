@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2024-05-24
+
+### Added
+- Anthropic provider support.
+- MistralAI provider support.
+- Optional `HIDE_MODELS` setting to hide `models` option from the bot menu.
+- Optional `HIDE_IMAGINE` setting to hide `imagine` option from the bot menu.
+
+### Changed
+- Project structure significantly refactored.
+- README updated: environment variables description significantly improved.
+
+
 ## [0.6.2] - 2024-02-18
 
 ### Added

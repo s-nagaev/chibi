@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 from loguru import logger
 from redis.asyncio import Redis, from_url
 
-from chibi.config import gpt_settings
 from chibi.models import Message, User
 from chibi.storage.abstract import Database
 
@@ -51,20 +50,14 @@ class RedisStorage(Database):
         user_data = user.json()
         await self.redis.set(user_key, user_data)
 
-        for message in user.messages:
-            message_key = f"user:{user.id}:message:{message.id}"
-            message_data = message.json()
-            await self.redis.set(message_key, message_data)
-            await self.redis.expire(message_key, gpt_settings.messages_ttl)
-
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
-        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        user.messages.append(initial_message)
+        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
+        # user.messages.append(initial_message)
         user_key = f"user:{user_id}"
 
         await self.redis.set(user_key, user.json())
-        await self.add_message(user=user, message=initial_message)
+        # await self.add_message(user=user, message=initial_message)
         return user
 
     async def get_user(self, user_id: int) -> Optional[User]:
@@ -75,9 +68,8 @@ class RedisStorage(Database):
 
         user = User.parse_raw(user_data)
         message_keys_pattern = f"user:{user.id}:message:*"
-        message_keys = await self.redis.keys(message_keys_pattern)
+        message_keys = set(await self.redis.keys(message_keys_pattern))
         user_messages = [Message.parse_raw(await self.redis.get(message_key)) for message_key in message_keys]
-
         user.messages = sorted(user_messages, key=lambda msg: msg.id)
 
         return user
@@ -106,9 +98,9 @@ class RedisStorage(Database):
         for message_key in message_keys:
             await self.redis.delete(message_key)
 
-        initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        user.messages.append(initial_message)
-        await self.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
+        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
+        # user.messages.append(initial_message)
+        # await self.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
 
     async def close(self) -> None:
         await self.redis.close()
