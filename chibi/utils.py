@@ -235,6 +235,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except ServiceResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+
             await send_message(
                 update=update,
                 context=context,
