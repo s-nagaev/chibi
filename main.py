@@ -20,7 +20,7 @@ from telegram.ext import (
     filters,
 )
 
-from chibi.config import gpt_settings, telegram_settings
+from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.services.bot import (
     handle_available_model_options,
     handle_image_generation,
@@ -36,6 +36,7 @@ from chibi.utils import (
     get_telegram_chat,
     get_telegram_message,
     log_application_settings,
+    run_monitoring,
     user_interacts_with_bot,
 )
 
@@ -188,6 +189,12 @@ class ChibiBot:
             )
         )
         app.add_error_handler(self.error_handler)
+        if not app.job_queue:
+            logger.error('Application job queue was shut down or never started.')
+        else:
+            app.job_queue.run_repeating(callback=run_monitoring,
+                                        interval=application_settings.monitoring_frequency_call,
+                                        first=0.0)
         app.run_polling()
 
 
