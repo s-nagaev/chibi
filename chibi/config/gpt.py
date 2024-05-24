@@ -17,7 +17,7 @@ class GPTSettings(BaseSettings):
         default=f"You're helpful and friendly assistant. Your name is {telegram_settings.bot_name}",
     )
     dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
-    frequency_penalty: float = Field(env="OPENAI_FREQUENCY_PENALTY", default=0)
+    frequency_penalty: float = Field(env="FREQUENCY_PENALTY", default=0)
     image_generations_monthly_limit: int = Field(env="IMAGE_GENERATIONS_LIMIT", default=0)
     image_generations_whitelist: list[str] = Field(env="IMAGE_GENERATIONS_WHITELIST", default_factory=list)
     image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)
@@ -30,11 +30,11 @@ class GPTSettings(BaseSettings):
     max_tokens: int = Field(env="MAX_TOKENS", default=1000)
     model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
     models_whitelist: list[str] = Field(env="MODELS_WHITELIST", default_factory=list)
-    presence_penalty: float = Field(env="OPENAI_PRESENCE_PENALTY", default=0)
+    presence_penalty: float = Field(env="PRESENCE_PENALTY", default=0)
     proxy: str | None = Field(env="PROXY", default=None)
     public_mode: bool = Field(env="PUBLIC_MODE", default=False)
     retries: int = Field(env="RETRIES", default=3)
-    temperature: float = Field(env="OPENAI_TEMPERATURE", default=1)
+    temperature: float = Field(env="TEMPERATURE", default=1)
     timeout: int = Field(env="TIMEOUT", default=240)
 
     class Config:

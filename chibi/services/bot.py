@@ -11,6 +11,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
+from chibi.constants import SupportedProviders
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.user import (
     check_history_and_summarize,
@@ -26,6 +27,7 @@ from chibi.utils import (
     api_key_is_plausible,
     chat_data,
     download_image,
+    get_provider_class_by_name,
     get_telegram_chat,
     get_telegram_message,
     get_telegram_user,
@@ -104,7 +106,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 @handle_gpt_exceptions
-async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -119,15 +121,6 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
                 f"Sorry, you have reached your monthly images generation limit "
                 f"({gpt_settings.image_generations_monthly_limit}). Please, try again later."
             ),
-        )
-        return None
-
-    prompt = telegram_message.text.replace("/imagine", "", 1).strip()
-    if not prompt:
-        await context.bot.send_message(
-            chat_id=telegram_chat.id,
-            reply_to_message_id=telegram_message.message_id,
-            text="Please provide some description (e.g. /imagine cat)",
         )
         return None
 
@@ -158,18 +151,21 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
             f"due to exception: {e}. Trying to send if via text message..."
         )
         await send_message(update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False)
+    if application_settings.log_prompt_data:
+        logger.info(f"{user_data(update)} got a successfully generated image(s): {image_urls}")
 
 
-async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE, provider: SupportedProviders) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
-    logger.info(f"{telegram_user.name} provides ones API Key.")
+    logger.info(f"{telegram_user.name} provides {provider.value} API Key.")
 
-    if not telegram_message.text:
+    prompt = telegram_message.text
+    if not prompt:
         return None
 
-    api_key = telegram_message.text.replace("/set_api_key", "", 1).strip()
+    api_key = prompt.strip()
     error_msg = (
         "Sorry, but API key you have provided does not seem correct. You can find your API key at:\n "
         "https://platform.openai.com/account/api-keys\n"
@@ -179,13 +175,23 @@ async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not api_key_is_plausible(api_key=api_key):
         await send_message(update=update, context=context, text=error_msg)
         logger.warning(f"{user_data(update)} provided improbable key.")
-        return
+        return None
 
-    await set_api_key(user_id=telegram_user.id, api_key=api_key)
-    msg = "Your API Key successfully set! 🦾\n\n" "Now you may check available models in /menu."
+    provider_class = get_provider_class_by_name(provider_name=provider)
+
+    if not await provider_class(token=api_key).api_key_is_valid():
+        await send_message(update=update, context=context, text=error_msg)
+        logger.warning(f"{user_data(update)} provided invalid key.")
+        return None
+
+    await set_api_key(user_id=telegram_user.id, api_key=api_key, provider=provider)
+    msg = "Your API Key successfully set! 🦾\n\n" "Now you may check available models in /models."
     await send_message(update=update, context=context, reply=False, text=msg)
-    await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
-    logger.info(f"{user_data(update)} successfully set up OpenAPI Key.")
+    try:
+        await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
+    except Exception:
+        pass
+    logger.info(f"{user_data(update)} successfully set up {provider.value} Key.")
 
 
 @handle_gpt_exceptions

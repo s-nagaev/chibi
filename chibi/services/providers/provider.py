@@ -64,6 +64,7 @@ class Provider(ABC):
         max_tokens: int,
         presence_penalty: float,
         frequency_penalty: float,
+        system_prompt: str,
         timeout: int,
     ) -> ChatResponseSchema:
         ...
@@ -76,6 +77,7 @@ class Provider(ABC):
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
+        system_prompt: str = gpt_settings.assistant_prompt,
         timeout: int = gpt_settings.timeout,
     ) -> ChatResponseSchema:
         model = model or self.active_model
@@ -89,6 +91,7 @@ class Provider(ABC):
             model=model,
             presence_penalty=presence_penalty,
             temperature=temperature,
+            system_prompt=system_prompt,
             timeout=timeout,
         )
 

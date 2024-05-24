@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import Task
+from typing import cast
 
 from loguru import logger
 from telegram import (
@@ -20,7 +21,8 @@ from telegram.ext import (
     filters,
 )
 
-from chibi.config import gpt_settings, telegram_settings
+from chibi.config import application_settings, gpt_settings, telegram_settings
+from chibi.constants import IMAGINE_ACTION, SET_API_KEY, SupportedProviders
 from chibi.services.bot import (
     handle_api_key_set,
     handle_available_model_options,
@@ -43,7 +45,6 @@ class ChibiBot:
     def __init__(self) -> None:
         self.commands = [
             BotCommand(command="help", description="Show this help message"),
-            BotCommand(command="imagine", description="Generate image from prompt with DALL-E (e.g. /imagine cat)"),
             BotCommand(
                 command="ask",
                 description=(
@@ -53,12 +54,28 @@ class ChibiBot:
             BotCommand(
                 command="reset", description="Reset your conversation history (will reduce prompt and save some tokens)"
             ),
-            BotCommand(command="menu", description="Select GPT model"),
         ]
+        if not application_settings.hide_imagine:
+            self.commands.append(
+                BotCommand(command="imagine", description="Generate image from prompt with DALL-E"),
+            )
+        if not application_settings.hide_models:
+            self.commands.append(BotCommand(command="models", description="Select GPT model"))
+
         if gpt_settings.public_mode:
             self.commands.append(
-                BotCommand(command="set_openai_key", description="Set your own OpenAI key (e.g. /set_api_key sk-XXXXX)")
+                BotCommand(
+                    command="set_anthropic_key",
+                    description="Set your own Anthropic (Claude-3) key",
+                )
             )
+            self.commands.append(
+                BotCommand(
+                    command="set_mistralai_key",
+                    description="Set your own MistralAI key",
+                )
+            )
+            self.commands.append(BotCommand(command="set_openai_key", description="Set your own OpenAI key"))
         self.background_tasks: set[Task] = set()
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,11 +94,28 @@ class ChibiBot:
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
 
-    @check_user_allowance
-    async def imagine(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        task = asyncio.create_task(handle_image_generation(update=update, context=context))
+    async def _handle_message_with_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        assert context.user_data
+        provider = cast(SupportedProviders, context.user_data.get(SET_API_KEY))
+        task = asyncio.create_task(handle_api_key_set(update=update, context=context, provider=provider))
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
+        context.user_data[SET_API_KEY] = None
+        return None
+
+    @check_user_allowance
+    async def imagine(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        telegram_message = get_telegram_message(update=update)
+        assert telegram_message.text
+        prompt = telegram_message.text.replace("/imagine", "", 1).strip()
+        if prompt:
+            task = asyncio.create_task(handle_image_generation(update=update, context=context, prompt=prompt))
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
+            return None
+
+        context.user_data[IMAGINE_ACTION] = True  # type: ignore
+        await telegram_message.reply_text("Ok, now give me an image prompt.")
 
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -90,6 +124,15 @@ class ChibiBot:
         prompt = telegram_message.text
 
         if not prompt:
+            return None
+
+        if context.user_data and context.user_data.get(SET_API_KEY):
+            return await self._handle_message_with_api_key(update=update, context=context)
+
+        if context.user_data and context.user_data.get(IMAGINE_ACTION):
+            task = asyncio.create_task(handle_image_generation(update=update, context=context, prompt=prompt))
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
             return None
 
         if (
@@ -110,10 +153,25 @@ class ChibiBot:
         task.add_done_callback(self.background_tasks.discard)
 
     @check_user_allowance
-    async def set_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        task = asyncio.create_task(handle_api_key_set(update=update, context=context))
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
+    async def set_openai_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        context.user_data[SET_API_KEY] = SupportedProviders.OPENAI  # type: ignore
+        await get_telegram_message(update=update).reply_text(
+            f"Ok, now give me an {SupportedProviders.OPENAI.value} API key"
+        )
+
+    @check_user_allowance
+    async def set_mistralai_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        context.user_data[SET_API_KEY] = SupportedProviders.MISTRALAI  # type: ignore
+        await get_telegram_message(update=update).reply_text(
+            f"Ok, now give me an {SupportedProviders.MISTRALAI.value} API key"
+        )
+
+    @check_user_allowance
+    async def set_anthropic_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        context.user_data[SET_API_KEY] = SupportedProviders.ANTHROPIC  # type: ignore
+        await get_telegram_message(update=update).reply_text(
+            f"Ok, now give me an {SupportedProviders.ANTHROPIC.value} API key"
+        )
 
     @check_user_allowance
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -164,22 +222,32 @@ class ChibiBot:
         else:
             app = ApplicationBuilder().token(telegram_settings.token).post_init(self.post_init).build()
 
+        if not application_settings.hide_imagine:
+            app.add_handler(CommandHandler("imagine", self.imagine))
+
+        if not application_settings.hide_models:
+            app.add_handler(CommandHandler("models", self.show_menu))
+            app.add_handler(CallbackQueryHandler(self.select_model))
+
+        if gpt_settings.public_mode:
+            app.add_handler(CommandHandler("set_anthropic_key", self.set_anthropic_api_key))
+            app.add_handler(CommandHandler("set_mistralai_key", self.set_mistralai_api_key))
+            app.add_handler(CommandHandler("set_openai_key", self.set_openai_api_key))
+
+        app.add_handler(CommandHandler("ask", self.ask))
         app.add_handler(CommandHandler("help", self.help))
         app.add_handler(CommandHandler("reset", self.reset))
-        app.add_handler(CommandHandler("imagine", self.imagine))
         app.add_handler(CommandHandler("start", self.help))
-        app.add_handler(CommandHandler("ask", self.ask))
-        app.add_handler(CommandHandler("set_api_key", self.set_api_key))
-        app.add_handler(CommandHandler("menu", self.show_menu))
+
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
-        app.add_handler(CallbackQueryHandler(self.select_model))
+
         app.add_handler(
             InlineQueryHandler(
                 self.inline_query,
                 chat_types=[constants.ChatType.GROUP, constants.ChatType.SUPERGROUP],
             )
         )
-        app.add_error_handler(self.error_handler)
+        # app.add_error_handler(self.error_handler)
         app.run_polling()
 
 

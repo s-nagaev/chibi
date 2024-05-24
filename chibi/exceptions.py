@@ -6,9 +6,12 @@ class GptException(Exception):
         self.provider = provider
         self.detail = detail
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         class_name = self.__class__.__name__
         return f"{class_name}(provider={self.provider!r}, model={self.model!r}, detail={self.detail!r})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class NoApiKeyProvidedError(GptException):

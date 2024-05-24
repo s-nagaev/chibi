@@ -4,10 +4,10 @@ from pydantic import BaseModel, Field
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError
-from chibi.services.anthropic import Anthropic
-from chibi.services.mistralai import MistralAI
-from chibi.services.openai import OpenAI
-from chibi.services.provider import Provider
+from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.mistralai import MistralAI
+from chibi.services.providers.openai import OpenAI
+from chibi.services.providers.provider import Provider
 
 
 class Message(BaseModel):
@@ -71,7 +71,7 @@ class User(BaseModel):
             return Anthropic(token=self.anthropic_token, user=self)
         if "gpt" in self.model and self.openai_token:
             return OpenAI(token=self.openai_token, user=self)
-        raise NoApiKeyProvidedError(provider="Any")
+        raise NoApiKeyProvidedError(provider="Unset", detail="No API key provided")
 
     @property
     def available_providers(self) -> list[Provider]:

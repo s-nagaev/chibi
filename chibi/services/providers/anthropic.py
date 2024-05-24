@@ -3,7 +3,7 @@ from httpx import HTTPStatusError
 from chibi.config import gpt_settings
 from chibi.schemas.anthropic import ChatCompletionSchema
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
-from chibi.services.provider import Provider
+from chibi.services.providers.provider import Provider
 from chibi.types import ChatCompletionMessageSchema
 
 
@@ -27,11 +27,12 @@ class Anthropic(Provider):
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
+        system_prompt: str = gpt_settings.assistant_prompt,
         timeout: int = gpt_settings.timeout,
     ) -> ChatResponseSchema:
         url = "https://api.anthropic.com/v1/messages"
 
-        data = {"model": model, "messages": messages, "system": gpt_settings.assistant_prompt, "max_tokens": max_tokens}
+        data = {"model": model, "messages": messages, "system": system_prompt, "max_tokens": max_tokens}
         response = await self._request(method="POST", url=url, data=data)
 
         response_data = ChatCompletionSchema(**response.json())

@@ -23,10 +23,9 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.provider import Provider
+from chibi.services.providers.provider import Provider
 from chibi.types import ChatCompletionMessageSchema
 
-# TODO: rename
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
 
@@ -79,9 +78,10 @@ class OpenAI(Provider):
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
+        system_prompt: str = gpt_settings.assistant_prompt,
         timeout: int = gpt_settings.timeout,
     ) -> ChatResponseSchema:
-        system_message = ChatCompletionSystemMessageParam(role="system", content=gpt_settings.assistant_prompt)
+        system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
 
         dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
@@ -119,8 +119,8 @@ class OpenAI(Provider):
 
     async def api_key_is_valid(self) -> bool:
         try:
-            await self.client.completions.create(model="text-davinci-003", prompt="This is a test", max_tokens=5)
-        except AuthenticationError:
+            await self.get_available_models()
+        except NotAuthorizedError:
             return False
         except Exception:
             raise

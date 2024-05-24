@@ -3,7 +3,7 @@ from httpx import HTTPStatusError
 from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema
 from chibi.schemas.mistralai import ChatCompletionSchema, GetModelsResponseSchema
-from chibi.services.provider import Provider
+from chibi.services.providers.provider import Provider
 from chibi.types import ChatCompletionMessageSchema
 
 
@@ -26,11 +26,12 @@ class MistralAI(Provider):
         max_tokens: int = gpt_settings.max_tokens,
         presence_penalty: float = gpt_settings.presence_penalty,
         frequency_penalty: float = gpt_settings.frequency_penalty,
+        system_prompt: str = gpt_settings.assistant_prompt,
         timeout: int = gpt_settings.timeout,
     ) -> ChatResponseSchema:
         url = "https://api.mistral.ai/v1/chat/completions"
 
-        system_message = {"role": "system", "content": gpt_settings.assistant_prompt}
+        system_message = {"role": "system", "content": system_prompt}
         dialog = [system_message] + [dict(m) for m in messages]
         data = {"model": model, "messages": dialog, "safe_prompt": False}
         response = await self._request(method="POST", url=url, data=data)

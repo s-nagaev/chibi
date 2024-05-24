@@ -1,6 +1,6 @@
 import io
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Type
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -14,15 +14,17 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
+from chibi.constants import GROUP_CHAT_TYPES, PERSONAL_CHAT_TYPES, SupportedProviders
 from chibi.exceptions import (
     NoApiKeyProvidedError,
     NotAuthorizedError,
     ServiceRateLimitError,
     ServiceResponseError,
 )
-
-GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
-PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
+from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.mistralai import MistralAI
+from chibi.services.providers.openai import OpenAI
+from chibi.services.providers.provider import Provider
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -73,7 +75,7 @@ async def send_long_message(
     parse_mode: str | None = None,
 ) -> None:
     chunk_size = constants.MessageLimit.MAX_TEXT_LENGTH
-    text_chunks = [message[i: i + chunk_size] for i in range(0, len(message), chunk_size)]
+    text_chunks = [message[i : i + chunk_size] for i in range(0, len(message), chunk_size)]
     for chunk in text_chunks:
         await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode)
 
@@ -215,7 +217,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             await send_message(
                 update=update,
                 context=context,
-                text="Ooops! It looks like you didn't set the API key for this provider.",
+                text="Oops! It looks like you didn't set the API key for this provider.",
             )
             return None
 
@@ -238,7 +240,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                 context=context,
                 text=(
                     f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
-                    f"Please, try again a bit later.",
+                    f"Please, try again a bit later."
                 ),
             )
             return None
@@ -251,7 +253,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except Exception as e:
-            logger.error(f"{error_msg_prefix}: {e}")
+            logger.error(f"{error_msg_prefix}: {e!r}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
@@ -273,6 +275,8 @@ def api_key_is_plausible(api_key: str) -> bool:
     Returns:
         True if token provided looks like a token :) False otherwise.
     """
+    if not api_key:
+        return False
     if " " in api_key:
         return False
     if len(api_key) < 30:
@@ -290,6 +294,17 @@ async def download_image(image_url: str) -> bytes:
     response = await httpx.AsyncClient().get(url=image_url, params=params)
     response.raise_for_status()
     return response.content
+
+
+def get_provider_class_by_name(provider_name: SupportedProviders) -> Type[Provider]:
+    match provider_name:
+        case SupportedProviders.ANTHROPIC:
+            return Anthropic
+        case SupportedProviders.MISTRALAI:
+            return MistralAI
+        case SupportedProviders.OPENAI:
+            return OpenAI
+    raise ValueError("Wrong provider name provided.")
 
 
 def log_application_settings() -> None:
