@@ -11,7 +11,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import SupportedProviders
+from chibi.constants import IMAGINE_ACTION, SupportedProviders
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.user import (
     check_history_and_summarize,
@@ -107,6 +107,8 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @handle_gpt_exceptions
 async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
+    if context.user_data:
+        context.user_data[IMAGINE_ACTION] = None
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
