@@ -21,9 +21,6 @@ class ModelDataSchema(BaseModel):
     object: str
     created: int
     owned_by: str
-    root: str | None
-    parent: str | None
-    permission: list[ModelPermissionSchema]
 
 
 class GetModelsResponseSchema(BaseModel):
