@@ -214,8 +214,8 @@ class ChibiBot:
             app = (
                 ApplicationBuilder()
                 .token(telegram_settings.token)
-                .proxy_url(telegram_settings.proxy)
-                .get_updates_proxy_url(telegram_settings.proxy)
+                .proxy(telegram_settings.proxy)
+                .get_updates_proxy(telegram_settings.proxy)
                 .post_init(self.post_init)
                 .build()
             )
