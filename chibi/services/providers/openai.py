@@ -1,6 +1,8 @@
+import inspect
 from functools import wraps
 from typing import Any, Callable, Coroutine, Iterable, Type, TypeVar
 
+from loguru import logger
 from openai import (
     APIConnectionError,
     AsyncOpenAI,
@@ -42,16 +44,17 @@ def handle_openai_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             raise NotAuthorizedError(provider="OpenAI", model=model)
         except RateLimitError:
             raise ServiceRateLimitError(provider="OpenAI", model=model)
-        except OpenAIError:
+        except OpenAIError as e:
+            logger.error(e)
             raise ServiceResponseError(provider="OpenAI", model=model)
 
     return wrapper
 
 
-def decorate_all_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
+def decorate_async_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
     def decorate(cls: Type[T]) -> Type[T]:
         for attr in cls.__dict__:
-            if callable(getattr(cls, attr)):
+            if inspect.iscoroutinefunction(getattr(cls, attr)):
                 original_func = getattr(cls, attr)
                 decorated_func = decorator(original_func)
                 setattr(cls, attr, decorated_func)
@@ -60,7 +63,7 @@ def decorate_all_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Typ
     return decorate
 
 
-@decorate_all_methods(handle_openai_exceptions)
+@decorate_async_methods(handle_openai_exceptions)
 class OpenAI(Provider):
     name = "OpenAI"
 
@@ -81,15 +84,18 @@ class OpenAI(Provider):
         system_prompt: str = gpt_settings.assistant_prompt,
         timeout: int = gpt_settings.timeout,
     ) -> ChatResponseSchema:
-        system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
-
-        dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
+        if model.lower().startswith("o1-preview") or model.lower().startswith("o1-mini"):
+            dialog: Iterable[ChatCompletionMessageParam] = messages  # type: ignore
+        else:
+            system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+            dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
         response = await self.client.chat.completions.create(
             model=model,
             messages=dialog,
             temperature=temperature,
-            max_tokens=max_tokens,
+            # max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             presence_penalty=presence_penalty,
             frequency_penalty=frequency_penalty,
             timeout=timeout,
@@ -113,9 +119,10 @@ class OpenAI(Provider):
                 model.id for model in openai_models.data if model.id in gpt_settings.models_whitelist
             ]
         else:
-            allowed_model_names = [model.id for model in openai_models.data]
-
-        return sorted([model for model in allowed_model_names if "gpt" in model])
+            allowed_model_names = [
+                model.id for model in openai_models.data if self.is_chat_completion_ready_model(model.id)
+            ]
+        return sorted([model for model in allowed_model_names])
 
     async def api_key_is_valid(self) -> bool:
         try:
@@ -135,3 +142,21 @@ class OpenAI(Provider):
             n=gpt_settings.image_n_choices,
         )
         return [image.url for image in response.data if image.url]
+
+    @classmethod
+    def is_chat_completion_ready_model(cls, model_name: str) -> bool:
+        def is_a_common_purpose_model(name: str) -> bool:
+            keywords = ("audio", "realtime", "instruct")
+            for keyword in keywords:
+                if keyword in name:
+                    return False
+            return True
+
+        def is_openai_model(name: str) -> bool:
+            prefixes = ("gpt", "o1", "o3")
+            for prefix in prefixes:
+                if name.startswith(prefix):
+                    return True
+            return False
+
+        return is_openai_model(model_name) and is_a_common_purpose_model(model_name)

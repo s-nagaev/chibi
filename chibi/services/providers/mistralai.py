@@ -63,7 +63,9 @@ class MistralAI(Provider):
                 model.id for model in response_data.data if model.id in gpt_settings.models_whitelist
             ]
         else:
-            allowed_model_names = [model.id for model in response_data.data]
+            allowed_model_names = [
+                model.id for model in response_data.data if self.is_chat_completion_ready_model(model.id)
+            ]
 
         return sorted(allowed_model_names)
 
@@ -75,3 +77,21 @@ class MistralAI(Provider):
         except Exception:
             raise
         return True
+
+    @classmethod
+    def is_chat_completion_ready_model(cls, model_name: str) -> bool:
+        def is_a_common_purpose_model(name: str) -> bool:
+            keywords = ("embed", "moderation")
+            for keyword in keywords:
+                if keyword in name:
+                    return False
+            return True
+
+        def is_mistralai_model(name: str) -> bool:
+            keywords = ("mistral", "mixtral", "ministral")
+            for keyword in keywords:
+                if keyword in name:
+                    return True
+            return False
+
+        return is_mistralai_model(model_name) and is_a_common_purpose_model(model_name)

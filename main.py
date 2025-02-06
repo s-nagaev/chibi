@@ -247,7 +247,7 @@ class ChibiBot:
                 chat_types=[constants.ChatType.GROUP, constants.ChatType.SUPERGROUP],
             )
         )
-        # app.add_error_handler(self.error_handler)
+        app.add_error_handler(self.error_handler)
         app.run_polling()
 
 

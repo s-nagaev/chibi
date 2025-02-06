@@ -65,11 +65,11 @@ class User(BaseModel):
 
     @property
     def active_provider(self) -> Provider:
-        if ("mistral" in self.model or "mixtral" in self.model) and self.mistralai_token is not None:
+        if MistralAI.is_chat_completion_ready_model(self.model) and self.mistralai_token:
             return MistralAI(token=self.mistralai_token, user=self)
         if "claude" in self.model and self.anthropic_token:
             return Anthropic(token=self.anthropic_token, user=self)
-        if "gpt" in self.model and self.openai_token:
+        if OpenAI.is_chat_completion_ready_model(self.model) and self.openai_token:
             return OpenAI(token=self.openai_token, user=self)
         raise NoApiKeyProvidedError(provider="Unset", detail="No API key provided")
 
