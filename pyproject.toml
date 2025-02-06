@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi"
-version = "0.8.2"
+version = "0.9.0"
 description = "Another one ChatGPT Telegram bot"
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"

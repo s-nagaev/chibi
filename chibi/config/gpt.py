@@ -35,7 +35,7 @@ class GPTSettings(BaseSettings):
     public_mode: bool = Field(env="PUBLIC_MODE", default=False)
     retries: int = Field(env="RETRIES", default=3)
     temperature: float = Field(env="TEMPERATURE", default=1)
-    timeout: int = Field(env="TIMEOUT", default=240)
+    timeout: int = Field(env="TIMEOUT", default=600)
 
     class Config:
         env_file = ".env"

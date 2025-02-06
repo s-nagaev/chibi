@@ -40,7 +40,6 @@ class Anthropic(Provider):
         if choices:
             answer_data = choices[0]
             answer = answer_data.text
-            print(response_data)
             usage = UsageSchema(
                 completion_tokens=response_data.usage.output_tokens,
                 prompt_tokens=response_data.usage.input_tokens,
@@ -56,11 +55,11 @@ class Anthropic(Provider):
         all_models = [
             "claude-3-opus-20240229",
             "claude-3-sonnet-20240229",
-            "claude-3-5-sonnet-20240620",
             "claude-3-haiku-20240307",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
             "claude-2.1'",
             "claude-2.0",
-            "claude-instant-1.2",
         ]
 
         if gpt_settings.models_whitelist:

@@ -15,7 +15,13 @@ Chibi is a Python-based Telegram chatbot that allows users to interact with the 
 
 - linux/amd64
 - linux/arm64
-- linux/arm/v7 *(Yeah! Your Raspberry Pi is supported!)*
+- linux/arm/v7 *(Raspberry Pi 3 is supported!)*
+
+## Supported providers
+
+- OpenAI
+- Anthropic
+- MistralAI
 
 ## Features
 
