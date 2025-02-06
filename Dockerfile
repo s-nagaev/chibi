@@ -28,4 +28,4 @@ RUN chown chibi:chibi /app/data
 USER chibi
 
 ENTRYPOINT []
-CMD python main.py
+CMD ["python", "main.py"]

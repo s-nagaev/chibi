@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.2] - 2024-08-1
+## [0.10.0] - 2025-02-06
+
+### Changed
+- Dependencies updated: `openai` module updated to `1.61.1`.
+
+
+## [0.9.0] - 2025-02-06
+
+### Added
+- OpenAI O1/O3 models support.
+
+### Changed
+- Mistral AI models selection updated.
+- Anthropic available models list updated. 
+
+
+
+## [0.8.2] - 2024-08-01
 
 ### Fixed
 - Data validation error after Mistral AI updated their `GET /models` API signature.
