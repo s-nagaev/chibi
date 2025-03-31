@@ -15,6 +15,7 @@ pydantic = "2.10.6"  # 1.10.9
 pydantic-settings = "^2.8.1"
 python-telegram-bot = {extras = ["socks"], version = "^22.0"}
 redis = {extras = ["hiredis"], version = "5.2.1"}
+telegramify-markdown = "^0.5.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.1.0"

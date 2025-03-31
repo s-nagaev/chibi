@@ -23,7 +23,7 @@ from telegram.ext import (
 )
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
-from chibi.constants import IMAGINE_ACTION, UserAction, UserContext
+from chibi.constants import UserAction, UserContext
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -40,10 +40,10 @@ from chibi.utils import (
     check_user_allowance,
     get_telegram_chat,
     get_telegram_message,
-    log_application_settings,
-    user_interacts_with_bot,
     get_user_context,
+    log_application_settings,
     set_user_context,
+    user_interacts_with_bot,
 )
 
 _T = TypeVar("_T")

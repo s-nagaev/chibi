@@ -13,7 +13,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import IMAGINE_ACTION, UserContext, UserAction
+from chibi.constants import UserAction, UserContext
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers import registered_providers
 from chibi.services.user import (
@@ -35,8 +35,8 @@ from chibi.utils import (
     handle_gpt_exceptions,
     send_gpt_answer_message,
     send_message,
-    user_data,
     set_user_context,
+    user_data,
 )
 
 

@@ -1,9 +1,10 @@
 import io
 from functools import wraps
-from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, cast, Type
+from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+import telegramify_markdown
 from loguru import logger
 from telegram import Chat as TelegramChat
 from telegram import Message as TelegramMessage
@@ -14,7 +15,11 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
-from chibi.constants import GROUP_CHAT_TYPES, PERSONAL_CHAT_TYPES, UserContext
+from chibi.constants import (
+    GROUP_CHAT_TYPES,
+    PERSONAL_CHAT_TYPES,
+    UserContext,
+)
 from chibi.exceptions import (
     NoApiKeyProvidedError,
     NoModelSelectedError,
@@ -74,18 +79,39 @@ async def send_long_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     parse_mode: str | None = None,
+    normalize_md: bool = True,
 ) -> None:
     chunk_size = constants.MessageLimit.MAX_TEXT_LENGTH
     text_chunks = [message[i : i + chunk_size] for i in range(0, len(message), chunk_size)]
     for chunk_number, chunk in enumerate(text_chunks):
-        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode, reply=chunk_number == 0)
+        text = telegramify_markdown.standardize(chunk) if normalize_md else chunk
+        await send_message(update=update, context=context, text=text, parse_mode=parse_mode, reply=chunk_number == 0)
+
+
+async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+
+    await send_long_message(message=message, update=update, context=context, normalize_md=False)
+    file = io.BytesIO()
+    file.write(message.encode())
+    file.seek(0)
+    explain_message_text = (
+        "Oops! 😯It looks like your answer contains some code, but Telegram can't display it properly. "
+        "I'll additionally add your answer to the markdown file. 👇"
+    )
+
+    await send_message(update=update, context=context, text=explain_message_text, reply=False)
+    await context.bot.send_document(
+        chat_id=telegram_chat.id,
+        document=file,
+        filename="answer.md",
+    )
 
 
 async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    telegram_chat = get_telegram_chat(update=update)
     try:
         await send_long_message(
-            message=gpt_answer, update=update, context=context, parse_mode=constants.ParseMode.MARKDOWN
+            message=gpt_answer, update=update, context=context, parse_mode=constants.ParseMode.MARKDOWN_V2
         )
     except BadRequest as e:
         # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
@@ -93,28 +119,7 @@ async def send_gpt_answer_message(gpt_answer: str, update: Update, context: Cont
             f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
             f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
         )
-        await send_long_message(message=gpt_answer, update=update, context=context)
-
-        if "```" in gpt_answer:
-            logger.info(
-                f"{user_data(update)} got and answer containing some code in the {chat_data(update)}, "
-                f"but face with a markdown parse error. Additionally sending answer as an attachment..."
-            )
-            file = io.BytesIO()
-            file.write(gpt_answer.encode())
-            file.seek(0)
-            explain_message_text = (
-                "Oops! 😯It looks like your answer contains some code, but Telegram can't display it properly. "
-                "I'll additionally add your answer to the markdown file. 👇"
-            )
-
-            explain_message = await send_message(update=update, context=context, text=explain_message_text, reply=False)
-            await context.bot.send_document(
-                chat_id=telegram_chat.id,
-                reply_to_message_id=explain_message.message_id,
-                document=file,
-                filename="answer.md",
-            )
+        await send_message_in_plain_text_and_file(message=gpt_answer, update=update, context=context)
 
 
 def user_is_allowed(tg_user: TelegramUser) -> bool:

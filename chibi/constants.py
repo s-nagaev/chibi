@@ -1,16 +1,16 @@
+import re
 from enum import Enum
 from typing import Literal
 
 from telegram import constants
 
 
-IMAGINE_ACTION = "imagine_action"
-API_KEY_SET_SELECTED_PROVIDER = "api_key_set_selected_provider"
-
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
 IMAGE_SIZE_LITERAL = Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
 IMAGE_ASPECT_RATIO_LITERAL = Literal["1:1", "3:4", "4:3", "9:16", "16:9"]
+MARKDOWN_V2_ESCAPE_CHARS = r"_*[]()~`>#+-=|{}.!"
+ESCAPE_PATTERN = re.compile(r"(```(?:.|\n)*?```|`.*?`)|([" + re.escape(MARKDOWN_V2_ESCAPE_CHARS) + r"])", re.DOTALL)
 
 
 class UserContext(Enum):
