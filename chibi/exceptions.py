@@ -1,6 +1,9 @@
 class GptException(Exception):
     def __init__(
-        self, provider: str, model: str = "unknown", detail: str = "Failed to receive response from the service"
+        self,
+        provider: str = "unknown",
+        model: str = "unknown",
+        detail: str = "Failed to receive response from the service",
     ) -> None:
         self.model = model
         self.provider = provider
@@ -31,4 +34,12 @@ class ServiceResponseError(GptException):
 
 
 class ServiceConnectionError(GptException):
+    ...
+
+
+class NoModelSelectedError(GptException):
+    ...
+
+
+class NoProviderSelectedError(GptException):
     ...

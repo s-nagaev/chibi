@@ -1,18 +1,20 @@
 from functools import lru_cache
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ApplicationSettings(BaseSettings):
-    redis: str | None = Field(env="REDIS", default=None)
-    redis_password: str | None = Field(env="REDIS_PASSWORD", default=None)
-    local_data_path: str = Field(env="LOCAL_DATA_PATH", default="/app/data")
-    log_prompt_data: bool = Field(env="LOG_PROMPT_DATA", default=False)
-    hide_models: bool = Field(env="HIDE_MODELS", default=False)
-    hide_imagine: bool = Field(env="HIDE_IMAGINE", default=False)
-
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=(".env",),
+        extra="ignore",
+    )
+    redis: str | None = Field(default=None)
+    redis_password: str | None = Field(default=None)
+    local_data_path: str = Field(default="/app/data")
+    log_prompt_data: bool = Field(default=False)
+    hide_models: bool = Field(default=False)
+    hide_imagine: bool = Field(default=False)
 
 
 @lru_cache()

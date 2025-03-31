@@ -1,14 +1,14 @@
-from httpx import HTTPStatusError
-
 from chibi.config import gpt_settings
 from chibi.schemas.anthropic import ChatCompletionSchema
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
-from chibi.services.providers.provider import Provider
+from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.types import ChatCompletionMessageSchema
 
 
-class Anthropic(Provider):
+class Anthropic(RestApiFriendlyProvider):
     name = "Anthropic"
+    model_name_keywords = ["claude"]
+    default_model = "claude-3-7-sonnet-20250219"
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -23,16 +23,11 @@ class Anthropic(Provider):
         self,
         messages: list[ChatCompletionMessageSchema],
         model: str,
-        temperature: float = gpt_settings.temperature,
-        max_tokens: int = gpt_settings.max_tokens,
-        presence_penalty: float = gpt_settings.presence_penalty,
-        frequency_penalty: float = gpt_settings.frequency_penalty,
-        system_prompt: str = gpt_settings.assistant_prompt,
-        timeout: int = gpt_settings.timeout,
+        system_prompt: str,
     ) -> ChatResponseSchema:
         url = "https://api.anthropic.com/v1/messages"
 
-        data = {"model": model, "messages": messages, "system": system_prompt, "max_tokens": max_tokens}
+        data = {"model": model, "messages": messages, "system": system_prompt, "max_tokens": self.max_tokens}
         response = await self._request(method="POST", url=url, data=data)
 
         response_data = ChatCompletionSchema(**response.json())
@@ -51,16 +46,14 @@ class Anthropic(Provider):
 
         return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self) -> list[str]:
-        all_models = [
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-2.1'",
-            "claude-2.0",
-        ]
+    async def get_available_models(self, image_generation: bool = False) -> list[str]:
+        if image_generation:
+            return []
+
+        url = "https://api.anthropic.com/v1/models"
+        response = await self._request(method="GET", url=url)
+        response_data = response.json().get("data", [])
+        all_models = [model.get("id") for model in response_data if model.get("id") and model.get("type") == "model"]
 
         if gpt_settings.models_whitelist:
             allowed_model_names = [model for model in all_models if model in gpt_settings.models_whitelist]
@@ -68,14 +61,3 @@ class Anthropic(Provider):
             allowed_model_names = all_models
 
         return sorted(allowed_model_names)
-
-    async def api_key_is_valid(self) -> bool:
-        try:
-            await self.get_chat_response(
-                messages=[{"role": "user", "content": "ping"}], max_tokens=5, model="claude-3-haiku-20240307"
-            )
-        except HTTPStatusError:
-            return False
-        except Exception:
-            raise
-        return True

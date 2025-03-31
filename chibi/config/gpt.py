@@ -1,52 +1,56 @@
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from chibi.config.telegram import telegram_settings
+from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL
 
 
 class GPTSettings(BaseSettings):
-    api_key: str | None = Field(env="OPENAI_API_KEY", default=None)  # Deprecated
-    openai_key: str | None = Field(env="OPENAI_API_KEY", default=None)
-    anthropic_key: str | None = Field(env="ANTHROPIC_API_KEY", default=None)
-    mistralai_key: str | None = Field(env="MISTRALAI_API_KEY", default=None)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    alibaba_key: str | None = Field(alias="ALIBABA_API_KEY", default=None)
+    anthropic_key: str | None = Field(alias="ANTHROPIC_API_KEY", default=None)
+    deepseek_key: str | None = Field(alias="DEEPSEEK_API_KEY", default=None)
+    gemini_key: str | None = Field(alias="GEMINI_API_KEY", default=None)
+    grok_key: str | None = Field(alias="GROK_API_KEY", default=None)
+    mistralai_key: str | None = Field(alias="MISTRALAI_API_KEY", default=None)
+    openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
 
     assistant_prompt: str = Field(
-        env="ASSISTANT_PROMPT",
         default=f"You're helpful and friendly assistant. Your name is {telegram_settings.bot_name}",
     )
-    dall_e_model: Literal["dall-e-2", "dall-e-3"] = Field(env="DALL_E_MODEL", default="dall-e-3")
-    frequency_penalty: float = Field(env="FREQUENCY_PENALTY", default=0)
-    image_generations_monthly_limit: int = Field(env="IMAGE_GENERATIONS_LIMIT", default=0)
-    image_generations_whitelist: list[str] = Field(env="IMAGE_GENERATIONS_WHITELIST", default_factory=list)
-    image_n_choices: int = Field(env="OPENAI_IMAGE_N_CHOICES", default=1)
-    image_quality: Literal["standard", "hd"] = Field(env="IMAGE_QUALITY", default="standard")
-    image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"] = Field(
-        env="IMAGE_SIZE", default="1024x1024"
-    )
-    max_conversation_age_minutes: int = Field(env="MAX_CONVERSATION_AGE_MINUTES", default=60)
-    max_history_tokens: int = Field(env="MAX_HISTORY_TOKENS", default=1800)
-    max_tokens: int = Field(env="MAX_TOKENS", default=1000)
-    model_default: str = Field(env="MODEL_DEFAULT", default="gpt-3.5-turbo")
-    models_whitelist: list[str] = Field(env="MODELS_WHITELIST", default_factory=list)
-    presence_penalty: float = Field(env="PRESENCE_PENALTY", default=0)
-    proxy: str | None = Field(env="PROXY", default=None)
-    public_mode: bool = Field(env="PUBLIC_MODE", default=False)
-    retries: int = Field(env="RETRIES", default=3)
-    temperature: float = Field(env="TEMPERATURE", default=1)
-    timeout: int = Field(env="TIMEOUT", default=600)
+    frequency_penalty: float = Field(default=0)
+    image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
+    image_n_choices: int = Field(default=1)
+    image_quality: Literal["standard", "hd"] = Field(default="standard")
+    image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
+    image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
+    max_conversation_age_minutes: int = Field(default=60)
+    max_history_tokens: int = Field(default=10240)
+    max_tokens: int = Field(default=4096)
+    presence_penalty: float = Field(default=0)
+    proxy: str | None = Field(default=None)
+    public_mode: bool = Field(default=False)
+    retries: int = Field(default=3)
+    temperature: float = Field(default=1)
+    timeout: int = Field(default=600)
+    models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
+    image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
+    model_default: str | None = Field(default=None)
 
-    class Config:
-        env_file = ".env"
+    @property
+    def models_whitelist(self) -> list[str]:
+        return [x.strip() for x in self.models_whitelist_raw.split(",")] if self.models_whitelist_raw else []
 
-        @classmethod
-        def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
-            if field_name in ("image_generations_whitelist", "models_whitelist"):
-                return raw_val.split(",")
-            if field_name == "gpt4_whitelist":
-                return [str(username).strip().strip("@") for username in raw_val.split(",")]
-            return cls.json_loads(raw_val)  # type: ignore
+    @property
+    def image_generations_whitelist(self) -> list[str]:
+        return (
+            [x.strip() for x in self.image_generations_whitelist_raw.split(",")]
+            if self.image_generations_whitelist_raw
+            else []
+        )
 
     @property
     def messages_ttl(self) -> int:

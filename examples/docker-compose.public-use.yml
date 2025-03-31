@@ -1,18 +1,35 @@
-version: '3'
+version: '3.8'
 
 services:
   chibi:
-   restart: unless-stopped
-   image: pysergio/chibi:latest
-   environment:
-     TELEGRAM_BOT_TOKEN: "9999999999:AAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBB"
-     REDIS: "redis://redis"
-
-  redis:
+    image: pysergio/chibi:latest
     restart: unless-stopped
-    image: redis:6-alpine
-    volumes:
-      - redis-data:/data
+    environment:
+      # Required: Get from BotFather
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
 
-volumes:
-  redis-data:
+      # --- Enable Public Mode ---
+      PUBLIC_MODE: "True"
+
+      # --- Optional Customization ---
+      BOT_NAME: "ChibiPublic"
+      # HIDE_MODELS: "True"
+      # HIDE_IMAGINE: "True"
+
+      # --- Whitelists (Optional for Public Mode) ---
+      # You can still restrict *which* users/groups can use the bot
+      # USERS_WHITELIST: "allowed_user1,123456789"
+      # GROUPS_WHITELIST: "-1001122334455"
+
+    # Volumes are optional unless needed for IMAGE_GENERATIONS_LIMIT
+    # or specific local storage needs.
+    # volumes:
+    #   - chibi_public_data:/app/data
+
+# volumes:
+#   chibi_public_data: {}
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# (No API keys needed here for public mode)
+# -------------------------

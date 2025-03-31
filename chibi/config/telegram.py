@@ -1,33 +1,36 @@
 from functools import lru_cache
-from typing import Any
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TelegramSettings(BaseSettings):
-    token: str = Field(env="TELEGRAM_BOT_TOKEN")
+    model_config = SettingsConfigDict(
+        env_file=(".env",),
+        extra="ignore",
+    )
+    token: str = Field(alias="TELEGRAM_BOT_TOKEN")
 
-    allow_bots: bool = Field(env="ALLOW_BOTS", default=False)
-    answer_direct_messages_only: bool = Field(env="ANSWER_DIRECT_MESSAGES_ONLY", default=True)
-    bot_name: str = Field(env="BOT_NAME", default="Chibi")
-    groups_whitelist: list[int] | None = Field(env="GROUPS_WHITELIST", default=None)
+    allow_bots: bool = Field(default=False)
+    answer_direct_messages_only: bool = Field(default=True)
+    bot_name: str = Field(default="Chibi")
     message_for_disallowed_users: str = Field(
-        env="MESSAGE_FOR_DISALLOWED_USERS",
         default="You're not allowed to interact with me, sorry. Contact my owner first, please.",
     )
-    proxy: str | None = Field(env="PROXY", default=None)
-    users_whitelist: list[str] | None = Field(env="USERS_WHITELIST", default=None)
+    proxy: str | None = Field(default=None)
+    groups_whitelist_raw: str | None = Field(alias="GROUPS_WHITELIST", default=None)
 
-    class Config:
-        env_file = ".env"
+    users_whitelist_raw: str | None = Field(alias="USERS_WHITELIST", default=None)
 
-        @classmethod
-        def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
-            if field_name == "users_whitelist":
-                return [str(username).strip().strip("@") for username in raw_val.split(",")]
-            if field_name == "groups_whitelist":
-                return [int(group_id) for group_id in raw_val.split(",")]
-            return cls.json_loads(raw_val)  # type: ignore
+    @property
+    def groups_whitelist(self) -> list[int]:
+        return [int(x.strip()) for x in self.groups_whitelist_raw.split(",")] if self.groups_whitelist_raw else []
+
+    @property
+    def users_whitelist(self) -> list[str]:
+        return (
+            [str(x).strip().strip("@") for x in self.users_whitelist_raw.split(",")] if self.users_whitelist_raw else []
+        )
 
 
 @lru_cache()

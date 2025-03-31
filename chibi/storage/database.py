@@ -1,6 +1,6 @@
 import asyncio
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar
 
 from chibi.config import application_settings
 from chibi.storage.abstract import Database
@@ -9,6 +9,10 @@ if application_settings.redis:
     from chibi.storage.redis import RedisStorage
 else:
     from chibi.storage.local import LocalStorage
+
+
+R = TypeVar("R")
+P = ParamSpec("P")
 
 
 class DatabaseCache:
@@ -37,9 +41,9 @@ class DatabaseCache:
 _db_provider = DatabaseCache()
 
 
-def inject_database(func: Callable[..., Any]) -> Callable[..., Any]:
+def inject_database(func: Callable[Concatenate[Database, P], Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         db = await _db_provider.get_database()
         return await func(db, *args, **kwargs)
 

@@ -1,19 +1,24 @@
+from io import BytesIO
+
 from openai.types.chat import ChatCompletionUserMessageParam
 
 from chibi.config import gpt_settings
-from chibi.constants import SupportedProviders
-from chibi.exceptions import NoApiKeyProvidedError
 from chibi.models import Message
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 from chibi.types import ChatCompletionMessageSchema, UserMessageSchema
 
 
 @inject_database
-async def set_active_model(db: Database, user_id: int, model_name: str) -> None:
+async def set_active_model(db: Database, user_id: int, model: ModelChangeSchema) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    user.gpt_model = model_name
+    if model.image_generation:
+        user.selected_image_model_name = model.name
+        user.selected_image_provider_name = model.provider
+    else:
+        user.selected_gpt_model_name = model.name
+        user.selected_gpt_provider_name = model.provider
     await db.save_user(user)
 
 
@@ -33,9 +38,8 @@ async def summarize(db: Database, user_id: int) -> None:
         ChatCompletionUserMessageParam(role="user", content=str(chat_history))
     ]
 
-    response = await user.active_provider.get_chat_response(
+    response = await user.active_gpt_provider.get_chat_response(
         messages=user_messages,
-        max_tokens=250,
         system_prompt="Summarize this conversation in 700 characters or less using English.",
     )
     initial_message = Message(role="user", content="What we were talking about?")
@@ -50,7 +54,9 @@ async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> ChatRe
     user = await db.get_or_create_user(user_id=user_id)
     conversation_messages: list[ChatCompletionMessageSchema] = await db.get_conversation_messages(user=user)
     conversation_messages.append(UserMessageSchema(role="user", content=prompt))
-    chat_response = await user.active_provider.get_chat_response(messages=conversation_messages)
+    chat_response = await user.active_gpt_provider.get_chat_response(
+        messages=conversation_messages, model=user.selected_gpt_model_name
+    )
 
     answer_message = Message(role="assistant", content=chat_response.answer)
     query_message = Message(role="user", content=prompt)
@@ -73,20 +79,18 @@ async def check_history_and_summarize(db: Database, user_id: int) -> bool:
 
 
 @inject_database
-async def generate_image(db: Database, user_id: int, prompt: str) -> list[str]:
+async def generate_image(db: Database, user_id: int, prompt: str) -> list[str] | list[BytesIO]:
     user = await db.get_or_create_user(user_id=user_id)
-    if not user.openai:
-        raise NoApiKeyProvidedError(provider="OpenAI")
-    images = await user.openai.get_images(prompt=prompt)
+    images = await user.active_image_provider.get_images(prompt=prompt, model=user.selected_image_model_name)
     if user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(user_id)
     return images
 
 
 @inject_database
-async def get_models_available(db: Database, user_id: int) -> list[str]:
+async def get_models_available(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    return await user.get_available_models()
+    return await user.get_available_models(image_generation=image_generation)
 
 
 @inject_database
@@ -96,14 +100,7 @@ async def user_has_reached_images_generation_limit(db: Database, user_id: int) -
 
 
 @inject_database
-async def set_api_key(db: Database, user_id: int, api_key: str, provider: SupportedProviders) -> None:
+async def set_api_key(db: Database, user_id: int, api_key: str, provider_name: str) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-
-    match provider:
-        case SupportedProviders.OPENAI:
-            user.openai_token = api_key
-        case SupportedProviders.MISTRALAI:
-            user.mistralai_token = api_key
-        case SupportedProviders.ANTHROPIC:
-            user.anthropic_token = api_key
+    user.tokens[provider_name] = api_key
     await db.save_user(user)

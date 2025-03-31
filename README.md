@@ -2,48 +2,59 @@
 
 [![Build](https://github.com/s-nagaev/chibi/actions/workflows/build.yml/badge.svg)](https://github.com/s-nagaev/chibi/actions/workflows/build.yml)
 [![docker hub](https://img.shields.io/docker/pulls/pysergio/chibi)](https://hub.docker.com/r/pysergio/chibi)
-[![docker image arch](https://img.shields.io/badge/docker%20image%20arch-amd64%20%7C%20arm64%20%7C%20armv7-informational)](https://hub.docker.com/r/pysergio/chibi/tags)
+[![docker image arch](https://img.shields.io/badge/docker%20image%20arch-arm64%20%7C%20amd64-informational)](https://hub.docker.com/r/pysergio/chibi/tags)
 [![docker image size](https://img.shields.io/docker/image-size/pysergio/chibi/latest)](https://hub.docker.com/r/pysergio/chibi/tags)
 ![license](https://img.shields.io/github/license/s-nagaev/chibi)
 
 
-Chibi is a Python-based Telegram chatbot that allows users to interact with the powerful ChatGPT and DALL-E neural networks. The bot is asynchronous, providing fast response times and serving multiple users simultaneously without blocking each other's requests. Chibi supports session management, enabling ChatGPT to remember the user's conversation history. The conversation history is stored for a configurable duration and is preserved even if the bot is restarted.
+Chibi is a Python-based Telegram chatbot that allows users to interact with a variety of powerful large language models (LLMs) and image generation models. The bot is asynchronous, providing fast response times and serving multiple users simultaneously without blocking each other's requests. Chibi supports session management, enabling models to remember the user's conversation history. The conversation history is stored for a configurable duration and is preserved even if the bot is restarted (when using persistent storage).
 
 [Docker Hub](https://hub.docker.com/r/pysergio/chibi)
 
 ## Supported platforms
 
-- linux/amd64
-- linux/arm64
+Currently supported architectures:
+*   `linux/amd64`
+*   `linux/arm64`
+
+_**Note on armv7:** Support for the `linux/armv7` architecture was discontinued after version `0.8.2`. However, if there is sufficient user interest, resuming `armv7` builds can be investigated._
 
 ## Supported providers
 
-- OpenAI
-- Anthropic
-- MistralAI
+Chibi currently supports models from the following providers:
+*   Alibaba (Qwen models)
+*   Anthropic (Claude models)
+*   DeepSeek
+*   Google (Gemini models, including image generation)
+*   MistralAI
+*   OpenAI (including DALL-E for images)
+*   xAI (Grok models, including image generation)
 
 ## Features
 
-- Optional "Public Mode", when no master `OPENAI_API_KEY` is required, but every user will be asked to provide one own while interacting with the bot.
-- Switch between GPT models (including GPT-4) at any time.
-- Session management for ChatGPT (by storing data locally or using Redis).
-- Request DALL-E to create an image from the same chat.
-- User and group whitelists.
-- Asynchronous code for quick and non-blocking performance.
-- Extensive configuration options through environment variables.
-- Docker image for easy deployment.
-- Cross-platform support (amd64, arm64, armv7).
-- MIT License.
-
-## Try it!
-
-- You can try a DEMO version of the Chibi bot by using [@ChibiDemoBot](https://t.me/ChibiDemoBot). An OpenAI API Key is not required, but there are only 4 free requests available.
-- You can also use a public version of the Chibi bot by using [@ChibiPublicBot](https://t.me/ChibiPublicBot). An OpenAI Key is required.
+*   **Multi-Provider Support:** Interact with models from 7 different providers (see list above).
+*   **Seamless Provider Switching:** Change the underlying LLM provider anytime without losing the current conversation context. The history is automatically adapted for the new model.
+*   **Image Generation:** Request images using DALL-E (OpenAI), Gemini (Google), or Grok (xAI) directly within the chat.
+*   **Context Management:**
+    *   Automatic conversation summarization (optional) to save tokens on long conversations by replacing older parts of the history with a summary.
+    *   Manual context reset (`/reset` command) to start fresh and save tokens.
+*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or simply keep it in memory (lost on restart).
+*   **Optional "Public Mode":** Run the bot without a master API key. Each user will be prompted to provide their own key via private message to the bot.
+*   **User and Group Whitelists:** Restrict bot access to specific users or chat groups.
+*   **Easy Deployment with Docker:** Pre-configured Docker image ready to run with minimal setup. Public mode works out-of-the-box without needing API keys in the environment variables.
+*   **Low Resource Usage:** Runs efficiently even on low-spec hardware like a Raspberry Pi 4.
+*   **Asynchronous:** Fast, non-blocking performance.
+*   **Configurable:** Extensive options via environment variables.
+*   **MIT Licensed:** Open source and free to use.
 
 
 ## System Requirements
 
-The application is not resource-demanding at all. It works perfectly on both Raspberry Pi 3A with 512MB RAM and the cheapest AWS EC2 Instance `t4g.nano` (2 arm64 cores, 512MB RAM), while being able to serve many people simultaneously. I would say that if your machine belongs to a supported architecture and can run Docker, the application will work.
+Chibi is designed to be very resource-efficient. It runs smoothly on hardware like a Raspberry Pi 4 (or higher) or even minimal cloud instances such as an AWS EC2 `t4g.nano` (2 arm64 vCPUs, 512MB RAM), capable of serving multiple users concurrently.
+
+Essentially, the main requirements are:
+*   A machine running on a supported architecture (`linux/amd64` or `linux/arm64`).
+*   Docker installed and running on that machine.
 
 ## Prerequisites
 
@@ -61,119 +72,237 @@ The application is not resource-demanding at all. It works perfectly on both Ras
     ```
 
 2. Run the Docker container with the necessary environment variables:
-
+This command runs the bot in private mode using a Google Gemini key. It requires your Telegram token and at least one AI provider API key. Data is *not* persisted between restarts.
     ```shell
-    docker run -d \
-      -e TELEGRAM_BOT_TOKEN=<your_telegram_token> \
-      -e OPENAI_API_KEY=<your_chatgpt_api_key> \
-      -v <path_to_local_data_directory>:/app/data \
-      --name chibi \
-      pysergio/chibi:latest
-    ```
-
-   Replace `<your_telegram_token>`, `<your_chatgpt_api_key>`, and `<path_to_local_data_directory>` with appropriate values.
-
-### Using Docker Compose
-
-1. Create a `docker-compose.yml` file with the following contents:
-
-   ```yaml
-      version: '3'
-
-      services:
-        chibi:
-         restart: unless-stopped
-         image: pysergio/chibi:latest
-         environment:
-           OPENAI_API_KEY: <your_chatgpt_api_key>
-           TELEGRAM_BOT_TOKEN: <your_telegram_token>
-         volumes:
-           - chibi_data:/app/data
-      
-      volumes:
-        chibi_data:
+   docker run -d --name chibi \
+     -e TELEGRAM_BOT_TOKEN='YOUR_TELEGRAM_TOKEN' \
+     -e GEMINI_API_KEY='AIzaSyYourGeminiKey...' \
+     # Add other keys like -e OPENAI_API_KEY='sk-...' if needed
+     pysergio/chibi:latest
    ```
+Replace placeholders with your actual values.
 
-   Replace `<your_telegram_token>` and `<your_chatgpt_api_key>` with appropriate values.
+## Docker Compose Examples
 
-2. Run the Docker container:
+Here are a few examples to get you started with docker-compose. Remember to create a .env file in the same directory as your docker-compose.yml to store your secrets like TELEGRAM_BOT_TOKEN and API keys.
 
-   ```shell
-   docker-compose up -d
-   ```
+### Minimal Private Mode Example
+
+This is the bare minimum setup to run Chibi in private mode. It uses the OpenAI API key provided in your .env file.
+
+```yaml
+version: '3.8'
+
+services:
+  chibi:
+    image: pysergio/chibi:latest
+    restart: unless-stopped
+    environment:
+      # Required: Get from BotFather
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+
+      # Required for Private Mode: Add at least one provider API key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Add other keys (GEMINI_API_KEY, ANTHROPIC_API_KEY, etc.) here if needed
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# OPENAI_API_KEY=sk-YourOpenAIKey...
+# -------------------------
+```
+---
+### Advanced Private Mode Example
+
+This example shows a more customized setup for private mode:
+*   Uses multiple AI providers.
+*   Stores conversation history locally and persistently using a Docker volume.
+*   Sets user/group whitelists.
+*   Defines a custom assistant prompt and default model.
+*   Sets a monthly limit for image generations.
+```yaml
+version: '3.8'
+
+services:
+  chibi:
+    image: pysergio/chibi:latest
+    restart: unless-stopped
+    environment:
+      # --- Required ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+
+      # --- API Keys (add whichever you use) ---
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # ... add other provider keys as needed
+
+      # --- Whitelists ---
+      USERS_WHITELIST: "@your_telegram_username,123456789" # Usernames and User IDs
+      GROUPS_WHITELIST: "-100987654321" # Group Chat IDs (usually negative)
+
+      # --- Customization ---
+      BOT_NAME: "MyChibiBot"
+      ASSISTANT_PROMPT: "You are a specialized assistant for code reviews."
+      MODEL_DEFAULT: "gpt-4o" # Set your preferred default model
+
+      # --- Limits & History ---
+      MAX_HISTORY_TOKENS: 8000 # Adjust context window size
+      IMAGE_GENERATIONS_LIMIT: 20 # Monthly limit per user (requires volume)
+
+      # --- Storage ---
+      # LOCAL_DATA_PATH: /app/data # Default path
+
+    volumes:
+      # Mounts the 'chibi_data' volume for persistence
+      - chibi_data:/app/data
+
+volumes:
+  # Defines the Docker volume
+  chibi_data: {}
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# OPENAI_API_KEY=sk-YourOpenAIKey...
+# GEMINI_API_KEY=AIzaSy...
+# ANTHROPIC_API_KEY=sk-ant-...
+# -------------------------
+```
+
+### Public Mode Example
+
+This setup runs the bot in public mode. No master API keys are needed here; the bot will ask each user to provide their own key via private message.
+```yaml
+version: '3.8'
+
+services:
+  chibi:
+    image: pysergio/chibi:latest
+    restart: unless-stopped
+    environment:
+      # Required: Get from BotFather
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+
+      # --- Enable Public Mode ---
+      PUBLIC_MODE: "True"
+
+      # --- Optional Customization ---
+      BOT_NAME: "ChibiPublic"
+      # HIDE_MODELS: "True"
+      # HIDE_IMAGINE: "True"
+
+      # --- Whitelists (Optional for Public Mode) ---
+      # You can still restrict *which* users/groups can use the bot
+      # USERS_WHITELIST: "allowed_user1,123456789"
+      # GROUPS_WHITELIST: "-1001122334455"
+
+    # Volumes are optional unless needed for IMAGE_GENERATIONS_LIMIT
+    # or specific local storage needs.
+    # volumes:
+    #   - chibi_public_data:/app/data
+
+# volumes:
+#   chibi_public_data: {}
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# (No API keys needed here for public mode)
+# -------------------------
+```
 
 Please, visit the [examples](examples) directory of the current repository for more examples.
 
-## Configuration
+### Telegram Bot Settings
 
-You can configure Chibi using the following environment variables:
+| Variable                       | Description                                                                                                           | Default Value                                                                      |
+|:-------------------------------|:----------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
+| `TELEGRAM_BOT_TOKEN`           | **Required.** Your Telegram Bot Token obtained from BotFather.                                                        | _None_                                                                             |
+| `BOT_NAME`                     | The name the bot uses for itself (e.g., in the default prompt).                                                       | `Chibi`                                                                            |
+| `ANSWER_DIRECT_MESSAGES_ONLY`  | If `True`, the bot only responds to direct messages, ignoring group messages (unless whitelisted and mentioned).      | `True`                                                                             |
+| `ALLOW_BOTS`                   | If `True`, allows the bot to respond to messages sent by other bots.                                                  | `False`                                                                            |
+| `MESSAGE_FOR_DISALLOWED_USERS` | The message sent to users or groups not in the whitelists when they try to interact with the bot.                     | `"You're not allowed to interact with me, sorry. Contact my owner first, please."` |
+| `PROXY`                        | Optional HTTP/SOCKS proxy specifically for connecting to the Telegram Bot API (e.g., `socks5://user:pass@host:port`). | `None`                                                                             |
 
-**Required variables:**
+### General Application Settings
 
-| Variable                     | Description                                                                                                          | Default Value                                                                    |
-|------------------------------|----------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
-| TELEGRAM_BOT_TOKEN           | Your Telegram bot token                                                                                              |                                                                                  |
+| Variable          | Description                                                                                                                               | Default Value |
+|:------------------|:------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
+| `PUBLIC_MODE`     | If `True`, the bot doesn't require master API keys. Users will be asked to provide their own keys via PM.                                 | `False`       |
+| `LOG_PROMPT_DATA` | Set to `True` to log the full prompt data sent to the API (includes history). **Use with caution, logs may contain PII!**                 | `False`       |
+| `HIDE_MODELS`     | Set to `True` to hide the `/model` command from users.                                                                                    | `False`       |
+| `HIDE_IMAGINE`    | Set to `True` to hide the `/image` command from users.                                                                                    | `False`       |
+| `PROXY`           | Optional HTTP/SOCKS proxy for **outgoing AI provider API requests** (e.g., `socks5://user:pass@host:port`). Distinct from Telegram proxy. | `None`        |
+| `RETRIES`         | Number of times to retry a failed AI provider API request.                                                                                | `3`           |
+| `TIMEOUT`         | Timeout in seconds for waiting for a response from the AI provider API.                                                                   | `600`         |
 
-**Provider access related variables:**
+_Note: There are two separate `PROXY` settings. One under "Telegram Bot Settings" for Telegram connections, and one under "General Application Settings" for connecting to AI providers like OpenAI, Anthropic, etc._
 
-| Variable          | Description                                                                                                                                                   | Default Value |
-|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
-| PUBLIC_MODE       | If `true`, every user will be asked to provide ones own API key to interact with provider(s). Otherwise the API keys set via the variables below will be used | `false`       |
-| ANTHROPIC_API_KEY | Anthropic (Claude-3) API key. If not provided, the user will be asked to provide it while interacting with the bot.                                           |               |
-| MISTRALAI_API_KEY | MistralAI API key. If not provided, the user will be asked to provide it while interacting with the bot.                                                      |               |
-| OPENAI_API_KEY    | OpenAI API key. If not provided, the user will be asked to provide it while interacting with the bot.                                                         |               |
+## Storage Settings
 
-**Variables responsible for the basic behavior of the bot:**
+| Variable          | Description                                                                                                                        | Default Value |
+|:------------------|:-----------------------------------------------------------------------------------------------------------------------------------|:--------------|
+| `REDIS`           | Redis connection string (e.g., `redis://localhost:6379/0`). If set, Redis will be used for session storage instead of local files. | `None`        |
+| `REDIS_PASSWORD`  | Password for the Redis connection, if required.                                                                                    | `None`        |
+| `LOCAL_DATA_PATH` | Path *inside the container* where local session data is stored. Mount a volume to this path for persistence between restarts.      | `/app/data`   |
 
-| Variable                     | Description                                                                                                    | Default Value                                                                   |
-|------------------------------|----------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| ALLOW_BOTS                   | Allow other bots to interact with Chibi                                                                        | `false`                                                                         |
-| ANSWER_DIRECT_MESSAGES_ONLY  | If True, the bot in group chats will respond only to messages containing its name (see the `BOT_NAME` setting) | `true`                                                                          |
-| ASSISTANT_PROMPT             | Initial assistant prompt for OpenAI Client                                                                     | `You're a helpful and friendly assistant. Your name is <BOT_NAME>`              |
-| BOT_NAME                     | Name of the bot                                                                                                | `Chibi`                                                                         |
-| LOG_PROMPT_DATA              | Log user's prompts and GPT answers for debug purposes                                                          | `false`                                                                         |
-| MESSAGE_FOR_DISALLOWED_USERS | Message to show disallowed users                                                                               | `You're not allowed to interact with me, sorry. Please contact my owner first.` |
-| MODELS_WHITELIST             | Comma-separated list of allowed models, e.g., "gpt-4,gpt-3.5-turbo"                                            |                                                                                 |
-| MODEL_DEFAULT                | Default OpenAI model to use                                                                                    | `gpt-3.5-turbo`                                                                 |
-| USERS_WHITELIST              | Comma-separated list of whitelisted usernames, e.g., `"@YourName,@YourFriendName,@YourCatName"`                |                                                                                 |
-| HIDE_MODELS                  | Hide "models" option from bot menu                                                                             | `false`                                                                         |
-| HIDE_IMAGINE                 | Hide "imagine" option from bot menu                                                                            | `false`                                                                         |
+### API Keys (Master Keys)
 
-**Proxy & data storage settings:**
+These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
 
-| Variable                     | Description                                                                                                         | Default Value                                                                   |
-|------------------------------|---------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| PROXY                        | Proxy setting for your application                                                                                  |                                                                                 |
-| REDIS                        | Redis connection string, e.g., `redis://localhost` or `redis://:my-secret-password@127.0.0.1:6379/1`                |                                                                                 |
-| REDIS_PASSWORD               | **DEPRECATED! Please use `REDIS` instead.** Redis password (optional)                                               |                                                                                 |
+| Variable            | Description                               | Default Value |
+|:--------------------|:------------------------------------------|:--------------|
+| `ALIBABA_API_KEY`   | API key for Alibaba (Qwen) models.        | `None`        |
+| `ANTHROPIC_API_KEY` | API key for Anthropic (Claude) models.    | `None`        |
+| `DEEPSEEK_API_KEY`  | API key for DeepSeek models.              | `None`        |
+| `GEMINI_API_KEY`    | API key for Google (Gemini) models.       | `None`        |
+| `GROK_API_KEY`      | API key for xAI (Grok) models.            | `None`        |
+| `MISTRALAI_API_KEY` | API key for MistralAI models.             | `None`        |
+| `OPENAI_API_KEY`    | API key for OpenAI (GPT & DALL-E) models. | `None`        |
 
+### Model & Conversation Settings
 
-**Setting up image generation using DALL-E:**
+| Variable                       | Description                                                                                                                       | Default Value                                                      |
+|:-------------------------------|:----------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
+| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used. | `None`                                                             |
+| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                    | `"You're helpful and friendly assistant. Your name is {BOT_NAME}"` |
+| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                   | `60`                                                               |
+| `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.      | `10240`                                                            |
+| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                   | `4096`                                                             |
+| `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                    | `1.0`                                                              |
+| `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (posit                                                      |                                                                    |
 
-| Variable                     | Description                                                                                                          | Default Value                                                                   |
-|------------------------------|----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| DALL_E_MODEL                 | DALL-E model. Available values: `dall-e-2`, `dall-e-3`                                                               | `dall-e-3`                                                                      |
-| IMAGE_GENERATIONS_LIMIT      | The number of images that a typical non-whitelisted user can generate per month. `0` - no limits.                    | `0`                                                                             |
-| IMAGE_GENERATIONS_WHITELIST  | Comma-separated list of user IDs (not usernames) for whom the image generation limit does not apply                  |                                                                                 |
-| IMAGE_QUALITY                | Quality of the image generated by DALL-E. Available values: `standard`, `hd`                                         | `standard`                                                                      |
-| IMAGE_SIZE                   | Size of the image generated by DALL-E. Available values: `256x256`, `512x512`, `1024x1024`, `1792x1024`, `1024x1792` | `1024x1024`                                                                     |
+ive values decrease repetition). Range: -2.0 to 2.0.                                         | `0.0`                                                       |
+| `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0.                            | `0.0`                                                       |
 
+### Image Generation Settings
 
-**Fine-tuning response generation. Already preconfigured and tested. You probably won't want to touch it:**
+| Variable                      | Description                                                                                                            | Default Value |
+|:------------------------------|:-----------------------------------------------------------------------------------------------------------------------|:--------------|
+| `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.            | `0`           |
+| `IMAGE_N_CHOICES`             | Default number of images to generate per request (currently supported mainly by DALL-E).                               | `1`           |
+| `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                                | `standard`    |
+| `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.                | `1024x1024`   |
+| `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g., DALL-E 3: `1:1`, `16:9`, `9:16`).                      | `16:9`        |
+| `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of provider names (`openai`, `google`, `grok`) allowed for image generation. If empty, allow all. | `None`        |
 
-| Variable                     | Description                                                                    | Default Value                                                                   |
-|------------------------------|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| FREQUENCY_PENALTY            | OpenAI frequency penalty                                                       | `0`                                                                             |
-| GROUPS_WHITELIST             | Comma-separated list of whitelisted group IDs, e.g., `"-799999999,-788888888"` |                                                                                 |
-| MAX_CONVERSATION_AGE_MINUTES | Maximum age of conversations (in minutes)                                      | `60`                                                                            |
-| MAX_HISTORY_TOKENS           | Maximum number of tokens in conversation history                               | `1800`                                                                          |
-| MAX_TOKENS                   | Maximum tokens for the OpenAI Client                                           | `1000`                                                                          |
-| OPENAI_IMAGE_N_CHOICES       | Number of choices for image generation in DALL-E                               | `4`                                                                             |
-| PRESENCE_PENALTY             | OpenAI presence penalty                                                        | `0`                                                                             |
-| TEMPERATURE                  | OpenAI temperature for response generation                                     | `0.5`                                                                           |
-| TIMEOUT                      | Timeout (in seconds) for processing requests                                   | `120`                                                                           |
+### Whitelists
 
-Please, visit the [examples](examples) directory for the example of `.env`-file.
+| Variable           | Description                                                                                                                                | Default Value |
+|:-------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
+| `USERS_WHITELIST`  | Comma-separated list of Telegram usernames (without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
+| `GROUPS_WHITELIST` | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                  | `None`        |
+| `MODELS_WHITELIST` | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.            | `None`        |...
+
+## Getting API Keys
+
+To use Chibi in private mode, or for users interacting with the bot in public mode, you'll need API keys from the desired AI providers. Here's where you can typically find information or generate keys:
+
+*   Alibaba (Qwen via DashScope): https://dashscope.console.aliyun.com/apiKey
+*   Anthropic (Claude): https://console.anthropic.com/ (Sign up and navigate to API Keys)
+*   DeepSeek: https://platform.deepseek.com/ (Sign up and navigate to API Keys)
+*   Google (Gemini): https://aistudio.google.com/app/apikey
+*   MistralAI: https://console.mistral.ai/ (Sign up and navigate to API Keys)
+*   OpenAI (GPT & DALL-E): https://platform.openai.com/api-keys
+*   xAI (Grok): https://docs.x.ai/ (Check documentation for API access details)
 
 ## Versioning
 
