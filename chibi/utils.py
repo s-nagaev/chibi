@@ -1,6 +1,6 @@
 import io
 from functools import wraps
-from typing import Any, Callable, Type
+from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, cast, Type
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -14,17 +14,18 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
-from chibi.constants import GROUP_CHAT_TYPES, PERSONAL_CHAT_TYPES, SupportedProviders
+from chibi.constants import GROUP_CHAT_TYPES, PERSONAL_CHAT_TYPES, UserContext
 from chibi.exceptions import (
     NoApiKeyProvidedError,
+    NoModelSelectedError,
+    NoProviderSelectedError,
     NotAuthorizedError,
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.services.providers.anthropic import Anthropic
-from chibi.services.providers.mistralai import MistralAI
-from chibi.services.providers.openai import OpenAI
-from chibi.services.providers.provider import Provider
+
+R = TypeVar("R")
+P = ParamSpec("P")
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -76,8 +77,8 @@ async def send_long_message(
 ) -> None:
     chunk_size = constants.MessageLimit.MAX_TEXT_LENGTH
     text_chunks = [message[i : i + chunk_size] for i in range(0, len(message), chunk_size)]
-    for chunk in text_chunks:
-        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode)
+    for chunk_number, chunk in enumerate(text_chunks):
+        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode, reply=chunk_number == 0)
 
 
 async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -145,7 +146,7 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return reply_message.from_user.id == context.bot.id
 
 
-def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
+def check_user_allowance(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, Coroutine[Any, Any, R | None]]:
     """Decorator controlling access to the chatbot.
 
     This deco checks:
@@ -163,9 +164,9 @@ def check_user_allowance(func: Callable[..., Any]) -> Callable[..., Any]:
         Wrapper function object.
     """
 
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        update: Update = kwargs.get("update") or args[1]
-        context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
+        update: Update = cast(Update, kwargs.get("update", None) or args[1])
+        context: ContextTypes.DEFAULT_TYPE = cast(ContextTypes.DEFAULT_TYPE, kwargs.get("context") or args[2])
         telegram_chat = get_telegram_chat(update=update)
         telegram_user = get_telegram_user(update=update)
 
@@ -253,6 +254,26 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             )
             return None
 
+        except NoModelSelectedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+
+            await send_message(
+                update=update,
+                context=context,
+                text="Please, select your model first.",
+            )
+            return None
+
+        except NoProviderSelectedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+
+            await send_message(
+                update=update,
+                context=context,
+                text="Please, select your provider first.",
+            )
+            return None
+
         except Exception as e:
             logger.error(f"{error_msg_prefix}: {e!r}")
             msg = (
@@ -260,32 +281,22 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
             )
             await send_message(update=update, context=context, text=msg)
+            raise
             return None
 
     return wrapper
 
 
-def api_key_is_plausible(api_key: str) -> bool:
-    """Dummy pre-validator for OpenAI token.
+def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expected_type: Type[R]) -> R | None:
+    if context.user_data is not None:
+        return cast(R, context.user_data.get(key, None))
+    return None
 
-    Just to discard obviously inappropriate data.
 
-    Args:
-        api_key: OpenAI token string.
-
-    Returns:
-        True if token provided looks like a token :) False otherwise.
-    """
-    if not api_key:
-        return False
-    if " " in api_key:
-        return False
-    if len(api_key) < 30:
-        return False
-    if len(api_key) > 150:
-        return False
-
-    return True
+def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value: object | None) -> None:
+    if context.user_data is not None:
+        context.user_data[key] = value
+    return None
 
 
 async def download_image(image_url: str) -> bytes:
@@ -295,17 +306,6 @@ async def download_image(image_url: str) -> bytes:
     response = await httpx.AsyncClient().get(url=image_url, params=params)
     response.raise_for_status()
     return response.content
-
-
-def get_provider_class_by_name(provider_name: SupportedProviders) -> Type[Provider]:
-    match provider_name:
-        case SupportedProviders.ANTHROPIC:
-            return Anthropic
-        case SupportedProviders.MISTRALAI:
-            return MistralAI
-        case SupportedProviders.OPENAI:
-            return OpenAI
-    raise ValueError("Wrong provider name provided.")
 
 
 def log_application_settings() -> None:
@@ -320,6 +320,9 @@ def log_application_settings() -> None:
     groups_whitelist = (
         f"<blue>{telegram_settings.groups_whitelist}</blue>" if telegram_settings.groups_whitelist else unset
     )
+    models_whitelist = (
+        f"<blue>{', '.join(gpt_settings.models_whitelist)}</blue>" if gpt_settings.models_whitelist else unset
+    )
     images_whitelist = (
         f"<blue>{','.join(gpt_settings.image_generations_whitelist)}</blue>"
         if gpt_settings.image_generations_whitelist
@@ -328,19 +331,24 @@ def log_application_settings() -> None:
 
     messages = (
         f"Application is initialized in the {mode} mode using {storage} storage.",
-        f"Anthropic (Claude-3) client set: {is_set if bool(gpt_settings.anthropic_key) else unset }",
+        f"Alibaba client: {is_set if bool(gpt_settings.alibaba_key) else unset}",
+        f"Anthropic client: {is_set if bool(gpt_settings.anthropic_key) else unset }",
+        f"DeepSeek client: {is_set if bool(gpt_settings.deepseek_key) else unset}",
+        f"Gemini client: {is_set if bool(gpt_settings.gemini_key) else unset}",
+        f"Grok client: {is_set if bool(gpt_settings.grok_key) else unset}",
         f"Mistral AI client: {is_set if bool(gpt_settings.mistralai_key) else unset }",
-        f"OpenAI client set: {is_set if bool(gpt_settings.openai_key) else unset }",
+        f"OpenAI client: {is_set if bool(gpt_settings.openai_key) else unset }",
         f"Bot name is <blue>{telegram_settings.bot_name}</blue>",
         f"Initial assistant prompt: <blue>{gpt_settings.assistant_prompt}</blue>",
         f"Proxy is {proxy}",
         f"Messages TTL: <blue>{gpt_settings.max_conversation_age_minutes} minutes</blue>",
         f"Maximum conversation history size: <blue>{gpt_settings.max_history_tokens}</blue> tokens",
         f"Maximum answer size: <blue>{gpt_settings.max_tokens}</blue> tokens",
-        f"Users whitelist: {users_whitelist}",
-        f"Groups whitelist: {groups_whitelist}",
         f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit}</blue>",
         f"Images limit whitelist: {images_whitelist}",
+        f"Users whitelist: {users_whitelist}",
+        f"Groups whitelist: {groups_whitelist}",
+        f"Models whitelist: {models_whitelist}",
     )
     for message in messages:
         logger.opt(colors=True).info(message)

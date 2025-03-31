@@ -1,15 +1,7 @@
-import inspect
-from functools import wraps
-from typing import Any, Callable, Coroutine, Iterable, Type, TypeVar
+from typing import Iterable
 
-from loguru import logger
-from openai import (
-    APIConnectionError,
-    AsyncOpenAI,
-    AuthenticationError,
-    OpenAIError,
-    RateLimitError,
-)
+from openai import NOT_GIVEN
+from openai.types import ImagesResponse
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
@@ -17,72 +9,25 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion import Choice
 
 from chibi.config import gpt_settings
-from chibi.exceptions import (
-    NoApiKeyProvidedError,
-    NotAuthorizedError,
-    ServiceConnectionError,
-    ServiceRateLimitError,
-    ServiceResponseError,
-)
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.providers.provider import Provider
+from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.types import ChatCompletionMessageSchema
 
-T = TypeVar("T")
-M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
 
-
-def handle_openai_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        model = kwargs.get("model", "unknown")
-        try:
-            return await func(*args, **kwargs)
-        except APIConnectionError:
-            raise ServiceConnectionError(provider="OpenAI", model=model)
-        except AuthenticationError:
-            raise NotAuthorizedError(provider="OpenAI", model=model)
-        except RateLimitError:
-            raise ServiceRateLimitError(provider="OpenAI", model=model)
-        except OpenAIError as e:
-            logger.error(e)
-            raise ServiceResponseError(provider="OpenAI", model=model)
-
-    return wrapper
-
-
-def decorate_async_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
-    def decorate(cls: Type[T]) -> Type[T]:
-        for attr in cls.__dict__:
-            if inspect.iscoroutinefunction(getattr(cls, attr)):
-                original_func = getattr(cls, attr)
-                decorated_func = decorator(original_func)
-                setattr(cls, attr, decorated_func)
-        return cls
-
-    return decorate
-
-
-@decorate_async_methods(handle_openai_exceptions)
-class OpenAI(Provider):
+class OpenAI(OpenAIFriendlyProvider):
     name = "OpenAI"
-
-    @property
-    def client(self) -> AsyncOpenAI:
-        if not self.token:
-            raise NoApiKeyProvidedError(provider=self.name, model="unknown")
-        return AsyncOpenAI(api_key=self.token)
+    model_name_prefixes = ["gpt", "o1", "o3"]
+    model_name_keywords_exclude = ["audio", "realtime", "transcribe"]
+    base_url = "https://api.openai.com/v1"
+    max_tokens = NOT_GIVEN
+    default_model = "o3-mini"
+    default_image_model = "dall-e-3"
 
     async def _get_chat_completion_response(
         self,
         messages: list[ChatCompletionMessageSchema],
         model: str,
-        temperature: float = gpt_settings.temperature,
-        max_tokens: int = gpt_settings.max_tokens,
-        presence_penalty: float = gpt_settings.presence_penalty,
-        frequency_penalty: float = gpt_settings.frequency_penalty,
-        system_prompt: str = gpt_settings.assistant_prompt,
-        timeout: int = gpt_settings.timeout,
+        system_prompt: str,
     ) -> ChatResponseSchema:
         if model.lower().startswith("o1-preview") or model.lower().startswith("o1-mini"):
             dialog: Iterable[ChatCompletionMessageParam] = messages  # type: ignore
@@ -93,12 +38,12 @@ class OpenAI(Provider):
         response = await self.client.chat.completions.create(
             model=model,
             messages=dialog,
-            temperature=temperature,
-            # max_tokens=max_tokens,
-            max_completion_tokens=max_tokens,
-            presence_penalty=presence_penalty,
-            frequency_penalty=frequency_penalty,
-            timeout=timeout,
+            max_completion_tokens=self.max_tokens,
+            max_tokens=self.max_tokens,
+            presence_penalty=self.presence_penalty if "search" not in model else NOT_GIVEN,
+            temperature=self.temperature if "search" not in model else NOT_GIVEN,
+            frequency_penalty=self.frequency_penalty if "search" not in model else NOT_GIVEN,
+            timeout=self.timeout,
         )
         if len(response.choices) != 0:
             choices: list[Choice] = response.choices
@@ -111,52 +56,17 @@ class OpenAI(Provider):
 
         return ChatResponseSchema(answer=answer or "", provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self) -> list[str]:
-        openai_models = await self.client.models.list()
-
-        if gpt_settings.models_whitelist:
-            allowed_model_names = [
-                model.id for model in openai_models.data if model.id in gpt_settings.models_whitelist
-            ]
-        else:
-            allowed_model_names = [
-                model.id for model in openai_models.data if self.is_chat_completion_ready_model(model.id)
-            ]
-        return sorted([model for model in allowed_model_names])
-
-    async def api_key_is_valid(self) -> bool:
-        try:
-            await self.get_available_models()
-        except NotAuthorizedError:
-            return False
-        except Exception:
-            raise
-        return True
-
-    async def get_images(self, prompt: str) -> list[str]:
-        response = await self.client.images.generate(
-            prompt=prompt,
-            quality=gpt_settings.image_quality,
-            model=gpt_settings.dall_e_model,
-            size=gpt_settings.image_size,
-            n=gpt_settings.image_n_choices,
-        )
-        return [image.url for image in response.data if image.url]
-
     @classmethod
-    def is_chat_completion_ready_model(cls, model_name: str) -> bool:
-        def is_a_common_purpose_model(name: str) -> bool:
-            keywords = ("audio", "realtime", "instruct")
-            for keyword in keywords:
-                if keyword in name:
-                    return False
-            return True
+    def is_image_ready_model(cls, model_name: str) -> bool:
+        return "dall-e" in model_name
 
-        def is_openai_model(name: str) -> bool:
-            prefixes = ("gpt", "o1", "o3")
-            for prefix in prefixes:
-                if name.startswith(prefix):
-                    return True
-            return False
-
-        return is_openai_model(model_name) and is_a_common_purpose_model(model_name)
+    async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
+        return await self.client.images.generate(
+            model=model,
+            prompt=prompt,
+            n=gpt_settings.image_n_choices if "dall-e-2" in model else 1,
+            quality=self.image_quality,
+            size=self.image_size if "dall-e-3" in model else NOT_GIVEN,
+            timeout=gpt_settings.timeout,
+            response_format="url",
+        )

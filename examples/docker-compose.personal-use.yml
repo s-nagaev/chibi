@@ -1,20 +1,46 @@
-version: '3'
+version: '3.8'
 
 services:
   chibi:
-   restart: unless-stopped
-   image: pysergio/chibi:latest
-   environment:
-     OPENAI_API_KEY: "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-     TELEGRAM_BOT_TOKEN: "9999999999:AAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBB"
-     USERS_WHITELIST: "@YouUserName,@YourFriendUserName"
-     REDIS: "redis://redis"
-
-  redis:
+    image: pysergio/chibi:latest
     restart: unless-stopped
-    image: redis:6-alpine
+    environment:
+      # --- Required ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+
+      # --- API Keys (add whichever you use) ---
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # ... add other provider keys as needed
+
+      # --- Whitelists ---
+      USERS_WHITELIST: "@your_telegram_username,123456789" # Usernames and User IDs
+      GROUPS_WHITELIST: "-100987654321" # Group Chat IDs (usually negative)
+
+      # --- Customization ---
+      BOT_NAME: "MyChibiBot"
+      ASSISTANT_PROMPT: "You are a specialized assistant for code reviews."
+      MODEL_DEFAULT: "gpt-4o" # Set your preferred default model
+
+      # --- Limits & History ---
+      MAX_HISTORY_TOKENS: 8000 # Adjust context window size
+      IMAGE_GENERATIONS_LIMIT: 20 # Monthly limit per user (requires volume)
+
+      # --- Storage ---
+      # LOCAL_DATA_PATH: /app/data # Default path
+
     volumes:
-      - redis-data:/data
+      # Mounts the 'chibi_data' volume for persistence
+      - chibi_data:/app/data
 
 volumes:
-  redis-data:
+  # Defines the Docker volume
+  chibi_data: {}
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# OPENAI_API_KEY=sk-YourOpenAIKey...
+# GEMINI_API_KEY=AIzaSy...
+# ANTHROPIC_API_KEY=sk-ant-...
+# -------------------------

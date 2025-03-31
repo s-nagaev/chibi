@@ -1,14 +1,18 @@
-version: '3'
+version: '3.8'
 
 services:
   chibi:
-   restart: unless-stopped
-   image: pysergio/chibi:latest
-   environment:
-     OPENAI_API_KEY: "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-     TELEGRAM_BOT_TOKEN: "9999999999:AAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBB"
-   volumes:
-     - chibi_data:/app/data
+    image: pysergio/chibi:latest
+    restart: unless-stopped
+    environment:
+      # Required: Get from BotFather
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
 
-volumes:
-  chibi_data:
+      # Required for Private Mode: Add at least one provider API key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Add other keys (GEMINI_API_KEY, ANTHROPIC_API_KEY, etc.) here if needed
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# OPENAI_API_KEY=sk-YourOpenAIKey...
+# -------------------------

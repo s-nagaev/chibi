@@ -1,7 +1,9 @@
 import asyncio
+from typing import cast
 
 from loguru import logger
 from telegram import (
+    CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -11,8 +13,9 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import IMAGINE_ACTION, SupportedProviders
-from chibi.schemas.app import ChatResponseSchema
+from chibi.constants import IMAGINE_ACTION, UserContext, UserAction
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.providers import registered_providers
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -24,10 +27,8 @@ from chibi.services.user import (
     user_has_reached_images_generation_limit,
 )
 from chibi.utils import (
-    api_key_is_plausible,
     chat_data,
     download_image,
-    get_provider_class_by_name,
     get_telegram_chat,
     get_telegram_message,
     get_telegram_user,
@@ -35,20 +36,18 @@ from chibi.utils import (
     send_gpt_answer_message,
     send_message,
     user_data,
+    set_user_context,
 )
 
 
 @handle_gpt_exceptions
-async def handle_model_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if not query:
-        return
-    await query.answer()
-    model_name = query.data
+async def handle_model_selection(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, model: ModelChangeSchema, query: CallbackQuery
+) -> None:
     telegram_user = get_telegram_user(update=update)
-    await set_active_model(user_id=telegram_user.id, model_name=model_name)
-    logger.info(f"{user_data(update)} switched to model '{model_name}'")
-    await query.edit_message_text(text=f"Selected model: {query.data}")
+    await set_active_model(user_id=telegram_user.id, model=model)
+    logger.info(f"{user_data(update)} switched to model '{model.name} ({model.provider})'")
+    await query.edit_message_text(text=f"Selected model: '{model.name} ({model.provider})'")
 
 
 @handle_gpt_exceptions
@@ -107,8 +106,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @handle_gpt_exceptions
 async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
-    if context.user_data:
-        context.user_data[IMAGINE_ACTION] = None
+    set_user_context(context=context, key=UserContext.ACTION, value=UserAction.NONE)
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -138,67 +136,88 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
         await asyncio.sleep(2.5)
 
-    image_urls = await generate_image_task
-
-    image_files = [await download_image(image_url=url) for url in image_urls]
-    try:
+    image_data = await generate_image_task
+    if isinstance(image_data[0], str):
+        image_files = [await download_image(image_url=cast(str, url)) for url in image_data]
+        try:
+            await context.bot.send_media_group(
+                chat_id=telegram_chat.id,
+                media=[InputMediaPhoto(url) for url in image_files],
+                reply_to_message_id=telegram_message.message_id,
+            )
+        except Exception as e:
+            logger.exception(
+                f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
+                f"due to exception: {e}. Trying to send if via text message..."
+            )
+            image_urls = cast(list[str], image_data)
+            await send_message(
+                update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False
+            )
+    else:
         await context.bot.send_media_group(
             chat_id=telegram_chat.id,
-            media=[InputMediaPhoto(url) for url in image_files],
+            media=[InputMediaPhoto(img) for img in image_data],
             reply_to_message_id=telegram_message.message_id,
         )
-    except Exception as e:
-        logger.exception(
-            f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
-            f"due to exception: {e}. Trying to send if via text message..."
-        )
-        await send_message(update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False)
-    if application_settings.log_prompt_data:
-        logger.info(f"{user_data(update)} got a successfully generated image(s): {image_urls}")
+    log_message = f"{user_data(update)} got a successfully generated image(s)"
+    if application_settings.log_prompt_data and isinstance(image_data[0], str):
+        log_message += f": {image_data}"
+    logger.info(log_message)
 
 
-async def handle_api_key_set(update: Update, context: ContextTypes.DEFAULT_TYPE, provider: SupportedProviders) -> None:
+async def handle_provider_api_key_set(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    provider_name: str,
+) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
-    logger.info(f"{telegram_user.name} provides {provider.value} API Key.")
+    logger.info(f"{telegram_user.name} provides API Key for provider '{provider_name}'.")
 
-    prompt = telegram_message.text
-    if not prompt:
+    api_key = telegram_message.text.strip() if telegram_message.text else None
+    if not api_key:
+        return None
+    provider = registered_providers.get(provider_name)
+    if not provider:
         return None
 
-    api_key = prompt.strip()
-    error_msg = (
-        "Sorry, but API key you have provided does not seem correct. You can find your API key at:\n "
-        "https://platform.openai.com/account/api-keys\n"
-        "https://console.anthropic.com/settings/keys\n"
-        "https://console.mistral.ai/api-keys"
-    )
-    if not api_key_is_plausible(api_key=api_key):
-        await send_message(update=update, context=context, text=error_msg)
-        logger.warning(f"{user_data(update)} provided improbable key.")
-        return None
-
-    provider_class = get_provider_class_by_name(provider_name=provider)
-
-    if not await provider_class(token=api_key).api_key_is_valid():
+    if not await provider(token=api_key).api_key_is_valid():
+        error_msg = "Sorry, but API key you have provided does not seem correct."
         await send_message(update=update, context=context, text=error_msg)
         logger.warning(f"{user_data(update)} provided invalid key.")
         return None
 
-    await set_api_key(user_id=telegram_user.id, api_key=api_key, provider=provider)
-    msg = "Your API Key successfully set! 🦾\n\n" "Now you may check available models in /models."
+    await set_api_key(user_id=telegram_user.id, api_key=api_key, provider_name=provider_name)
+    msg = f"Your {provider_name} API Key successfully set! 🦾\n\n" "Now you may check available models in /gpt_models."
     await send_message(update=update, context=context, reply=False, text=msg)
     try:
         await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
     except Exception:
         pass
-    logger.info(f"{user_data(update)} successfully set up {provider.value} Key.")
+    logger.info(f"{user_data(update)} successfully set up {provider_name} Key.")
 
 
 @handle_gpt_exceptions
-async def handle_available_model_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
+async def handle_available_model_options(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    image_generation: bool = False,
+) -> InlineKeyboardMarkup:
     telegram_user = get_telegram_user(update=update)
-    models_available = await get_models_available(user_id=telegram_user.id)
-    keyboard = [[InlineKeyboardButton(model.upper(), callback_data=model)] for model in models_available]
+    models_available = await get_models_available(user_id=telegram_user.id, image_generation=image_generation)
+    mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models_available)}
+    set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
+    keyboard = [
+        [InlineKeyboardButton(f"{model.name.lower()} ({model.provider})", callback_data=key)]
+        for key, model in mapped_models.items()
+    ]
+    keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_available_provider_options() -> InlineKeyboardMarkup:
+    keyboard = [[InlineKeyboardButton(name, callback_data=name)] for name, klass in registered_providers.items()]
+    keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
     return InlineKeyboardMarkup(keyboard)

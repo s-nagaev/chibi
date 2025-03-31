@@ -1,19 +1,43 @@
-version: '3'
+version: '3.8'
 
 services:
   chibi:
-   restart: unless-stopped
-   image: pysergio/chibi:latest
-   environment:
-     OPENAI_API_KEY: "sk-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-     TELEGRAM_BOT_TOKEN: "9999999999:AAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBB"
-     REDIS: "redis://redis"
+    image: pysergio/chibi:latest
+    restart: unless-stopped
+    environment:
+      # Required: Get from BotFather
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+
+      # Required for Private Mode: Add at least one provider API key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Add other keys (GEMINI_API_KEY, ANTHROPIC_API_KEY, etc.) here if needed
+
+      # --- Redis Configuration ---
+      # Points to the Redis service defined below
+      REDIS: "redis://redis:6379/0"
+      # Add REDIS_PASSWORD if your Redis requires authentication
+      # REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+    # Depends on Redis being started first
+    depends_on:
+      - redis
 
   redis:
+    image: redis:6-alpine # Or redis:latest
     restart: unless-stopped
-    image: redis:6-alpine
+    # Optional: Mount volume for Redis data persistence
     volumes:
-      - redis-data:/data
+      - redis_data:/data
+    # Optional: Add command for password if needed (sync with REDIS_PASSWORD)
+    # command: redis-server --requirepass ${REDIS_PASSWORD}
 
 volumes:
-  redis-data:
+  # Defines the Docker volume for Redis persistence (optional but recommended)
+  redis_data: {}
+
+# --- .env file example ---
+# TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234...
+# OPENAI_API_KEY=sk-YourOpenAIKey...
+# Optional:
+# REDIS_PASSWORD=your_redis_password
+# -------------------------

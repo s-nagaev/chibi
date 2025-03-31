@@ -1,14 +1,15 @@
-from httpx import HTTPStatusError
-
 from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema
 from chibi.schemas.mistralai import ChatCompletionSchema, GetModelsResponseSchema
-from chibi.services.providers.provider import Provider
+from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.types import ChatCompletionMessageSchema
 
 
-class MistralAI(Provider):
+class MistralAI(RestApiFriendlyProvider):
     name = "MistralAI"
+    model_name_keywords = ["mistral", "mixtral", "ministral"]
+    model_name_keywords_exclude = ["embed", "moderation", "ocr"]
+    default_model = "mistral-large-latest"
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -22,12 +23,7 @@ class MistralAI(Provider):
         self,
         messages: list[ChatCompletionMessageSchema],
         model: str,
-        temperature: float = gpt_settings.temperature,
-        max_tokens: int = gpt_settings.max_tokens,
-        presence_penalty: float = gpt_settings.presence_penalty,
-        frequency_penalty: float = gpt_settings.frequency_penalty,
-        system_prompt: str = gpt_settings.assistant_prompt,
-        timeout: int = gpt_settings.timeout,
+        system_prompt: str,
     ) -> ChatResponseSchema:
         url = "https://api.mistral.ai/v1/chat/completions"
 
@@ -51,11 +47,12 @@ class MistralAI(Provider):
 
         return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self) -> list[str]:
+    async def get_available_models(self, image_generation: bool = False) -> list[str]:
+        if image_generation:
+            return []
+
         url = "https://api.mistral.ai/v1/models"
-
         response = await self._request(method="GET", url=url)
-
         response_data = GetModelsResponseSchema(**response.json())
 
         if gpt_settings.models_whitelist:
@@ -63,35 +60,6 @@ class MistralAI(Provider):
                 model.id for model in response_data.data if model.id in gpt_settings.models_whitelist
             ]
         else:
-            allowed_model_names = [
-                model.id for model in response_data.data if self.is_chat_completion_ready_model(model.id)
-            ]
+            allowed_model_names = [model.id for model in response_data.data if self.is_chat_ready_model(model.id)]
 
         return sorted(allowed_model_names)
-
-    async def api_key_is_valid(self) -> bool:
-        try:
-            await self.get_available_models()
-        except HTTPStatusError:
-            return False
-        except Exception:
-            raise
-        return True
-
-    @classmethod
-    def is_chat_completion_ready_model(cls, model_name: str) -> bool:
-        def is_a_common_purpose_model(name: str) -> bool:
-            keywords = ("embed", "moderation")
-            for keyword in keywords:
-                if keyword in name:
-                    return False
-            return True
-
-        def is_mistralai_model(name: str) -> bool:
-            keywords = ("mistral", "mixtral", "ministral")
-            for keyword in keywords:
-                if keyword in name:
-                    return True
-            return False
-
-        return is_mistralai_model(model_name) and is_a_common_purpose_model(model_name)
