@@ -234,14 +234,12 @@ Please, visit the [examples](examples) directory of the current repository for m
 | `RETRIES`         | Number of times to retry a failed AI provider API request.                                                                                | `3`           |
 | `TIMEOUT`         | Timeout in seconds for waiting for a response from the AI provider API.                                                                   | `600`         |
 
-_Note: There are two separate `PROXY` settings. One under "Telegram Bot Settings" for Telegram connections, and one under "General Application Settings" for connecting to AI providers like OpenAI, Anthropic, etc._
-
-## Storage Settings
+### Storage Settings
 
 | Variable          | Description                                                                                                                        | Default Value |
 |:------------------|:-----------------------------------------------------------------------------------------------------------------------------------|:--------------|
 | `REDIS`           | Redis connection string (e.g., `redis://localhost:6379/0`). If set, Redis will be used for session storage instead of local files. | `None`        |
-| `REDIS_PASSWORD`  | Password for the Redis connection, if required.                                                                                    | `None`        |
+| `REDIS_PASSWORD`  | **DEPRECATED** Password for the Redis connection.                                                                                  | `None`        |
 | `LOCAL_DATA_PATH` | Path *inside the container* where local session data is stored. Mount a volume to this path for persistence between restarts.      | `/app/data`   |
 
 ### API Keys (Master Keys)
@@ -260,37 +258,35 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 
 ### Model & Conversation Settings
 
-| Variable                       | Description                                                                                                                       | Default Value                                                      |
-|:-------------------------------|:----------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
-| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used. | `None`                                                             |
-| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                    | `"You're helpful and friendly assistant. Your name is {BOT_NAME}"` |
-| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                   | `60`                                                               |
-| `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.      | `10240`                                                            |
-| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                   | `4096`                                                             |
-| `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                    | `1.0`                                                              |
-| `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (posit                                                      |                                                                    |
-
-ive values decrease repetition). Range: -2.0 to 2.0.                                         | `0.0`                                                       |
-| `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0.                            | `0.0`                                                       |
+| Variable                       | Description                                                                                                                                     | Default Value                                                      |
+|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
+| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used.               | `None`                                                             |
+| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                                  | `"You're helpful and friendly assistant. Your name is {BOT_NAME}"` |
+| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                                 | `60`                                                               |
+| `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.                    | `64000`                                                            |
+| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                                 | `4096`                                                             |
+| `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                                  | `1.0`                                                              |
+| `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (positive values decrease repetition). Range: -2.0 to 2.0.                | `0.0`                                                              |
+| `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0. | `0.0`                                                              |
 
 ### Image Generation Settings
 
-| Variable                      | Description                                                                                                            | Default Value |
-|:------------------------------|:-----------------------------------------------------------------------------------------------------------------------|:--------------|
-| `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.            | `0`           |
-| `IMAGE_N_CHOICES`             | Default number of images to generate per request (currently supported mainly by DALL-E).                               | `1`           |
-| `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                                | `standard`    |
-| `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.                | `1024x1024`   |
-| `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g., DALL-E 3: `1:1`, `16:9`, `9:16`).                      | `16:9`        |
-| `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of provider names (`openai`, `google`, `grok`) allowed for image generation. If empty, allow all. | `None`        |
+| Variable                      | Description                                                                                                           | Default Value |
+|:------------------------------|:----------------------------------------------------------------------------------------------------------------------|:--------------|
+| `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.           | `0`           |
+| `IMAGE_N_CHOICES`             | Default number of images to generate per request (currently supported mainly by DALL-E).                              | `1`           |
+| `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                               | `standard`    |
+| `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.               | `1024x1024`   |
+| `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g.: `1:1`, `16:9`, `9:16`).                               | `16:9`        |
 
 ### Whitelists
 
-| Variable           | Description                                                                                                                                | Default Value |
-|:-------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
-| `USERS_WHITELIST`  | Comma-separated list of Telegram usernames (without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
-| `GROUPS_WHITELIST` | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                  | `None`        |
-| `MODELS_WHITELIST` | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.            | `None`        |...
+| Variable                      | Description                                                                                                                                        | Default Value |
+|:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
+| `USERS_WHITELIST`             | Comma-separated list of Telegram usernames (with or without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
+| `GROUPS_WHITELIST`            | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                          | `None`        |
+| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |...
+| `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit.                             | `None`        |
 
 ## Getting API Keys
 
