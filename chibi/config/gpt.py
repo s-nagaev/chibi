@@ -28,7 +28,7 @@ class GPTSettings(BaseSettings):
     image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
     max_conversation_age_minutes: int = Field(default=60)
-    max_history_tokens: int = Field(default=10240)
+    max_history_tokens: int = Field(default=64000)
     max_tokens: int = Field(default=4096)
     presence_penalty: float = Field(default=0)
     proxy: str | None = Field(default=None)

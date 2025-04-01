@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2025-04-01
+
+### Added
+- Integrated support for new LLM providers:
+  - `Alibaba (Qwen)`
+  - `Deepseek`
+  - `xAI (Grok)`
+  - `Google (Gemini)`
+- Enabled image generation using models from various supported providers, extending beyond the default `DALL-E`.
+- Implemented the `/image_model` command, allowing users to select their preferred model for image generation tasks.
+
+### Changed
+- Redesigned and improved the user interface and workflow for setting up provider tokens in the public mode.
+- Extensively refactored the core application codebase to significantly simplify the future integration of new LLM providers.
+- Updated project dependencies to their latest compatible versions.
+- Thoroughly rewrote the `README.md` file to accurately reflect the current features and structure.
+- Updated provided examples to align them with the latest codebase and functionalities.
+
+### Fixed
+- Addressed issues related to inconsistent or incorrect Markdown rendering in responses from Language Models, significantly reducing the occurrence of these problems.
+
+
 ## [0.10.0] - 2025-02-06
 
 ### Changed
@@ -215,6 +237,10 @@ applied.
 
 [Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
 
+[1.0.0]: https://github.com/s-nagaev/chibi/compare/v0.10.0...v1.0.0
+[0.10.0]: https://github.com/s-nagaev/chibi/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/s-nagaev/chibi/compare/v0.8.2...v0.9.0
+[0.8.2]: https://github.com/s-nagaev/chibi/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/s-nagaev/chibi/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/s-nagaev/chibi/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/s-nagaev/chibi/compare/v0.6.2...v0.7.0
