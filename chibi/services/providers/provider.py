@@ -42,8 +42,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.schemas.app import ChatResponseSchema
-from chibi.types import ChatCompletionMessageSchema
+from chibi.schemas.app import ChatCompletionMessageSchema, ChatResponseSchema
 
 P = ParamSpec("P")
 R = TypeVar("R")

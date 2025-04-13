@@ -35,6 +35,7 @@ from chibi.utils import (
     handle_gpt_exceptions,
     send_gpt_answer_message,
     send_message,
+    set_user_action,
     set_user_context,
     user_data,
 )
@@ -106,7 +107,7 @@ async def handle_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @handle_gpt_exceptions
 async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str) -> None:
-    set_user_context(context=context, key=UserContext.ACTION, value=UserAction.NONE)
+    set_user_action(context=context, action=UserAction.NONE)
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -218,6 +219,13 @@ async def handle_available_model_options(
 
 
 async def handle_available_provider_options() -> InlineKeyboardMarkup:
-    keyboard = [[InlineKeyboardButton(name, callback_data=name)] for name, klass in registered_providers.items()]
+    keyboard = [
+        [InlineKeyboardButton(name, callback_data=name)]
+        for name, klass in registered_providers.items()
+        if name != "Cloudflare"
+        # Temporary removing the Cloudflare provider from the "public mode"
+        # because we need to handle account id setting first. Will provide
+        # such a support in one of the following releases.
+    ]
     keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
     return InlineKeyboardMarkup(keyboard)

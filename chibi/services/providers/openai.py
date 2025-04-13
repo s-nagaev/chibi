@@ -9,9 +9,8 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion import Choice
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatCompletionMessageSchema, ChatResponseSchema
 from chibi.services.providers.provider import OpenAIFriendlyProvider
-from chibi.types import ChatCompletionMessageSchema
 
 
 class OpenAI(OpenAIFriendlyProvider):

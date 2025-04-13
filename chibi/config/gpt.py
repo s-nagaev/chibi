@@ -10,16 +10,23 @@ from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL
 
 class GPTSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
     alibaba_key: str | None = Field(alias="ALIBABA_API_KEY", default=None)
     anthropic_key: str | None = Field(alias="ANTHROPIC_API_KEY", default=None)
+    cloudflare_key: str | None = Field(alias="CLOUDFLARE_API_KEY", default=None)
+    cloudflare_account_id: str | None = Field(alias="CLOUDFLARE_ACCOUNT_ID", default=None)
     deepseek_key: str | None = Field(alias="DEEPSEEK_API_KEY", default=None)
     gemini_key: str | None = Field(alias="GEMINI_API_KEY", default=None)
     grok_key: str | None = Field(alias="GROK_API_KEY", default=None)
     mistralai_key: str | None = Field(alias="MISTRALAI_API_KEY", default=None)
+    moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
 
     assistant_prompt: str = Field(
-        default=f"You're helpful and friendly assistant. Your name is {telegram_settings.bot_name}",
+        default=(
+            f"You're helpful and friendly assistant. Your name is "
+            f"{telegram_settings.bot_name}. Use markdown for formatting."
+        )
     )
     frequency_penalty: float = Field(default=0)
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)

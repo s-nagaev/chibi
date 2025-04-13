@@ -20,7 +20,7 @@ class LocalStorage(Database):
     async def save_user(self, user: User) -> None:
         filename = self._get_storage_filename(user.id)
         with open(filename, "wb") as f:
-            pickle.dump(user.dict(), f)
+            pickle.dump(user.model_dump(), f)
 
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
@@ -60,7 +60,7 @@ class LocalStorage(Database):
         current_time = time.time()
 
         msgs = [
-            msg.dict(exclude={"expire_at", "id"})
+            msg.model_dump(exclude={"expire_at", "id"})
             for msg in user_refreshed.messages
             if msg.expire_at is None or msg.expire_at > current_time
         ]

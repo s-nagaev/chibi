@@ -18,6 +18,9 @@ from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import (
     GROUP_CHAT_TYPES,
     PERSONAL_CHAT_TYPES,
+    SETTING_SET,
+    SETTING_UNSET,
+    UserAction,
     UserContext,
 )
 from chibi.exceptions import (
@@ -28,6 +31,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.services.providers import registered_providers
 
 R = TypeVar("R")
 P = ParamSpec("P")
@@ -293,14 +297,75 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expected_type: Type[R]) -> R | None:
+    """Retrieve a specific value from the user's context data.
+
+    Safely access the `user_data` dictionary associated with the current user
+    in the Telegram bot context and return the value associated with the given key,
+    cast to the expected type.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        key: An enum member (UserContext) representing the key for the data to retrieve.
+        expected_type: The Python type the retrieved value is expected to conform to.
+                       Used for casting the result.
+
+    Returns:
+        The value associated with the key, cast to `expected_type`, if it exists
+        and `user_data` is available. Otherwise, returns None.
+    """
     if context.user_data is not None:
         return cast(R, context.user_data.get(key, None))
     return None
 
 
 def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value: object | None) -> None:
+    """Set or update a specific value in the user's context data.
+
+    Safely access the `user_data` dictionary associated with the current user
+    and store the provided value under the given key. If `user_data` does not
+    exist, do nothing.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        key: An enum member (UserContext) representing the key under which to store the value.
+        value: The value to store in the user's context data. Can be any object or None.
+    """
     if context.user_data is not None:
         context.user_data[key] = value
+    return None
+
+
+def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:
+    """Get the current action state associated with the user.
+
+    Retrieve the action stored under the `UserContext.ACTION` key in the user's
+    context data. If `user_data` is missing or the action is not set, it defaults
+    to `UserAction.NONE`.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+
+    Returns:
+        The current `UserAction` enum member associated with the user. Defaults to
+        `UserAction.NONE` if no action is set or `user_data` is unavailable.
+    """
+    if context.user_data is None:
+        return UserAction.NONE
+    return context.user_data.get(UserContext.ACTION, UserAction.NONE)
+
+
+def set_user_action(context: ContextTypes.DEFAULT_TYPE, action: UserAction) -> None:
+    """Set the current action state for the user.
+
+    Store the provided `UserAction` under the `UserContext.ACTION` key in the user's
+    context data. If `user_data` does not exist, do nothing.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        action: The `UserAction` enum member to set as the user's current action state.
+    """
+    if context.user_data is not None:
+        context.user_data[UserContext.ACTION] = action
     return None
 
 
@@ -313,48 +378,61 @@ async def download_image(image_url: str) -> bytes:
     return response.content
 
 
+def _provider_statuses() -> list[str]:
+    """Prepare a provider clients statuses data for logging.
+
+    Returns:
+        list of string containing the provider clients statuses data.
+    """
+    statuses = [
+        "<magenta>Provider clients:</magenta>",
+    ]
+    for provider_name in registered_providers:
+        status = SETTING_SET if getattr(gpt_settings, f"{provider_name.lower()}_key", None) else SETTING_UNSET
+        statuses.append(f"{provider_name} client: {status}")
+    return statuses
+
+
 def log_application_settings() -> None:
     mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<blue>PRIVATE</blue>"
-    is_set = "<green>SET</green>"
-    unset = "<red>UNSET</red>"
     storage = "<red>REDIS</red>" if application_settings.redis else "<yellow>LOCAL</yellow>"
-    proxy = f"<blue>{telegram_settings.proxy}</blue>" if telegram_settings.proxy else unset
+    proxy = f"<blue>{telegram_settings.proxy}</blue>" if telegram_settings.proxy else SETTING_UNSET
     users_whitelist = (
-        f"<blue>{','.join(telegram_settings.users_whitelist)}</blue>" if telegram_settings.users_whitelist else unset
+        f"<blue>{','.join(telegram_settings.users_whitelist)}</blue>"
+        if telegram_settings.users_whitelist
+        else SETTING_UNSET
     )
     groups_whitelist = (
-        f"<blue>{telegram_settings.groups_whitelist}</blue>" if telegram_settings.groups_whitelist else unset
+        f"<blue>{telegram_settings.groups_whitelist}</blue>" if telegram_settings.groups_whitelist else SETTING_UNSET
     )
     models_whitelist = (
-        f"<blue>{', '.join(gpt_settings.models_whitelist)}</blue>" if gpt_settings.models_whitelist else unset
+        f"<blue>{', '.join(gpt_settings.models_whitelist)}</blue>" if gpt_settings.models_whitelist else SETTING_UNSET
     )
     images_whitelist = (
         f"<blue>{','.join(gpt_settings.image_generations_whitelist)}</blue>"
         if gpt_settings.image_generations_whitelist
-        else unset
+        else SETTING_UNSET
     )
 
-    messages = (
+    messages = [
+        "<magenta>General Settings:</magenta>",
         f"Application is initialized in the {mode} mode using {storage} storage.",
-        f"Alibaba client: {is_set if bool(gpt_settings.alibaba_key) else unset}",
-        f"Anthropic client: {is_set if bool(gpt_settings.anthropic_key) else unset }",
-        f"DeepSeek client: {is_set if bool(gpt_settings.deepseek_key) else unset}",
-        f"Gemini client: {is_set if bool(gpt_settings.gemini_key) else unset}",
-        f"Grok client: {is_set if bool(gpt_settings.grok_key) else unset}",
-        f"Mistral AI client: {is_set if bool(gpt_settings.mistralai_key) else unset }",
-        f"OpenAI client: {is_set if bool(gpt_settings.openai_key) else unset }",
+        f"Proxy is {proxy}",
+        "<magenta>LLM Settings:</magenta>",
         f"Bot name is <blue>{telegram_settings.bot_name}</blue>",
         f"Initial assistant prompt: <blue>{gpt_settings.assistant_prompt}</blue>",
-        f"Proxy is {proxy}",
         f"Messages TTL: <blue>{gpt_settings.max_conversation_age_minutes} minutes</blue>",
         f"Maximum conversation history size: <blue>{gpt_settings.max_history_tokens}</blue> tokens",
         f"Maximum answer size: <blue>{gpt_settings.max_tokens}</blue> tokens",
         f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit}</blue>",
+        "<magenta>Whitelists:</magenta>",
         f"Images limit whitelist: {images_whitelist}",
         f"Users whitelist: {users_whitelist}",
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
-    )
+    ]
+    messages += _provider_statuses()
+
     for message in messages:
         logger.opt(colors=True).info(message)
 

@@ -24,9 +24,11 @@ _**Note on armv7:** Support for the `linux/armv7` architecture was discontinued 
 Chibi currently supports models from the following providers:
 *   Alibaba (Qwen models)
 *   Anthropic (Claude models)
+*   Cloudflare (44+ open-source models)
 *   DeepSeek
 *   Google (Gemini models, including image generation)
 *   MistralAI
+*   MoonshotAI
 *   OpenAI (including DALL-E for images)
 *   xAI (Grok models, including image generation)
 
@@ -246,28 +248,31 @@ Please, visit the [examples](examples) directory of the current repository for m
 
 These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
 
-| Variable            | Description                               | Default Value |
-|:--------------------|:------------------------------------------|:--------------|
-| `ALIBABA_API_KEY`   | API key for Alibaba (Qwen) models.        | `None`        |
-| `ANTHROPIC_API_KEY` | API key for Anthropic (Claude) models.    | `None`        |
-| `DEEPSEEK_API_KEY`  | API key for DeepSeek models.              | `None`        |
-| `GEMINI_API_KEY`    | API key for Google (Gemini) models.       | `None`        |
-| `GROK_API_KEY`      | API key for xAI (Grok) models.            | `None`        |
-| `MISTRALAI_API_KEY` | API key for MistralAI models.             | `None`        |
-| `OPENAI_API_KEY`    | API key for OpenAI (GPT & DALL-E) models. | `None`        |
+| Variable                | Description                                      | Default Value |
+|:------------------------|:-------------------------------------------------|:--------------|
+| `ALIBABA_API_KEY`       | API key for Alibaba (Qwen) models.               | `None`        |
+| `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.           | `None`        |
+| `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models). | `None`        |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.           | `None`        |
+| `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                     | `None`        |
+| `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.     | `None`        |
+| `GROK_API_KEY`          | API key for xAI (Grok) models.                   | `None`        |
+| `MISTRALAI_API_KEY`     | API key for MistralAI models.                    | `None`        |
+| `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.            | `None`        |
+| `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.        | `None`        |
 
 ### Model & Conversation Settings
 
-| Variable                       | Description                                                                                                                                     | Default Value                                                      |
-|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------|
-| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used.               | `None`                                                             |
-| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                                  | `"You're helpful and friendly assistant. Your name is {BOT_NAME}"` |
-| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                                 | `60`                                                               |
-| `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.                    | `64000`                                                            |
-| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                                 | `4096`                                                             |
-| `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                                  | `1.0`                                                              |
-| `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (positive values decrease repetition). Range: -2.0 to 2.0.                | `0.0`                                                              |
-| `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0. | `0.0`                                                              |
+| Variable                       | Description                                                                                                                                     | Default Value                                                                                     |
+|:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------|
+| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used.               | `None`                                                                                            |
+| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                                  | `"You're helpful and friendly assistant. Your name is {BOT_NAME}".  Use markdown for formatting.` |
+| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                                 | `60`                                                                                              |
+| `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.                    | `64000`                                                                                           |
+| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                                 | `4096`                                                                                            |
+| `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                                  | `1.0`                                                                                             |
+| `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (positive values decrease repetition). Range: -2.0 to 2.0.                | `0.0`                                                                                             |
+| `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0. | `0.0`                                                                                             |
 
 ### Image Generation Settings
 
@@ -294,9 +299,11 @@ To use Chibi in private mode, or for users interacting with the bot in public mo
 
 *   Alibaba (Qwen via DashScope): https://dashscope.console.aliyun.com/apiKey
 *   Anthropic (Claude): https://console.anthropic.com/ (Sign up and navigate to API Keys)
+*   Cloudflare: https://dash.cloudflare.com/profile/api-tokens (Need API key with `Account.Workers AI` permissions)
 *   DeepSeek: https://platform.deepseek.com/ (Sign up and navigate to API Keys)
 *   Google (Gemini): https://aistudio.google.com/app/apikey
 *   MistralAI: https://console.mistral.ai/ (Sign up and navigate to API Keys)
+*   MoonshotAI (Kimi): https://platform.moonshot.cn (Sign up and navigate to API Keys)
 *   OpenAI (GPT & DALL-E): https://platform.openai.com/api-keys
 *   xAI (Grok): https://docs.x.ai/ (Check documentation for API access details)
 
