@@ -4,10 +4,14 @@ from openai.types.chat import ChatCompletionUserMessageParam
 
 from chibi.config import gpt_settings
 from chibi.models import Message
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import (
+    ChatCompletionMessageSchema,
+    ChatResponseSchema,
+    ModelChangeSchema,
+    UserMessageSchema,
+)
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
-from chibi.types import ChatCompletionMessageSchema, UserMessageSchema
 
 
 @inject_database

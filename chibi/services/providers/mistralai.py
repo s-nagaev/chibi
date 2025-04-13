@@ -1,8 +1,7 @@
 from chibi.config import gpt_settings
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatCompletionMessageSchema, ChatResponseSchema
 from chibi.schemas.mistralai import ChatCompletionSchema, GetModelsResponseSchema
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.types import ChatCompletionMessageSchema
 
 
 class MistralAI(RestApiFriendlyProvider):

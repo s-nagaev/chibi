@@ -43,3 +43,7 @@ class NoModelSelectedError(GptException):
 
 class NoProviderSelectedError(GptException):
     ...
+
+
+class NoAccountIDSetError(GptException):
+    ...

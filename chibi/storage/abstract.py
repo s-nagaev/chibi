@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from chibi.models import ImageMeta, Message, User
-from chibi.types import (
+from chibi.schemas.app import (
     AssistantMessageSchema,
     ChatCompletionMessageSchema,
     UserMessageSchema,

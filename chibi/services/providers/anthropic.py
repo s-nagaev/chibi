@@ -1,8 +1,11 @@
 from chibi.config import gpt_settings
 from chibi.schemas.anthropic import ChatCompletionSchema
-from chibi.schemas.app import ChatResponseSchema, UsageSchema
+from chibi.schemas.app import (
+    ChatCompletionMessageSchema,
+    ChatResponseSchema,
+    UsageSchema,
+)
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.types import ChatCompletionMessageSchema
 
 
 class Anthropic(RestApiFriendlyProvider):

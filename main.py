@@ -6,6 +6,7 @@ from typing import Any, Coroutine, TypeVar
 from loguru import logger
 from telegram import (
     BotCommand,
+    CallbackQuery,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Update,
@@ -38,10 +39,12 @@ from chibi.services.providers import registered_providers
 from chibi.utils import (
     GROUP_CHAT_TYPES,
     check_user_allowance,
+    current_user_action,
     get_telegram_chat,
     get_telegram_message,
     get_user_context,
     log_application_settings,
+    set_user_action,
     set_user_context,
     user_interacts_with_bot,
 )
@@ -114,7 +117,7 @@ class ChibiBot:
         if prompt:
             self.run_task(handle_image_generation(update=update, context=context, prompt=prompt))
             return None
-        set_user_context(context=context, key=UserContext.ACTION, value=UserAction.IMAGINE)
+        set_user_action(context=context, action=UserAction.IMAGINE)
         await telegram_message.reply_text("Ok, now give me an image prompt.")
 
     @check_user_allowance
@@ -126,14 +129,11 @@ class ChibiBot:
         if not prompt:
             return None
 
-        if (
-            get_user_context(context=context, key=UserContext.ACTION, expected_type=UserAction)
-            == UserAction.SET_API_KEY
-        ):
-            set_user_context(context=context, key=UserContext.ACTION, value=UserAction.NONE)
+        if current_user_action(context=context) == UserAction.SET_API_KEY:
+            set_user_action(context=context, action=UserAction.NONE)
             return await self._handle_message_with_api_key(update=update, context=context)
 
-        if get_user_context(context=context, key=UserContext.ACTION, expected_type=UserAction) == UserAction.IMAGINE:
+        if current_user_action(context=context) == UserAction.IMAGINE:
             self.run_task(handle_image_generation(update=update, context=context, prompt=prompt))
             return None
 
@@ -159,7 +159,7 @@ class ChibiBot:
             message = f"Active model: {active_model}. You  may select another one from the list below:"
         else:
             message = "Please, select model:"
-        set_user_context(context=context, key=UserContext.ACTION, value=UserAction.SELECT_MODEL)
+        set_user_action(context=context, action=UserAction.SELECT_MODEL)
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
     @check_user_allowance
@@ -171,7 +171,7 @@ class ChibiBot:
             message = f"Active model: {active_model}. You  may select another one from the list below:"
         else:
             message = "Please, select model:"
-        set_user_context(context=context, key=UserContext.ACTION, value=UserAction.SELECT_MODEL)
+        set_user_action(context=context, action=UserAction.SELECT_MODEL)
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
     async def show_api_key_set_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -180,10 +180,59 @@ class ChibiBot:
 
         message = "Please, select a provider:"
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
-        set_user_context(context=context, key=UserContext.ACTION, value=UserAction.SELECT_PROVIDER)
+        set_user_action(context=context, action=UserAction.SELECT_PROVIDER)
 
-    async def select_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        action = get_user_context(context=context, key=UserContext.ACTION, expected_type=UserAction)
+    async def _compute_model_selection_action(
+        self, query: CallbackQuery, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        mapped_models = get_user_context(
+            context=context, key=UserContext.MAPPED_MODELS, expected_type=dict[str, ModelChangeSchema]
+        )
+        await query.answer()
+
+        if not mapped_models or not query.data:
+            await query.delete_message()
+            return None
+
+        if query.data == "-1":
+            await query.delete_message()
+            return None
+
+        model = mapped_models.get(query.data)
+        if not model:
+            await query.delete_message()
+            return None
+
+        if model.image_generation:
+            set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, value=model.name)
+        else:
+            set_user_context(context=context, key=UserContext.ACTIVE_MODEL, value=model.name)
+        self.run_task(
+            handle_model_selection(
+                update=update,
+                context=context,
+                model=model,
+                query=query,
+            )
+        )
+        set_user_action(context=context, action=UserAction.NONE)
+
+    async def _compute_provider_selection_action(
+        self, query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        await query.answer()
+        provider_name = query.data
+        if not provider_name or provider_name not in registered_providers.keys():
+            await query.delete_message()
+            return
+        set_user_context(context=context, key=UserContext.SELECTED_PROVIDER, value=provider_name)
+        await query.edit_message_text(
+            text=f"{provider_name} selected.\nNow please send me an API key",
+        )
+        set_user_action(context=context, action=UserAction.SET_API_KEY)
+
+    async def handle_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        action = current_user_action(context=context)
         if not action or action == UserAction.NONE:
             return None
 
@@ -192,49 +241,10 @@ class ChibiBot:
             return None
 
         if action == UserAction.SELECT_MODEL:
-            mapped_models = get_user_context(
-                context=context, key=UserContext.MAPPED_MODELS, expected_type=dict[str, ModelChangeSchema]
-            )
-            await query.answer()
-
-            if not mapped_models or not query.data:
-                await query.delete_message()
-                return None
-
-            if query.data == "-1":
-                await query.delete_message()
-                return None
-
-            model = mapped_models.get(query.data)
-            if not model:
-                await query.delete_message()
-                return None
-
-            if model.image_generation:
-                set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, value=model.name)
-            else:
-                set_user_context(context=context, key=UserContext.ACTIVE_MODEL, value=model.name)
-            self.run_task(
-                handle_model_selection(
-                    update=update,
-                    context=context,
-                    model=model,
-                    query=query,
-                )
-            )
-            set_user_context(context=context, key=UserContext.ACTION, value=UserAction.NONE)
+            return await self._compute_model_selection_action(query=query, update=update, context=context)
 
         if action == UserAction.SELECT_PROVIDER:
-            await query.answer()
-            provider_name = query.data
-            if not provider_name or provider_name not in registered_providers.keys():
-                await query.delete_message()
-                return
-            set_user_context(context=context, key=UserContext.SELECTED_PROVIDER, value=provider_name)
-            await query.edit_message_text(
-                text=f"{provider_name} selected.\nNow please send me an API key",
-            )
-            set_user_context(context=context, key=UserContext.ACTION, value=UserAction.SET_API_KEY)
+            return await self._compute_provider_selection_action(query=query, context=context)
 
     @check_user_allowance
     async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -279,7 +289,7 @@ class ChibiBot:
         if not application_settings.hide_models:
             app.add_handler(CommandHandler("gpt_models", self.show_gpt_models_menu))
             app.add_handler(CommandHandler("image_models", self.show_image_models_menu))
-        app.add_handler(CallbackQueryHandler(self.select_model))
+        app.add_handler(CallbackQueryHandler(self.handle_selection))
 
         if gpt_settings.public_mode:
             app.add_handler(CommandHandler("set_api_key", self.show_api_key_set_menu))
@@ -297,7 +307,7 @@ class ChibiBot:
                 chat_types=[constants.ChatType.PRIVATE, constants.ChatType.GROUP, constants.ChatType.SUPERGROUP],
             )
         )
-        # app.add_error_handler(self.error_handler)
+        app.add_error_handler(self.error_handler)
         app.run_polling()
 
 
