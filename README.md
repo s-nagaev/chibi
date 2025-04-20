@@ -84,6 +84,7 @@ This command runs the bot in private mode using a Google Gemini key. It requires
      pysergio/chibi:latest
    ```
 Replace placeholders with your actual values.
+**Hint:** talk to [BotFather](https://t.me/BotFather) on Telegram and use the `/newbot` command to create a bot and get your token.
 
 ## Docker Compose Examples
 
