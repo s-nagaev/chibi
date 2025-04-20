@@ -485,23 +485,33 @@ async def download_image(image_url: str) -> bytes:
     return response.content
 
 
-async def run_monitoring(context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not application_settings.monitoring_url:
-        return
+async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a heartbeat GET request to a configured monitoring URL.
+
+    This function is designed to be called periodically by a scheduler
+    (python-telegram-bot's JobQueue) to signal the bot's operational status
+    to an external monitoring service (e.g., Healthchecks.io, Uptime Kuma, etc.).
+
+    Args:
+        context: The callback context provided by the JobQueue. Although
+                 required by the JobQueue signature, it's not directly used
+                 in this function's logic.
+    """
+    if not application_settings.heartbeat_url:
+        return None
 
     transport = httpx.AsyncHTTPTransport(
-        retries=application_settings.monitoring_retry_calls,
-        proxy=application_settings.monitoring_proxy
+        retries=application_settings.heartbeat_retry_calls, proxy=application_settings.heartbeat_proxy
     )
 
-    async with httpx.AsyncClient(transport=transport, proxy=application_settings.monitoring_proxy) as client:
+    async with httpx.AsyncClient(transport=transport, proxy=application_settings.heartbeat_proxy) as client:
         try:
-            result = await client.get(application_settings.monitoring_url)
+            result = await client.get(application_settings.heartbeat_url)
         except Exception as error:
-            logger.error(f'Uptime Checker failed with an Exception: {error}')
+            logger.error(f"Uptime Checker failed with an Exception: {error}")
             return
         if result.is_error:
-            logger.error(f'Uptime Checker failed, status_code: {result.status_code}, msg: {result.text}')
+            logger.error(f"Uptime Checker failed, status_code: {result.status_code}, msg: {result.text}")
 
 
 def _provider_statuses() -> list[str]:
@@ -520,22 +530,22 @@ def _provider_statuses() -> list[str]:
 
 
 def log_application_settings() -> None:
-    mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<blue>PRIVATE</blue>"
+    mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<cyan>PRIVATE</cyan>"
     storage = "<red>REDIS</red>" if application_settings.redis else "<yellow>LOCAL</yellow>"
-    proxy = f"<blue>{telegram_settings.proxy}</blue>" if telegram_settings.proxy else SETTING_UNSET
+    proxy = f"<cyan>{telegram_settings.proxy}</cyan>" if telegram_settings.proxy else SETTING_UNSET
     users_whitelist = (
-        f"<blue>{','.join(telegram_settings.users_whitelist)}</blue>"
+        f"<cyan>{','.join(telegram_settings.users_whitelist)}</cyan>"
         if telegram_settings.users_whitelist
         else SETTING_UNSET
     )
     groups_whitelist = (
-        f"<blue>{telegram_settings.groups_whitelist}</blue>" if telegram_settings.groups_whitelist else SETTING_UNSET
+        f"<cyan>{telegram_settings.groups_whitelist}</cyan>" if telegram_settings.groups_whitelist else SETTING_UNSET
     )
     models_whitelist = (
-        f"<blue>{', '.join(gpt_settings.models_whitelist)}</blue>" if gpt_settings.models_whitelist else SETTING_UNSET
+        f"<cyan>{', '.join(gpt_settings.models_whitelist)}</cyan>" if gpt_settings.models_whitelist else SETTING_UNSET
     )
     images_whitelist = (
-        f"<blue>{','.join(gpt_settings.image_generations_whitelist)}</blue>"
+        f"<cyan>{','.join(gpt_settings.image_generations_whitelist)}</cyan>"
         if gpt_settings.image_generations_whitelist
         else SETTING_UNSET
     )
@@ -545,18 +555,19 @@ def log_application_settings() -> None:
         f"Application is initialized in the {mode} mode using {storage} storage.",
         f"Proxy is {proxy}",
         "<magenta>LLM Settings:</magenta>",
-        f"Bot name is <blue>{telegram_settings.bot_name}</blue>",
-        f"Initial assistant prompt: <blue>{gpt_settings.assistant_prompt}</blue>",
-        f"Messages TTL: <blue>{gpt_settings.max_conversation_age_minutes} minutes</blue>",
-        f"Maximum conversation history size: <blue>{gpt_settings.max_history_tokens}</blue> tokens",
-        f"Maximum answer size: <blue>{gpt_settings.max_tokens}</blue> tokens",
-        f"Images generation limit: <blue>{gpt_settings.image_generations_monthly_limit}</blue>",
+        f"Bot name is <cyan>{telegram_settings.bot_name}</cyan>",
+        f"Initial assistant prompt: <cyan>{gpt_settings.assistant_prompt}</cyan>",
+        f"Messages TTL: <cyan>{gpt_settings.max_conversation_age_minutes} minutes</cyan>",
+        f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
+        f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
+        f"Images generation limit: <cyan>{gpt_settings.image_generations_monthly_limit}</cyan>",
         "<magenta>Whitelists:</magenta>",
         f"Images limit whitelist: {images_whitelist}",
         f"Users whitelist: {users_whitelist}",
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
-        f"Uptime monitoring: {SETTING_SET if application_settings.monitoring_url else SETTING_UNSET}"
+        "<magenta>Heartbeat:</magenta>",
+        f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
     ]
     messages += _provider_statuses()
 
