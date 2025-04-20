@@ -1,32 +1,36 @@
 name: Quality Gate
 on: push
 
+
 jobs:
-  Flake8:
+  Ruff:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v1
-        with:
-          python-version: "3.11"
-      - uses: actions/checkout@v2
-      - name: Install Deps
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+      - name: Run Ruff
         run: |
-          pip install -r requirements-dev.txt
-      - name: Run Flake8
+          ruff check .
+  Vulture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+      - name: Run Vulture
         run: |
-          flake8 .
+          vulture .
+
   Mypy:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v1
-        with:
-          python-version: "3.11"
-      - uses: actions/checkout@v2
-      - name: Install Deps
-        run: |
-          pip install -r requirements-dev.txt
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup
       - name: Run Mypy
         run: |
           mypy .

@@ -1,4 +1,5 @@
 import io
+from collections import deque
 from functools import wraps
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
@@ -8,15 +9,15 @@ import telegramify_markdown
 from loguru import logger
 from telegram import Chat as TelegramChat
 from telegram import Message as TelegramMessage
-from telegram import Update
+from telegram import Update, constants
 from telegram import User as TelegramUser
-from telegram import constants
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import (
     GROUP_CHAT_TYPES,
+    MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
     SETTING_SET,
     SETTING_UNSET,
@@ -35,6 +36,8 @@ from chibi.services.providers import registered_providers
 
 R = TypeVar("R")
 P = ParamSpec("P")
+
+CLOSER = {"```": "```", "`": "`", "*": "*", "_": "_", "~": "~"}
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -65,6 +68,105 @@ def get_telegram_message(update: Update) -> TelegramMessage:
     raise ValueError(f"Telegram incoming update does not contain valid message data. Update ID: {update.update_id}")
 
 
+def _get_next_token(text: str, pos: int, escaped: bool) -> tuple[str | None, int]:
+    """Find the next Markdown token at the given position.
+
+    Checks if the text starting from `pos` begins with any known Markdown token,
+    unless the preceding character was an escape character '\'.
+
+    Args:
+        text: The string to search within.
+        pos: The starting position in the text to check for a token.
+        escaped: True if the character immediately preceding `pos` was an
+                 escape character ('\'), False otherwise.
+
+    Returns:
+        A tuple containing:
+        - The found Markdown token (str) or None if no token is found
+          at the position or if it's escaped.
+        - The length of the found token (int), or 0 if no token is found.
+    """
+    if escaped:
+        return None, 0
+    for token in MARKDOWN_TOKENS:
+        if text.startswith(token, pos):
+            return token, len(token)
+    return None, 0
+
+
+def split_markdown_v2(
+    text: str,
+    limit: int = constants.MessageLimit.MAX_TEXT_LENGTH,
+    recommended_margin: int = 400,
+    safety_margin: int = 50,
+) -> list[str]:
+    """Split a Markdown text into chunks while trying to preserve formatting.
+
+    Attempts to split the text into chunks smaller than `limit`. It tracks
+    opening and closing Markdown tokens using a stack. When a chunk needs to be
+    split, it appends the necessary closing tokens to the end of the current
+    chunk and prepends the corresponding opening tokens to the beginning of the
+    next chunk.
+
+    Splitting priority:
+    1. At a newline character when the buffer size is close to the limit
+       (within `recommended_margin`).
+    2. Anywhere when the buffer size is very close to the limit
+       (within `safety_margin`).
+
+    Args:
+        text: The Markdown string to split.
+        limit: The maximum desired length for each chunk. Defaults to
+               `constants.MessageLimit.MAX_TEXT_LENGTH`.
+        recommended_margin: The preferred distance from the `limit` at which
+               to split, ideally looking for a newline.
+        safety_margin: The absolute minimum distance from the `limit` at which
+               a split must occur, regardless of the character.
+
+    Returns:
+        A list of strings, where each string is a chunk of the original text,
+        with formatting tokens adjusted to maintain validity across chunks.
+    """
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    buffer: list[str] = []
+    stack: deque[str] = deque()
+
+    i = 0
+    escaped: bool = False
+
+    while i < len(text):
+        token, shift = _get_next_token(text=text, pos=i, escaped=escaped)
+        escaped = text[i] == "\\"
+        if token:
+            buffer.append(token)
+            if stack and stack[-1] == token:
+                stack.pop()
+            else:
+                stack.append(token)
+            i += shift
+        else:
+            buffer.append(text[i])
+            i += 1
+
+        if len("".join(buffer)) >= limit - recommended_margin:
+            if text[i] == "\n":
+                closing_sequence = "\n".join(reversed(stack))
+                chunks.append("".join(buffer) + closing_sequence)
+                buffer = list(stack)
+
+        elif len("".join(buffer)) >= limit - safety_margin:
+            closing_sequence = "\n".join(reversed(stack))
+            chunks.append("".join(buffer) + closing_sequence)
+            buffer = list(stack)
+
+    if buffer:
+        chunks.append("".join(buffer))
+    return chunks
+
+
 async def send_message(
     update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any
 ) -> TelegramMessage:
@@ -85,11 +187,17 @@ async def send_long_message(
     parse_mode: str | None = None,
     normalize_md: bool = True,
 ) -> None:
-    chunk_size = constants.MessageLimit.MAX_TEXT_LENGTH
-    text_chunks = [message[i : i + chunk_size] for i in range(0, len(message), chunk_size)]
-    for chunk_number, chunk in enumerate(text_chunks):
-        text = telegramify_markdown.standardize(chunk) if normalize_md else chunk
-        await send_message(update=update, context=context, text=text, parse_mode=parse_mode, reply=chunk_number == 0)
+    if normalize_md:
+        message = telegramify_markdown.markdownify(message)
+        chunks = split_markdown_v2(message)
+    else:
+        chunks = [
+            message[i : i + constants.MessageLimit.MAX_TEXT_LENGTH]
+            for i in range(0, len(message), constants.MessageLimit.MAX_TEXT_LENGTH)
+        ]
+
+    for chunk_number, chunk in enumerate(chunks):
+        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode, reply=chunk_number == 0)
 
 
 async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -259,7 +367,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
             await send_message(
-                update=update, context=context, text=f"🤐Rate Limit exceeded for {e.provider}. We should back off a bit."
+                update=update, context=context, text=f"Rate Limit exceeded for {e.provider}. We should back off a bit."
             )
             return None
 
@@ -291,7 +399,6 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             )
             await send_message(update=update, context=context, text=msg)
             raise
-            return None
 
     return wrapper
 

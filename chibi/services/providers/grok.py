@@ -11,4 +11,4 @@ class Grok(OpenAIFriendlyProvider):
     image_quality = NOT_GIVEN
     image_size = NOT_GIVEN
     default_image_model = "grok-2-image-1212"
-    default_model = "grok-2-1212"
+    default_model = "grok-3-beta"

@@ -1,12 +1,9 @@
 from loguru import logger
+from openai.types.chat import ChatCompletionMessageParam
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoAccountIDSetError
-from chibi.schemas.app import (
-    ChatCompletionMessageSchema,
-    ChatResponseSchema,
-    UsageSchema,
-)
+from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.schemas.cloudflare import (
     ChatCompletionResponseSchema,
     ModelsSearchResponseSchema,
@@ -27,10 +24,7 @@ class Cloudflare(RestApiFriendlyProvider):
         }
 
     async def _get_chat_completion_response(
-        self,
-        messages: list[ChatCompletionMessageSchema],
-        model: str,
-        system_prompt: str,
+        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
     ) -> ChatResponseSchema:
         if not gpt_settings.cloudflare_account_id:
             raise NoAccountIDSetError

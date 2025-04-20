@@ -1,15 +1,10 @@
 from io import BytesIO
 
-from openai.types.chat import ChatCompletionUserMessageParam
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionUserMessageParam
 
 from chibi.config import gpt_settings
 from chibi.models import Message
-from chibi.schemas.app import (
-    ChatCompletionMessageSchema,
-    ChatResponseSchema,
-    ModelChangeSchema,
-    UserMessageSchema,
-)
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
@@ -38,7 +33,7 @@ async def summarize(db: Database, user_id: int) -> None:
 
     chat_history = await db.get_messages(user=user)
 
-    user_messages: list[ChatCompletionMessageSchema] = [
+    user_messages: list[ChatCompletionMessageParam] = [
         ChatCompletionUserMessageParam(role="user", content=str(chat_history))
     ]
 
@@ -56,8 +51,8 @@ async def summarize(db: Database, user_id: int) -> None:
 @inject_database
 async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
-    conversation_messages: list[ChatCompletionMessageSchema] = await db.get_conversation_messages(user=user)
-    conversation_messages.append(UserMessageSchema(role="user", content=prompt))
+    conversation_messages: list[ChatCompletionMessageParam] = await db.get_conversation_messages(user=user)
+    conversation_messages.append(ChatCompletionUserMessageParam(role="user", content=prompt))
     chat_response = await user.active_gpt_provider.get_chat_response(
         messages=conversation_messages, model=user.selected_gpt_model_name
     )

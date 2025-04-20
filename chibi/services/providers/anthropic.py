@@ -1,10 +1,8 @@
+from openai.types.chat import ChatCompletionMessageParam
+
 from chibi.config import gpt_settings
 from chibi.schemas.anthropic import ChatCompletionSchema
-from chibi.schemas.app import (
-    ChatCompletionMessageSchema,
-    ChatResponseSchema,
-    UsageSchema,
-)
+from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.providers.provider import RestApiFriendlyProvider
 
 
@@ -23,10 +21,7 @@ class Anthropic(RestApiFriendlyProvider):
         }
 
     async def _get_chat_completion_response(
-        self,
-        messages: list[ChatCompletionMessageSchema],
-        model: str,
-        system_prompt: str,
+        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
     ) -> ChatResponseSchema:
         url = "https://api.anthropic.com/v1/messages"
 

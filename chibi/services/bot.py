@@ -191,7 +191,7 @@ async def handle_provider_api_key_set(
         return None
 
     await set_api_key(user_id=telegram_user.id, api_key=api_key, provider_name=provider_name)
-    msg = f"Your {provider_name} API Key successfully set! 🦾\n\n" "Now you may check available models in /gpt_models."
+    msg = f"Your {provider_name} API Key successfully set! 🦾\n\nNow you may check available models in /gpt_models."
     await send_message(update=update, context=context, reply=False, text=msg)
     try:
         await context.bot.delete_message(chat_id=telegram_chat.id, message_id=telegram_message.message_id)
