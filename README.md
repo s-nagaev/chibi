@@ -40,6 +40,7 @@ Chibi currently supports models from the following providers:
 *   **Context Management:**
     *   Automatic conversation summarization (optional) to save tokens on long conversations by replacing older parts of the history with a summary.
     *   Manual context reset (`/reset` command) to start fresh and save tokens.
+*   **Enhanced LLM Capabilities with Tools:** The bot can leverage integrated tools (when using compatible LLMs like GPT-4/Gemini).
 *   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or simply keep it in memory (lost on restart).
 *   **Optional "Public Mode":** Run the bot without a master API key. Each user will be prompted to provide their own key via private message to the bot.
 *   **User and Group Whitelists:** Restrict bot access to specific users or chat groups.
@@ -83,6 +84,7 @@ This command runs the bot in private mode using a Google Gemini key. It requires
      pysergio/chibi:latest
    ```
 Replace placeholders with your actual values.
+**Hint:** talk to [BotFather](https://t.me/BotFather) on Telegram and use the `/newbot` command to create a bot and get your token.
 
 ## Docker Compose Examples
 

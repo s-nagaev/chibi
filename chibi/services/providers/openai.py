@@ -1,59 +1,43 @@
-from typing import Iterable
-
 from openai import NOT_GIVEN
 from openai.types import ImagesResponse
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionSystemMessageParam,
 )
-from openai.types.chat.chat_completion import Choice
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ChatCompletionMessageSchema, ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
 class OpenAI(OpenAIFriendlyProvider):
     name = "OpenAI"
-    model_name_prefixes = ["gpt", "o1", "o3"]
+    model_name_prefixes = ["gpt", "o1", "o3", "o4"]
     model_name_keywords_exclude = ["audio", "realtime", "transcribe"]
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
-    default_model = "o3-mini"
+    default_model = "gpt-4.1"
     default_image_model = "dall-e-3"
 
-    async def _get_chat_completion_response(
+    async def get_chat_response(
         self,
-        messages: list[ChatCompletionMessageSchema],
-        model: str,
-        system_prompt: str,
+        messages: list[ChatCompletionMessageParam],
+        model: str | None = None,
+        system_prompt: str = gpt_settings.assistant_prompt,
     ) -> ChatResponseSchema:
+        model = model or self.default_model
+
+        self.presence_penalty = self.presence_penalty if "search" not in model else NOT_GIVEN
+        self.temperature = self.temperature if "search" not in model else NOT_GIVEN
+        self.frequency_penalty = self.frequency_penalty if "search" not in model else NOT_GIVEN
+
         if model.lower().startswith("o1-preview") or model.lower().startswith("o1-mini"):
-            dialog: Iterable[ChatCompletionMessageParam] = messages  # type: ignore
+            dialog: list[ChatCompletionMessageParam] = messages
         else:
             system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
-            dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
+            dialog = [system_message] + messages
 
-        response = await self.client.chat.completions.create(
-            model=model,
-            messages=dialog,
-            max_completion_tokens=self.max_tokens,
-            max_tokens=self.max_tokens,
-            presence_penalty=self.presence_penalty if "search" not in model else NOT_GIVEN,
-            temperature=self.temperature if "search" not in model else NOT_GIVEN,
-            frequency_penalty=self.frequency_penalty if "search" not in model else NOT_GIVEN,
-            timeout=self.timeout,
-        )
-        if len(response.choices) != 0:
-            choices: list[Choice] = response.choices
-            data = choices[0]
-            answer = data.message.content
-            usage = response.usage
-        else:
-            answer = ""
-            usage = None
-
-        return ChatResponseSchema(answer=answer or "", provider=self.name, model=model, usage=usage)
+        return await self._get_chat_completion_response(messages=dialog, model=model, system_prompt=system_prompt)
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:

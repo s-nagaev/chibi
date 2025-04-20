@@ -1,7 +1,4 @@
-from typing import Literal, Required, TypedDict, Union
-
 from openai.types import CompletionUsage
-from openai.types.chat import ChatCompletionMessageParam
 from openai.types.completion_usage import CompletionTokensDetails, PromptTokensDetails
 from pydantic import BaseModel
 
@@ -25,16 +22,3 @@ class ModelChangeSchema(BaseModel):
     provider: str
     name: str
     image_generation: bool
-
-
-class UserMessageSchema(TypedDict, total=False):
-    content: Required[str]
-    role: Required[Literal["user"]]
-
-
-class AssistantMessageSchema(TypedDict, total=False):
-    content: Required[str]
-    role: Required[Literal["assistant"]]
-
-
-ChatCompletionMessageSchema = Union[AssistantMessageSchema, UserMessageSchema, ChatCompletionMessageParam]

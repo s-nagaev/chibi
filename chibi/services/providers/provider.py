@@ -1,17 +1,10 @@
+import datetime
 import inspect
+import json
 from abc import ABC
 from functools import wraps
 from io import BytesIO
-from typing import (
-    Awaitable,
-    Callable,
-    Generic,
-    Iterable,
-    Literal,
-    ParamSpec,
-    TypeVar,
-    cast,
-)
+from typing import Awaitable, Callable, Generic, Literal, ParamSpec, TypeVar, cast
 
 import httpx
 from httpx import Response
@@ -27,10 +20,14 @@ from openai import (
 )
 from openai.types import ImagesResponse
 from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
+    ChatCompletionMessageToolCallParam,
     ChatCompletionSystemMessageParam,
+    ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import Choice
+from openai.types.chat.chat_completion_message_tool_call_param import Function
 
 from chibi.config import gpt_settings
 from chibi.constants import IMAGE_SIZE_LITERAL
@@ -42,7 +39,8 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.schemas.app import ChatCompletionMessageSchema, ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema
+from chibi.services.providers.tools import registered_functions, tools
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -68,25 +66,18 @@ class Provider(ABC):
         # self.active_model = user.model if user else None
 
     async def _get_chat_completion_response(
-        self,
-        messages: list[ChatCompletionMessageSchema],
-        model: str,
-        system_prompt: str,
+        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
     ) -> ChatResponseSchema:
         raise NotImplementedError
 
     async def get_chat_response(
         self,
-        messages: list[ChatCompletionMessageSchema],
+        messages: list[ChatCompletionMessageParam],
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
     ) -> ChatResponseSchema:
         model = model or self.default_model
-        return await self._get_chat_completion_response(
-            model=model,
-            messages=messages,
-            system_prompt=system_prompt,
-        )
+        return await self._get_chat_completion_response(messages=messages, model=model, system_prompt=system_prompt)
 
     async def get_available_models(self, image_generation: bool = False) -> list[str]:
         raise NotImplementedError
@@ -188,33 +179,83 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         return AsyncOpenAI(api_key=self.token, base_url=self.base_url)
 
     async def _get_chat_completion_response(
-        self,
-        messages: list[ChatCompletionMessageSchema],
-        model: str,
-        system_prompt: str,
+        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
     ) -> ChatResponseSchema:
-        system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
-        dialog: Iterable[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
+        if not system_prompt:
+            dialog = messages
+        else:
+            system_prompt += f"Now {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+            system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+            dialog: list[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
         response = await self.client.chat.completions.create(
             model=model,
             messages=dialog,
             temperature=self.temperature,
-            max_completion_tokens=self.max_tokens,
+            max_tokens=self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
+            tools=tools,
+            tool_choice="auto",
         )
+        if not response.choices:
+            logger.error(f"Response w/o choices received: {response}")
+
         if len(response.choices) != 0:
             choices: list[Choice] = response.choices
             data = choices[0]
-            answer = data.message.content
+            answer = data.message.content or ""
             usage = response.usage
+            tool_calls = getattr(data.message, "tool_calls", None)
         else:
             answer = ""
             usage = None
+            tool_calls = None
 
-        return ChatResponseSchema(answer=answer or "", provider=self.name, model=model, usage=usage)
+        if not tool_calls:
+            return ChatResponseSchema(answer=answer or "", provider=self.name, model=model, usage=usage)
+
+        logger.opt(colors=True).info(f"<magenta>Model {model} requested a function call..</magenta>")
+
+        for tool_call in tool_calls:
+            function_name = tool_call.function.name
+            function_to_call = registered_functions.get(function_name)
+            if not function_to_call:
+                raise ValueError(f"Function {function_name} called but it's not registered. This should never happen.")
+
+            function_args = json.loads(tool_call.function.arguments)
+            logger.opt(colors=True).info(f"<magenta>Calling a function {function_name}..</magenta>")
+
+            if function_args:
+                function_response = await function_to_call(**function_args)
+            else:
+                function_response = await function_to_call()
+
+            messages.append(
+                ChatCompletionAssistantMessageParam(
+                    role="assistant",
+                    content=answer,
+                    tool_calls=[
+                        ChatCompletionMessageToolCallParam(
+                            id=tool_call.id,
+                            type="function",
+                            function=Function(name=function_name, arguments=tool_call.function.arguments),
+                        )
+                    ],
+                )
+            )
+            messages.append(
+                ChatCompletionToolMessageParam(
+                    tool_call_id=tool_call.id,
+                    role="tool",
+                    content=function_response,
+                )
+            )
+        logger.opt(colors=True).info(
+            f"<magenta>Function result received, returning it to the model {model}...</magenta>"
+        )
+        return await self._get_chat_completion_response(messages=messages, model=model, system_prompt=system_prompt)
 
     async def get_available_models(self, image_generation: bool = False) -> list[str]:
         models = await self.client.models.list()
@@ -273,7 +314,7 @@ class RestApiFriendlyProvider(Provider):
             return response
 
         logger.error(
-            f"Unexpected response from {self.name} API. Status code: {response.status_code}. " f"Data: {response.text}"
+            f"Unexpected response from {self.name} API. Status code: {response.status_code}. Data: {response.text}"
         )
         if response.status_code == 401:
             raise NotAuthorizedError(provider=self.name)

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2025-04-20
+
+### Added
+- Implemented **initial** support for LLM function calling (tool use).
+- Added initial tools available for LLM invocation:
+  - `web_search`
+  - `search_news`
+  - `read_web_page`
+  - `get_current_datetime`
+- Integrated Vulture for dead code detection in the development workflow.
+
+### Changed
+- Updated core project dependencies to their latest compatible versions.
+- Replaced Flake8, isort, and Black with Ruff for linting and formatting, streamlining the development toolchain.
+- Updated GitHub Actions CI workflow (`Quality Gate`) to use Ruff and Vulture, and optimized setup steps.
+
+### Fixed
+- Addressed issues with Telegram Markdown rendering when LLM responses were split into multiple messages.
+
 ## [1.1.0] - 2025-04-13
 
 ### Added
@@ -247,6 +266,8 @@ applied.
 
 [Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
 
+[1.2.0]: https://github.com/s-nagaev/chibi/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/s-nagaev/chibi/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/s-nagaev/chibi/compare/v0.10.0...v1.0.0
 [0.10.0]: https://github.com/s-nagaev/chibi/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/s-nagaev/chibi/compare/v0.8.2...v0.9.0
