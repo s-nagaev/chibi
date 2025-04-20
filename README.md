@@ -45,11 +45,11 @@ Chibi currently supports models from the following providers:
 *   **Optional "Public Mode":** Run the bot without a master API key. Each user will be prompted to provide their own key via private message to the bot.
 *   **User and Group Whitelists:** Restrict bot access to specific users or chat groups.
 *   **Easy Deployment with Docker:** Pre-configured Docker image ready to run with minimal setup. Public mode works out-of-the-box without needing API keys in the environment variables.
+*   **Optional Health Monitoring (Heartbeat):** The bot can periodically ping a configured URL (e.g., a healthchecks.io endpoint) to signal its operational status, allowing external systems to monitor its health and availability.  
 *   **Low Resource Usage:** Runs efficiently even on low-spec hardware like a Raspberry Pi 4.
 *   **Asynchronous:** Fast, non-blocking performance.
 *   **Configurable:** Extensive options via environment variables.
 *   **MIT Licensed:** Open source and free to use.
-
 
 ## System Requirements
 
@@ -292,8 +292,17 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 |:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
 | `USERS_WHITELIST`             | Comma-separated list of Telegram usernames (with or without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
 | `GROUPS_WHITELIST`            | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                          | `None`        |
-| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |...
+| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |
 | `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit.                             | `None`        |
+
+### Heartbeat
+
+| Variable                   | Description                                                                                                                                                                                                                                        | Default Value |
+|----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
+| `HEARTBEAT_URL`            | The target URL endpoint for sending periodic heartbeat GET requests. *Setting this variable enables the heartbeat feature.* Used to signal to an external monitoring system (like healthchecks.io, uptime kuma, etc.) that the bot is operational. | `None`        |
+| `HEARTBEAT_FREQUENCY_CALL` | The interval (in seconds) between sending heartbeat pings to the `HEARTBEAT_URL`. This only applies if `HEARTBEAT_URL` is set.                                                                                                                     | 30            |
+| `HEARTBEAT_RETRY_CALLS`    | Number of times the HTTP client (`httpx`) will automatically retry sending the heartbeat request upon transient failures (e.g., network errors, specific server responses) before logging an error.                                                | 3             |
+| `HEARTBEAT_PROXY`          | Optional proxy URL (e.g., `http://user:pass@host:port` or `socks5://host:port`) to use for sending the heartbeat requests.                                                                                                                         | `None`        |
 
 ## Getting API Keys
 

@@ -14,8 +14,8 @@ httpx = "0.28.1"
 loguru = "0.7.3"
 openai = "1.75.0"
 pydantic = "2.11.3"
-pydantic-settings = "2.8.1"
-python-telegram-bot = {extras = ["socks"], version = "^22.0"}
+pydantic-settings = "2.9.1"
+python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.0"}
 redis = {extras = ["hiredis"], version = "5.2.1"}
 telegramify-markdown = {extras = ["mermaid"], version = "0.5.1"}
 trafilatura = "2.0.0"
