@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "chibi"
-version = "1.1.0"
-description = "Another one ChatGPT Telegram bot"
+version = "1.2.0"
+description = "An asynchronous Telegram bot providing access to various LLMs (OpenAI, Gemini, Anthropic, etc.) and image generation models, featuring context management and built-in tools for web search, news retrieval, and reading web pages."
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
 readme = "README.md"
@@ -14,27 +14,19 @@ httpx = "0.28.1"
 loguru = "0.7.3"
 openai = "1.75.0"
 pydantic = "2.11.3"
-pydantic-settings = "^2.8.1"
+pydantic-settings = "2.8.1"
 python-telegram-bot = {extras = ["socks"], version = "^22.0"}
 redis = {extras = ["hiredis"], version = "5.2.1"}
 telegramify-markdown = {extras = ["mermaid"], version = "0.5.1"}
 trafilatura = "2.0.0"
 
 [tool.poetry.group.dev.dependencies]
-black = "^23.1.0"
 mypy = "1.10.0"
 ruff = "^0.11.6"
 vulture = "^2.14"
 
 [tool.poetry.requires-plugins]
 poetry-plugin-export = ">=1.8"
-
-[tool.black]
-line-length = 120
-include = ".pyi?$"
-
-[tool.isort]
-profile = "black"
 
 [tool.mypy]
 python_version = "3.11"
@@ -49,12 +41,6 @@ warn_unused_configs = true
 warn_unused_ignores = true
 allow_untyped_calls = true
 plugins = [ "pydantic.mypy" ]
-
-[tool.flake8]
-ignore = "E203,E266,H106,H904,W503"
-max-line-length = 120
-exit-zero = true
-exclude = " .git,__pycache__ "
 
 [tool.vulture]
 ignore_names = ["expected_type",]
