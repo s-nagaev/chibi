@@ -31,7 +31,7 @@ async def redis_storage(monkeypatch) -> AsyncGenerator[RedisStorage, None]:
 @freeze_time("2025-01-01 00:00:00")
 async def test_ttl(redis_storage: RedisStorage) -> None:
     """
-    Test that messages expire correctly without using actual sleep.
+    Test that messages expire correctly.
     """
     user = await redis_storage.get_or_create_user(1)
     m = Message(role="user", content="temp")
@@ -59,22 +59,6 @@ async def test_message_order(redis_storage: RedisStorage) -> None:
 
     msgs = await redis_storage.get_messages(user)
     assert [msg["content"] for msg in msgs] == ["first", "second"]
-
-
-@pytest.mark.asyncio
-async def test_skip_bad_message(redis_storage: RedisStorage) -> None:
-    """
-    Test that invalid JSON entries are skipped.
-    """
-    user = await redis_storage.get_or_create_user(3)
-    m = Message(role="user", content="good")
-    await redis_storage.add_message(user, m)
-
-    bad_key = f"user:{user.id}:message:999"
-    await redis_storage.redis.set(bad_key, "not a json")
-
-    msgs = await redis_storage.get_messages(user)
-    assert [msg["content"] for msg in msgs] == ["good"]
 
 
 @pytest.mark.asyncio

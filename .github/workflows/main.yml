@@ -43,5 +43,7 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup
       - name: Run Tests
+        env:
+          TELEGRAM_BOT_TOKEN: dummy-for-ci
         run: |
-          pytest .
+          pytest -vv .

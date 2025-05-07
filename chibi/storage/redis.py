@@ -69,17 +69,7 @@ class RedisStorage(Database):
         user = User.model_validate_json(user_data)
         message_keys_pattern = f"user:{user.id}:message:*"
         message_keys = set(await self.redis.keys(message_keys_pattern))
-        user_messages = []
-        for message_key in message_keys:
-            raw = await self.redis.get(message_key)
-            if not raw:
-                continue
-            try:
-                msg = Message.model_validate_json(raw)
-            except Exception:
-                # Skip messages that cannot be parsed
-                continue
-            user_messages.append(msg)
+        user_messages = [Message.model_validate_json(await self.redis.get(message_key)) for message_key in message_keys]
         user.messages = sorted(user_messages, key=lambda msg: msg.id)
 
         return user
