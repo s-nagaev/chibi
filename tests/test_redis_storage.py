@@ -1,3 +1,5 @@
+from typing import AsyncGenerator
+
 import pytest
 from fakeredis import FakeAsyncRedis
 from freezegun import freeze_time
@@ -7,7 +9,7 @@ from chibi.storage.redis import RedisStorage
 
 
 @pytest.fixture
-async def redis_storage(monkeypatch) -> RedisStorage:
+async def redis_storage(monkeypatch) -> AsyncGenerator[RedisStorage, None]:
     """
     Create RedisStorage instance with FakeAsyncRedis backend.
     """
@@ -23,7 +25,6 @@ async def redis_storage(monkeypatch) -> RedisStorage:
     await storage.redis.flushdb()
     yield storage
     await storage.close()
-    # await getattr(storage, "close", lambda: None)()
 
 
 @pytest.mark.asyncio

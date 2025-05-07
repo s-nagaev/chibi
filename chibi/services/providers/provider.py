@@ -296,6 +296,8 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         if not model:
             raise NoModelSelectedError(provider=self.name, detail="No image generation model selected")
         response = await self._get_image_generation_response(prompt=prompt, model=model)
+        if not response.data:
+            raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
         return [image.url for image in response.data if image.url]
 
 

@@ -4,7 +4,6 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
-from chibi.services.providers.tools.cmd import create_file, run_command_in_terminal
 from chibi.services.providers.tools.current_date import get_current_datetime
 from chibi.services.providers.tools.web_search import (
     read_web_page,

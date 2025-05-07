@@ -1,6 +1,6 @@
 import asyncio
 from functools import wraps
-from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar
+from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar, cast
 
 from chibi.config.app import application_settings
 from chibi.storage.abstract import Database
@@ -36,7 +36,7 @@ class DatabaseCache:
             if backend == "redis":
                 # RedisStorage.create expects URL and password
                 self._cache = await RedisStorage.create(
-                    url=application_settings.redis,
+                    url=cast(str, application_settings.redis),
                     password=application_settings.redis_password,
                 )
             elif backend == "dynamodb":
