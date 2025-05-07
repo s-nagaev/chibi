@@ -64,7 +64,8 @@ class ChibiBot:
                 ),
             ),
             BotCommand(
-                command="reset", description="Reset your conversation history (will reduce prompt and save some tokens)"
+                command="reset",
+                description="Reset your conversation history (will reduce prompt and save some tokens)",
             ),
         ]
         if not application_settings.hide_imagine:
@@ -84,7 +85,12 @@ class ChibiBot:
             )
         self.background_tasks: set[Task] = set()
 
-    def run_task(self, coro: Coroutine[Any, Any, _T], name: str | None = None, context: Context | None = None) -> None:
+    def run_task(
+        self,
+        coro: Coroutine[Any, Any, _T],
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> None:
         task = asyncio.create_task(coro=coro, name=name, context=context)
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
@@ -187,7 +193,9 @@ class ChibiBot:
         self, query: CallbackQuery, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         mapped_models = get_user_context(
-            context=context, key=UserContext.MAPPED_MODELS, expected_type=dict[str, ModelChangeSchema]
+            context=context,
+            key=UserContext.MAPPED_MODELS,
+            expected_type=dict[str, ModelChangeSchema],
         )
         await query.answer()
 
@@ -305,7 +313,11 @@ class ChibiBot:
         app.add_handler(
             InlineQueryHandler(
                 self.inline_query,
-                chat_types=[constants.ChatType.PRIVATE, constants.ChatType.GROUP, constants.ChatType.SUPERGROUP],
+                chat_types=[
+                    constants.ChatType.PRIVATE,
+                    constants.ChatType.GROUP,
+                    constants.ChatType.SUPERGROUP,
+                ],
             )
         )
         app.add_error_handler(self.error_handler)
@@ -319,7 +331,9 @@ class ChibiBot:
                     f"every {application_settings.heartbeat_frequency_call} seconds."
                 )
                 app.job_queue.run_repeating(
-                    callback=run_heartbeat, interval=application_settings.heartbeat_frequency_call, first=0.0
+                    callback=run_heartbeat,
+                    interval=application_settings.heartbeat_frequency_call,
+                    first=0.0,
                 )
         app.run_polling()
 

@@ -34,3 +34,14 @@ jobs:
       - name: Run Mypy
         run: |
           mypy .
+
+  Tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+      - name: Run Tests
+        run: |
+          pytest --v .

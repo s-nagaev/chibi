@@ -21,11 +21,19 @@ class Anthropic(RestApiFriendlyProvider):
         }
 
     async def _get_chat_completion_response(
-        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
+        self,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        system_prompt: str | None = None,
     ) -> ChatResponseSchema:
         url = "https://api.anthropic.com/v1/messages"
 
-        data = {"model": model, "messages": messages, "system": system_prompt, "max_tokens": self.max_tokens}
+        data = {
+            "model": model,
+            "messages": messages,
+            "system": system_prompt,
+            "max_tokens": self.max_tokens,
+        }
         response = await self._request(method="POST", url=url, data=data)
 
         response_data = ChatCompletionSchema(**response.json())

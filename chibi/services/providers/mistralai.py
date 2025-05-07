@@ -21,7 +21,10 @@ class MistralAI(RestApiFriendlyProvider):
         }
 
     async def _get_chat_completion_response(
-        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
+        self,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        system_prompt: str | None = None,
     ) -> ChatResponseSchema:
         url = "https://api.mistral.ai/v1/chat/completions"
 

@@ -43,7 +43,10 @@ from chibi.utils import (
 
 @handle_gpt_exceptions
 async def handle_model_selection(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, model: ModelChangeSchema, query: CallbackQuery
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    model: ModelChangeSchema,
+    query: CallbackQuery,
 ) -> None:
     telegram_user = get_telegram_user(update=update)
     await set_active_model(user_id=telegram_user.id, model=model)
@@ -78,17 +81,25 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await asyncio.sleep(2.5)
 
     chat_response: ChatResponseSchema = await get_gtp_chat_answer_task
-    # usage_message = (
-    #     f"Tokens used: {str(usage.get('total_tokens', 'n/a'))} "
-    #     f"({str(usage.get('prompt_tokens', 'n/a'))} prompt, "
-    #     f"{str(usage.get('completion_tokens', 'n/a'))} completion)"
-    # )
-    answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
-    logged_answer = f"Answer: {answer_to_log}" if application_settings.log_prompt_data else ""
+    usage = chat_response.usage
+    if usage:
+        usage_message = (
+            f"Tokens used: {usage.total_tokens or 'n/a'}: "
+            f"{usage.prompt_tokens or 'n/a'} prompt, "
+            f"{usage.completion_tokens or 'n/a'} completion."
+        )
+    else:
+        usage_message = ""
+
+    if application_settings.log_prompt_data:
+        answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
+        logged_answer = f"Answer: {answer_to_log}"
+    else:
+        logged_answer = ""
 
     logger.info(
         f"{user_data(update)} got {chat_response.provider} ({chat_response.model}) answer in "
-        f"the {chat_data(update)}. {logged_answer}"
+        f"the {chat_data(update)}. {logged_answer} {usage_message}"
     )
     await send_gpt_answer_message(gpt_answer=chat_response.answer, update=update, context=context)
     history_is_summarized = await check_history_and_summarize(user_id=telegram_user.id)
@@ -153,7 +164,10 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
             )
             image_urls = cast(list[str], image_data)
             await send_message(
-                update=update, context=context, text="\n".join(image_urls), disable_web_page_preview=False
+                update=update,
+                context=context,
+                text="\n".join(image_urls),
+                disable_web_page_preview=False,
             )
     else:
         await context.bot.send_media_group(

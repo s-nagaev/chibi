@@ -2,9 +2,18 @@ import datetime
 
 from loguru import logger
 
+from chibi.services.providers.tools.schemas import ToolResponse
 
-async def get_current_datetime():
+
+async def get_current_datetime() -> str:
     logger.log("TOOL", "Getting current date & time")
     now = datetime.datetime.now()
-    datetime_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    return datetime_str
+    result = {
+        "status": "ok",
+        "datetime_now": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    return ToolResponse(
+        tool_name="get_current_datetime",
+        status="ok",
+        result=result,
+    ).model_dump_json()

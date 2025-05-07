@@ -66,7 +66,10 @@ class Provider(ABC):
         # self.active_model = user.model if user else None
 
     async def _get_chat_completion_response(
-        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
+        self,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        system_prompt: str | None = None,
     ) -> ChatResponseSchema:
         raise NotImplementedError
 
@@ -179,7 +182,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         return AsyncOpenAI(api_key=self.token, base_url=self.base_url)
 
     async def _get_chat_completion_response(
-        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
+        self,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        system_prompt: str | None = None,
     ) -> ChatResponseSchema:
         if not system_prompt:
             dialog = messages
@@ -225,7 +231,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 raise ValueError(f"Function {function_name} called but it's not registered. This should never happen.")
 
             function_args = json.loads(tool_call.function.arguments)
-            logger.opt(colors=True).info(f"<magenta>Calling a function {function_name}..</magenta>")
+            logger.opt(colors=True).info(
+                f"<magenta>Calling a function '{function_name}'. Args: {function_args}</magenta>"
+            )
 
             if function_args:
                 function_response = await function_to_call(**function_args)
@@ -240,7 +248,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                         ChatCompletionMessageToolCallParam(
                             id=tool_call.id,
                             type="function",
-                            function=Function(name=function_name, arguments=tool_call.function.arguments),
+                            function=Function(
+                                name=function_name,
+                                arguments=tool_call.function.arguments,
+                            ),
                         )
                     ],
                 )
@@ -294,7 +305,11 @@ class RestApiFriendlyProvider(Provider):
         raise NotImplementedError
 
     async def _request(
-        self, method: str, url: str, data: RequestData | None = None, params: QueryParamTypes | None = None
+        self,
+        method: str,
+        url: str,
+        data: RequestData | None = None,
+        params: QueryParamTypes | None = None,
     ) -> Response:
         if not self.token:
             raise NoApiKeyProvidedError(provider=self.name)
@@ -303,9 +318,17 @@ class RestApiFriendlyProvider(Provider):
 
         try:
             async with httpx.AsyncClient(
-                transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy
+                transport=transport,
+                timeout=gpt_settings.timeout,
+                proxy=gpt_settings.proxy,
             ) as client:
-                response = await client.request(method=method, url=url, json=data, headers=self._headers, params=params)
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    json=data,
+                    headers=self._headers,
+                    params=params,
+                )
         except Exception as e:
             logger.error(f"An error occurred while calling the {self.name} API: {e}")
             raise ServiceResponseError(provider=self.name, detail=str(e))

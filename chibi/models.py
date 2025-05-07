@@ -118,7 +118,11 @@ class User(BaseModel):
         for provider in self.available_providers:
             models.extend(
                 [
-                    ModelChangeSchema(provider=provider.name, name=model, image_generation=image_generation)
+                    ModelChangeSchema(
+                        provider=provider.name,
+                        name=model,
+                        image_generation=image_generation,
+                    )
                     for model in await provider.get_available_models(image_generation=image_generation)
                 ]
             )
