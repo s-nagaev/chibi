@@ -86,52 +86,6 @@ tools = [
             },
         ),
     ),
-    ChatCompletionToolParam(
-        type="function",
-        function=FunctionDefinition(
-            name="run_command_in_terminal",
-            description=(
-                "Run command in the zsh shell (MacOS). Will run via python's subprocess.run() "
-                "Will return json including return code, stdout and stderr."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "cmd": {"type": "string", "description": "Shell command to run."},
-                },
-                "required": ["cmd"],
-            },
-        ),
-    ),
-    ChatCompletionToolParam(
-        type="function",
-        function=FunctionDefinition(
-            name="create_file",
-            description="Create a file at the given full path (including any directories).",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "File content",
-                    },
-                    "full_path": {
-                        "type": "string",
-                        "description": "Full file name, including file path.",
-                    },
-                    "overwrite": {
-                        "type": "string",
-                        "enum": ["true", "false"],
-                        "description": (
-                            "Set it to true to overwrite the file. If overwrite is false and "
-                            "the file exists, raises FileExistsError."
-                        ),
-                    },
-                },
-                "required": ["content", "full_path"],
-            },
-        ),
-    ),
 ]
 
 registered_functions: dict[str, Callable[..., Awaitable[Any]]] = {
@@ -139,6 +93,4 @@ registered_functions: dict[str, Callable[..., Awaitable[Any]]] = {
     "web_search": web_search,
     "search_news": search_news,
     "read_web_page": read_web_page,
-    "run_command_in_terminal": run_command_in_terminal,
-    "create_file": create_file,
 }
