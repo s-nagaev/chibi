@@ -168,14 +168,19 @@ def split_markdown_v2(
 
 
 async def send_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    reply: bool = True,
+    **kwargs: Any,
 ) -> TelegramMessage:
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
 
     if reply:
         return await context.bot.send_message(
-            chat_id=telegram_chat.id, reply_to_message_id=telegram_message.message_id, **kwargs
+            chat_id=telegram_chat.id,
+            reply_to_message_id=telegram_message.message_id,
+            **kwargs,
         )
     return await context.bot.send_message(chat_id=telegram_chat.id, **kwargs)
 
@@ -197,7 +202,13 @@ async def send_long_message(
         ]
 
     for chunk_number, chunk in enumerate(chunks):
-        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode, reply=chunk_number == 0)
+        await send_message(
+            update=update,
+            context=context,
+            text=chunk,
+            parse_mode=parse_mode,
+            reply=chunk_number == 0,
+        )
 
 
 async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -223,7 +234,10 @@ async def send_message_in_plain_text_and_file(message: str, update: Update, cont
 async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         await send_long_message(
-            message=gpt_answer, update=update, context=context, parse_mode=constants.ParseMode.MARKDOWN_V2
+            message=gpt_answer,
+            update=update,
+            context=context,
+            parse_mode=constants.ParseMode.MARKDOWN_V2,
         )
     except BadRequest as e:
         # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
@@ -263,7 +277,9 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return reply_message.from_user.id == context.bot.id
 
 
-def check_user_allowance(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, Coroutine[Any, Any, R | None]]:
+def check_user_allowance(
+    func: Callable[P, Coroutine[Any, Any, R]],
+) -> Callable[P, Coroutine[Any, Any, R | None]]:
     """Decorator controlling access to the chatbot.
 
     This deco checks:
@@ -293,7 +309,11 @@ def check_user_allowance(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[
 
         if telegram_chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
             logger.warning(f"{user_data(update)} is not allowed to work with me. Request rejected.")
-            await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
+            await send_message(
+                update=update,
+                context=context,
+                text=telegram_settings.message_for_disallowed_users,
+            )
             return None
 
         if telegram_chat.type in GROUP_CHAT_TYPES and not group_is_allowed(tg_chat=telegram_chat):
@@ -367,7 +387,9 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
             await send_message(
-                update=update, context=context, text=f"Rate Limit exceeded for {e.provider}. We should back off a bit."
+                update=update,
+                context=context,
+                text=f"Rate Limit exceeded for {e.provider}. We should back off a bit.",
             )
             return None
 
@@ -501,7 +523,8 @@ async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
         return None
 
     transport = httpx.AsyncHTTPTransport(
-        retries=application_settings.heartbeat_retry_calls, proxy=application_settings.heartbeat_proxy
+        retries=application_settings.heartbeat_retry_calls,
+        proxy=application_settings.heartbeat_proxy,
     )
 
     async with httpx.AsyncClient(transport=transport, proxy=application_settings.heartbeat_proxy) as client:

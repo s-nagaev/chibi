@@ -19,10 +19,7 @@ tools = [
         type="function",
         function=FunctionDefinition(
             name="get_current_datetime",
-            description=(
-                "Get the current date and time. Keep in mind that your current date data is based on your update date. "
-                "Use this function to find out the real date and time."
-            ),
+            description="Get the current date and time.",
             parameters={"type": "object", "properties": {}, "required": []},
         ),
     ),

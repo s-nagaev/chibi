@@ -1,11 +1,10 @@
-import json
-
 from duckduckgo_search import DDGS
 from httpx import Response
 from loguru import logger
 from trafilatura import extract
 
 from chibi.config import gpt_settings
+from chibi.services.providers.tools.schemas import ToolResponse
 from chibi.services.providers.tools.utils import _get_url
 
 duckduckgo = DDGS(proxy=gpt_settings.proxy)
@@ -28,8 +27,18 @@ async def search_news(search_phrase: str, max_results: int = 10) -> str:
     except Exception as e:
         msg = f"Couldn't find news for '{search_phrase}', max_results={max_results}. Error: {e}"
         logger.warning(msg)
-        return msg
-    return json.dumps(result)
+        response = ToolResponse(
+            tool_name="search_news",
+            status="error",
+            result=msg,
+        )
+        return response.model_dump_json()
+    response = ToolResponse(
+        tool_name="search_news",
+        status="ok",
+        result=result,
+    )
+    return response.model_dump_json()
 
 
 async def web_search(search_phrase: str, max_results: int = 10) -> str:
@@ -49,8 +58,19 @@ async def web_search(search_phrase: str, max_results: int = 10) -> str:
     except Exception as e:
         msg = f"Couldn't get search result for '{search_phrase}', max_results={max_results}.Error: {e}"
         logger.warning(msg)
-        return msg
-    return json.dumps(result)
+        response = ToolResponse(
+            tool_name="web_search",
+            status="error",
+            result=msg,
+        )
+        return response.model_dump_json()
+
+    response = ToolResponse(
+        tool_name="web_search",
+        status="ok",
+        result=result,
+    )
+    return response.model_dump_json()
 
 
 async def read_web_page(url: str) -> str:
@@ -70,22 +90,46 @@ async def read_web_page(url: str) -> str:
     except Exception as e:
         msg = f"Couldn't read URL: {url}. Error: {e}"
         logger.warning(msg)
-        return msg
+        return ToolResponse(
+            tool_name="read_web_page",
+            status="error",
+            result=msg,
+        ).model_dump_json()
 
     if response.status_code != 200:
         msg = f"Failed to get URL: {url}. Status code: {response.status_code}"
         logger.warning(msg)
-        return msg
+        return ToolResponse(
+            tool_name="read_web_page",
+            status="error",
+            result=msg,
+        ).model_dump_json()
 
     data = response.text
     if not data:
         msg = f"Failed to extract data from URL: {url}. Empty response received."
         logger.warning(msg)
-        return msg
+        return ToolResponse(
+            tool_name="read_web_page",
+            status="error",
+            result=msg,
+        ).model_dump_json()
 
-    result = extract(filecontent=data, include_links=True)
-    if not result:
-        logger.warning(f"Failed to extract URL: {url}. Empty extracted data. Trying to send raw HTML to model")
-        return data
+    content = extract(filecontent=data, include_links=True)
+    if not content:
+        msg = f"Failed to extract URL: {url}. Empty extracted data. Trying to send raw HTML to model"
+        logger.warning(msg)
+        return ToolResponse(
+            tool_name="read_web_page",
+            status="warning",
+            result=data,
+            additional_details=msg,
+        ).model_dump_json()
+
     logger.log("TOOL", f"The data from the URL {url} seems to be successfully extracted")
-    return result
+
+    return ToolResponse(
+        tool_name="read_web_page",
+        status="ok",
+        result=content,
+    ).model_dump_json()
