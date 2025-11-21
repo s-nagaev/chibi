@@ -8,8 +8,13 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
+aiocache = "0.12.3"
+anthropic = "^0.72.1"
 boto3 = "^1.38.3"
+dashscope = "^1.25.1"
+ddgs = "^9.9.0"
 fake-useragent = "2.2.0"
+google-genai = "1.51.0"
 httpx = "0.28.1"
 loguru = "0.7.3"
 openai = "1.77.0"
@@ -19,11 +24,6 @@ python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.0"}
 redis = {extras = ["hiredis"], version = "5.2.1"}
 telegramify-markdown = "0.5.1"
 trafilatura = "2.0.0"
-aiocache = "0.12.3"
-anthropic = "^0.72.1"
-google-genai = "1.51.0"
-ddgs = "^9.9.0"
-dashscope = "^1.25.1"
 
 [tool.poetry.group.dev.dependencies]
 factory-boy = "^3.3.3"
