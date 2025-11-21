@@ -227,7 +227,7 @@ class Gemini(RestApiFriendlyProvider):
                 context=context,
                 update=update,
             )
-        # TODO: unreachable raise, temporary solution, for mypy only
+        # Unreachable raise, temporary solution, for mypy only
         raise ServiceResponseError(provider=self.name, model=model_name, detail="this should never happen")
 
     async def get_chat_response(

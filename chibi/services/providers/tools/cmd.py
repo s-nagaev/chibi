@@ -102,7 +102,7 @@ class RunCommandInTerminalTool(ChibiTool):
         raw_stdout = stdout.decode()
         raw_stderr = stderr.decode()
 
-        # TODO: to settings/constants
+        # Move to settings/constants
         truncated_stdout = raw_stdout if len(raw_stdout) < 10000 else f"...truncated... {raw_stdout[10000:]}"
         truncated_stderr = raw_stderr if len(raw_stderr) < 10000 else f"...truncated... {raw_stderr[10000:]}"
         logger.log(

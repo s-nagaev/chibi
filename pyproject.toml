@@ -36,6 +36,7 @@ ruff = "^0.11.6"
 vulture = "^2.14"
 mypy = "^1.15.0"
 ipython = "^9.7.0"
+pytest-asyncio = "^1.3.0"
 
 [tool.poetry.requires-plugins]
 poetry-plugin-export = ">=1.8"

@@ -5,7 +5,7 @@ RUN apk update && apk upgrade && apk add --no-cache ca-certificates gcc build-ba
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.11-alpine
 
