@@ -1,9 +1,9 @@
-FROM --platform=$BUILDPLATFORM python:3.11-slim AS builder
+FROM python:3.11-slim AS builder
 
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-       build-essential gcc libffi-dev libxml2-dev libxslt-dev cargo rustc \
+       build-essential gcc libffi-dev libxml2-dev libxslt-dev cargo rustc zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-FROM --platform=linux/arm/v7 python:3.11-slim
+FROM python:3.11-slim
 
 RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list.d/bookworm.list \
     && echo "deb http://security.debian.org/debian-security bookworm-security main" > /etc/apt/sources.list.d/security.list \

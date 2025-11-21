@@ -1,43 +1,52 @@
+from io import BytesIO
+
+from loguru import logger
 from openai import NOT_GIVEN
 from openai.types import ImagesResponse
-from openai.types.chat import (
-    ChatCompletionMessageParam,
-    ChatCompletionSystemMessageParam,
-)
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ChatResponseSchema
+from chibi.constants import TTS_INSTRUCTIONS
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
 class OpenAI(OpenAIFriendlyProvider):
+    api_key = gpt_settings.openai_key
+    chat_ready = True
+    tts_ready = True
+    stt_ready = True
+    image_generation_ready = True
+
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
-    model_name_keywords_exclude = ["audio", "realtime", "transcribe"]
+    model_name_keywords_exclude = ["audio", "realtime", "transcribe", "tts", "image"]
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
-    default_model = "gpt-4.1"
+    default_model = "gpt-5.1"
     default_image_model = "dall-e-3"
+    default_stt_model = "whisper-1"
+    default_tts_model = "gpt-4o-mini-tts"
+    default_tts_voice = "nova"
 
-    async def get_chat_response(
-        self,
-        messages: list[ChatCompletionMessageParam],
-        model: str | None = None,
-        system_prompt: str = gpt_settings.assistant_prompt,
-    ) -> ChatResponseSchema:
-        model = model or self.default_model
+    async def transcribe(self, audio: BytesIO, model: str = default_stt_model) -> str:
+        logger.info(f"Transcribing audio with model {model}...")
+        response = await self.client.audio.transcriptions.create(
+            model=model,
+            file=("voice.ogg", audio.getvalue()),
+        )
+        if response:
+            logger.info(f"Transcribed text: {response.text}")
+            return response.text
+        raise ValueError("Could not transcribe audio message")
 
-        self.presence_penalty = self.presence_penalty if "search" not in model else NOT_GIVEN
-        self.temperature = self.temperature if "search" not in model else NOT_GIVEN
-        self.frequency_penalty = self.frequency_penalty if "search" not in model else NOT_GIVEN
-
-        if model.lower().startswith("o1-preview") or model.lower().startswith("o1-mini"):
-            dialog: list[ChatCompletionMessageParam] = messages
-        else:
-            system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
-            dialog = [system_message] + messages
-
-        return await self._get_chat_completion_response(messages=dialog, model=model, system_prompt=system_prompt)
+    async def speech(self, text: str, voice: str = default_tts_voice, model: str = default_tts_model) -> bytes:
+        logger.info(f"Recording a voice message with model {model}...")
+        response = await self.client.audio.speech.create(
+            model=model,
+            voice=voice,
+            input=text,
+            instructions=TTS_INSTRUCTIONS,
+        )
+        return await response.aread()
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
@@ -53,3 +62,8 @@ class OpenAI(OpenAIFriendlyProvider):
             timeout=gpt_settings.timeout,
             response_format="url",
         )
+
+    def get_model_display_name(self, model_name: str) -> str:
+        if "dall" in model_name:
+            return model_name.replace("dall-e-", "DALL·E ")
+        return model_name.replace("-", " ")

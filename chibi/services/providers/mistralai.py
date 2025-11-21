@@ -1,12 +1,16 @@
+from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.schemas.mistralai import ChatCompletionSchema, GetModelsResponseSchema
 from chibi.services.providers.provider import RestApiFriendlyProvider
 
 
 class MistralAI(RestApiFriendlyProvider):
+    api_key = gpt_settings.mistralai_key
+    chat_ready = True
+
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
     model_name_keywords_exclude = ["embed", "moderation", "ocr"]
@@ -48,19 +52,29 @@ class MistralAI(RestApiFriendlyProvider):
 
         return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self, image_generation: bool = False) -> list[str]:
+    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
             return []
 
         url = "https://api.mistral.ai/v1/models"
-        response = await self._request(method="GET", url=url)
+        try:
+            response = await self._request(method="GET", url=url)
+        except Exception as e:
+            logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
+            return []
+
         response_data = GetModelsResponseSchema(**response.json())
 
-        if gpt_settings.models_whitelist:
-            allowed_model_names = [
-                model.id for model in response_data.data if model.id in gpt_settings.models_whitelist
-            ]
-        else:
-            allowed_model_names = [model.id for model in response_data.data if self.is_chat_ready_model(model.id)]
+        all_models = [
+            ModelChangeSchema(
+                provider=self.name,
+                name=model.id,
+                image_generation=False,
+            )
+            for model in response_data.data
+        ]
+        all_models.sort(key=lambda model: model.name)
 
-        return sorted(allowed_model_names)
+        if gpt_settings.models_whitelist:
+            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
+        return [model for model in all_models if self.is_chat_ready_model(model.name)]

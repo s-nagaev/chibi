@@ -131,6 +131,10 @@ class ChibiBot:
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_chat = get_telegram_chat(update=update)
         telegram_message = get_telegram_message(update=update)
+        if telegram_message.voice:
+            self.run_task(handle_prompt(update=update, context=context))
+            return None
+
         prompt = telegram_message.text
 
         if not prompt:
@@ -308,7 +312,7 @@ class ChibiBot:
         app.add_handler(CommandHandler("reset", self.reset))
         app.add_handler(CommandHandler("start", self.help))
 
-        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
+        app.add_handler(MessageHandler(filters.TEXT | filters.VOICE | filters.AUDIO & (~filters.COMMAND), self.prompt))
 
         app.add_handler(
             InlineQueryHandler(
@@ -320,7 +324,7 @@ class ChibiBot:
                 ],
             )
         )
-        app.add_error_handler(self.error_handler)
+        # app.add_error_handler(self.error_handler)
         if application_settings.heartbeat_url:
             if not app.job_queue:
                 logger.error("Could not launch heartbeat beacon: application job queue was shut down or never started.")

@@ -1,6 +1,6 @@
-import io
 from collections import deque
 from functools import wraps
+from io import BytesIO
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -8,8 +8,8 @@ import httpx
 import telegramify_markdown
 from loguru import logger
 from telegram import Chat as TelegramChat
+from telegram import InputMediaPhoto, Update, constants
 from telegram import Message as TelegramMessage
-from telegram import Update, constants
 from telegram import User as TelegramUser
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -19,6 +19,8 @@ from chibi.constants import (
     GROUP_CHAT_TYPES,
     MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
+    SETTING_DISABLED,
+    SETTING_ENABLED,
     SETTING_SET,
     SETTING_UNSET,
     UserAction,
@@ -191,6 +193,7 @@ async def send_long_message(
     context: ContextTypes.DEFAULT_TYPE,
     parse_mode: str | None = None,
     normalize_md: bool = True,
+    reply: bool = True,
 ) -> None:
     if normalize_md:
         message = telegramify_markdown.markdownify(message)
@@ -207,7 +210,58 @@ async def send_long_message(
             context=context,
             text=chunk,
             parse_mode=parse_mode,
-            reply=chunk_number == 0,
+            reply=chunk_number == 0 if reply else False,
+        )
+
+
+async def send_audio(
+    audio: bytes,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.RECORD_VOICE)
+
+    await context.bot.send_audio(
+        chat_id=telegram_chat.id, audio=audio, title="voice", reply_to_message_id=telegram_message.message_id
+    )
+
+
+async def send_images(
+    images: list[str] | list[BytesIO],
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
+
+    if isinstance(images[0], str):
+        image_files = [await download_image(image_url=cast(str, url)) for url in images]
+        try:
+            await context.bot.send_media_group(
+                chat_id=telegram_chat.id,
+                media=[InputMediaPhoto(url) for url in image_files],
+                reply_to_message_id=telegram_message.message_id,
+            )
+        except Exception as e:
+            logger.exception(
+                f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
+                f"due to exception: {e}. Trying to send if via text message..."
+            )
+            image_urls = cast(list[str], images)
+            await send_message(
+                update=update,
+                context=context,
+                text="\n".join(image_urls),
+                disable_web_page_preview=False,
+            )
+    else:
+        await context.bot.send_media_group(
+            chat_id=telegram_chat.id,
+            media=[InputMediaPhoto(img) for img in images],
+            reply_to_message_id=telegram_message.message_id,
         )
 
 
@@ -215,7 +269,7 @@ async def send_message_in_plain_text_and_file(message: str, update: Update, cont
     telegram_chat = get_telegram_chat(update=update)
 
     await send_long_message(message=message, update=update, context=context, normalize_md=False)
-    file = io.BytesIO()
+    file = BytesIO()
     file.write(message.encode())
     file.seek(0)
     explain_message_text = (
@@ -372,7 +426,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except ServiceResponseError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
+            logger.exception(f"{error_msg_prefix}: {e}")
 
             await send_message(
                 update=update,
@@ -414,13 +468,13 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except Exception as e:
-            logger.error(f"{error_msg_prefix}: {e!r}")
+            logger.exception(f"{error_msg_prefix}: {e!r}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
             )
             await send_message(update=update, context=context, text=msg)
-            raise
+            # raise
 
     return wrapper
 
@@ -584,6 +638,7 @@ def log_application_settings() -> None:
         f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
         f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
         f"Images generation limit: <cyan>{gpt_settings.image_generations_monthly_limit}</cyan>",
+        f"Filesystem access: {SETTING_ENABLED if gpt_settings.filesystem_access else SETTING_DISABLED}",
         "<magenta>Whitelists:</magenta>",
         f"Images limit whitelist: {images_whitelist}",
         f"Users whitelist: {users_whitelist}",

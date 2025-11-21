@@ -1,12 +1,12 @@
 import asyncio
-from typing import cast
+from io import BytesIO
 
 from loguru import logger
 from telegram import (
     CallbackQuery,
+    File,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMediaPhoto,
     Update,
     constants,
 )
@@ -16,6 +16,7 @@ from chibi.config import application_settings, gpt_settings
 from chibi.constants import UserAction, UserContext
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers import registered_providers
+from chibi.services.providers.utils import get_usage_msg
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -28,12 +29,12 @@ from chibi.services.user import (
 )
 from chibi.utils import (
     chat_data,
-    download_image,
     get_telegram_chat,
     get_telegram_message,
     get_telegram_user,
     handle_gpt_exceptions,
     send_gpt_answer_message,
+    send_images,
     send_message,
     set_user_action,
     set_user_context,
@@ -59,22 +60,36 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
-    prompt = telegram_message.text
+    text_prompt = telegram_message.text
 
-    if not prompt:
+    if telegram_message.voice:
+        file_id = telegram_message.voice.file_id
+        file: File = await context.bot.get_file(file_id)
+        voice_prompt = BytesIO()
+        await file.download_to_memory(out=voice_prompt)
+        voice_prompt.seek(0)
+    else:
+        voice_prompt = None
+
+    if not text_prompt and not voice_prompt:
         return None
 
-    if prompt.startswith("/ask"):
-        prompt = prompt.replace("/ask", "", 1).strip()
+    if text_prompt:
+        if text_prompt.startswith("/ask"):
+            text_prompt = text_prompt.replace("/ask", "", 1).strip()
 
-    prompt_to_log = prompt.replace("\r", " ").replace("\n", " ")
+    prompt_to_log = text_prompt.replace("\r", " ").replace("\n", " ") if text_prompt else "voice message"
 
     logger.info(
         f"{user_data(update)} sent a new message in the {chat_data(update)}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 
-    get_gtp_chat_answer_task = asyncio.ensure_future(get_gtp_chat_answer(user_id=telegram_user.id, prompt=prompt))
+    get_gtp_chat_answer_task = asyncio.ensure_future(
+        get_gtp_chat_answer(
+            user_id=telegram_user.id, text_prompt=text_prompt, voice_prompt=voice_prompt, context=context, update=update
+        )
+    )
 
     while not get_gtp_chat_answer_task.done():
         await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.TYPING)
@@ -82,14 +97,7 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     chat_response: ChatResponseSchema = await get_gtp_chat_answer_task
     usage = chat_response.usage
-    if usage:
-        usage_message = (
-            f"Tokens used: {usage.total_tokens or 'n/a'}: "
-            f"{usage.prompt_tokens or 'n/a'} prompt, "
-            f"{usage.completion_tokens or 'n/a'} completion."
-        )
-    else:
-        usage_message = ""
+    usage_message = get_usage_msg(usage)
 
     if application_settings.log_prompt_data:
         answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
@@ -149,32 +157,7 @@ async def handle_image_generation(update: Update, context: ContextTypes.DEFAULT_
         await asyncio.sleep(2.5)
 
     image_data = await generate_image_task
-    if isinstance(image_data[0], str):
-        image_files = [await download_image(image_url=cast(str, url)) for url in image_data]
-        try:
-            await context.bot.send_media_group(
-                chat_id=telegram_chat.id,
-                media=[InputMediaPhoto(url) for url in image_files],
-                reply_to_message_id=telegram_message.message_id,
-            )
-        except Exception as e:
-            logger.exception(
-                f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
-                f"due to exception: {e}. Trying to send if via text message..."
-            )
-            image_urls = cast(list[str], image_data)
-            await send_message(
-                update=update,
-                context=context,
-                text="\n".join(image_urls),
-                disable_web_page_preview=False,
-            )
-    else:
-        await context.bot.send_media_group(
-            chat_id=telegram_chat.id,
-            media=[InputMediaPhoto(img) for img in image_data],
-            reply_to_message_id=telegram_message.message_id,
-        )
+    await send_images(images=image_data, update=update, context=context)
     log_message = f"{user_data(update)} got a successfully generated image(s)"
     if application_settings.log_prompt_data and isinstance(image_data[0], str):
         log_message += f": {image_data}"
@@ -225,9 +208,11 @@ async def handle_available_model_options(
     mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models_available)}
     set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
     keyboard = [
-        [InlineKeyboardButton(f"{model.name.lower()} ({model.provider})", callback_data=key)]
+        [InlineKeyboardButton(f"{model.display_name.title()} ({model.provider})", callback_data=key)]
         for key, model in mapped_models.items()
     ]
+    # for model in models_available:
+    #     logger.debug(f"{model.provider}: {model.name}")
     keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
     return InlineKeyboardMarkup(keyboard)
 

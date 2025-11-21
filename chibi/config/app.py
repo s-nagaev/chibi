@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,7 +11,6 @@ class ApplicationSettings(BaseSettings):
     Application settings loaded from environment or .env file.
 
     Attributes:
-        storage_backend: Storage backend to use: 'local', 'redis', or 'dynamodb'.
         redis: Redis connection URL.
         redis_password: Password for Redis.
         aws_region: AWS region for DynamoDB.
@@ -68,6 +68,12 @@ class ApplicationSettings(BaseSettings):
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
     return ApplicationSettings()
+
+
+logger.level("TOOL", no=20, color="<light-blue>")
+logger.level("THINK", no=20, color="<light-magenta>")
+logger.level("CALL", no=20, color="<magenta>")
+logger.level("CHECK", no=20, color="<light-red>")
 
 
 application_settings = _get_application_settings()

@@ -52,12 +52,8 @@ class RedisStorage(Database):
 
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
-        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        # user.messages.append(initial_message)
         user_key = f"user:{user_id}"
-
         await self.redis.set(user_key, user.model_dump_json())
-        # await self.add_message(user=user, message=initial_message)
         return user
 
     async def get_user(self, user_id: int) -> Optional[User]:
@@ -74,16 +70,9 @@ class RedisStorage(Database):
 
         return user
 
-    async def get_or_create_user(self, user_id: int) -> User:
-        if user := await self.get_user(user_id=user_id):
-            return user
-        return await self.create_user(user_id=user_id)
-
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
-        message_to_save = Message(role=message.role, content=message.content)
         message_key = f"user:{user.id}:message:{message.id}"
-
-        await self.redis.set(name=message_key, value=message_to_save.model_dump_json(exclude={"expire_at"}))
+        await self.redis.set(name=message_key, value=message.model_dump_json(exclude={"expire_at"}))
         if ttl:
             await self.redis.expire(name=message_key, time=ttl)
 
@@ -97,10 +86,6 @@ class RedisStorage(Database):
 
         for message_key in message_keys:
             await self.redis.delete(message_key)
-
-        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        # user.messages.append(initial_message)
-        # await self.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
 
     async def close(self) -> None:
         await self.redis.aclose()

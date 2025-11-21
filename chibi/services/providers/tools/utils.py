@@ -1,12 +1,24 @@
 import urllib.parse
+from typing import ParamSpec, TypedDict, TypeVar
 
 import httpx
 from fake_useragent import UserAgent
 from httpx import Response
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 ua_generator = UserAgent()
+
+
+class AdditionalOptions(TypedDict, total=False):
+    user_id: int | None
+    telegram_context: ContextTypes.DEFAULT_TYPE | None
+    telegram_update: Update | None
 
 
 def _generate_google_search_referrer(target_url: str) -> str:
