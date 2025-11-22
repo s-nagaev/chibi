@@ -1,6 +1,6 @@
-import io
 from collections import deque
 from functools import wraps
+from io import BytesIO
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -8,8 +8,8 @@ import httpx
 import telegramify_markdown
 from loguru import logger
 from telegram import Chat as TelegramChat
+from telegram import InputMediaPhoto, Update, constants
 from telegram import Message as TelegramMessage
-from telegram import Update, constants
 from telegram import User as TelegramUser
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
@@ -19,6 +19,8 @@ from chibi.constants import (
     GROUP_CHAT_TYPES,
     MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
+    SETTING_DISABLED,
+    SETTING_ENABLED,
     SETTING_SET,
     SETTING_UNSET,
     UserAction,
@@ -168,14 +170,19 @@ def split_markdown_v2(
 
 
 async def send_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, **kwargs: Any
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    reply: bool = True,
+    **kwargs: Any,
 ) -> TelegramMessage:
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
 
     if reply:
         return await context.bot.send_message(
-            chat_id=telegram_chat.id, reply_to_message_id=telegram_message.message_id, **kwargs
+            chat_id=telegram_chat.id,
+            reply_to_message_id=telegram_message.message_id,
+            **kwargs,
         )
     return await context.bot.send_message(chat_id=telegram_chat.id, **kwargs)
 
@@ -186,6 +193,7 @@ async def send_long_message(
     context: ContextTypes.DEFAULT_TYPE,
     parse_mode: str | None = None,
     normalize_md: bool = True,
+    reply: bool = True,
 ) -> None:
     if normalize_md:
         message = telegramify_markdown.markdownify(message)
@@ -197,14 +205,71 @@ async def send_long_message(
         ]
 
     for chunk_number, chunk in enumerate(chunks):
-        await send_message(update=update, context=context, text=chunk, parse_mode=parse_mode, reply=chunk_number == 0)
+        await send_message(
+            update=update,
+            context=context,
+            text=chunk,
+            parse_mode=parse_mode,
+            reply=chunk_number == 0 if reply else False,
+        )
+
+
+async def send_audio(
+    audio: bytes,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.RECORD_VOICE)
+
+    await context.bot.send_audio(
+        chat_id=telegram_chat.id, audio=audio, title="voice", reply_to_message_id=telegram_message.message_id
+    )
+
+
+async def send_images(
+    images: list[str] | list[BytesIO],
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
+
+    if isinstance(images[0], str):
+        image_files = [await download_image(image_url=cast(str, url)) for url in images]
+        try:
+            await context.bot.send_media_group(
+                chat_id=telegram_chat.id,
+                media=[InputMediaPhoto(url) for url in image_files],
+                reply_to_message_id=telegram_message.message_id,
+            )
+        except Exception as e:
+            logger.exception(
+                f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
+                f"due to exception: {e}. Trying to send if via text message..."
+            )
+            image_urls = cast(list[str], images)
+            await send_message(
+                update=update,
+                context=context,
+                text="\n".join(image_urls),
+                disable_web_page_preview=False,
+            )
+    else:
+        await context.bot.send_media_group(
+            chat_id=telegram_chat.id,
+            media=[InputMediaPhoto(img) for img in images],
+            reply_to_message_id=telegram_message.message_id,
+        )
 
 
 async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_chat = get_telegram_chat(update=update)
 
     await send_long_message(message=message, update=update, context=context, normalize_md=False)
-    file = io.BytesIO()
+    file = BytesIO()
     file.write(message.encode())
     file.seek(0)
     explain_message_text = (
@@ -223,7 +288,10 @@ async def send_message_in_plain_text_and_file(message: str, update: Update, cont
 async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         await send_long_message(
-            message=gpt_answer, update=update, context=context, parse_mode=constants.ParseMode.MARKDOWN_V2
+            message=gpt_answer,
+            update=update,
+            context=context,
+            parse_mode=constants.ParseMode.MARKDOWN_V2,
         )
     except BadRequest as e:
         # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
@@ -263,7 +331,9 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return reply_message.from_user.id == context.bot.id
 
 
-def check_user_allowance(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[P, Coroutine[Any, Any, R | None]]:
+def check_user_allowance(
+    func: Callable[P, Coroutine[Any, Any, R]],
+) -> Callable[P, Coroutine[Any, Any, R | None]]:
     """Decorator controlling access to the chatbot.
 
     This deco checks:
@@ -293,7 +363,11 @@ def check_user_allowance(func: Callable[P, Coroutine[Any, Any, R]]) -> Callable[
 
         if telegram_chat.type in PERSONAL_CHAT_TYPES and not user_is_allowed(tg_user=telegram_user):
             logger.warning(f"{user_data(update)} is not allowed to work with me. Request rejected.")
-            await send_message(update=update, context=context, text=telegram_settings.message_for_disallowed_users)
+            await send_message(
+                update=update,
+                context=context,
+                text=telegram_settings.message_for_disallowed_users,
+            )
             return None
 
         if telegram_chat.type in GROUP_CHAT_TYPES and not group_is_allowed(tg_chat=telegram_chat):
@@ -352,7 +426,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except ServiceResponseError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
+            logger.exception(f"{error_msg_prefix}: {e}")
 
             await send_message(
                 update=update,
@@ -367,7 +441,9 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
             await send_message(
-                update=update, context=context, text=f"Rate Limit exceeded for {e.provider}. We should back off a bit."
+                update=update,
+                context=context,
+                text=f"Rate Limit exceeded for {e.provider}. We should back off a bit.",
             )
             return None
 
@@ -392,13 +468,13 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except Exception as e:
-            logger.error(f"{error_msg_prefix}: {e!r}")
+            logger.exception(f"{error_msg_prefix}: {e!r}")
             msg = (
                 "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
                 "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
             )
             await send_message(update=update, context=context, text=msg)
-            raise
+            # raise
 
     return wrapper
 
@@ -501,7 +577,8 @@ async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
         return None
 
     transport = httpx.AsyncHTTPTransport(
-        retries=application_settings.heartbeat_retry_calls, proxy=application_settings.heartbeat_proxy
+        retries=application_settings.heartbeat_retry_calls,
+        proxy=application_settings.heartbeat_proxy,
     )
 
     async with httpx.AsyncClient(transport=transport, proxy=application_settings.heartbeat_proxy) as client:
@@ -561,6 +638,7 @@ def log_application_settings() -> None:
         f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
         f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
         f"Images generation limit: <cyan>{gpt_settings.image_generations_monthly_limit}</cyan>",
+        f"Filesystem access: {SETTING_ENABLED if gpt_settings.filesystem_access else SETTING_DISABLED}",
         "<magenta>Whitelists:</magenta>",
         f"Images limit whitelist: {images_whitelist}",
         f"Users whitelist: {users_whitelist}",

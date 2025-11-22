@@ -5,7 +5,6 @@ from typing import Optional
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionFunctionMessageParam,
-    ChatCompletionMessageParam,
     ChatCompletionToolMessageParam,
     ChatCompletionUserMessageParam,
 )
@@ -21,11 +20,19 @@ CHAT_COMPLETION_CLASSES = {
 
 
 class Database(ABC):
-    @abstractmethod
-    async def get_or_create_user(self, user_id: int) -> User: ...
+    async def get_or_create_user(self, user_id: int) -> User:
+        if user := await self.get_user(user_id=user_id):
+            return user
+        return await self.create_user(user_id=user_id)
 
     @abstractmethod
     async def save_user(self, user: User) -> None: ...
+
+    @abstractmethod
+    async def create_user(self, user_id: int) -> User: ...
+
+    @abstractmethod
+    async def get_user(self, user_id: int) -> User | None: ...
 
     @abstractmethod
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None: ...
@@ -36,15 +43,9 @@ class Database(ABC):
     @abstractmethod
     async def drop_messages(self, user: User) -> None: ...
 
-    async def get_conversation_messages(self, user: User) -> list[ChatCompletionMessageParam]:
+    async def get_conversation_messages(self, user: User) -> list[Message]:
         messages = await self.get_messages(user=user)
-        conversation_messages: list[ChatCompletionMessageParam] = []
-        for message in messages:
-            wrapper_class = CHAT_COMPLETION_CLASSES.get(message["role"])
-            if not wrapper_class:
-                continue
-            conversation_messages.append(wrapper_class(**message))
-        return conversation_messages
+        return [Message(**msg) for msg in messages]
 
     async def count_image(self, user_id: int) -> None:
         user = await self.get_or_create_user(user_id=user_id)

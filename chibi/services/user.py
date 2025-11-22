@@ -1,6 +1,12 @@
+import datetime
+import json
+from datetime import timezone
 from io import BytesIO
+from typing import Any, cast
 
-from openai.types.chat import ChatCompletionMessageParam, ChatCompletionUserMessageParam
+from aiocache import cached
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
 from chibi.models import Message
@@ -32,14 +38,13 @@ async def summarize(db: Database, user_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
 
     chat_history = await db.get_messages(user=user)
+    chat_history_string = str(msg for msg in chat_history if not any((msg.get("tool_calls"), msg.get("tool_call_id"))))
+    user_messages: list[Message] = [Message(role="user", content=chat_history_string)]
 
-    user_messages: list[ChatCompletionMessageParam] = [
-        ChatCompletionUserMessageParam(role="user", content=str(chat_history))
-    ]
-
-    response = await user.active_gpt_provider.get_chat_response(
+    response, _ = await user.active_gpt_provider.get_chat_response(
         messages=user_messages,
-        system_prompt="Summarize this conversation in 700 characters or less using English.",
+        user=user,
+        system_prompt="Summarize this conversation in 2000 characters or less using English.",
     )
     initial_message = Message(role="user", content="What we were talking about?")
     answer_message = Message(role="assistant", content=response.answer)
@@ -49,18 +54,42 @@ async def summarize(db: Database, user_id: int) -> None:
 
 
 @inject_database
-async def get_gtp_chat_answer(db: Database, user_id: int, prompt: str) -> ChatResponseSchema:
+async def get_gtp_chat_answer(
+    db: Database,
+    user_id: int,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text_prompt: str | None = None,
+    voice_prompt: BytesIO | None = None,
+) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
-    conversation_messages: list[ChatCompletionMessageParam] = await db.get_conversation_messages(user=user)
-    conversation_messages.append(ChatCompletionUserMessageParam(role="user", content=prompt))
-    chat_response = await user.active_gpt_provider.get_chat_response(
-        messages=conversation_messages, model=user.selected_gpt_model_name
-    )
 
-    answer_message = Message(role="assistant", content=chat_response.answer)
-    query_message = Message(role="user", content=prompt)
-    await db.add_message(user=user, message=query_message, ttl=gpt_settings.messages_ttl)
-    await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
+    user_content = None
+    if text_prompt:
+        user_content = text_prompt
+    elif voice_prompt:
+        user_content = await cast(Any, user.stt_provider).transcribe(audio=voice_prompt)
+
+    if not user_content:
+        raise ValueError("No text or voice provided")
+
+    conversation_messages: list[Message] = await db.get_conversation_messages(user=user)
+
+    user_prompt = {
+        "prompt": user_content,
+        "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+        "transcribed_from_voice_message": bool(voice_prompt),
+    }
+
+    user_message = Message(role="user", content=json.dumps(user_prompt))
+    conversation_messages.append(user_message)
+
+    chat_response, new_messages = await user.active_gpt_provider.get_chat_response(
+        messages=conversation_messages, user=user, model=user.selected_gpt_model_name, update=update, context=context
+    )
+    await db.add_message(user=user, message=user_message, ttl=gpt_settings.messages_ttl)
+    for message in new_messages:
+        await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl)
     return chat_response
 
 
@@ -78,14 +107,29 @@ async def check_history_and_summarize(db: Database, user_id: int) -> bool:
 
 
 @inject_database
-async def generate_image(db: Database, user_id: int, prompt: str) -> list[str] | list[BytesIO]:
+async def generate_image(
+    db: Database, user_id: int, prompt: str, model: str | None = None, provider_name: str | None = None
+) -> list[str] | list[BytesIO]:
     user = await db.get_or_create_user(user_id=user_id)
-    images = await user.active_image_provider.get_images(prompt=prompt, model=user.selected_image_model_name)
+
+    if provider_name:
+        provider = user.providers.get(provider_name)
+        selected_model = model
+    elif user.selected_image_provider_name:
+        provider = user.active_image_provider
+        selected_model = model or user.selected_image_model_name
+    else:
+        provider = user.active_image_provider
+        selected_model = None
+    if not provider:
+        raise ValueError(f"User {user_id}: no image provider available.")
+    images = await provider.get_images(prompt=prompt, model=selected_model)
     if user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(user_id)
     return images
 
 
+@cached(ttl=6000)
 @inject_database
 async def get_models_available(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
@@ -102,4 +146,18 @@ async def user_has_reached_images_generation_limit(db: Database, user_id: int) -
 async def set_api_key(db: Database, user_id: int, api_key: str, provider_name: str) -> None:
     user = await db.get_or_create_user(user_id=user_id)
     user.tokens[provider_name] = api_key
+    await db.save_user(user)
+    return None
+
+
+@inject_database
+async def get_info(db: Database, user_id: int) -> str:
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.info
+
+
+@inject_database
+async def set_info(db: Database, user_id: int, new_info: str) -> None:
+    user = await db.get_or_create_user(user_id=user_id)
+    user.info = new_info
     await db.save_user(user)

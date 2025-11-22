@@ -1,12 +1,32 @@
+import datetime
+import json
 import urllib.parse
+from typing import ParamSpec, TypedDict, TypeVar
 
 import httpx
 from fake_useragent import UserAgent
 from httpx import Response
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
+from chibi.constants import SUB_EXECUTOR_PROMPT
+from chibi.models import Message
+from chibi.schemas.app import ChatResponseSchema
+from chibi.storage.abstract import Database
+from chibi.storage.database import inject_database
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 ua_generator = UserAgent()
+
+
+class AdditionalOptions(TypedDict, total=False):
+    user_id: int | None
+    model: str | None
+    telegram_context: ContextTypes.DEFAULT_TYPE | None
+    telegram_update: Update | None
 
 
 def _generate_google_search_referrer(target_url: str) -> str:
@@ -69,3 +89,27 @@ async def _get_url(url: str) -> Response:
     }
     async with httpx.AsyncClient(transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy) as client:
         return await client.get(url=url, headers=headers)
+
+
+@inject_database
+async def get_sub_agent_response(
+    db: Database,
+    user_id: int,
+    prompt: str,
+) -> ChatResponseSchema:
+    user = await db.get_or_create_user(user_id=user_id)
+
+    user_prompt = {
+        "prompt": prompt,
+        "datetime_now": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+    }
+
+    user_message = Message(role="user", content=json.dumps(user_prompt))
+    conversation_messages = [
+        user_message,
+    ]
+
+    chat_response, _ = await user.active_gpt_provider.get_chat_response(
+        messages=conversation_messages, user=user, model=user.selected_gpt_model_name, system_prompt=SUB_EXECUTOR_PROMPT
+    )
+    return chat_response

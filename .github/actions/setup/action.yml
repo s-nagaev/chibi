@@ -3,15 +3,15 @@ description: 'Set up Python, check out code, install dependencies and cache em'
 runs:
   using: "composite"
   steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
         cache: 'pip'
         cache-dependency-path: 'requirements-dev.txt'
-
-    - name: Checkout code
-      uses: actions/checkout@v4
 
     - name: Install Dependencies
       shell: bash

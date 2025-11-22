@@ -4,8 +4,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from chibi.config.telegram import telegram_settings
-from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL
+from chibi.constants import BASE_PROMPT, FILESYSTEM_ACCESS_PROMPT, IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL
 
 
 class GPTSettings(BaseSettings):
@@ -13,8 +12,10 @@ class GPTSettings(BaseSettings):
 
     alibaba_key: str | None = Field(alias="ALIBABA_API_KEY", default=None)
     anthropic_key: str | None = Field(alias="ANTHROPIC_API_KEY", default=None)
-    cloudflare_key: str | None = Field(alias="CLOUDFLARE_API_KEY", default=None)
     cloudflare_account_id: str | None = Field(alias="CLOUDFLARE_ACCOUNT_ID", default=None)
+    cloudflare_key: str | None = Field(alias="CLOUDFLARE_API_KEY", default=None)
+    customopenai_key: str | None = Field(alias="CUSTOMOPENAI_API_KEY", default=None)
+    customopenai_url: str = Field(alias="CUSTOMOPENAI_URL", default="http://localhost:1234/v1")
     deepseek_key: str | None = Field(alias="DEEPSEEK_API_KEY", default=None)
     gemini_key: str | None = Field(alias="GEMINI_API_KEY", default=None)
     grok_key: str | None = Field(alias="GROK_API_KEY", default=None)
@@ -22,30 +23,46 @@ class GPTSettings(BaseSettings):
     moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
 
-    assistant_prompt: str = Field(
-        default=(
-            f"You're helpful and friendly assistant. Your name is "
-            f"{telegram_settings.bot_name}. Use markdown for formatting."
-        )
-    )
     frequency_penalty: float = Field(default=0)
+    max_tokens: int = Field(default=32000)
+    presence_penalty: float = Field(default=0)
+    temperature: float = Field(default=1)
+
+    backoff_factor: float = Field(default=0.5)
+    retries: int = Field(default=3)
+    timeout: int = Field(default=600)
+
+    system_prompt: str = Field(alias="ASSISTANT_PROMPT", default=BASE_PROMPT)
+
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
     image_n_choices: int = Field(default=1)
     image_quality: Literal["standard", "hd"] = Field(default="standard")
     image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
-    max_conversation_age_minutes: int = Field(default=60)
+
+    default_model: str | None = Field(default=None)
+    default_provider: str | None = Field(default=None)
+    filesystem_access: bool = Field(default=False)
+    image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
+    max_conversation_age_minutes: int = Field(default=360)
     max_history_tokens: int = Field(default=64000)
-    max_tokens: int = Field(default=4096)
-    presence_penalty: float = Field(default=0)
+    models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
     proxy: str | None = Field(default=None)
     public_mode: bool = Field(default=False)
-    retries: int = Field(default=3)
-    temperature: float = Field(default=1)
-    timeout: int = Field(default=600)
-    models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
-    image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
-    model_default: str | None = Field(default=None)
+    show_llm_thoughts: bool = Field(default=False)
+
+    google_search_api_key: str | None = Field(default=None)
+    google_search_cx: str | None = Field(default=None)
+
+    @property
+    def google_search_client_set(self) -> bool:
+        return bool(self.google_search_api_key) and bool(self.google_search_cx)
+
+    @property
+    def assistant_prompt(self) -> str:
+        if self.filesystem_access:
+            return self.system_prompt + FILESYSTEM_ACCESS_PROMPT
+        return self.system_prompt
 
     @property
     def models_whitelist(self) -> list[str]:

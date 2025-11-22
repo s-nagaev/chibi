@@ -47,17 +47,13 @@ class RedisStorage(Database):
 
     async def save_user(self, user: User) -> None:
         user_key = f"user:{user.id}"
-        user_data = user.json()
+        user_data = user.model_dump_json()
         await self.redis.set(user_key, user_data)
 
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
-        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        # user.messages.append(initial_message)
         user_key = f"user:{user_id}"
-
-        await self.redis.set(user_key, user.json())
-        # await self.add_message(user=user, message=initial_message)
+        await self.redis.set(user_key, user.model_dump_json())
         return user
 
     async def get_user(self, user_id: int) -> Optional[User]:
@@ -66,30 +62,23 @@ class RedisStorage(Database):
         if not user_data:
             return None
 
-        user = User.parse_raw(user_data)
+        user = User.model_validate_json(user_data)
         message_keys_pattern = f"user:{user.id}:message:*"
         message_keys = set(await self.redis.keys(message_keys_pattern))
-        user_messages = [Message.parse_raw(await self.redis.get(message_key)) for message_key in message_keys]
+        user_messages = [Message.model_validate_json(await self.redis.get(message_key)) for message_key in message_keys]
         user.messages = sorted(user_messages, key=lambda msg: msg.id)
 
         return user
 
-    async def get_or_create_user(self, user_id: int) -> User:
-        if user := await self.get_user(user_id=user_id):
-            return user
-        return await self.create_user(user_id=user_id)
-
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
-        message_to_save = Message(role=message.role, content=message.content)
         message_key = f"user:{user.id}:message:{message.id}"
-
-        await self.redis.set(name=message_key, value=message_to_save.json(exclude={"expire_at"}))
+        await self.redis.set(name=message_key, value=message.model_dump_json(exclude={"expire_at"}))
         if ttl:
             await self.redis.expire(name=message_key, time=ttl)
 
     async def get_messages(self, user: User) -> list[dict[str, str]]:
         user_refreshed = await self.get_or_create_user(user_id=user.id)
-        return [msg.dict(exclude={"expire_at", "id"}) for msg in user_refreshed.messages]
+        return [msg.model_dump(exclude={"expire_at", "id"}) for msg in user_refreshed.messages]
 
     async def drop_messages(self, user: User) -> None:
         message_keys_pattern = f"user:{user.id}:message:*"
@@ -98,9 +87,5 @@ class RedisStorage(Database):
         for message_key in message_keys:
             await self.redis.delete(message_key)
 
-        # initial_message = Message(role="system", content=gpt_settings.assistant_prompt)
-        # user.messages.append(initial_message)
-        # await self.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
-
     async def close(self) -> None:
-        await self.redis.close()
+        await self.redis.aclose()

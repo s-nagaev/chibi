@@ -1,9 +1,13 @@
 from openai import NOT_GIVEN
 
+from chibi.config import gpt_settings
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
 class MoonshotAI(OpenAIFriendlyProvider):
+    api_key = gpt_settings.moonshotai_key
+    chat_ready = True
+
     base_url = "https://api.moonshot.cn/v1"
     name = "MoonshotAI"
     model_name_keywords = ["moonshot", "kimi"]

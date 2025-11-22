@@ -34,3 +34,16 @@ jobs:
       - name: Run Mypy
         run: |
           mypy .
+
+  Tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+      - name: Run Tests
+        env:
+          TELEGRAM_BOT_TOKEN: dummy-for-ci
+        run: |
+          pytest -vv .

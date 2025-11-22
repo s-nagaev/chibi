@@ -29,30 +29,29 @@ class LocalStorage(Database):
 
     async def get_user(self, user_id: int) -> User | None:
         filename = self._get_storage_filename(user_id)
+        user = None
         if not os.path.exists(filename):
             return None
         with open(filename, "rb") as f:
             data = pickle.load(f)
         if isinstance(data, dict):
-            return User(**data)
+            user = User(**data)
         if isinstance(data, User):
-            return User(**data.dict())
-        return None
-
-    async def get_or_create_user(self, user_id: int) -> User:
-        if user := await self.get_user(user_id=user_id):
+            user = User(**data.dict())
+        if user:
             current_time = time.time()
             if hasattr(user, "images"):
                 user.images = [img for img in user.images if img.expire_at > current_time]
             return user
-        return await self.create_user(user_id=user_id)
+
+        return None
 
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
         user_refreshed = await self.get_or_create_user(user_id=user.id)
         expire_at = time.time() + ttl if ttl else None
 
-        message_with_ttl = Message(role=message.role, content=message.content, expire_at=expire_at)
-        user_refreshed.messages.append(message_with_ttl)
+        message.expire_at = expire_at
+        user_refreshed.messages.append(message)
         await self.save_user(user_refreshed)
 
     async def get_messages(self, user: User) -> list[dict[str, str]]:

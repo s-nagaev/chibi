@@ -1,0 +1,28 @@
+version: '3'
+tasks:
+  build:64:
+    desc: "Build amd64 and arm64 images in cloud with specified tag"
+    vars:
+      TAG: dev
+    cmds:
+      - docker buildx build
+          --builder cloud-builder
+          --platform linux/amd64,linux/arm64
+          --cache-to type=registry,ref=pysergio/chibi:buildcache,mode=max
+          --cache-from type=registry,ref=pysergio/chibi:buildcache
+          -t pysergio/chibi:{{.TAG}}
+          -f Dockerfile
+          --push .
+
+  build:7:
+    desc: "Build armv7 image locally with specified tag"
+    vars:
+      TAG: dev
+    cmds:
+      - docker buildx build
+          --platform linux/arm/v7
+          --cache-to type=registry,ref=pysergio/chibi:armv7-cache,mode=max
+          --cache-from type=registry,ref=pysergio/chibi:armv7-cache
+          -t pysergio/chibi:armv7-{{.TAG}}
+          -f armv7.Dockerfile
+          --push .

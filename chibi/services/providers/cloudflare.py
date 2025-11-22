@@ -3,7 +3,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoAccountIDSetError
-from chibi.schemas.app import ChatResponseSchema, UsageSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema
 from chibi.schemas.cloudflare import (
     ChatCompletionResponseSchema,
     ModelsSearchResponseSchema,
@@ -12,6 +12,9 @@ from chibi.services.providers.provider import RestApiFriendlyProvider
 
 
 class Cloudflare(RestApiFriendlyProvider):
+    api_key = gpt_settings.cloudflare_key
+    chat_ready = True
+
     name = "Cloudflare"
     model_name_keywords = ["@cf", "@hf"]
     default_model = "@cf/meta/llama-3.2-3b-instruct"
@@ -24,7 +27,10 @@ class Cloudflare(RestApiFriendlyProvider):
         }
 
     async def _get_chat_completion_response(
-        self, messages: list[ChatCompletionMessageParam], model: str, system_prompt: str | None = None
+        self,
+        messages: list[ChatCompletionMessageParam],
+        model: str,
+        system_prompt: str | None = None,
     ) -> ChatResponseSchema:
         if not gpt_settings.cloudflare_account_id:
             raise NoAccountIDSetError
@@ -56,7 +62,7 @@ class Cloudflare(RestApiFriendlyProvider):
 
         return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self, image_generation: bool = False) -> list[str]:
+    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
             return []
 
@@ -67,16 +73,26 @@ class Cloudflare(RestApiFriendlyProvider):
         url = f"{self.base_url}/models/search"
         params = {"task": "Text Generation"}
 
-        response = await self._request(method="GET", url=url, params=params)
+        try:
+            response = await self._request(method="GET", url=url, params=params)
+        except Exception as e:
+            logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
+            return []
 
         data = response.json()
         response_data = ModelsSearchResponseSchema(**data)
 
-        all_models = [model.name for model in response_data.result]
+        all_models = [
+            ModelChangeSchema(
+                provider=self.name,
+                name=model.name,
+                image_generation=False,
+            )
+            for model in response_data.result
+        ]
+        all_models.sort(key=lambda model: model.name)
 
         if gpt_settings.models_whitelist:
-            allowed_model_names = [model for model in all_models if model in gpt_settings.models_whitelist]
-        else:
-            allowed_model_names = all_models
+            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
 
-        return sorted(allowed_model_names)
+        return all_models
