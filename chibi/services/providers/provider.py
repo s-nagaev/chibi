@@ -363,6 +363,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             function_args["user_id"] = user.id if user else 0
             function_args["telegram_context"] = context
             function_args["telegram_update"] = update
+            function_args["model"] = model
 
             logger.log(
                 "CALL",

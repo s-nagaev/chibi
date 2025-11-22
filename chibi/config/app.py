@@ -74,6 +74,8 @@ logger.level("TOOL", no=20, color="<light-blue>")
 logger.level("THINK", no=20, color="<light-magenta>")
 logger.level("CALL", no=20, color="<magenta>")
 logger.level("CHECK", no=20, color="<light-red>")
+logger.level("SUBAGENT", no=20, color="<cyan>")
+logger.level("DELEGATE", no=20, color="<blue>")
 
 
 application_settings = _get_application_settings()

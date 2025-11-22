@@ -174,6 +174,7 @@ class Gemini(RestApiFriendlyProvider):
             function_args["user_id"] = user.id if user else 0
             function_args["telegram_context"] = context
             function_args["telegram_update"] = update
+            function_args["model"] = model
 
             function_call_id = function_call.id or str(uuid4())
 
@@ -243,7 +244,7 @@ class Gemini(RestApiFriendlyProvider):
         initial_messages = [msg.to_google() for msg in messages]
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages,
+            messages=initial_messages.copy(),
             user=user,
             model=model,
             system_prompt=system_prompt,

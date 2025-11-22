@@ -5,10 +5,10 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ModelChangeSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, get_sub_agent_response
 from chibi.services.user import generate_image, user_has_reached_images_generation_limit
 
 
@@ -109,10 +109,10 @@ class GenerateImageTool(ChibiTool):
                 "type": "object",
                 "properties": {
                     "provider": {"type": "string", "description": "Provider name, i.e. 'Gemini'"},
-                    "model": {"type": "string", "description": "Model name, i.e. 'dall-e-3'"},
+                    "image_model": {"type": "string", "description": "Model name, i.e. 'dall-e-3'"},
                     "prompt": {"type": "string", "description": "Image generation prompt. English recommended"},
                 },
-                "required": ["provider", "model", "prompt"],
+                "required": ["provider", "image_model", "prompt"],
             },
         ),
     )
@@ -120,7 +120,7 @@ class GenerateImageTool(ChibiTool):
 
     @classmethod
     async def function(
-        cls, provider: str, model: str, prompt: str, **kwargs: Unpack[AdditionalOptions]
+        cls, provider: str, image_model: str, prompt: str, **kwargs: Unpack[AdditionalOptions]
     ) -> dict[str, str]:
         user_id = kwargs.get("user_id")
         if not user_id:
@@ -138,7 +138,46 @@ class GenerateImageTool(ChibiTool):
         if await user_has_reached_images_generation_limit(user_id=user_id):
             raise ToolException("User has reached image generation monthly limit.")
 
-        images = await generate_image(user_id=user_id, provider_name=provider, model=model, prompt=prompt)
+        images = await generate_image(user_id=user_id, provider_name=provider, model=image_model, prompt=prompt)
         await send_images(images=images, update=telegram_update, context=telegram_context)
 
         return {"detail": "Image was successfully generated and sent."}
+
+
+class DelegateTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="delegate_task",
+            description=(
+                "Delegate exactly one task to a sub-agent - an LLM identical to you. The prompt should be "
+                "exhaustive and expect a concrete result, or an explanation for its absence. The task should be "
+                "as atomic as possible. Delegate preferably tasks that involve processing large volumes of "
+                "information, to avoid saturating your context."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Prompt"},
+                },
+                "required": ["prompt"],
+            },
+        ),
+    )
+    name = "delegate_task"
+
+    @classmethod
+    async def function(cls, prompt: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ToolException("This function requires user_id to be automatically provided.")
+        model = kwargs.get("model")
+        if not model:
+            raise ToolException("This function requires model to be automatically provided.")
+        logger.log("DELEGATE", f"Model {model} delegating a task: {prompt}")
+
+        response: ChatResponseSchema = await get_sub_agent_response(user_id=user_id, prompt=prompt)
+        logger.log("SUBAGENT", f"Delegated task is done: {response.answer}")
+
+        return {"response": response.answer}

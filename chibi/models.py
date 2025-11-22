@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import binascii
 import itertools
 import json
 import time
@@ -17,7 +19,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
     ChatCompletionUserMessageParam,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from chibi.config import gpt_settings
 from chibi.exceptions import (
@@ -48,6 +50,27 @@ class ToolSchema(BaseModel):
     type: str = "function"
     function: FunctionSchema
     thought_signature: bytes | None = None
+
+    @field_validator("thought_signature", mode="before")
+    @classmethod
+    def decode_signature_from_base64(cls, v: bytes | str | None) -> bytes | None:
+        if v is None:
+            return None
+
+        if isinstance(v, bytes):
+            return v
+
+        if isinstance(v, str):
+            try:
+                return base64.b64decode(v)
+            except binascii.Error:
+                raise ValueError("Invalid base64 string for thought_signature")
+
+        raise TypeError("thought_signature must be bytes or a base64 encoded string")
+
+    @field_serializer("thought_signature")
+    def serialize_signature_to_base64(self, value: bytes) -> str:
+        return base64.b64encode(value).decode("ascii")
 
 
 class Message(BaseModel):

@@ -189,6 +189,7 @@ class Anthropic(RestApiFriendlyProvider):
                 "user_id": user.id if user else None,
                 "telegram_context": context,
                 "telegram_update": update,
+                "model": model,
             }
 
             function_args.update(part.input)
@@ -250,7 +251,6 @@ class Anthropic(RestApiFriendlyProvider):
             return []
 
         response_data = response.json().get("data", [])
-        print(response_data)
         all_models = [
             ModelChangeSchema(
                 provider=self.name,
