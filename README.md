@@ -35,21 +35,23 @@ Chibi currently supports models from the following providers:
 
 ## Features
 
-*   **Multi-Provider Support:** Interact with models from 7 different providers (see list above).
+*   **Expanded AI Provider Support:** Interact with a wider range of leading LLM and image generation models from various providers, including OpenAI, Google (Gemini), Anthropic, Alibaba, Deepseek, Grok, MoonshotAI, Cloudflare, and custom OpenAI-compatible endpoints.
 *   **Seamless Provider Switching:** Change the underlying LLM provider anytime without losing the current conversation context. The history is automatically adapted for the new model.
-*   **Image Generation:** Request images using DALL-E (OpenAI), Gemini (Google), or Grok (xAI) directly within the chat.
+*   **Advanced Tooling & Recursive Delegation:** The bot leverages an enhanced suite of built-in tools for tasks like file system operations (with `FILESYSTEM_ACCESS` setting), terminal command execution (with LLM-moderated access), web searching, and more. Recursive delegation allows sub-agents to handle complex, multi-step tasks efficiently, significantly reducing token usage.
+*   **Initial Voice Interaction:** Engage with the bot using voice messages and receive audio responses. This is an initial implementation with ongoing development planned for richer voice capabilities.
+*   **Configurable Image Generation:** Request images with `Nano Banana`, `Imagen`, `Wan/Qwen`, `DALL-E` or `Grok`, with enhanced control over quality, size, aspect ratio, and quantity per request.
 *   **Context Management:**
     *   Automatic conversation summarization (optional) to save tokens on long conversations by replacing older parts of the history with a summary.
     *   Manual context reset (`/reset` command) to start fresh and save tokens.
-*   **Enhanced LLM Capabilities with Tools:** The bot can leverage integrated tools (when using compatible LLMs like GPT-4/Gemini).
-*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or simply keep it in memory (lost on restart).
-*   **Optional "Public Mode":** Run the bot without a master API key. Each user will be prompted to provide their own key via private message to the bot.
-*   **User and Group Whitelists:** Restrict bot access to specific users or chat groups.
-*   **Easy Deployment with Docker:** Pre-configured Docker image ready to run with minimal setup. Public mode works out-of-the-box without needing API keys in the environment variables.
-*   **Optional Health Monitoring (Heartbeat):** The bot can periodically ping a configured URL (e.g., a healthchecks.io endpoint) to signal its operational status, allowing external systems to monitor its health and availability.  
+*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or DynamoDB, or simply keep it in memory (lost on restart).
+*   **Optional "Public Mode":** Run the bot without master API keys. Each user will be prompted to provide their own key via private message to the bot.
+*   **Granular Access Control:** Restrict bot access to specific users or chat groups, whitelist allowed models, and control image generation limits for certain users.
+*   **Dynamic Proxy Support:** Configure HTTP/SOCKS proxies for AI provider API requests and heartbeat pings, separate from the Telegram proxy.
+*   **Health Monitoring (Heartbeat):** The bot can periodically ping a configured URL (e.g., a healthchecks.io endpoint) to signal its operational status, allowing external systems to monitor its health and availability.
+*   **Easy Deployment with Docker:** Pre-configured Docker images (including experimental ARMv7 support) ready to run with minimal setup. Public mode works out-of-the-box without needing API keys in the environment variables.
 *   **Low Resource Usage:** Runs efficiently even on low-spec hardware like a Raspberry Pi 4.
 *   **Asynchronous:** Fast, non-blocking performance.
-*   **Configurable:** Extensive options via environment variables.
+*   **Highly Configurable:** Extensive options via environment variables for fine-grained control over bot behavior.
 *   **MIT Licensed:** Open source and free to use.
 
 ## System Requirements
@@ -217,68 +219,73 @@ services:
 Please, visit the [examples](examples) directory of the current repository for more examples.
 
 ### Telegram Bot Settings
-
-| Variable                       | Description                                                                                                           | Default Value                                                                      |
-|:-------------------------------|:----------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
-| `TELEGRAM_BOT_TOKEN`           | **Required.** Your Telegram Bot Token obtained from BotFather.                                                        | _None_                                                                             |
-| `BOT_NAME`                     | The name the bot uses for itself (e.g., in the default prompt).                                                       | `Chibi`                                                                            |
-| `ANSWER_DIRECT_MESSAGES_ONLY`  | If `True`, the bot only responds to direct messages, ignoring group messages (unless whitelisted and mentioned).      | `True`                                                                             |
-| `ALLOW_BOTS`                   | If `True`, allows the bot to respond to messages sent by other bots.                                                  | `False`                                                                            |
-| `MESSAGE_FOR_DISALLOWED_USERS` | The message sent to users or groups not in the whitelists when they try to interact with the bot.                     | `"You're not allowed to interact with me, sorry. Contact my owner first, please."` |
+| Variable                       | Description                                                                                             | Default Value                                                                      |
+|:-------------------------------|:--------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
+| `TELEGRAM_BOT_TOKEN`           | **Required.** Your Telegram Bot API token. Get one from [@BotFather](https://t.me/BotFather).          |                                                                                    |
+| `BOT_NAME`                     | The name the bot uses for itself (e.g., in the default prompt).                                         | `Chibi`                                                                            |
+| `ANSWER_DIRECT_MESSAGES_ONLY`  | If `True`, the bot only responds to direct messages, ignoring group messages (unless whitelisted and mentioned). | `True`                                                                             |
+| `ALLOW_BOTS`                   | If `True`, allows the bot to respond to messages sent by other bots.                                    | `False`                                                                            |
+| `MESSAGE_FOR_DISALLOWED_USERS` | The message sent to users or groups not in the whitelists when they try to interact with the bot.       | `"You\'re not allowed to interact with me, sorry. Contact my owner first, please."` |
 | `PROXY`                        | Optional HTTP/SOCKS proxy specifically for connecting to the Telegram Bot API (e.g., `socks5://user:pass@host:port`). | `None`                                                                             |
-
+| `GROUPS_WHITELIST`             | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups. | `None`                                                                             |
+| `USERS_WHITELIST`              | Comma-separated list of Telegram usernames (with or without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`                                                                             |
 ### General Application Settings
-
-| Variable          | Description                                                                                                                               | Default Value |
-|:------------------|:------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
-| `PUBLIC_MODE`     | If `True`, the bot doesn't require master API keys. Users will be asked to provide their own keys via PM.                                 | `False`       |
-| `LOG_PROMPT_DATA` | Set to `True` to log the full prompt data sent to the API (includes history). **Use with caution, logs may contain PII!**                 | `False`       |
-| `HIDE_MODELS`     | Set to `True` to hide the `/model` command from users.                                                                                    | `False`       |
-| `HIDE_IMAGINE`    | Set to `True` to hide the `/image` command from users.                                                                                    | `False`       |
-| `PROXY`           | Optional HTTP/SOCKS proxy for **outgoing AI provider API requests** (e.g., `socks5://user:pass@host:port`). Distinct from Telegram proxy. | `None`        |
-| `RETRIES`         | Number of times to retry a failed AI provider API request.                                                                                | `3`           |
-| `TIMEOUT`         | Timeout in seconds for waiting for a response from the AI provider API.                                                                   | `600`         |
-
+| Variable          | Description                         | Default Value |
+|:------------------|:------------------------------------|:--------------|
+| `LOG_PROMPT_DATA` | Whether to log prompt data.         | `False`       |
+| `HIDE_MODELS`     | Hide model options in UI.           | `False`       |
+| `HIDE_IMAGINE`    | Hide imagine commands.              | `False`       |
 ### Storage Settings
-
-| Variable          | Description                                                                                                                        | Default Value |
-|:------------------|:-----------------------------------------------------------------------------------------------------------------------------------|:--------------|
-| `REDIS`           | Redis connection string (e.g., `redis://localhost:6379/0`). If set, Redis will be used for session storage instead of local files. | `None`        |
-| `REDIS_PASSWORD`  | **DEPRECATED** Password for the Redis connection.                                                                                  | `None`        |
-| `LOCAL_DATA_PATH` | Path *inside the container* where local session data is stored. Mount a volume to this path for persistence between restarts.      | `/app/data`   |
-
+| Variable              | Description                                                                                             | Default Value |
+|:----------------------|:--------------------------------------------------------------------------------------------------------|:--------------|
+| `REDIS`               | Redis connection URL.                                                                                   | `None`        |
+| `REDIS_PASSWORD`      | Password for Redis.                                                                                     | `None`        |
+| `AWS_REGION`          | AWS region for DynamoDB.                                                                                | `None`        |
+| `AWS_ACCESS_KEY_ID`   | AWS access key ID.                                                                                      | `None`        |
+| `AWS_SECRET_ACCESS_KEY`| AWS secret access key.                                                                                  | `None`        |
+| `DDB_USERS_TABLE`     | DynamoDB table name for users.                                                                          | `None`        |
+| `DDB_MESSAGES_TABLE`  | DynamoDB table name for messages.                                                                       | `None`        |
+| `LOCAL_DATA_PATH`     | Filesystem path for local storage.                                                                      | `/app/data`   |
 ### API Keys (Master Keys)
-
 These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
 
-| Variable                | Description                                      | Default Value |
-|:------------------------|:-------------------------------------------------|:--------------|
-| `ALIBABA_API_KEY`       | API key for Alibaba (Qwen) models.               | `None`        |
-| `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.           | `None`        |
-| `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models). | `None`        |
-| `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.           | `None`        |
-| `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                     | `None`        |
-| `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.     | `None`        |
-| `GROK_API_KEY`          | API key for xAI (Grok) models.                   | `None`        |
-| `MISTRALAI_API_KEY`     | API key for MistralAI models.                    | `None`        |
-| `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.            | `None`        |
-| `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.        | `None`        |
-
+| Variable                | Description                                                          | Default Value |
+|:------------------------|:---------------------------------------------------------------------|:--------------|
+| `ALIBABA_API_KEY`       | API key for Alibaba (Qwen) models.                                   | `None`        |
+| `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.                               | `None`        |
+| `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models).                     | `None`        |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.                               | `None`        |
+| `CUSTOMOPENAI_API_KEY`  | API key for custom OpenAI-compatible endpoints.                      | `None`        |
+| `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.                          | `http://localhost:1234/v1` |
+| `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                                         | `None`        |
+| `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.                         | `None`        |
+| `GOOGLE_SEARCH_API_KEY` | API key for Google Custom Search.                                    | `None`        |
+| `GOOGLE_SEARCH_CX`      | Custom Search Engine ID for Google Custom Search.                    | `None`        |
+| `GROK_API_KEY`          | API key for xAI (Grok) models.                                       | `None`        |
+| `MISTRALAI_API_KEY`     | API key for MistralAI models.                                        | `None`        |
+| `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.                                | `None`        |
+| `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.                            | `None`        |
 ### Model & Conversation Settings
-
 | Variable                       | Description                                                                                                                                     | Default Value                                                                                     |
 |:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------|
-| `MODEL_DEFAULT`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider's default is used.               | `None`                                                                                            |
-| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                                  | `"You're helpful and friendly assistant. Your name is {BOT_NAME}".  Use markdown for formatting.` |
-| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                                 | `60`                                                                                              |
+| `PUBLIC_MODE`                  | If `True`, the bot doesn't require master API keys. Users will be asked to provide their own keys via PM.                                       | `False`                                                                                           |
+| `PROXY`                        | Optional HTTP/SOCKS proxy for **outgoing AI provider API requests** (e.g., `socks5://user:pass@host:port`). Distinct from Telegram proxy.     | `None`                                                                                            |
+| `RETRIES`                      | Number of times to retry a failed AI provider API request.                                                                                      | `3`                                                                                               |
+| `TIMEOUT`                      | Timeout in seconds for waiting for a response from the AI provider API.                                                                         | `600`                                                                                             |
+| `BACKOFF_FACTOR`               | A backoff factor to apply between attempts after the first failed try.                                                                          | `0.5`                                                                                             |
+| `DEFAULT_MODEL`                | Default model ID used for new conversations (e.g., `gpt-4o`, `claude-3-opus-20240229`). If unset, the provider\'s default is used.               | `None`                                                                                            |
+| `DEFAULT_PROVIDER`             | Default provider for models if `DEFAULT_MODEL` is not fully qualified.                                                                          | `None`                                                                                            |
+| `ASSISTANT_PROMPT`             | The system prompt used to initialize the conversation. Uses `BOT_NAME` from Telegram settings.                                                  | `"You\'re helpful and friendly assistant. Your name is {BOT_NAME}". Use markdown for formatting.` |
+| `MAX_CONVERSATION_AGE_MINUTES` | Maximum age (in minutes) of messages kept in the active history. Older messages might be summarized or dropped.                                 | `360`                                                                                             |
 | `MAX_HISTORY_TOKENS`           | Maximum number of tokens to retain in the conversation history sent to the model. Helps manage context window size and cost.                    | `64000`                                                                                           |
-| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                                 | `4096`                                                                                            |
+| `MAX_TOKENS`                   | Maximum number of tokens the model is allowed to generate in a single response.                                                                 | `32000`                                                                                           |
 | `TEMPERATURE`                  | Controls randomness (0.0 to 2.0). Lower values are more deterministic, higher values are more creative/random.                                  | `1.0`                                                                                             |
 | `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (positive values decrease repetition). Range: -2.0 to 2.0.                | `0.0`                                                                                             |
 | `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0. | `0.0`                                                                                             |
-
+| `MODELS_WHITELIST`             | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                  | `None`                                                                                            |
+| `FILESYSTEM_ACCESS`            | If `True`, enables file system access for the bot.                                                                                              | `False`                                                                                           |
+| `SHOW_LLM_THOUGHTS`            | If `True`, shows the bot\'s internal thoughts in the chat.                                                                                       | `False`                                                                                           |
 ### Image Generation Settings
-
 | Variable                      | Description                                                                                                           | Default Value |
 |:------------------------------|:----------------------------------------------------------------------------------------------------------------------|:--------------|
 | `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.           | `0`           |
@@ -286,25 +293,16 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                               | `standard`    |
 | `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.               | `1024x1024`   |
 | `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g.: `1:1`, `16:9`, `9:16`).                               | `16:9`        |
-
+| `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit. | `None`        |
 ### Whitelists
-
-| Variable                      | Description                                                                                                                                        | Default Value |
-|:------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
-| `USERS_WHITELIST`             | Comma-separated list of Telegram usernames (with or without `@`) or user IDs allowed to interact with the bot. If empty or unset, allow all users. | `None`        |
-| `GROUPS_WHITELIST`            | Comma-separated list of Telegram group chat IDs where the bot is allowed to operate. If empty or unset, allow all groups.                          | `None`        |
-| `MODELS_WHITELIST`            | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                    | `None`        |
-| `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit.                             | `None`        |
-
+Whitelist variables have been moved to their respective sections (e.g., `USERS_WHITELIST` and `GROUPS_WHITELIST` are now under Telegram Bot Settings, `MODELS_WHITELIST` under Model & Conversation Settings, and `IMAGE_GENERATIONS_WHITELIST` under Image Generation Settings).
 ### Heartbeat
-
 | Variable                   | Description                                                                                                                                                                                                                                        | Default Value |
-|----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------|
-| `HEARTBEAT_URL`            | The target URL endpoint for sending periodic heartbeat GET requests. *Setting this variable enables the heartbeat feature.* Used to signal to an external monitoring system (like healthchecks.io, uptime kuma, etc.) that the bot is operational. | `None`        |
-| `HEARTBEAT_FREQUENCY_CALL` | The interval (in seconds) between sending heartbeat pings to the `HEARTBEAT_URL`. This only applies if `HEARTBEAT_URL` is set.                                                                                                                     | 30            |
-| `HEARTBEAT_RETRY_CALLS`    | Number of times the HTTP client (`httpx`) will automatically retry sending the heartbeat request upon transient failures (e.g., network errors, specific server responses) before logging an error.                                                | 3             |
+|:---------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------|
+| `HEARTBEAT_URL`            | The target URL endpoint for sending periodic heartbeat GET requests. _Setting this variable enables the heartbeat feature._ Used to signal to an external monitoring system (like healthchecks.io, uptime kuma, etc.) that the bot is operational. | `None`        |
+| `HEARTBEAT_FREQUENCY_CALL` | The interval (in seconds) between sending heartbeat pings to the `HEARTBEAT_URL`. This only applies if `HEARTBEAT_URL` is set.                                                                                                                     | `30`          |
+| `HEARTBEAT_RETRY_CALLS`    | Number of times the HTTP client (`httpx`) will automatically retry sending the heartbeat request upon transient failures (e.g., network errors, specific server responses) before logging an error.                                                | `3`           |
 | `HEARTBEAT_PROXY`          | Optional proxy URL (e.g., `http://user:pass@host:port` or `socks5://host:port`) to use for sending the heartbeat requests.                                                                                                                         | `None`        |
-
 ## Getting API Keys
 
 To use Chibi in private mode, or for users interacting with the bot in public mode, you'll need API keys from the desired AI providers. Here's where you can typically find information or generate keys:
@@ -326,3 +324,4 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+ 

@@ -30,6 +30,7 @@ from chibi.exceptions import (
     NoApiKeyProvidedError,
     NoModelSelectedError,
     NoProviderSelectedError,
+    NoResponseError,
     NotAuthorizedError,
     ServiceRateLimitError,
     ServiceResponseError,
@@ -265,6 +266,18 @@ async def send_images(
         )
 
 
+async def send_text_file(file_content: str, file_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_chat = get_telegram_chat(update=update)
+    text_file = BytesIO(file_content.encode("utf-8"))
+    text_file.name = file_name
+
+    await context.bot.send_document(
+        chat_id=telegram_chat.id,
+        document=text_file,
+        filename=file_name,
+    )
+
+
 async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_chat = get_telegram_chat(update=update)
 
@@ -426,7 +439,7 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             return None
 
         except ServiceResponseError as e:
-            logger.exception(f"{error_msg_prefix}: {e}")
+            logger.error(f"{error_msg_prefix}: {e}")
 
             await send_message(
                 update=update,
@@ -436,6 +449,10 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                     f"Please, try again a bit later."
                 ),
             )
+            return None
+
+        except NoResponseError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
             return None
 
         except ServiceRateLimitError as e:

@@ -69,7 +69,9 @@ class ToolSchema(BaseModel):
         raise TypeError("thought_signature must be bytes or a base64 encoded string")
 
     @field_serializer("thought_signature")
-    def serialize_signature_to_base64(self, value: bytes) -> str:
+    def serialize_signature_to_base64(self, value: bytes | None) -> str | None:
+        if not value:
+            return None
         return base64.b64encode(value).decode("ascii")
 
 

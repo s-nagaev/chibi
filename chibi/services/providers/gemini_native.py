@@ -21,7 +21,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
-from chibi.exceptions import ServiceResponseError
+from chibi.exceptions import NoResponseError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.provider import RestApiFriendlyProvider
@@ -109,7 +109,7 @@ class Gemini(RestApiFriendlyProvider):
                 f"Attempt #{attempt + 1}. Unexpected (empty) response received. Retrying in {total_delay} seconds..."
             )
             await sleep(total_delay)
-        raise ServiceResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
+        raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
 
     async def _get_chat_completion_response(
         self,
