@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from chibi.config import gpt_settings
 from chibi.models import Message
-from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT, MODERATOR_PROMPT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
@@ -102,18 +102,26 @@ class RunCommandInTerminalTool(ChibiTool):
         raw_stdout = stdout.decode()
         raw_stderr = stderr.decode()
 
-        # Move to settings/constants
-        truncated_stdout = raw_stdout if len(raw_stdout) < 10000 else f"...truncated... {raw_stdout[10000:]}"
-        truncated_stderr = raw_stderr if len(raw_stderr) < 10000 else f"...truncated... {raw_stderr[10000:]}"
+        result: dict[str, str | int | None] = {"return_code": process.returncode}
+
+        if len(raw_stdout) > CMD_STDOUT_LIMIT or len(raw_stderr) > CMD_STDOUT_LIMIT:
+            result["WARNING"] = (
+                "The volume of stdout/stderr data is excessively large "
+                f"(over {CMD_STDOUT_LIMIT} characters). If this is the "
+                f"result of reading from a file, try reading it in parts."
+            )
+        result["stdout"] = (
+            raw_stdout if len(raw_stdout) < CMD_STDOUT_LIMIT else f"...truncated... {raw_stdout[CMD_STDOUT_LIMIT:]}"
+        )
+        result["stderr"] = (
+            raw_stderr if len(raw_stderr) < CMD_STDOUT_LIMIT else f"...truncated... {raw_stderr[CMD_STDOUT_LIMIT:]}"
+        )
+
         logger.log(
             "TOOL",
             f"Command '{cmd}' executed. Return code: {process.returncode}.",
         )
-        return {
-            "returncode": process.returncode,
-            "stdout": truncated_stdout,
-            "stderr": truncated_stderr,
-        }
+        return result
 
 
 class CreateFileTool(ChibiTool):

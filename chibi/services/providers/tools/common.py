@@ -181,3 +181,43 @@ class DelegateTool(ChibiTool):
         logger.log("SUBAGENT", f"Delegated task is done: {response.answer}")
 
         return {"response": response.answer}
+
+
+class SendTextFileTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="send_text_based_file",
+            description=("Send a data as a text-based file (.md, .txt, .rst, .py, etc)  to user."),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "File content"},
+                    "filename": {"type": "string", "description": "File name including extension, i.e. 'info.txt'"},
+                },
+                "required": ["content", "filename"],
+            },
+        ),
+    )
+    name = "send_text_based_file"
+
+    @classmethod
+    async def function(cls, content: str, filename: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ToolException("This function requires user_id to be automatically provided.")
+
+        telegram_context = kwargs.get("telegram_context")
+        telegram_update = kwargs.get("telegram_update")
+
+        if telegram_context is None or telegram_update is None:
+            raise ToolException(
+                "This function requires telegram context & telegram update to be automatically provided."
+            )
+
+        from chibi.utils import send_text_file
+
+        await send_text_file(file_content=content, file_name=filename, update=telegram_update, context=telegram_context)
+
+        return {"detail": "File was successfully sent."}

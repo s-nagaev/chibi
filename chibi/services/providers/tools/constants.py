@@ -1,3 +1,5 @@
+CMD_STDOUT_LIMIT = 10000  # Move to settings
+
 MODERATOR_PROMPT = """
 **Your Role:**
 

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2025-11-23
+
+### Added
+- **Enhanced Tooling with Recursive Delegation:** Implemented recursive delegation for sub-agents, enabling the bot to tackle complex, multi-step tasks efficiently. This approach drastically reduces token consumption (up to 76% in various tests) by offloading processing to sub-agents.
+- **Initial Voice Interaction Support:** Introduced preliminary support for voice messages, allowing the bot to receive voice input and respond with generated speech. This feature is an initial implementation and is planned for significant future development.
+- **Moderated Terminal Access:** Integrated a moderated terminal access tool. All terminal commands are pre-moderated by a specialized LLM using strict rules to ensure safety and prevent unauthorized operations. This is an initial implementation with extensive future enhancements planned. (Refer to `chibi/constants.py` for moderation prompt details).
+- **Google Web Search Integration:** Added a dedicated tool for web searching using the official Google Search API for more accurate and comprehensive search results.
+- **Enhanced Built-in Toolset:** Expanded the bot's capabilities with a new suite of built-in tools, including command execution (`cmd.py`), general utilities (`common.py`), robust file editing (`file_editor.py`), memory management (`memory.py`), and a structured framework for tool development (`tool.py`, `schemas.py`, `utils.py`, `exceptions.py`).
+    - *Note:* Access to the filesystem via tools is governed by the `FILESYSTEM_ACCESS` setting and is strongly discouraged for publicly accessible bots due to potential security implications.
+- **DynamoDB Support:** Implemented initial support for DynamoDB as a persistent storage backend.
+
+### Changed
+- **Major Codebase Refactoring:** Performed extensive refactoring across the core codebase, models, and provider logic to significantly improve maintainability, scalability, and overall code quality.
+- **Rewritten Gemini Provider:** The Gemini provider has been completely rewritten to leverage the native `genai` library, moving away from the previously used OpenAI-compatible interface.
+- **Rewritten Anthropic Integration:** The integration with Anthropic has been entirely re-engineered to utilize the official Python module. This change enables Claude models to fully access the bot's comprehensive toolset and benefits from native caching mechanisms.
+- **Reworked Base Chatbot Prompt:** The fundamental system prompt used to initialize the chatbot's personality and guidelines has undergone a significant overhaul for improved performance and clarity.
+- **Updated Existing AI Provider Integrations:** Updated integrations for Alibaba, Grok, and OpenAI to align with their latest APIs and introduce new features.
+- **Revised Tool Initialization and Web Search:** The process for initializing tools has been overhauled, and the web search tool (`web_search.py`) specifically refactored for improved performance and reliability.
+- **Project Configuration and Dependencies Refresh:** Updated `pyproject.toml`, `Taskfile.yml`, and managed dependencies (`poetry.lock`, `requirements-dev.txt`, `requirements.txt`).
+
+### Removed
+- **Unnecessary Dependencies and Configurations:** Cleaned up unneeded dependencies and configurations as part of the overall project restructuring.
+
+### Chore
+- **GitHub Actions Workflows Refinements:** Added new steps to GitHub Actions workflows (`.github/workflows/main.yml`) and updated the GitHub setup action (`.github/actions/setup/action.yml`) for optimized CI/CD processes.
+- **ARMv7 Dockerfile Experimentation:** Included `armv7.Dockerfile` as part of ongoing experimental efforts to restore ARMv7 platform support. This work is still in progress.
+- **Linter and Test Configuration Fixes:** Addressed issues within linter configurations and made improvements to test setup for greater accuracy and coverage.
+- **New Comprehensive Test Suites:** Introduced new test files covering database interactions (`test_database.py`), file editor functionalities (`test_file_editor.py`), and model integrity (`test_models.py`).
+
+
 ## [1.2.1] - 2025-04-21
 
 ### Added
@@ -272,6 +302,7 @@ applied.
 
 [Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
 
+[2.0.0]: https://github.com/s-nagaev/chibi/compare/v1.2.1...v2.0.0
 [1.2.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/s-nagaev/chibi/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/s-nagaev/chibi/compare/v1.0.0...v1.1.0
