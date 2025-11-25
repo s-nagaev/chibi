@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2025-11-26
+
+### Changed
+- image generation functionality for Gemini models reimplemented using the official `google.genai` library
+- upload image to Telegram chat logic updated
+
 ## [1.3.0] - 2025-11-23
 
 ### Added
@@ -302,7 +308,8 @@ applied.
 
 [Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
 
-[2.0.0]: https://github.com/s-nagaev/chibi/compare/v1.2.1...v2.0.0
+[1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/s-nagaev/chibi/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/s-nagaev/chibi/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/s-nagaev/chibi/compare/v1.0.0...v1.1.0
