@@ -17,7 +17,9 @@ from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import (
+    FILE_UPLOAD_TIMEOUT,
     GROUP_CHAT_TYPES,
+    IMAGE_UPLOAD_TIMEOUT,
     MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
     SETTING_DISABLED,
@@ -287,7 +289,7 @@ async def send_images(
             chat_id=telegram_chat.id,
             media=[InputMediaPhoto(img) for img in media_photos],
             reply_to_message_id=telegram_message.message_id,
-            write_timeout=60.0,
+            write_timeout=IMAGE_UPLOAD_TIMEOUT,
         )
 
     if media_docs:
@@ -297,7 +299,7 @@ async def send_images(
             chat_id=telegram_chat.id,
             media=[InputMediaDocument(img) for img in media_docs],
             reply_to_message_id=telegram_message.message_id,
-            write_timeout=120.0,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
         )
 
 
