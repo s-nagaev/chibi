@@ -321,9 +321,16 @@ class Gemini(RestApiFriendlyProvider):
 
     def get_model_display_name(self, model_name: str) -> str:
         if "gemini-3-pro-image" in model_name:
-            return "Nano Banana Pro"
+            display_name = model_name.replace("models/gemini-3-pro-image", "Nano Banana Pro")
+            return display_name.replace("-", " ").capitalize()
+
+        if "gemini-2.5-flash" in model_name:
+            display_name = model_name.replace("models/gemini-2.5-flash-image", "Nano Banana")
+            return display_name.replace("-", " ").capitalize()
+
         if "imagen" in model_name:
             model_name = model_name.replace("generate-", "")
+
         return model_name[7:].replace("-", " ")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
