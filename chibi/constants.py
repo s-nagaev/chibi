@@ -14,6 +14,8 @@ SETTING_UNSET = "<red>UNSET</red>"
 SETTING_ENABLED = "<green>ENABLED</green>"
 SETTING_DISABLED = "<red>DISABLED</red>"
 MARKDOWN_TOKENS = ("```", "`", "*", "_", "~")
+IMAGE_UPLOAD_TIMEOUT = 60.0
+FILE_UPLOAD_TIMEOUT = 120.0
 
 
 class UserContext(Enum):

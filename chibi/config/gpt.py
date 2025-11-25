@@ -39,6 +39,7 @@ class GPTSettings(BaseSettings):
     image_quality: Literal["standard", "hd"] = Field(default="standard")
     image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
+    image_size_nano_banana: Literal["1K", "2K", "4K"] = Field(default="2K")
 
     default_model: str | None = Field(default=None)
     default_provider: str | None = Field(default=None)

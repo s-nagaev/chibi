@@ -1,4 +1,3 @@
-import base64
 import random
 from asyncio import sleep
 from copy import copy
@@ -13,6 +12,10 @@ from google.genai.types import (
     FunctionResponseDict,
     GenerateContentConfig,
     GenerateContentResponse,
+    GenerateImagesConfig,
+    GenerateImagesResponse,
+    Image,
+    ImageConfig,
     PartDict,
     Tool,
 )
@@ -255,36 +258,62 @@ class Gemini(RestApiFriendlyProvider):
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return chat_response, [Message.from_google(msg) for msg in new_messages]
 
+    async def _generate_image_via_content_creation_model(
+        self,
+        prompt: str,
+        model: str,
+    ) -> list[Image]:
+        image_size = (
+            gpt_settings.image_size_nano_banana if "flash" not in model else None
+        )  # flash-models don't support it
+
+        generation_config = GenerateContentConfig(
+            image_config=ImageConfig(
+                aspect_ratio=gpt_settings.image_aspect_ratio,
+                image_size=image_size,
+            )
+        )
+
+        async with Client(api_key=gpt_settings.gemini_key).aio as client:
+            response: GenerateContentResponse = await client.models.generate_content(
+                model=model,
+                contents=[prompt],
+                config=generation_config,
+            )
+        if not response.parts:
+            raise ServiceResponseError(provider=self.name, model=model, detail="No content-parts in response found")
+
+        images: list[Image | None] = [part.as_image() for part in response.parts if part]
+        return [image for image in images if image]
+
+    @staticmethod
+    async def _generate_image_by_imagen(
+        prompt: str,
+        model: str,
+    ) -> list[Image]:
+        generation_config = GenerateImagesConfig(
+            aspect_ratio=gpt_settings.image_aspect_ratio,
+            number_of_images=gpt_settings.image_n_choices,
+        )
+        async with Client(api_key=gpt_settings.gemini_key).aio as client:
+            response: GenerateImagesResponse = await client.models.generate_images(
+                model=model,
+                prompt=prompt,
+                config=generation_config,
+            )
+            images_in_response = response.images
+
+            return [image for image in images_in_response if image]
+
     async def get_images(self, prompt: str, model: str | None = None) -> list[BytesIO]:
-        base_url = "https://generativelanguage.googleapis.com/v1beta/"
-        model = model or self.default_image_model
-        params = {"key": self.token}
+        selected_model = model or self.default_image_model
 
-        if "image-gen" in model:
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseModalities": ["Text", "Image"]},
-            }
-            url = f"{base_url}{model}:generateContent"
-
+        if "imagen-" in selected_model:
+            images = await self._generate_image_by_imagen(prompt=prompt, model=selected_model)
         else:
-            payload = {
-                "instances": [{"prompt": prompt}],
-                "parameters": {
-                    "sampleCount": gpt_settings.image_n_choices if "ultra" not in model else 1,
-                    "aspectRatio": gpt_settings.image_aspect_ratio,
-                },
-            }
-            url = f"{base_url}{model}:predict"
+            images = await self._generate_image_via_content_creation_model(prompt=prompt, model=selected_model)
 
-        response = await self._request(method="POST", url=url, data=payload, params=params)
-        response_data = response.json()
-        if "image-gen" in model:
-            image_data_b64 = response_data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
-            return [BytesIO(base64.b64decode(image_data_b64))]
-
-        images = [x["bytesBase64Encoded"] for x in response_data["predictions"]]
-        return [BytesIO(base64.b64decode(image_data_b64)) for image_data_b64 in images]
+        return [BytesIO(image.image_bytes) for image in images if image.image_bytes]
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
@@ -292,9 +321,16 @@ class Gemini(RestApiFriendlyProvider):
 
     def get_model_display_name(self, model_name: str) -> str:
         if "gemini-3-pro-image" in model_name:
-            return "Nano Banana Pro"
+            display_name = model_name.replace("models/gemini-3-pro-image", "Nano Banana Pro")
+            return display_name.replace("-", " ").capitalize()
+
+        if "gemini-2.5-flash" in model_name:
+            display_name = model_name.replace("models/gemini-2.5-flash-image", "Nano Banana")
+            return display_name.replace("-", " ").capitalize()
+
         if "imagen" in model_name:
             model_name = model_name.replace("generate-", "")
+
         return model_name[7:].replace("-", " ")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:

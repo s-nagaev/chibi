@@ -8,15 +8,18 @@ import httpx
 import telegramify_markdown
 from loguru import logger
 from telegram import Chat as TelegramChat
-from telegram import InputMediaPhoto, Update, constants
+from telegram import InputMediaDocument, InputMediaPhoto, Update, constants
 from telegram import Message as TelegramMessage
 from telegram import User as TelegramUser
+from telegram.constants import FileSizeLimit
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import (
+    FILE_UPLOAD_TIMEOUT,
     GROUP_CHAT_TYPES,
+    IMAGE_UPLOAD_TIMEOUT,
     MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
     SETTING_DISABLED,
@@ -239,15 +242,17 @@ async def send_images(
     await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
 
     if isinstance(images[0], str):
+        logger.info(f"Downloading {len(images)} images for {user_data(update)} via URLs...")
         image_files = [await download_image(image_url=cast(str, url)) for url in images]
         try:
+            logger.info(f"Uploading {len(images)} images to {user_data(update)} in the {chat_data(update)}")
             await context.bot.send_media_group(
                 chat_id=telegram_chat.id,
                 media=[InputMediaPhoto(url) for url in image_files],
                 reply_to_message_id=telegram_message.message_id,
             )
         except Exception as e:
-            logger.exception(
+            logger.error(
                 f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
                 f"due to exception: {e}. Trying to send if via text message..."
             )
@@ -258,11 +263,43 @@ async def send_images(
                 text="\n".join(image_urls),
                 disable_web_page_preview=False,
             )
-    else:
+        return None
+
+    logger.info(f"Uploading {len(images)} image(s) to {user_data(update)} in the {chat_data(update)}")
+    media_photos: list[BytesIO] = []
+    media_docs: list[BytesIO] = []
+
+    for file in images:
+        if not isinstance(file, BytesIO):
+            continue
+
+        file.seek(0, 2)
+        size = file.tell()
+        file.seek(0)
+        if size < (FileSizeLimit.PHOTOSIZE_UPLOAD * 1024 * 1024):
+            media_photos.append(file)
+        elif size < (FileSizeLimit.FILESIZE_UPLOAD * 1024 * 1024):
+            media_docs.append(file)
+        else:
+            logger.error(f"{user_data(update)} File size ({size}) exceeds file size limit, skipping it..")
+            continue
+
+    if media_photos:
         await context.bot.send_media_group(
             chat_id=telegram_chat.id,
-            media=[InputMediaPhoto(img) for img in images],
+            media=[InputMediaPhoto(img) for img in media_photos],
             reply_to_message_id=telegram_message.message_id,
+            write_timeout=IMAGE_UPLOAD_TIMEOUT,
+        )
+
+    if media_docs:
+        logger.info(f"Uploading {len(images)} image(s) as file(s) to {user_data(update)} in the {chat_data(update)}")
+
+        await context.bot.send_media_group(
+            chat_id=telegram_chat.id,
+            media=[InputMediaDocument(img) for img in media_docs],
+            reply_to_message_id=telegram_message.message_id,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
         )
 
 

@@ -286,14 +286,15 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `FILESYSTEM_ACCESS`            | If `True`, enables file system access for the bot.                                                                                              | `False`                                                                                           |
 | `SHOW_LLM_THOUGHTS`            | If `True`, shows the bot\'s internal thoughts in the chat.                                                                                       | `False`                                                                                           |
 ### Image Generation Settings
-| Variable                      | Description                                                                                                           | Default Value |
-|:------------------------------|:----------------------------------------------------------------------------------------------------------------------|:--------------|
-| `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.           | `0`           |
-| `IMAGE_N_CHOICES`             | Default number of images to generate per request (currently supported mainly by DALL-E).                              | `1`           |
-| `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                               | `standard`    |
-| `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.               | `1024x1024`   |
-| `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g.: `1:1`, `16:9`, `9:16`).                               | `16:9`        |
+| Variable                      | Description                                                                                                            | Default Value |
+|:------------------------------|:-----------------------------------------------------------------------------------------------------------------------|:--------------|
+| `IMAGE_GENERATIONS_LIMIT`     | Monthly limit on the number of `/image` commands per user (0 means unlimited). Requires persistent storage.            | `0`           |
+| `IMAGE_N_CHOICES`             | Default number of images to generate per request (currently supported mainly by DALL-E).                               | `1`           |
+| `IMAGE_QUALITY`               | Default image quality for providers that support it (e.g., DALL-E: `standard` or `hd`).                                | `standard`    |
+| `IMAGE_SIZE`                  | Default image size (e.g., `1024x1024`, `1792x1024`). Check provider documentation for supported values.                | `1024x1024`   |
+| `IMAGE_ASPECT_RATIO`          | Default image aspect ratio for providers that support it (e.g.: `1:1`, `16:9`, `9:16`).                                | `16:9`        |
 | `IMAGE_GENERATIONS_WHITELIST` | Comma-separated list of Telegram usernames (with or without `@`) or user IDs excluded from the image generation limit. | `None`        |
+| `IMAGE_SIZE_NANO_BANANA`      | An image size for the Nano Banana Pro model only. Can be `1K`, `2K`, `4K`                                              | `2K`          |
 ### Whitelists
 Whitelist variables have been moved to their respective sections (e.g., `USERS_WHITELIST` and `GROUPS_WHITELIST` are now under Telegram Bot Settings, `MODELS_WHITELIST` under Model & Conversation Settings, and `IMAGE_GENERATIONS_WHITELIST` under Image Generation Settings).
 ### Heartbeat
