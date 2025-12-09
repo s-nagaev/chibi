@@ -9,6 +9,7 @@ from chibi.services.providers.tools.utils import AdditionalOptions
 
 class McpEchoTool(ChibiTool):
     """Test/demo only"""
+
     register = False
     name = "mcp_echo"
     definition = {
