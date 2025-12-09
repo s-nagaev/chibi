@@ -69,6 +69,32 @@ Essentially, the main requirements are:
 
 ## Getting Started
 
+### Quick Install: Dobby Agent Mode (Experimental)
+
+⚠️ **WARNING**: This installation mode enables **full filesystem access**. Only use on trusted systems.
+
+**Dobby** is an experimental agent mode that gives the bot access to your filesystem and shell commands. Perfect for development assistance, automation, and advanced AI interactions.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/s-nagaev/chibi/main/scripts/install.sh | bash
+```
+
+**What you get:**
+- Autonomous AI agent with filesystem access
+- Pre-configured for agent workflows
+- Simple command-line interface: `dobby run`, `dobby attach`, `dobby free`
+- 200K token context window (extended conversations)
+- Whitelisted access only (security first)
+
+**Requirements:**
+- Telegram Bot Token (required)
+- At least one AI provider API key
+- User whitelist configuration
+
+See [scripts/README.md](scripts/README.md) for full installation guide and security considerations.
+
+### Standard Installation (Docker)
+
 ### Using Docker Run
 
 1. Pull the Chibi Docker image:
@@ -304,6 +330,14 @@ Whitelist variables have been moved to their respective sections (e.g., `USERS_W
 | `HEARTBEAT_FREQUENCY_CALL` | The interval (in seconds) between sending heartbeat pings to the `HEARTBEAT_URL`. This only applies if `HEARTBEAT_URL` is set.                                                                                                                     | `30`          |
 | `HEARTBEAT_RETRY_CALLS`    | Number of times the HTTP client (`httpx`) will automatically retry sending the heartbeat request upon transient failures (e.g., network errors, specific server responses) before logging an error.                                                | `3`           |
 | `HEARTBEAT_PROXY`          | Optional proxy URL (e.g., `http://user:pass@host:port` or `socks5://host:port`) to use for sending the heartbeat requests.                                                                                                                         | `None`        |
+### Metrics & Monitoring
+| Variable          | Description                                           | Default Value |
+|:------------------|:------------------------------------------------------|:--------------|
+| `INFLUXDB_URL`    | The URL of your InfluxDB instance.                    | `None`        |
+| `INFLUXDB_TOKEN`  | The authentication token for your InfluxDB instance.  | `None`        |
+| `INFLUXDB_ORG`    | The organization to be used in InfluxDB.              | `None`        |
+| `INFLUXDB_BUCKET` | The data bucket where the metrics will be stored.     | `None`        |
+
 ## Getting API Keys
 
 To use Chibi in private mode, or for users interacting with the bot in public mode, you'll need API keys from the desired AI providers. Here's where you can typically find information or generate keys:

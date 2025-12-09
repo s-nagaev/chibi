@@ -1,18 +1,32 @@
+import json
 from typing import Any, Callable, Coroutine, ParamSpec, TypeVar
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from chibi.services.providers.tools.schemas import ToolResponse
+from chibi.services.providers.utils import escape_and_truncate
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
-RegisteredFunctionsMap = dict[str, Callable[P, Coroutine[Any, Any, ToolResponse]]]
+Tool = Callable[P, Coroutine[Any, Any, ToolResponse]]
+RegisteredFunctionsMap = dict[str, Tool]
+
+
+async def _stub_function(*args: Any, **kwargs: Any) -> ToolResponse:
+    """A stub function that is executed when the LLM calls a non-existent function.
+
+    Returns:
+        A ToolResponse object describing the error.
+    """
+    logger.log("TOOL", f"Running stub function. Args: {args}, kwargs: {kwargs}")
+    return ToolResponse(tool_name="stub", status="error", result="A non-existent function called")
 
 
 class RegisteredChibiTools:
     tools: set[type["ChibiTool"]] = set()
+    tools_map: RegisteredFunctionsMap = {"stub_function": _stub_function}
 
     @classmethod
     def get_tool_definitions(cls) -> list[ChatCompletionToolParam]:
@@ -23,6 +37,24 @@ class RegisteredChibiTools:
         registered_functions = {tool.name: tool.tool for tool in cls.tools}
         registered_functions["stub_function"] = cls._stub_function
         return registered_functions
+
+    @classmethod
+    def register(cls, tool: type["ChibiTool"]) -> None:
+        cls.tools.add(tool)
+        cls.tools_map[tool.name] = tool.tool
+
+    @classmethod
+    def get(cls, tool_name: str) -> Tool:
+        if called_tool := cls.tools_map.get(tool_name):
+            return called_tool
+
+        logger.error(f"Function {tool_name} called but it's not registered.")
+        return _stub_function
+
+    @classmethod
+    async def call(cls, tool_name: str, tools_args: dict[str, Any]) -> ToolResponse:
+        tool = cls.get(tool_name)
+        return await tool(**tools_args)
 
     @classmethod
     async def _stub_function(cls, *args: Any, **kwargs: Any) -> ToolResponse:
@@ -42,8 +74,15 @@ class ChibiTool:
 
     @classmethod
     async def tool(cls, *args: Any, **kwargs: Any) -> ToolResponse:
+        printable_kwargs = {k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update")}
+        logger.log(
+            "CALL", (f"Calling a function '{cls.name}'. Args: {escape_and_truncate(json.dumps(printable_kwargs))}")
+        )
         try:
             result = await cls.function(*args, **kwargs)
+            logger.log(
+                "CALL", f"Function '{cls.name}' called, result retrieved: {escape_and_truncate(json.dumps(result))}"
+            )
             return ToolResponse(tool_name=cls.name, status="ok", result=result)
         except Exception as e:
             logger.warning(f"Tool {cls.name} raised an exception: {e}")
@@ -57,4 +96,4 @@ class ChibiTool:
         super().__init_subclass__(**kwargs)
 
         if cls.register:
-            RegisteredChibiTools.tools.add(cls)
+            RegisteredChibiTools.register(cls)

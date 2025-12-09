@@ -1,0 +1,7 @@
+# Ignore backup files
+*.bak
+*.backup
+*.tmp
+
+# Ignore local test files
+test-*.sh

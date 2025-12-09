@@ -144,4 +144,8 @@ static/
 node_modules/
 
 # Data
-data/*.pkl
+data/*
+!data/.keep
+
+# Project-specific
+.project/

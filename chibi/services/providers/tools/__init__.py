@@ -13,6 +13,7 @@ from .file_editor import (
     ReplaceInFileTool,
     ReplaceLinesTool,
 )
+from .mcp_simple import McpEchoTool
 from .memory import SetUserInfoTool
 from .schemas import ToolResponse
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap

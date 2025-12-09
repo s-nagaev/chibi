@@ -10,4 +10,6 @@
 .env
 docker-compose.*yml
 *.bak
-data/*.pkl
+data/*
+!data/.keep
+.project/

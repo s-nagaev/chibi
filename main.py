@@ -1,5 +1,3 @@
-import asyncio
-from asyncio import Task
 from contextvars import Context
 from typing import Any, Coroutine, TypeVar
 
@@ -36,6 +34,7 @@ from chibi.services.bot import (
     handle_reset,
 )
 from chibi.services.providers import registered_providers
+from chibi.services.task_manager import task_manager
 from chibi.utils import (
     GROUP_CHAT_TYPES,
     check_user_allowance,
@@ -83,7 +82,6 @@ class ChibiBot:
                     description="Set an API key (token) for any of supported providers",
                 )
             )
-        self.background_tasks: set[Task] = set()
 
     def run_task(
         self,
@@ -91,9 +89,7 @@ class ChibiBot:
         name: str | None = None,
         context: Context | None = None,
     ) -> None:
-        task = asyncio.create_task(coro=coro, name=name, context=context)
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
+        task_manager.run_task(coro)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)

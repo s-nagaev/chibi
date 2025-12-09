@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2025-12-09
+### Added
+- **InfluxDB Integration:** Added integration with InfluxDB for storing and visualizing metrics (token usage, cost, latency, etc.). Metrics can now be pushed to InfluxDB for monitoring via Grafana or other tools.
+- **Mistral Native Client:** Reimplemented the Mistral AI client using the native `mistralai` library (v1.0.0+) for better stability and feature support, replacing the generic requests-based implementation.
+- **Metrics Service:** Introduced a dedicated `MetricsService` (`chibi/services/metrics.py`) to handle data collection and reporting to InfluxDB.
+- **Dobby Installation Scripts:** Added a comprehensive suite of scripts (`scripts/`) for installing, configuring, and controlling the "Dobby" local agent mode, including `install.sh`, `dobby-control.sh`, and documentation.
+
+### Changed
+- **Task Manager Refactoring:** Refactored `TaskManager` to better handle recursive delegation and metrics tracking.
+- **Provider Interface Updates:** Updated the base `Provider` class and implementations (`Anthropic`, `Gemini`, `DeepSeek`) to support the new metrics collection system.
+- **Dependency Updates:** Updated `poetry.lock` and requirements files to include `influxdb-client` and updated `mistralai` SDK.
+
 
 ## [1.3.1] - 2025-11-26
 
@@ -306,9 +317,10 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.3.1...HEAD
 
-[1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.3.0...v1.3.1
+[1.4.0]: https://github.com/s-nagaev/chibi/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.3.1
 [1.3.0]: https://github.com/s-nagaev/chibi/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/s-nagaev/chibi/compare/v1.1.0...v1.2.0

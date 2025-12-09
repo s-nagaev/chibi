@@ -1,3 +1,4 @@
+import sys
 from functools import lru_cache
 from typing import Literal
 
@@ -56,6 +57,16 @@ class ApplicationSettings(BaseSettings):
     heartbeat_retry_calls: int = Field(default=3)
     heartbeat_proxy: str | None = Field(default=None)
 
+    # InfluxDB settings
+    influxdb_url: str | None = Field(default=None)
+    influxdb_token: str | None = Field(default=None)
+    influxdb_org: str | None = Field(default=None)
+    influxdb_bucket: str | None = Field(default=None)
+
+    @property
+    def is_influx_configured(self) -> bool:
+        return all((self.influxdb_url, self.influxdb_token, self.influxdb_org, self.influxdb_bucket))
+
     @property
     def storage_backend(self) -> Literal["local", "redis", "dynamodb"]:
         if self.redis:
@@ -70,6 +81,21 @@ def _get_application_settings() -> ApplicationSettings:
     return ApplicationSettings()
 
 
+def add_user_context(record) -> bool:
+    user_id = record["extra"].get("user_id")
+    record["extra"]["user_id"] = f"[{user_id}] " if user_id else ""
+    return True
+
+
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<level>{level: <8}</level> | "
+    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | "
+    "{extra[user_id]}"
+    "<level>{message}</level>",
+    filter=add_user_context,
+)
 logger.level("TOOL", no=20, color="<light-blue>")
 logger.level("THINK", no=20, color="<light-magenta>")
 logger.level("CALL", no=20, color="<magenta>")
