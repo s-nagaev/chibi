@@ -26,3 +26,10 @@ tasks:
           -t pysergio/chibi:armv7-{{.TAG}}
           -f armv7.Dockerfile
           --push .
+
+  lint:
+    desc: "Run linters: ruff format, ruff check --fix, and mypy"
+    cmds:
+      - ruff format .
+      - ruff check --fix .
+      - mypy .

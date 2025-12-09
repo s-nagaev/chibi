@@ -4,6 +4,8 @@ from openai.types import CompletionUsage
 from openai.types.completion_usage import CompletionTokensDetails, PromptTokensDetails
 from pydantic import BaseModel, model_validator
 
+from chibi.config import telegram_settings
+
 if TYPE_CHECKING:
     pass
 
@@ -16,6 +18,14 @@ class UsageSchema(BaseModel):
     cache_read_input_tokens: int = 0
     completion_tokens_details: CompletionTokensDetails | None = None
     prompt_tokens_details: PromptTokensDetails | None = None
+
+
+class MetricTagsSchema(UsageSchema):
+    user_id: int
+    user_name: str | None = None
+    provider: str
+    model: str
+    bot: str = telegram_settings.bot_name
 
 
 class ChatResponseSchema(BaseModel):

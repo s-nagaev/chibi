@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [1.3.1] - 2025-11-27
+
+### Added
+- **InfluxDB Integration:** Added support for sending usage metrics to an InfluxDB instance. This includes new configuration settings (`INFLUXDB_URL`, `INFLUXDB_TOKEN`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET`) and a schema for usage metrics.
+- **Linter Task:** A new `lint` task has been added to `Taskfile.yml` to run `ruff` and `mypy` for code quality checks.
+
+### Changed
+- **Task Management:** Refactored the handling of background tasks to use a centralized `task_manager`.
+- **Dependencies:** Added the `influxdb-client` library to support the new InfluxDB integration.
+
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -306,9 +316,9 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.3.1...HEAD
 
-[1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.3.0...v1.3.1
+[1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.3.1
 [1.3.0]: https://github.com/s-nagaev/chibi/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/s-nagaev/chibi/compare/v1.1.0...v1.2.0

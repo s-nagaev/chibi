@@ -13,8 +13,27 @@ from anthropic.types import (
     ToolUseBlockParam,
 )
 from google.genai.types import ContentDict, FunctionCallDict, PartDict
+from mistralai.models import (
+    AssistantMessage as MistralAssistantMessage,
+)
+from mistralai.models import (
+    FunctionCall as MistralFunctionCall,
+)
+from mistralai.models import (
+    SystemMessage as MistralSystemMessage,
+)
+from mistralai.models import (
+    ToolCall as MistralToolCall,
+)
+from mistralai.models import (
+    ToolMessage as MistralToolMessage,
+)
+from mistralai.models import (
+    UserMessage as MistralUserMessage,
+)
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
+    ChatCompletionFunctionMessageParam,
     ChatCompletionMessageParam,
     ChatCompletionToolMessageParam,
     ChatCompletionUserMessageParam,
@@ -34,7 +53,7 @@ if TYPE_CHECKING:
 
 CHAT_COMPLETION_CLASSES = {
     "assistant": ChatCompletionAssistantMessageParam,
-    # "function": ChatCompletionFunctionMessageParam,
+    "function": ChatCompletionFunctionMessageParam,
     "tool": ChatCompletionToolMessageParam,
     "user": ChatCompletionUserMessageParam,
 }
@@ -82,6 +101,7 @@ class Message(BaseModel):
     expire_at: float | None = None
     tool_calls: list[ToolSchema] | None = None
     tool_call_id: str | None = None
+    source: str | None = None
 
     def to_openai(self) -> ChatCompletionMessageParam:
         wrapper_class = CHAT_COMPLETION_CLASSES.get(self.role)
@@ -95,7 +115,9 @@ class Message(BaseModel):
     def from_openai(cls, open_ai_message: ChatCompletionMessageParam) -> "Message":
         # if not open_ai_message.get("tool_calls"):
         #     open_ai_message["tool_calls"] = []
-        return cls(**open_ai_message)
+        msg = cls(**open_ai_message)
+        msg.source = "openai"
+        return msg
 
     def to_anthropic(self) -> MessageParam:
         if self.role == "tool" and self.tool_call_id:
@@ -123,7 +145,7 @@ class Message(BaseModel):
         assistant_content: list[TextBlockParam | ToolUseBlockParam] = [
             TextBlockParam(
                 type="text",
-                text=self.content,
+                text=self.content or "No content",
             )
         ]
         if self.tool_calls:
@@ -178,7 +200,7 @@ class Message(BaseModel):
                     tool = ToolSchema(id=content_block["id"], function=function)
                     tools.append(tool)
 
-        return cls(role=role, content=content, tool_calls=tools or None, tool_call_id=tool_call_id)
+        return cls(role=role, content=content, tool_calls=tools or None, tool_call_id=tool_call_id, source="anthropic")
 
     def to_google(self) -> ContentDict:
         """Convert a Chibi Message to a Google AI ContentDict."""
@@ -272,10 +294,92 @@ class Message(BaseModel):
                             content = response_content.get("content", "")
 
         return cls(
-            role=chibi_role,
+            role=chibi_role, content=content, tool_calls=tools or None, tool_call_id=tool_call_id, source="google"
+        )
+
+    def to_mistral(self) -> MistralSystemMessage | MistralUserMessage | MistralAssistantMessage | MistralToolMessage:
+        """Convert to MistralAI SDK format."""
+        if self.role == "system":
+            return MistralSystemMessage(content=self.content, role="system")
+
+        elif self.role == "user":
+            return MistralUserMessage(content=self.content, role="user")
+
+        elif self.role == "assistant":
+            mistral_tool_calls: list[MistralToolCall] | None = None
+            if self.tool_calls:
+                mistral_tool_calls = [
+                    MistralToolCall(
+                        id=tool.id,
+                        function=MistralFunctionCall(
+                            name=tool.function.name,
+                            arguments=tool.function.arguments or "{}",
+                        ),
+                    )
+                    for tool in self.tool_calls
+                ]
+            return MistralAssistantMessage(
+                content=self.content,
+                tool_calls=mistral_tool_calls,
+                role="assistant",
+            )
+
+        elif self.role == "tool":
+            return MistralToolMessage(
+                content=self.content,
+                tool_call_id=self.tool_call_id or "",
+                name=None,
+                role="tool",
+            )
+
+        # Fallback to user message
+        return MistralUserMessage(content=self.content, role="user")
+
+    @classmethod
+    def from_mistral(
+        cls,
+        mistral_message: MistralUserMessage | MistralAssistantMessage | MistralToolMessage,
+    ) -> "Message":
+        """Convert from MistralAI SDK format to Chibi Message."""
+        role: Literal["user", "assistant", "tool"] = mistral_message.role  # type: ignore
+
+        # Extract content - handle different content types
+        raw_content = mistral_message.content
+        if isinstance(raw_content, str):
+            content = raw_content
+        elif raw_content is None:
+            content = ""
+        else:
+            # Content is a list/complex type - convert to string
+            content = str(raw_content)
+
+        tool_calls: list[ToolSchema] | None = None
+        tool_call_id: str | None = None
+
+        if isinstance(mistral_message, MistralAssistantMessage) and mistral_message.tool_calls:
+            tool_calls = [
+                ToolSchema(
+                    id=tool.id or "",
+                    function=FunctionSchema(
+                        name=tool.function.name,
+                        arguments=tool.function.arguments,
+                    ),
+                )
+                for tool in mistral_message.tool_calls
+            ]
+
+        if isinstance(mistral_message, MistralToolMessage):
+            # Handle Unset/None/str types
+            raw_tool_call_id = mistral_message.tool_call_id
+            if raw_tool_call_id and not isinstance(raw_tool_call_id, type(None)):
+                tool_call_id = str(raw_tool_call_id)
+
+        return cls(
+            role=role,
             content=content,
-            tool_calls=tools or None,
+            tool_calls=tool_calls,
             tool_call_id=tool_call_id,
+            source="mistral",
         )
 
 

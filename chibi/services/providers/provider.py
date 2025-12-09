@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import json
 from abc import ABC
@@ -10,6 +11,7 @@ from httpx import Response
 from httpx._types import QueryParamTypes, RequestData
 from loguru import logger
 from openai import (
+    NOT_GIVEN,
     APIConnectionError,
     AsyncOpenAI,
     AuthenticationError,
@@ -33,7 +35,7 @@ from openai.types.chat.chat_completion_message_tool_call_param import Function
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_LITERAL
 from chibi.exceptions import (
     NoApiKeyProvidedError,
@@ -45,9 +47,9 @@ from chibi.exceptions import (
 )
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
-from chibi.services.providers.tools import registered_functions, tools
+from chibi.services.metrics import MetricsService
+from chibi.services.providers.tools import RegisteredChibiTools, tools
 from chibi.services.providers.utils import (
-    escape_and_truncate,
     get_usage_from_openai_response,
     get_usage_msg,
     prepare_system_prompt,
@@ -314,9 +316,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         if not system_prompt:
             dialog = messages
         else:
-            prepared_system_prompt = (
-                await prepare_system_prompt(base_system_prompt=system_prompt, user=user) if user else system_prompt
-            )
+            prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog: list[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
@@ -330,6 +330,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             timeout=self.timeout,
             tools=tools,
             tool_choice="auto",
+            reasoning_effort="medium" if "reason" in model else NOT_GIVEN,
         )
         choices: list[Choice] = response.choices
 
@@ -338,39 +339,42 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         data = choices[0]
         answer: str = data.message.content or ""
-        tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls
+
         usage = get_usage_from_openai_response(response_message=response)
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
+
+        tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls
 
         if not tool_calls:
             messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
-        thoughts = answer or "No thoughts..."
+        # Tool calls handling
+        logger.log("CALL", f"LLM requested the call of {len(tool_calls)} tools.")
+
+        thoughts = answer or "No thoughts"
+        if thoughts:
+            await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
         logger.log("THINK", f"{model}: {thoughts}. {usage_message}")
 
-        if all((context is not None, update is not None, bool(answer))):
-            await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
+        tool_context: dict[str, Any] = {
+            "user_id": user.id if user else None,
+            "telegram_context": context,
+            "telegram_update": update,
+            "model": model,
+        }
 
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_to_call = registered_functions.get(function_name)
-            if not function_to_call:
-                logger.error(f"Function {function_name} called but it's not registered.")
-                function_to_call = registered_functions["stub_function"]
-
-            function_args = json.loads(tool_call.function.arguments)
-            function_args["user_id"] = user.id if user else 0
-            function_args["telegram_context"] = context
-            function_args["telegram_update"] = update
-            function_args["model"] = model
-
-            logger.log(
-                "CALL",
-                f"Calling a function '{function_name}'. Args: {escape_and_truncate(tool_call.function.arguments)}",
+        tool_coroutines = [
+            RegisteredChibiTools.call(
+                tool_name=tool_call.function.name, tools_args=tool_context | json.loads(tool_call.function.arguments)
             )
-            function_response = await function_to_call(**function_args)
+            for tool_call in tool_calls
+        ]
+        results = await asyncio.gather(*tool_coroutines)
 
+        for tool_call, result in zip(tool_calls, results):
             tool_call_message = ChatCompletionAssistantMessageParam(
                 role="assistant",
                 content=answer,
@@ -379,7 +383,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                         id=tool_call.id,
                         type="function",
                         function=Function(
-                            name=function_name,
+                            name=tool_call.function.name,
                             arguments=tool_call.function.arguments,
                         ),
                     )
@@ -388,11 +392,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             tool_result_message = ChatCompletionToolMessageParam(
                 tool_call_id=tool_call.id,
                 role="tool",
-                content=function_response.model_dump_json(),
+                content=result.model_dump_json(),
             )
             messages.append(tool_call_message)
             messages.append(tool_result_message)
-        logger.log("CALL", f"Function result received, returning it to the model {model}...")
+
+        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,

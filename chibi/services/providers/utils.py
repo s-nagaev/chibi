@@ -6,6 +6,7 @@ from anthropic.types import (
     Message as AnthropicMessage,
 )
 from google.genai.types import GenerateContentResponse
+from mistralai import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 from telegram import Update, constants
@@ -43,7 +44,10 @@ def escape_and_truncate(message: str | dict[str, Any] | None, limit: int = 80) -
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user: User) -> str:
+async def prepare_system_prompt(base_system_prompt: str, user: User | None = None) -> str:
+    if user is None:
+        return base_system_prompt
+
     prompt = {
         "user_id": user.id,
         "user_info": user.info,
@@ -103,6 +107,16 @@ def get_usage_from_google_response(response_message: GenerateContentResponse) ->
         completion_tokens=response_message.usage_metadata.candidates_token_count or 0,
         prompt_tokens=response_message.usage_metadata.prompt_token_count or 0,
         cache_read_input_tokens=response_message.usage_metadata.cached_content_token_count or 0,
+    )
+
+
+def get_usage_from_mistral_response(response_message: ChatCompletionResponse) -> UsageSchema:
+    return UsageSchema(
+        completion_tokens=response_message.usage.completion_tokens or 0,
+        prompt_tokens=response_message.usage.prompt_tokens or 0,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        total_tokens=response_message.usage.total_tokens or 0,
     )
 
 

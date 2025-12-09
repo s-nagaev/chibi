@@ -1,7 +1,9 @@
+import asyncio
 import random
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
+from typing import Any
 from uuid import uuid4
 
 from google.genai.client import Client
@@ -23,14 +25,14 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.tools import registered_functions, tools
+from chibi.services.providers.tools import RegisteredChibiTools, tools
 from chibi.services.providers.utils import (
-    escape_and_truncate,
     get_usage_from_google_response,
     get_usage_msg,
     prepare_system_prompt,
@@ -90,6 +92,17 @@ class Gemini(RestApiFriendlyProvider):
                 text += part.text
         return text if text != "" else None
 
+    def get_thought_signature(self, response: GenerateContentResponse) -> bytes | None:
+        if not response.candidates:
+            return None
+        first_candidate = response.candidates[0]
+        if not first_candidate.content or not first_candidate.content.parts:
+            return None
+        for part in first_candidate.content.parts:
+            if signature := part.thought_signature:
+                return signature
+        return None
+
     async def _generate_content(
         self, model: str, contents: list[ContentDict], config: GenerateContentConfig
     ) -> GenerateContentResponse:
@@ -125,12 +138,10 @@ class Gemini(RestApiFriendlyProvider):
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
-        prepared_system_prompt = (
-            await prepare_system_prompt(base_system_prompt=system_prompt, user=user) if user else system_prompt
-        )
+        prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
 
         generation_config = GenerateContentConfig(
-            system_instruction=prepared_system_prompt,
+            system_instruction=prepared_system_prompt if "gemini" in model_name else None,
             temperature=self.temperature,
             max_output_tokens=self.max_tokens,
             presence_penalty=self.presence_penalty,
@@ -138,14 +149,15 @@ class Gemini(RestApiFriendlyProvider):
             tools=self.tools_list if "gemini" in model_name else None,
         )
 
-        response = await self._generate_content(
+        response: GenerateContentResponse = await self._generate_content(
             model=model_name,
             contents=messages,
             config=generation_config,
         )
         answer = self._get_text(response)
-
         usage = get_usage_from_google_response(response_message=response)
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=model_name, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
 
         if not response.function_calls:
@@ -161,46 +173,42 @@ class Gemini(RestApiFriendlyProvider):
             )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model_name, usage=usage), messages
 
-        thoughts = answer or "No thoughts..."
-        logger.log("THINK", f"{model_name}: {thoughts[:1800]}. {usage_message}")
+        # Tool calls handling
+        logger.log("CALL", f"LLM requested the call of {len(response.function_calls)} tools.")
 
-        if all((context is not None, update is not None, bool(answer))):
-            await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
+        if answer:
+            await send_llm_thoughts(thoughts=answer, context=context, update=update)
+        logger.log("THINK", f"{model}: {answer or 'No thoughts...'}. {usage_message}")
 
-        for function_call in response.function_calls:
-            function_to_call = registered_functions.get(str(function_call.name))
-            if not function_to_call:
-                logger.error(f"Function {str(function_call.name)} called but it's not registered.")
-                function_to_call = registered_functions["stub_function"]
+        tool_context: dict[str, Any] = {
+            "user_id": user.id if user else None,
+            "telegram_context": context,
+            "telegram_update": update,
+            "model": model,
+        }
 
-            function_args = copy(function_call.args) if function_call.args else {}
-            function_args["user_id"] = user.id if user else 0
-            function_args["telegram_context"] = context
-            function_args["telegram_update"] = update
-            function_args["model"] = model
-
-            function_call_id = function_call.id or str(uuid4())
-
-            logger.log(
-                "CALL",
-                f"Calling a function '{function_call.name}'. Args: {escape_and_truncate(function_call.args)}",
+        tool_coroutines = [
+            RegisteredChibiTools.call(
+                tool_name=str(function_call.name),
+                tools_args=tool_context | copy(function_call.args) if function_call.args else {},
             )
-            function_response = await function_to_call(**function_args)
+            for function_call in response.function_calls
+        ]
+        results = await asyncio.gather(*tool_coroutines)
 
-            try:
-                thought_signature = response.candidates[0].content.parts[0].thought_signature  # type: ignore
-            except Exception as e:
-                logger.error(
-                    f"Could not get thought signature for function {function_call.name} call: {e}. "
-                    f"{response.candidates[0] if response.candidates else 'No response candidates found'}."
-                )
-                thought_signature = None
+        thought_signature = self.get_thought_signature(response=response)
+        if not thought_signature:
+            logger.error(
+                f"Could not get thought signature for function call, no response candidates found: "
+                f"{response.candidates}."
+            )
 
+        for function_call, result in zip(response.function_calls, results):
+            function_call_id = function_call.id or str(uuid4())
             tool_call_message: ContentDict = ContentDict(
                 role="model",
                 parts=[
                     PartDict(
-                        # text=response.text,
                         function_call=FunctionCallDict(
                             name=function_call.name, args=function_call.args, id=function_call_id
                         ),
@@ -214,7 +222,7 @@ class Gemini(RestApiFriendlyProvider):
                 parts=[
                     PartDict(
                         function_response=FunctionResponseDict(
-                            id=function_call_id, name=function_call.name, response=function_response.model_dump()
+                            id=function_call_id, name=function_call.name, response=result.model_dump()
                         )
                     ),
                 ],
@@ -222,17 +230,16 @@ class Gemini(RestApiFriendlyProvider):
 
             messages.append(tool_call_message)
             messages.append(tool_result_message)
-            logger.log("CALL", f"Function result received, returning it to the model {model_name}...")
-            return await self._get_chat_completion_response(
-                messages=messages,
-                model=model_name,
-                user=user,
-                system_prompt=system_prompt,
-                context=context,
-                update=update,
-            )
-        # Unreachable raise, temporary solution, for mypy only
-        raise ServiceResponseError(provider=self.name, model=model_name, detail="this should never happen")
+
+        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        return await self._get_chat_completion_response(
+            messages=messages,
+            model=model_name,
+            user=user,
+            system_prompt=system_prompt,
+            context=context,
+            update=update,
+        )
 
     async def get_chat_response(
         self,

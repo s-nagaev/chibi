@@ -7,7 +7,7 @@ from chibi.services.providers.customopenai import CustomOpenAI
 from chibi.services.providers.deepseek import DeepSeek
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.grok import Grok
-from chibi.services.providers.mistralai import MistralAI
+from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import RegisteredProviders
