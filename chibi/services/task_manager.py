@@ -46,14 +46,16 @@ class BackgroundTaskManager:
         finally:
             self._tasks.discard(task)
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *args: Any) -> None:
         """
         Wait for all background tasks to complete with a timeout.
         If tasks do not finish within 15 seconds, they are cancelled.
         """
+        logger.info("Shutting down background tasks...")
         self._shutting_down = True
         tasks_to_wait = list(self._tasks)
         if not tasks_to_wait:
+            logger.info("No background tasks to wait, we're good.")
             return None
 
         logger.info(f"Waiting for {len(tasks_to_wait)} background tasks to complete...")

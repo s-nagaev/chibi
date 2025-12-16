@@ -16,6 +16,7 @@ from google.genai.types import (
     GenerateContentResponse,
     GenerateImagesConfig,
     GenerateImagesResponse,
+    HttpOptions,
     Image,
     ImageConfig,
     PartDict,
@@ -140,13 +141,21 @@ class Gemini(RestApiFriendlyProvider):
 
         prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
 
+        if "flash" in model_name and self.temperature > 0.4:
+            temperature = 0.4
+        else:
+            temperature = self.temperature
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
-            temperature=self.temperature,
+            temperature=temperature,
             max_output_tokens=self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             tools=self.tools_list if "gemini" in model_name else None,
+            http_options=http_options,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -190,7 +199,7 @@ class Gemini(RestApiFriendlyProvider):
         tool_coroutines = [
             RegisteredChibiTools.call(
                 tool_name=str(function_call.name),
-                tools_args=tool_context | copy(function_call.args) if function_call.args else {},
+                tools_args=tool_context | copy(function_call.args) if function_call.args else tool_context,
             )
             for function_call in response.function_calls
         ]
@@ -274,6 +283,8 @@ class Gemini(RestApiFriendlyProvider):
             gpt_settings.image_size_nano_banana if "flash" not in model else None
         )  # flash-models don't support it
 
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
         generation_config = GenerateContentConfig(
             image_config=ImageConfig(
                 aspect_ratio=gpt_settings.image_aspect_ratio,
@@ -281,7 +292,7 @@ class Gemini(RestApiFriendlyProvider):
             )
         )
 
-        async with Client(api_key=gpt_settings.gemini_key).aio as client:
+        async with Client(api_key=gpt_settings.gemini_key, http_options=http_options).aio as client:
             response: GenerateContentResponse = await client.models.generate_content(
                 model=model,
                 contents=[prompt],
@@ -293,14 +304,17 @@ class Gemini(RestApiFriendlyProvider):
         images: list[Image | None] = [part.as_image() for part in response.parts if part]
         return [image for image in images if image]
 
-    @staticmethod
     async def _generate_image_by_imagen(
+        self,
         prompt: str,
         model: str,
     ) -> list[Image]:
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
         generation_config = GenerateImagesConfig(
             aspect_ratio=gpt_settings.image_aspect_ratio,
             number_of_images=gpt_settings.image_n_choices,
+            http_options=http_options,
         )
         async with Client(api_key=gpt_settings.gemini_key).aio as client:
             response: GenerateImagesResponse = await client.models.generate_images(

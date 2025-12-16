@@ -8,6 +8,30 @@
 
 set -e
 
+# Read user input from TTY when available (so `curl ... | bash` stays interactive)
+ui_read() { # ui_read [-s] [-p "prompt"] varname
+  local secret=false prompt="" OPTIND opt
+  while getopts ":sp:" opt; do
+    case "$opt" in
+      s) secret=true ;;
+      p) prompt="$OPTARG" ;;
+      *) return 2 ;;
+    esac
+  done
+  shift $((OPTIND-1))
+  local __var="$1" __in="" __tty="/dev/tty"
+  [[ -r "$__tty" ]] || __tty="/dev/stdin"
+  [[ -n "$prompt" ]] && echo -ne "$prompt" >"$__tty"
+  if $secret; then
+    IFS= read -r -s __in <"$__tty" || __in=""
+    echo "" >"$__tty"
+  else
+    IFS= read -r __in <"$__tty" || __in=""
+  fi
+  printf -v "$__var" "%s" "$__in"
+}
+
+
 # Colors & Styles
 NEON_CYAN='\033[96m'
 NEON_PINK='\033[95m'
@@ -96,8 +120,7 @@ prompt_input() {
     local required="${3:-false}"
     
     while true; do
-        echo -ne "${NEON_BLUE}${prompt_text}${RESET} "
-        read -r input
+        ui_read -p "${NEON_BLUE}${prompt_text}${RESET} " input
         
         if [[ -n "$input" ]]; then
             eval "$var_name='$input'"
@@ -117,9 +140,7 @@ prompt_secret() {
     local required="${3:-false}"
     
     while true; do
-        echo -ne "${NEON_BLUE}${prompt_text}${RESET} "
-        read -rs input
-        echo ""
+        ui_read -s -p "${NEON_BLUE}${prompt_text}${RESET} " input
         
         if [[ -n "$input" ]]; then
             eval "$var_name='$input'"
@@ -167,8 +188,7 @@ check_requirements() {
     # Check for Poetry or offer to install
     if ! command -v poetry &> /dev/null; then
         log_warning "Poetry is not installed"
-        echo -ne "${NEON_BLUE}Install Poetry now? [Y/n]${RESET} "
-        read -r install_poetry
+        ui_read -p "${NEON_BLUE}Install Poetry now? [Y/n]${RESET} " install_poetry
         
         if [[ "$install_poetry" =~ ^[Nn]$ ]]; then
             log_error "Poetry is required for installation. Aborting."
@@ -200,8 +220,7 @@ clone_repository() {
     
     if [[ -d "$INSTALL_DIR" ]]; then
         log_warning "Directory $INSTALL_DIR already exists"
-        echo -ne "${NEON_BLUE}Remove existing directory and continue? [y/N]${RESET} "
-        read -r remove_dir
+        ui_read -p "${NEON_BLUE}Remove existing directory and continue? [y/N]${RESET} " remove_dir
         
         if [[ "$remove_dir" =~ ^[Yy]$ ]]; then
             rm -rf "$INSTALL_DIR"
@@ -451,8 +470,7 @@ main() {
     echo -e "   The agent will have full moderated access to your filesystem."
     echo -e "   Only proceed if you understand the security implications."
     echo ""
-    echo -ne "${NEON_BLUE}Continue with installation? [y/N]${RESET} "
-    read -r confirm
+    ui_read -p "${NEON_BLUE}Continue with installation? [y/N]${RESET} " confirm
     
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         log_info "Installation cancelled"

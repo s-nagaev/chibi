@@ -462,6 +462,10 @@ class RestApiFriendlyProvider(Provider):
     def _headers(self) -> dict[str, str]:
         raise NotImplementedError
 
+    def get_async_httpx_client(self) -> httpx.AsyncClient:
+        transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
+        return httpx.AsyncClient(transport=transport, timeout=gpt_settings.timeout)
+
     async def _request(
         self,
         method: str,
@@ -472,14 +476,8 @@ class RestApiFriendlyProvider(Provider):
         if not self.token:
             raise NoApiKeyProvidedError(provider=self.name)
 
-        transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
-
         try:
-            async with httpx.AsyncClient(
-                transport=transport,
-                timeout=gpt_settings.timeout,
-                proxy=gpt_settings.proxy,
-            ) as client:
+            async with self.get_async_httpx_client() as client:
                 response = await client.request(
                     method=method,
                     url=url,

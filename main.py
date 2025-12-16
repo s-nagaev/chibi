@@ -280,17 +280,16 @@ class ChibiBot:
         await application.bot.set_my_commands(self.commands)
 
     def run(self) -> None:
+        builder = (
+            ApplicationBuilder()
+            .token(telegram_settings.token)
+            .post_init(self.post_init)
+            .post_shutdown(task_manager.shutdown)
+        )
+
         if telegram_settings.proxy:
-            app = (
-                ApplicationBuilder()
-                .token(telegram_settings.token)
-                .proxy(telegram_settings.proxy)
-                .get_updates_proxy(telegram_settings.proxy)
-                .post_init(self.post_init)
-                .build()
-            )
-        else:
-            app = ApplicationBuilder().token(telegram_settings.token).post_init(self.post_init).build()
+            builder = builder.proxy(telegram_settings.proxy).get_updates_proxy(telegram_settings.proxy)
+        app = builder.build()
 
         if not application_settings.hide_imagine:
             app.add_handler(CommandHandler(command="imagine", callback=self.imagine))
