@@ -5,6 +5,7 @@ from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.cloudflare import Cloudflare
 from chibi.services.providers.customopenai import CustomOpenAI
 from chibi.services.providers.deepseek import DeepSeek
+from chibi.services.providers.eleven_labs import ElevenLabs
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.grok import Grok
 from chibi.services.providers.mistralai_native import MistralAI
@@ -17,6 +18,7 @@ registered_providers = {
     "Anthropic": Anthropic,
     "Cloudflare": Cloudflare,
     "DeepSeek": DeepSeek,
+    "ElevenLabs": ElevenLabs,
     "Gemini": Gemini,
     "Grok": Grok,
     "MistralAI": MistralAI,

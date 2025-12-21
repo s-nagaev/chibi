@@ -32,6 +32,7 @@ Chibi currently supports models from the following providers:
 *   MoonshotAI
 *   OpenAI (including DALL-E for images)
 *   xAI (Grok models, including image generation)
+*   ElevenLabs (ElevenLabs models, including text to speach, speach to text, music generation)
 
 ## Features
 
@@ -275,22 +276,23 @@ Please, visit the [examples](examples) directory of the current repository for m
 ### API Keys (Master Keys)
 These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
 
-| Variable                | Description                                                          | Default Value |
-|:------------------------|:---------------------------------------------------------------------|:--------------|
-| `ALIBABA_API_KEY`       | API key for Alibaba (Qwen) models.                                   | `None`        |
-| `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.                               | `None`        |
-| `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models).                     | `None`        |
-| `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.                               | `None`        |
-| `CUSTOMOPENAI_API_KEY`  | API key for custom OpenAI-compatible endpoints.                      | `None`        |
-| `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.                          | `http://localhost:1234/v1` |
-| `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                                         | `None`        |
-| `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.                         | `None`        |
-| `GOOGLE_SEARCH_API_KEY` | API key for Google Custom Search.                                    | `None`        |
-| `GOOGLE_SEARCH_CX`      | Custom Search Engine ID for Google Custom Search.                    | `None`        |
-| `GROK_API_KEY`          | API key for xAI (Grok) models.                                       | `None`        |
-| `MISTRALAI_API_KEY`     | API key for MistralAI models.                                        | `None`        |
-| `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.                                | `None`        |
-| `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.                            | `None`        |
+| Variable                | Description                                                 | Default Value              |
+|:------------------------|:------------------------------------------------------------|:---------------------------|
+| `ALIBABA_API_KEY`       | API key for Alibaba (Qwen) models.                          | `None`                     |
+| `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.                      | `None`                     |
+| `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models).            | `None`                     |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.                      | `None`                     |
+| `CUSTOMOPENAI_API_KEY`  | API key for custom OpenAI-compatible endpoints.             | `None`                     |
+| `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.                 | `http://localhost:1234/v1` |
+| `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                                | `None`                     |
+| `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.                | `None`                     |
+| `GOOGLE_SEARCH_API_KEY` | API key for Google Custom Search.                           | `None`                     |
+| `GOOGLE_SEARCH_CX`      | Custom Search Engine ID for Google Custom Search.           | `None`                     |
+| `GROK_API_KEY`          | API key for xAI (Grok) models.                              | `None`                     |
+| `MISTRALAI_API_KEY`     | API key for MistralAI models.                               | `None`                     |
+| `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.                       | `None`                     |
+| `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.                   | `None`                     |
+| `ELEVEN_LABS_API_KEY`   | API key for ElevenLabs models.                              | `None`                     |
 ### Model & Conversation Settings### MCP Settings
 | Variable           | Description                                      | Default Value |
 |:-------------------|:-------------------------------------------------|:--------------|
@@ -349,13 +351,14 @@ To use Chibi in private mode, or for users interacting with the bot in public mo
 
 *   Alibaba (Qwen via DashScope): https://dashscope.console.aliyun.com/apiKey
 *   Anthropic (Claude): https://console.anthropic.com/ (Sign up and navigate to API Keys)
-*   Cloudflare: https://dash.cloudflare.com/profile/api-tokens (Need API key with `Account.Workers AI` permissions)
+*   Cloudflare: https://dash.cloudflare.com/profile/api-tokens (Need API Key with `Account.Workers AI` permissions)
 *   DeepSeek: https://platform.deepseek.com/ (Sign up and navigate to API Keys)
 *   Google (Gemini): https://aistudio.google.com/app/apikey
 *   MistralAI: https://console.mistral.ai/ (Sign up and navigate to API Keys)
 *   MoonshotAI (Kimi): https://platform.moonshot.cn (Sign up and navigate to API Keys)
 *   OpenAI (GPT & DALL-E): https://platform.openai.com/api-keys
 *   xAI (Grok): https://docs.x.ai/ (Check documentation for API access details)
+*   ElevenLabs: https://elevenlabs.io/ (Sign up and navigate to API Keys)
 
 ## Versioning
 
