@@ -27,6 +27,7 @@ trafilatura = "2.0.0"
 influxdb-client = "^1.49.0"
 mistralai = "^1.9.11"
 mcp = "1.23.1"
+elevenlabs = "^2.25.0"
 
 [tool.poetry.group.dev.dependencies]
 factory-boy = "^3.3.3"
