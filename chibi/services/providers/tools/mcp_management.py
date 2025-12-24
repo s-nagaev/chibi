@@ -1,4 +1,4 @@
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, cast
 
 from loguru import logger
 from mcp import ClientSession
@@ -11,7 +11,6 @@ from chibi.services.mcp.manager import MCPManager
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.providers.utils import escape_and_truncate
-
 
 JsonNode = dict[str, Any] | list[Any] | str | int | float | bool | None
 
@@ -70,7 +69,7 @@ async def register_tools_from_mcp_session(
                     function=FunctionDefinition(
                         name=chibi_tool_name,
                         description=f"MCP Server: {server_name}. {tool.description or ''}",
-                        parameters=_clean_schema(tool.inputSchema),
+                        parameters=cast(dict[str, object], _clean_schema(tool.inputSchema)),
                     ),
                 ),
                 "name": chibi_tool_name,
