@@ -5,16 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2025-12-09
-### Added
-- **InfluxDB Integration:** Added integration with InfluxDB for storing and visualizing metrics (token usage, cost, latency, etc.). Metrics can now be pushed to InfluxDB for monitoring via Grafana or other tools.
-- **Mistral Native Client:** Reimplemented the Mistral AI client using the native `mistralai` library (v1.0.0+) for better stability and feature support, replacing the generic requests-based implementation.
-- **Metrics Service:** Introduced a dedicated `MetricsService` (`chibi/services/metrics.py`) to handle data collection and reporting to InfluxDB.
-- **Dobby Installation Scripts:** Added a comprehensive suite of scripts (`scripts/`) for installing, configuring, and controlling the "Dobby" local agent mode, including `install.sh`, `dobby-control.sh`, and documentation.
-
-### Changed
 ## [1.4.1] - 2025-12-24
-
 ### Added
 - **Model Context Protocol (MCP)** integration:
     - Support for **Stdio** transport (local tools like SQLite, Filesystem).
@@ -25,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed `RuntimeError` during MCP server disconnection by isolating the connection lifecycle in a dedicated background task.
 - Improved `BackgroundTaskManager` to return `asyncio.Task` objects for better control.
+
+## [1.4.0] - 2025-12-09
+### Added
+- **InfluxDB Integration:** Added integration with InfluxDB for storing and visualizing metrics (token usage, cost, latency, etc.). Metrics can now be pushed to InfluxDB for monitoring via Grafana or other tools.
+- **Mistral Native Client:** Reimplemented the Mistral AI client using the native `mistralai` library (v1.0.0+) for better stability and feature support, replacing the generic requests-based implementation.
+- **Metrics Service:** Introduced a dedicated `MetricsService` (`chibi/services/metrics.py`) to handle data collection and reporting to InfluxDB.
+- **Dobby Installation Scripts:** Added a comprehensive suite of scripts (`scripts/`) for installing, configuring, and controlling the "Dobby" local agent mode, including `install.sh`, `dobby-control.sh`, and documentation.
+
+### Changed
 - **Task Manager Refactoring:** Refactored `TaskManager` to better handle recursive delegation and metrics tracking.
 - **Provider Interface Updates:** Updated the base `Provider` class and implementations (`Anthropic`, `Gemini`, `DeepSeek`) to support the new metrics collection system.
 - **Dependency Updates:** Updated `poetry.lock` and requirements files to include `influxdb-client` and updated `mistralai` SDK.
