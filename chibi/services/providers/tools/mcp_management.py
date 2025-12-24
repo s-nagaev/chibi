@@ -6,6 +6,7 @@ from mcp.types import CallToolResult
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
+from chibi.config import settings
 from chibi.services.mcp.manager import MCPManager
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import AdditionalOptions
@@ -88,7 +89,7 @@ async def register_tools_from_mcp_session(
 
 
 class InitializeStdioMCPServer(ChibiTool):
-    register = True
+    register = settings.app.enable_mcp_stdio
     name = "initialize_stdio_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
@@ -146,7 +147,7 @@ class InitializeStdioMCPServer(ChibiTool):
 
 
 class InitializeSseMCPServer(ChibiTool):
-    register = True
+    register = settings.app.enable_mcp_sse
     name = "initialize_sse_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
@@ -190,7 +191,7 @@ class InitializeSseMCPServer(ChibiTool):
 class DeinitializeMCPServer(ChibiTool):
     """Disconnects from an MCP server and removes its tools."""
 
-    register = True
+    register = settings.app.enable_mcp_stdio or settings.app.enable_mcp_sse
     name = "deinitialize_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
