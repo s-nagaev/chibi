@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
 from mcp import ClientSession
@@ -6,7 +6,7 @@ from mcp.types import CallToolResult
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
-from chibi.config import settings
+from chibi.config import application_settings
 from chibi.services.mcp.manager import MCPManager
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import AdditionalOptions
@@ -29,8 +29,10 @@ def _clean_schema(schema: Any) -> Any:
     return schema
 
 
-def create_wrapper(server_name: str, original_tool_name: str, chibi_tool_name: str):
-    async def wrapper(**kwargs_inner):
+def create_wrapper(
+    server_name: str, original_tool_name: str, chibi_tool_name: str
+) -> Callable[..., Coroutine[Any, Any, dict[str, Any]]]:
+    async def wrapper(**kwargs_inner: Any) -> dict[str, Any]:
         tool_args = {k: v for k, v in kwargs_inner.items() if k not in list(AdditionalOptions.__annotations__.keys())}
 
         logger.log("TOOL", f"Calling MCP tool '{chibi_tool_name}' with args: {escape_and_truncate(tool_args)}")
@@ -89,7 +91,7 @@ async def register_tools_from_mcp_session(
 
 
 class InitializeStdioMCPServer(ChibiTool):
-    register = settings.app.enable_mcp_stdio
+    register = application_settings.enable_mcp_stdio
     name = "initialize_stdio_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
@@ -147,7 +149,7 @@ class InitializeStdioMCPServer(ChibiTool):
 
 
 class InitializeSseMCPServer(ChibiTool):
-    register = settings.app.enable_mcp_sse
+    register = application_settings.enable_mcp_sse
     name = "initialize_sse_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
@@ -191,7 +193,7 @@ class InitializeSseMCPServer(ChibiTool):
 class DeinitializeMCPServer(ChibiTool):
     """Disconnects from an MCP server and removes its tools."""
 
-    register = settings.app.enable_mcp_stdio or settings.app.enable_mcp_sse
+    register = application_settings.enable_mcp_stdio or application_settings.enable_mcp_sse
     name = "deinitialize_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",

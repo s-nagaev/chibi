@@ -98,7 +98,6 @@ class MCPManager:
 
             ready_event = asyncio.Event()
 
-            # Start the lifecycle task
             task = task_manager.run_task(cls._session_lifecycle(name, stdio_factory, ready_event, timeout))
 
             if not task:
@@ -106,19 +105,15 @@ class MCPManager:
 
             cls._server_tasks[name] = task
 
-            # Wait for initialization
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
             except Exception:
-                # If init failed or timed out, cancel the task and re-raise
                 task.cancel()
                 cls._server_tasks.pop(name, None)
                 raise
 
-            # Check if session appeared (it might have failed and set ready_event)
             session = cls._sessions.get(name)
             if not session:
-                # Task likely died with an exception
                 cls._server_tasks.pop(name, None)
                 raise RuntimeError(f"Failed to initialize MCP server '{name}'")
 
@@ -180,7 +175,7 @@ class MCPManager:
     def pop_server_tools(cls, server_name: str) -> list[str]:
         """Remove and return tools associated with a specific server session."""
         if server_name not in cls._session_tools_map:
-            # logger.warning(f"No Tools registered for server {server_name}. Nothing to deregister.")
+            logger.warning(f"No Tools registered for server {server_name}. Nothing to deregister.")
             return []
         removed_tools = cls._session_tools_map.pop(server_name)
         return removed_tools
