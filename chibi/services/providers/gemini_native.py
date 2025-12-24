@@ -32,7 +32,7 @@ from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.tools import RegisteredChibiTools, tools
+from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.utils import (
     get_usage_from_google_response,
     get_usage_msg,
@@ -71,16 +71,23 @@ class Gemini(RestApiFriendlyProvider):
             Tools list in Google's Tool format.
         """
         google_tools = []
-        for tool in tools:
-            google_tool = Tool(
-                function_declarations=[
-                    FunctionDeclaration(
-                        name=tool["function"]["name"],
-                        description=tool["function"]["description"],
-                        parameters=tool["function"]["parameters"],
-                    )
-                ]
-            )
+        for tool in RegisteredChibiTools.get_tool_definitions():
+            try:
+                google_tool = Tool(
+                    function_declarations=[
+                        FunctionDeclaration(
+                            name=str(tool["function"]["name"]),
+                            description=str(tool["function"]["description"]),
+                            parameters=tool["function"]["parameters"],
+                        )
+                    ]
+                )
+            except Exception as e:
+                logger.error(f"Failed to register tool {tool['function']['name']} due to exception: {e}")
+                import pprint
+
+                pprint.pprint(tool)
+                raise
             google_tools.append(google_tool)
         return google_tools
 
@@ -240,7 +247,7 @@ class Gemini(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
-        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model_name,

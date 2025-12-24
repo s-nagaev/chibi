@@ -48,7 +48,10 @@ class ApplicationSettings(BaseSettings):
     # Local storage settings
     local_data_path: str = Field(default="/app/data")
 
-    # Other settings
+    # Other settings    # MCP settings
+    enable_mcp_sse: bool = Field(default=True)
+    enable_mcp_stdio: bool = Field(default=False)
+
     log_prompt_data: bool = Field(default=False)
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)

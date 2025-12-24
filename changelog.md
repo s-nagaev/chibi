@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dobby Installation Scripts:** Added a comprehensive suite of scripts (`scripts/`) for installing, configuring, and controlling the "Dobby" local agent mode, including `install.sh`, `dobby-control.sh`, and documentation.
 
 ### Changed
+## [1.4.1] - 2025-12-24
+
+### Added
+- **Model Context Protocol (MCP)** integration:
+    - Support for **Stdio** transport (local tools like SQLite, Filesystem).
+    - Support for **SSE** transport (remote tools).
+    - Lifecycle management for MCP servers (connect/disconnect/list tools).
+    - New settings `ENABLE_MCP_SSE` (default `True`) and `ENABLE_MCP_STDIO` (default `False`).
+
+### Fixed
+- Fixed `RuntimeError` during MCP server disconnection by isolating the connection lifecycle in a dedicated background task.
+- Improved `BackgroundTaskManager` to return `asyncio.Task` objects for better control.
 - **Task Manager Refactoring:** Refactored `TaskManager` to better handle recursive delegation and metrics tracking.
 - **Provider Interface Updates:** Updated the base `Provider` class and implementations (`Anthropic`, `Gemini`, `DeepSeek`) to support the new metrics collection system.
 - **Dependency Updates:** Updated `poetry.lock` and requirements files to include `influxdb-client` and updated `mistralai` SDK.

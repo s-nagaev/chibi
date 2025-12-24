@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi"
-version = "1.4.0"
+version = "1.4.1"
 description = "An asynchronous Telegram bot providing access to various LLMs (OpenAI, Gemini, Anthropic, etc.) and image generation models, featuring context management and built-in tools for web search, news retrieval, and reading web pages."
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"

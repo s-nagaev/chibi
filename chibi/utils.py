@@ -687,7 +687,7 @@ def log_application_settings() -> None:
         f"Proxy is {proxy}",
         "<magenta>LLM Settings:</magenta>",
         f"Bot name is <cyan>{telegram_settings.bot_name}</cyan>",
-        f"Initial assistant prompt: <cyan>{gpt_settings.assistant_prompt}</cyan>",
+        # f"Initial assistant prompt: <cyan>{gpt_settings.assistant_prompt}</cyan>",
         f"Messages TTL: <cyan>{gpt_settings.max_conversation_age_minutes} minutes</cyan>",
         f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
         f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",

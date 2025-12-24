@@ -291,7 +291,12 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `MISTRALAI_API_KEY`     | API key for MistralAI models.                                        | `None`        |
 | `MOONSHOTAI_API_KEY`    | API key for MoonshotAI (Kimi) models.                                | `None`        |
 | `OPENAI_API_KEY`        | API key for OpenAI (GPT & DALL-E) models.                            | `None`        |
-### Model & Conversation Settings
+### Model & Conversation Settings### MCP Settings
+| Variable           | Description                                      | Default Value |
+|:-------------------|:-------------------------------------------------|:--------------|
+| `ENABLE_MCP_SSE`   | Enable Model Context Protocol via SSE transport. | `True`        |
+| `ENABLE_MCP_STDIO` | Enable Model Context Protocol via Stdio transport. | `False`       |
+
 | Variable                       | Description                                                                                                                                     | Default Value                                                                                     |
 |:-------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------|
 | `PUBLIC_MODE`                  | If `True`, the bot doesn't require master API keys. Users will be asked to provide their own keys via PM.                                       | `False`                                                                                           |

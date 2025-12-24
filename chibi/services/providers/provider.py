@@ -48,7 +48,7 @@ from chibi.exceptions import (
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
-from chibi.services.providers.tools import RegisteredChibiTools, tools
+from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.utils import (
     get_usage_from_openai_response,
     get_usage_msg,
@@ -328,7 +328,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
-            tools=tools,
+            tools=RegisteredChibiTools.get_tool_definitions(),
             tool_choice="auto",
             reasoning_effort="medium" if "reason" in model else NOT_GIVEN,
         )
@@ -397,7 +397,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
-        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,
