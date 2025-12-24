@@ -13,7 +13,10 @@ from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.providers.utils import escape_and_truncate
 
 
-def _clean_schema(schema: Any) -> Any:
+JsonNode = dict[str, Any] | list[Any] | str | int | float | bool | None
+
+
+def _clean_schema(schema: JsonNode) -> JsonNode:
     """Recursively cleans the schema for LLM provider compatibility.
 
     Removes 'additionalProperties', '$schema', and other meta-fields that cause validation errors.
