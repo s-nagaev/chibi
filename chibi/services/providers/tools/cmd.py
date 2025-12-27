@@ -9,7 +9,7 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.models import Message
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT, MODERATOR_PROMPT
 from chibi.services.providers.tools.exceptions import ToolException
@@ -73,6 +73,12 @@ class RunCommandInTerminalTool(ChibiTool):
                 "type": "object",
                 "properties": {
                     "cmd": {"type": "string", "description": "Shell command to run."},
+                    "cwd": {
+                        "type": "string",
+                        "description": (
+                            f"The working directory to run the command in. Default: {application_settings.home_dir}"
+                        ),
+                    },
                 },
                 "required": ["cmd"],
             },
@@ -81,7 +87,9 @@ class RunCommandInTerminalTool(ChibiTool):
     name = "run_command_in_terminal"
 
     @classmethod
-    async def function(cls, cmd: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, Any]:
+    async def function(
+        cls, cmd: str, cwd: str = application_settings.home_dir, **kwargs: Unpack[AdditionalOptions]
+    ) -> dict[str, Any]:
         logger.log("CHECK", f"Pre-moderating command: '{cmd}'")
         moderator_answer: ModeratorsAnswer = await moderate_command(cmd)
         if moderator_answer.verdict == "declined":
@@ -91,9 +99,7 @@ class RunCommandInTerminalTool(ChibiTool):
         logger.log("TOOL", f"Running command in terminal: {cmd}")
         try:
             process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
             )
             stdout, stderr = await process.communicate()
         except Exception as e:

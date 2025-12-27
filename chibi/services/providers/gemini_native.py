@@ -1,4 +1,5 @@
 import asyncio
+import math
 import random
 from asyncio import sleep
 from copy import copy
@@ -7,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from google.genai.client import Client
+from google.genai.errors import APIError
 from google.genai.types import (
     ContentDict,
     FunctionCallDict,
@@ -27,7 +29,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.exceptions import NoResponseError, ServiceResponseError
+from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
@@ -58,10 +60,6 @@ class Gemini(RestApiFriendlyProvider):
 
     def __init__(self, token: str) -> None:
         super().__init__(token=token)
-
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {"Content-Type": "application/json"}
 
     @property
     def tools_list(self) -> list[Tool]:
@@ -100,7 +98,7 @@ class Gemini(RestApiFriendlyProvider):
                 text += part.text
         return text if text != "" else None
 
-    def get_thought_signature(self, response: GenerateContentResponse) -> bytes | None:
+    def _get_thought_signature(self, response: GenerateContentResponse) -> bytes | None:
         if not response.candidates:
             return None
         first_candidate = response.candidates[0]
@@ -111,19 +109,75 @@ class Gemini(RestApiFriendlyProvider):
                 return signature
         return None
 
+    def _get_retry_delay(self, response: Any) -> float | None:
+        if not isinstance(response, dict):
+            logger.warning(
+                f"The Gemini API error response data is not a dict. Skipping getting retry delay. "
+                f"Response type: {type(response)}. Response: {response}"
+            )
+            return None
+        per_day_quota: bool = False
+        retry_delay = None
+        details = response.get("error", {}).get("details", [])
+        if not details:
+            logger.warning(
+                f"The Gemini API error response data does not contain details section. Skipping getting retry delay. "
+                f"Response: {response}"
+            )
+            return None
+
+        for item in details:
+            detail_type = item.get("@type", "")
+
+            if "QuotaFailure" in detail_type:
+                violations = item.get("violations", [])
+                for v in violations:
+                    if "PerDay" in v.get("quotaId", ""):
+                        per_day_quota = True
+                        break
+
+            elif "RetryInfo" in detail_type:
+                delay_str = item.get("retryDelay", "")
+                if delay_str and delay_str.endswith("s"):
+                    try:
+                        val = float(delay_str[:-1])
+                        retry_delay = math.ceil(val) + 1
+                    except ValueError:
+                        retry_delay = None
+        if per_day_quota:
+            logger.warning("Ooops! Seems we have reached Daily Quota for Gemini API.")
+            return None
+        return retry_delay
+
     async def _generate_content(
         self, model: str, contents: list[ContentDict], config: GenerateContentConfig
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
-            async with Client(api_key=gpt_settings.gemini_key).aio as client:
-                response: GenerateContentResponse = await client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
-            answer = self._get_text(response)
-            if answer is not None or response.function_calls:
-                return response
+            try:
+                async with Client(api_key=gpt_settings.gemini_key).aio as client:
+                    response: GenerateContentResponse = await client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                answer = self._get_text(response)
+                if answer is not None or response.function_calls:
+                    return response
+            except APIError as err:
+                logger.error(f"Gemini API error: {err.message}")
+
+                if err.code == 429:
+                    retry_delay = self._get_retry_delay(err.details)
+                    if not retry_delay:
+                        raise ServiceRateLimitError(provider=self.name, model=model, detail=err.details)
+                    await asyncio.sleep(retry_delay + random.uniform(0.5, 2.5))
+                    continue
+
+                elif err.code == 403:
+                    raise NotAuthorizedError(provider=self.name, model=model, detail=err.details)
+
+                else:
+                    raise ServiceResponseError(provider=self.name, model=model, detail=err.details)
 
             delay = gpt_settings.backoff_factor * (2**attempt)
             jitter = delay * random.uniform(0.1, 0.5)
@@ -212,7 +266,7 @@ class Gemini(RestApiFriendlyProvider):
         ]
         results = await asyncio.gather(*tool_coroutines)
 
-        thought_signature = self.get_thought_signature(response=response)
+        thought_signature = self._get_thought_signature(response=response)
         if not thought_signature:
             logger.error(
                 f"Could not get thought signature for function call, no response candidates found: "
@@ -318,10 +372,16 @@ class Gemini(RestApiFriendlyProvider):
     ) -> list[Image]:
         http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
 
+        if "preview" in model or "fast" in model:
+            image_size = None
+        else:
+            image_size = gpt_settings.image_size_imagen
+
         generation_config = GenerateImagesConfig(
             aspect_ratio=gpt_settings.image_aspect_ratio,
             number_of_images=gpt_settings.image_n_choices,
             http_options=http_options,
+            image_size=image_size,
         )
         async with Client(api_key=gpt_settings.gemini_key).aio as client:
             response: GenerateImagesResponse = await client.models.generate_images(

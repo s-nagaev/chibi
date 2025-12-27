@@ -276,9 +276,9 @@ async def send_images(
         file.seek(0, 2)
         size = file.tell()
         file.seek(0)
-        if size < (FileSizeLimit.PHOTOSIZE_UPLOAD * 1024 * 1024):
+        if size < FileSizeLimit.PHOTOSIZE_UPLOAD:
             media_photos.append(file)
-        elif size < (FileSizeLimit.FILESIZE_UPLOAD * 1024 * 1024):
+        elif size < FileSizeLimit.FILESIZE_UPLOAD:
             media_docs.append(file)
         else:
             logger.error(f"{user_data(update)} File size ({size}) exceeds file size limit, skipping it..")
@@ -297,7 +297,7 @@ async def send_images(
 
         await context.bot.send_media_group(
             chat_id=telegram_chat.id,
-            media=[InputMediaDocument(img) for img in media_docs],
+            media=[InputMediaDocument(media=img, filename="file.jpeg") for img in media_docs],
             reply_to_message_id=telegram_message.message_id,
             write_timeout=FILE_UPLOAD_TIMEOUT,
         )
