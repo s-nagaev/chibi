@@ -15,11 +15,12 @@ class BackgroundTaskManager:
         return cls._instance
 
     def __init__(self) -> None:
+        """Initialize the task manager."""
         if not hasattr(self, "_tasks"):
             self._tasks: set[asyncio.Task] = set()
             self._shutting_down: bool = False
 
-    def run_task(self, coro: Coroutine[Any, Any, Any]) -> None:
+    def run_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task | None:
         """Schedule a coroutine to run in the background.
 
         Args:
@@ -33,8 +34,10 @@ class BackgroundTaskManager:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._discard_task)
+        return task
 
     def _discard_task(self, task: asyncio.Task) -> None:
+        """Callback to remove a task from the set when it finishes."""
         try:
             exc = task.exception()
             if exc:
@@ -46,14 +49,16 @@ class BackgroundTaskManager:
         finally:
             self._tasks.discard(task)
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *args: Any) -> None:
         """
         Wait for all background tasks to complete with a timeout.
         If tasks do not finish within 15 seconds, they are cancelled.
         """
+        logger.info("Shutting down background tasks...")
         self._shutting_down = True
         tasks_to_wait = list(self._tasks)
         if not tasks_to_wait:
+            logger.info("No background tasks to wait, we're good.")
             return None
 
         logger.info(f"Waiting for {len(tasks_to_wait)} background tasks to complete...")

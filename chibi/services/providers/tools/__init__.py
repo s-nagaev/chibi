@@ -13,11 +13,9 @@ from .file_editor import (
     ReplaceInFileTool,
     ReplaceLinesTool,
 )
+from .mcp_management import DeinitializeMCPServer, InitializeSseMCPServer, InitializeStdioMCPServer
 from .mcp_simple import McpEchoTool
 from .memory import SetUserInfoTool
 from .schemas import ToolResponse
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
 from .web_search import DDGSWebSearchTool, GoogleSearchTool, ReadWebPageTool, SearchNewsTool
-
-registered_functions: RegisteredFunctionsMap = RegisteredChibiTools.get_registered_functions()
-tools = RegisteredChibiTools.get_tool_definitions()

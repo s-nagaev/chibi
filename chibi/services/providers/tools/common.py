@@ -3,12 +3,15 @@ from typing import Any, Unpack
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
+from telegram import Update
+from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, get_sub_agent_response
+from chibi.services.task_manager import task_manager
 from chibi.services.user import generate_image, user_has_reached_images_generation_limit
 
 
@@ -88,7 +91,7 @@ class GetAvailableImageModelsTool(ChibiTool):
         data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=True)
 
         return {
-            "available_models": [info.model_dump(include={"provider", "name"}) for info in data],
+            "available_models": [info.model_dump(include={"provider", "name", "display_name"}) for info in data],
         }
 
 
@@ -111,6 +114,10 @@ class GenerateImageTool(ChibiTool):
                     "provider": {"type": "string", "description": "Provider name, i.e. 'Gemini'"},
                     "image_model": {"type": "string", "description": "Model name, i.e. 'dall-e-3'"},
                     "prompt": {"type": "string", "description": "Image generation prompt. English recommended"},
+                    "execute_in_background": {
+                        "type": "boolean",
+                        "description": "Execute image generation in background.",
+                    },
                 },
                 "required": ["provider", "image_model", "prompt"],
             },
@@ -119,8 +126,29 @@ class GenerateImageTool(ChibiTool):
     name = "generate_image"
 
     @classmethod
+    async def generate_and_send_image(
+        cls,
+        user_id: int,
+        provider: str,
+        model: str,
+        prompt: str,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        from chibi.utils import send_images
+
+        images = await generate_image(user_id=user_id, provider_name=provider, model=model, prompt=prompt)
+        await send_images(images=images, update=update, context=context)
+        return None
+
+    @classmethod
     async def function(
-        cls, provider: str, image_model: str, prompt: str, **kwargs: Unpack[AdditionalOptions]
+        cls,
+        provider: str,
+        image_model: str,
+        prompt: str,
+        execute_in_background: bool = False,
+        **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
         user_id = kwargs.get("user_id")
         if not user_id:
@@ -133,14 +161,22 @@ class GenerateImageTool(ChibiTool):
                 "This function requires telegram context & telegram update to be automatically provided."
             )
 
-        from chibi.utils import send_images
-
         if await user_has_reached_images_generation_limit(user_id=user_id):
             raise ToolException("User has reached image generation monthly limit.")
 
-        images = await generate_image(user_id=user_id, provider_name=provider, model=image_model, prompt=prompt)
-        await send_images(images=images, update=telegram_update, context=telegram_context)
+        coro = cls.generate_and_send_image(
+            user_id=user_id,
+            provider=provider,
+            model=image_model,
+            prompt=prompt,
+            update=telegram_update,
+            context=telegram_context,
+        )
+        if execute_in_background:
+            task_manager.run_task(coro)
+            return {"detail": "Image generation was successfully scheduled. User will receive it soon."}
 
+        await coro
         return {"detail": "Image was successfully generated and sent."}
 
 

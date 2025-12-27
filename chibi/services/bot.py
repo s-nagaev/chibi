@@ -211,8 +211,8 @@ async def handle_available_model_options(
         [InlineKeyboardButton(f"{model.display_name.title()} ({model.provider})", callback_data=key)]
         for key, model in mapped_models.items()
     ]
-    # for model in models_available:
-    #     logger.debug(f"{model.provider}: {model.name}")
+    for model in models_available:
+        logger.debug(f"{model.provider}: {model.name}")
     keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
     return InlineKeyboardMarkup(keyboard)
 

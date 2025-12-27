@@ -26,7 +26,7 @@ from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.tools import RegisteredChibiTools, tools
+from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.utils import (
     get_usage_from_anthropic_response,
     get_usage_msg,
@@ -59,7 +59,7 @@ class Anthropic(RestApiFriendlyProvider):
                 description=tool["function"]["description"],
                 input_schema=tool["function"]["parameters"],
             )
-            for tool in tools
+            for tool in RegisteredChibiTools.get_tool_definitions()
         ]
         return anthropic_tools
 
@@ -224,7 +224,7 @@ class Anthropic(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
-        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,

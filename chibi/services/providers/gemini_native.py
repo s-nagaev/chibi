@@ -1,4 +1,5 @@
 import asyncio
+import math
 import random
 from asyncio import sleep
 from copy import copy
@@ -7,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from google.genai.client import Client
+from google.genai.errors import APIError
 from google.genai.types import (
     ContentDict,
     FunctionCallDict,
@@ -16,6 +18,7 @@ from google.genai.types import (
     GenerateContentResponse,
     GenerateImagesConfig,
     GenerateImagesResponse,
+    HttpOptions,
     Image,
     ImageConfig,
     PartDict,
@@ -26,12 +29,12 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
-from chibi.exceptions import NoResponseError, ServiceResponseError
+from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.tools import RegisteredChibiTools, tools
+from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.utils import (
     get_usage_from_google_response,
     get_usage_msg,
@@ -59,10 +62,6 @@ class Gemini(RestApiFriendlyProvider):
         super().__init__(token=token)
 
     @property
-    def _headers(self) -> dict[str, str]:
-        return {"Content-Type": "application/json"}
-
-    @property
     def tools_list(self) -> list[Tool]:
         """Convert our tools format to Google's Tool format.
 
@@ -70,16 +69,23 @@ class Gemini(RestApiFriendlyProvider):
             Tools list in Google's Tool format.
         """
         google_tools = []
-        for tool in tools:
-            google_tool = Tool(
-                function_declarations=[
-                    FunctionDeclaration(
-                        name=tool["function"]["name"],
-                        description=tool["function"]["description"],
-                        parameters=tool["function"]["parameters"],
-                    )
-                ]
-            )
+        for tool in RegisteredChibiTools.get_tool_definitions():
+            try:
+                google_tool = Tool(
+                    function_declarations=[
+                        FunctionDeclaration(
+                            name=str(tool["function"]["name"]),
+                            description=str(tool["function"]["description"]),
+                            parameters=tool["function"]["parameters"],
+                        )
+                    ]
+                )
+            except Exception as e:
+                logger.error(f"Failed to register tool {tool['function']['name']} due to exception: {e}")
+                import pprint
+
+                pprint.pprint(tool)
+                raise
             google_tools.append(google_tool)
         return google_tools
 
@@ -92,7 +98,7 @@ class Gemini(RestApiFriendlyProvider):
                 text += part.text
         return text if text != "" else None
 
-    def get_thought_signature(self, response: GenerateContentResponse) -> bytes | None:
+    def _get_thought_signature(self, response: GenerateContentResponse) -> bytes | None:
         if not response.candidates:
             return None
         first_candidate = response.candidates[0]
@@ -103,19 +109,75 @@ class Gemini(RestApiFriendlyProvider):
                 return signature
         return None
 
+    def _get_retry_delay(self, response: Any) -> float | None:
+        if not isinstance(response, dict):
+            logger.warning(
+                f"The Gemini API error response data is not a dict. Skipping getting retry delay. "
+                f"Response type: {type(response)}. Response: {response}"
+            )
+            return None
+        per_day_quota: bool = False
+        retry_delay = None
+        details = response.get("error", {}).get("details", [])
+        if not details:
+            logger.warning(
+                f"The Gemini API error response data does not contain details section. Skipping getting retry delay. "
+                f"Response: {response}"
+            )
+            return None
+
+        for item in details:
+            detail_type = item.get("@type", "")
+
+            if "QuotaFailure" in detail_type:
+                violations = item.get("violations", [])
+                for v in violations:
+                    if "PerDay" in v.get("quotaId", ""):
+                        per_day_quota = True
+                        break
+
+            elif "RetryInfo" in detail_type:
+                delay_str = item.get("retryDelay", "")
+                if delay_str and delay_str.endswith("s"):
+                    try:
+                        val = float(delay_str[:-1])
+                        retry_delay = math.ceil(val) + 1
+                    except ValueError:
+                        retry_delay = None
+        if per_day_quota:
+            logger.warning("Ooops! Seems we have reached Daily Quota for Gemini API.")
+            return None
+        return retry_delay
+
     async def _generate_content(
         self, model: str, contents: list[ContentDict], config: GenerateContentConfig
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
-            async with Client(api_key=gpt_settings.gemini_key).aio as client:
-                response: GenerateContentResponse = await client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
-            answer = self._get_text(response)
-            if answer is not None or response.function_calls:
-                return response
+            try:
+                async with Client(api_key=gpt_settings.gemini_key).aio as client:
+                    response: GenerateContentResponse = await client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                answer = self._get_text(response)
+                if answer is not None or response.function_calls:
+                    return response
+            except APIError as err:
+                logger.error(f"Gemini API error: {err.message}")
+
+                if err.code == 429:
+                    retry_delay = self._get_retry_delay(err.details)
+                    if not retry_delay:
+                        raise ServiceRateLimitError(provider=self.name, model=model, detail=err.details)
+                    await asyncio.sleep(retry_delay + random.uniform(0.5, 2.5))
+                    continue
+
+                elif err.code == 403:
+                    raise NotAuthorizedError(provider=self.name, model=model, detail=err.details)
+
+                else:
+                    raise ServiceResponseError(provider=self.name, model=model, detail=err.details)
 
             delay = gpt_settings.backoff_factor * (2**attempt)
             jitter = delay * random.uniform(0.1, 0.5)
@@ -140,13 +202,21 @@ class Gemini(RestApiFriendlyProvider):
 
         prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
 
+        if "flash" in model_name and self.temperature > 0.4:
+            temperature = 0.4
+        else:
+            temperature = self.temperature
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
-            temperature=self.temperature,
+            temperature=temperature,
             max_output_tokens=self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             tools=self.tools_list if "gemini" in model_name else None,
+            http_options=http_options,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -190,13 +260,13 @@ class Gemini(RestApiFriendlyProvider):
         tool_coroutines = [
             RegisteredChibiTools.call(
                 tool_name=str(function_call.name),
-                tools_args=tool_context | copy(function_call.args) if function_call.args else {},
+                tools_args=tool_context | copy(function_call.args) if function_call.args else tool_context,
             )
             for function_call in response.function_calls
         ]
         results = await asyncio.gather(*tool_coroutines)
 
-        thought_signature = self.get_thought_signature(response=response)
+        thought_signature = self._get_thought_signature(response=response)
         if not thought_signature:
             logger.error(
                 f"Could not get thought signature for function call, no response candidates found: "
@@ -231,7 +301,7 @@ class Gemini(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
-        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model_name,
@@ -274,6 +344,8 @@ class Gemini(RestApiFriendlyProvider):
             gpt_settings.image_size_nano_banana if "flash" not in model else None
         )  # flash-models don't support it
 
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
         generation_config = GenerateContentConfig(
             image_config=ImageConfig(
                 aspect_ratio=gpt_settings.image_aspect_ratio,
@@ -281,7 +353,7 @@ class Gemini(RestApiFriendlyProvider):
             )
         )
 
-        async with Client(api_key=gpt_settings.gemini_key).aio as client:
+        async with Client(api_key=gpt_settings.gemini_key, http_options=http_options).aio as client:
             response: GenerateContentResponse = await client.models.generate_content(
                 model=model,
                 contents=[prompt],
@@ -293,14 +365,23 @@ class Gemini(RestApiFriendlyProvider):
         images: list[Image | None] = [part.as_image() for part in response.parts if part]
         return [image for image in images if image]
 
-    @staticmethod
     async def _generate_image_by_imagen(
+        self,
         prompt: str,
         model: str,
     ) -> list[Image]:
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+
+        if "preview" in model or "fast" in model:
+            image_size = None
+        else:
+            image_size = gpt_settings.image_size_imagen
+
         generation_config = GenerateImagesConfig(
             aspect_ratio=gpt_settings.image_aspect_ratio,
             number_of_images=gpt_settings.image_n_choices,
+            http_options=http_options,
+            image_size=image_size,
         )
         async with Client(api_key=gpt_settings.gemini_key).aio as client:
             response: GenerateImagesResponse = await client.models.generate_images(

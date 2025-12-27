@@ -32,13 +32,17 @@ def decorate_async_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], T
     return decorate
 
 
-def escape_and_truncate(message: str | dict[str, Any] | None, limit: int = 80) -> str:
+def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | None, limit: int = 50) -> str:
     if not message:
         return "no data"
-    text = json.dumps(message) if isinstance(message, dict) else message
 
-    escaped_message = text.replace("<", r"\<").replace(">", r"\>")
+    if isinstance(message, dict):
+        return json.dumps({k: escape_and_truncate(message=v, limit=limit) for k, v in message.items()})
 
+    if isinstance(message, list):
+        return json.dumps([escape_and_truncate(message=m, limit=limit) for m in message])
+
+    escaped_message = str(message).replace("<", r"\<").replace(">", r"\>")
     if len(escaped_message) < limit + 20:
         return escaped_message
     return f"{escaped_message[:limit]}... (truncated)"

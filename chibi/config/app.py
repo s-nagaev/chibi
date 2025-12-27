@@ -48,10 +48,16 @@ class ApplicationSettings(BaseSettings):
     # Local storage settings
     local_data_path: str = Field(default="/app/data")
 
-    # Other settings
+    # Other settings    # MCP settings
+    enable_mcp_sse: bool = Field(default=True)
+    enable_mcp_stdio: bool = Field(default=False)
+
     log_prompt_data: bool = Field(default=False)
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
+    home_dir: str = Field(default="~/dobby")
+
+    # HeartBeat settings
     heartbeat_url: str | None = Field(default=None)
     heartbeat_frequency_call: int = Field(default=30)
     heartbeat_retry_calls: int = Field(default=3)

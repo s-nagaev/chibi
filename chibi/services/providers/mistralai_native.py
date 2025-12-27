@@ -24,7 +24,7 @@ from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.tools import RegisteredChibiTools, tools
+from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.utils import (
     get_usage_from_mistral_response,
     get_usage_msg,
@@ -55,7 +55,7 @@ class MistralAI(RestApiFriendlyProvider):
     @property
     def tools_list(self) -> list[ChatCompletionToolParam]:
         """Return tools in OpenAI-compatible format (which Mistral uses)."""
-        return tools
+        return RegisteredChibiTools.get_tool_definitions()
 
     @property
     def client(self) -> Mistral:
@@ -222,7 +222,7 @@ class MistralAI(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
-        logger.log("CALL", "The all functions results have been obtained. Returning them to the LLM...")
+        logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,
