@@ -282,6 +282,8 @@ class ChibiBot:
     def run(self) -> None:
         builder = (
             ApplicationBuilder()
+            .base_url(telegram_settings.telegram_base_url)
+            .base_file_url(telegram_settings.telegram_base_file_url)
             .token(telegram_settings.token)
             .post_init(self.post_init)
             .post_shutdown(task_manager.shutdown)
