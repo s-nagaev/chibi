@@ -22,7 +22,7 @@ from telegram.ext import (
 )
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
-from chibi.constants import UserAction, UserContext
+from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -33,17 +33,15 @@ from chibi.services.bot import (
     handle_provider_api_key_set,
     handle_reset,
 )
-from chibi.services.providers import registered_providers
+from chibi.services.providers import RegisteredProviders
 from chibi.services.task_manager import task_manager
-from chibi.utils import (
-    GROUP_CHAT_TYPES,
+from chibi.utils.app import log_application_settings, run_heartbeat
+from chibi.utils.telegram import (
     check_user_allowance,
     current_user_action,
     get_telegram_chat,
     get_telegram_message,
     get_user_context,
-    log_application_settings,
-    run_heartbeat,
     set_user_action,
     set_user_context,
     user_interacts_with_bot,
@@ -231,7 +229,7 @@ class ChibiBot:
     ) -> None:
         await query.answer()
         provider_name = query.data
-        if not provider_name or provider_name not in registered_providers.keys():
+        if not provider_name or provider_name not in RegisteredProviders.all.keys():
             await query.delete_message()
             return
         set_user_context(context=context, key=UserContext.SELECTED_PROVIDER, value=provider_name)

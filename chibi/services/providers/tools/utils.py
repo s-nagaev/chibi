@@ -1,11 +1,12 @@
 import datetime
 import json
 import urllib.parse
-from typing import ParamSpec, TypedDict, TypeVar
+from typing import TYPE_CHECKING, ParamSpec, TypedDict, TypeVar
 
 import httpx
 from fake_useragent import UserAgent
 from httpx import Response
+from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -15,6 +16,9 @@ from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+
+if TYPE_CHECKING:
+    from chibi.services.providers.provider import Provider
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -96,10 +100,24 @@ async def get_sub_agent_response(
     db: Database,
     user_id: int,
     prompt: str,
+    model_name: str | None = None,
+    provider_name: str | None = None,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
+    provider: Provider | None
+    if not model_name or not provider_name:
+        provider = user.active_gpt_provider
+        model = user.selected_gpt_model_name
+    else:
+        provider = user.providers.get(provider_name=provider_name)
+        model = model_name
+
+    if not provider:
+        raise ValueError(f"No provider found. Provided provider name: {provider_name}")
 
     user_prompt = {
+        "user_type": "llm",
+        "current_working_dir": user.working_dir,
         "prompt": prompt,
         "datetime_now": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
     }
@@ -109,7 +127,20 @@ async def get_sub_agent_response(
         user_message,
     ]
 
-    chat_response, _ = await user.active_gpt_provider.get_chat_response(
-        messages=conversation_messages, user=user, model=user.selected_gpt_model_name, system_prompt=SUB_EXECUTOR_PROMPT
+    chat_response, _ = await provider.get_chat_response(
+        messages=conversation_messages, user=user, model=model, system_prompt=SUB_EXECUTOR_PROMPT
     )
     return chat_response
+
+
+async def download(url: str) -> bytes | None:
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=90.0)  # TODO: move timeout to settings or use one of existent
+            response.raise_for_status()
+            data = response.content
+            logger.log("TOOL", f"Downloaded data from URL {url}: {len(data)} bytes")
+            return data
+    except Exception as e:
+        logger.error(f"Failed to download file from {url}: {e}")
+    return None

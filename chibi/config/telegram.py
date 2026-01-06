@@ -11,6 +11,8 @@ class TelegramSettings(BaseSettings):
     )
     token: str = Field(alias="TELEGRAM_BOT_TOKEN")
 
+    telegram_base_url: str = Field(default="https://api.telegram.org/bot")
+    telegram_base_file_url: str = Field(default="https://api.telegram.org/file/bot")
     allow_bots: bool = Field(default=False)
     answer_direct_messages_only: bool = Field(default=True)
     bot_name: str = Field(default="Chibi")

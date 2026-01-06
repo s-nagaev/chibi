@@ -23,7 +23,7 @@ class GetCurrentDatetimeTool(ChibiTool):
 
     @classmethod
     async def function(cls, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
-        logger.log("TOOL", "Getting current date & time")
+        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Getting current date & time")
         now = datetime.datetime.now()
         return {
             "datetime_now": now.strftime("%Y-%m-%d %H:%M:%S"),

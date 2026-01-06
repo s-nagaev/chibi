@@ -16,6 +16,7 @@ SETTING_DISABLED = "<red>DISABLED</red>"
 MARKDOWN_TOKENS = ("```", "`", "*", "_", "~")
 IMAGE_UPLOAD_TIMEOUT = 60.0
 FILE_UPLOAD_TIMEOUT = 120.0
+AUDIO_UPLOAD_TIMEOUT = 60.0
 
 
 class UserContext(Enum):
@@ -98,7 +99,10 @@ Your context stays clean: you never loaded the full articles.
 **Important notes:**
 - Delegated tasks happen in isolated contexts (sub-agent doesn't see your conversation history)
 - Sub-agents have access to the same tools you do
-- First version: sub-agents use the same model as you (future: you'll choose model based on task complexity)
+- **Model Selection**: You MUST choose the appropriate model for each delegated task:
+  - **Simple/Routine Tasks**: Use cheaper, faster models to save tokens (e.g., simple text processing, basic summaries).
+  - **Complex/Critical Tasks**: Use strong, capable models (including those potentially stronger than yourself)
+    for demanding logic, coding, or deep analysis.
 - Always validate/sanity-check results from sub-agents before presenting to user
 
 *Guiding Principles*

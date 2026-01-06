@@ -1,5 +1,7 @@
+import os
 from typing import Any, Callable, Coroutine, cast
 
+from dotenv import dotenv_values
 from loguru import logger
 from mcp import ClientSession
 from mcp.types import CallToolResult
@@ -37,7 +39,13 @@ def create_wrapper(
     async def wrapper(**kwargs_inner: Any) -> dict[str, Any]:
         tool_args = {k: v for k, v in kwargs_inner.items() if k not in list(AdditionalOptions.__annotations__.keys())}
 
-        logger.log("TOOL", f"Calling MCP tool '{chibi_tool_name}' with args: {escape_and_truncate(tool_args)}")
+        logger.log(
+            "TOOL",
+            (
+                f"[{kwargs_inner.get('model', 'Unknown model')}] "
+                f"Calling MCP tool '{chibi_tool_name}' with args: {escape_and_truncate(tool_args)}"
+            ),
+        )
         res: CallToolResult = await MCPManager.call_tool(
             server_name=server_name, tool_name=original_tool_name, arguments=tool_args
         )
@@ -47,7 +55,13 @@ def create_wrapper(
         else:
             output = {"result": [content.model_dump() for content in res.content]}
 
-        logger.log("TOOL", f"MCP tool '{chibi_tool_name}' returned: {escape_and_truncate(output)}")
+        logger.log(
+            "TOOL",
+            (
+                f"[{kwargs_inner.get('model', 'Unknown model')}] "
+                f"MCP tool '{chibi_tool_name}' returned: {escape_and_truncate(output)}",
+            ),
+        )
         return output
 
     return wrapper
@@ -120,6 +134,15 @@ class InitializeStdioMCPServer(ChibiTool):
                         "type": "object",
                         "description": "Optional environment variables",
                     },
+                    "secret_envs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "A list of environment variables that need to be passed to the mcp server "
+                            "without direct access to their contents."
+                        ),
+                    },
+                    "env_file_path": {"type": "string", "description": "Absolute path to the env-file."},
                 },
                 "required": ["server_name", "command", "args"],
             },
@@ -133,20 +156,38 @@ class InitializeStdioMCPServer(ChibiTool):
         command: str,
         args: list[str],
         env: dict[str, str] | None = None,
+        secret_envs: list[str] | None = None,
+        env_file_path: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Connect to an MCP server via stdio and register its tools dynamically.
 
         Args:
             server_name: Unique name for the session.
-            command: Command to start the server (stdio).
-            args: Command arguments (stdio).
-            env: Optional environment variables (stdio).
+            command: Command to start the server.
+            args: Command arguments.
+            env: Optional environment variables.
+            secret_envs: Optional list of environment variable names.
+            env_file_path: Optional path to the env file.
 
         Returns:
             dict[str, Any]: Success or error message.
         """
-        session = await MCPManager.connect_stdio(server_name, command, args, env)
+        if secret_envs:
+            env = env or {}
+            for secret_env in secret_envs:
+                env[secret_env] = os.environ[secret_env]
+
+        if env_file_path:
+            if not os.path.exists(env_file_path):
+                raise ValueError(f"The file {env_file_path} does not exist.")
+            env = env or {}
+            envs_from_file = dotenv_values(env_file_path)
+            envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
+            if envs_with_values_from_file:
+                env.update(envs_with_values_from_file)
+
+        session = await MCPManager.connect_stdio(name=server_name, command=command, args=args, env=env)
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="stdio")
 
 
@@ -188,7 +229,10 @@ class InitializeSseMCPServer(ChibiTool):
         Returns:
             dict[str, Any]: Success or error message.
         """
-        session = await MCPManager.connect_sse(server_name, url)
+        try:
+            session = await MCPManager.connect_sse(server_name, url)
+        except Exception:
+            raise
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="sse")
 
 

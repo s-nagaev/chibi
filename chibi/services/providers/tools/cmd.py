@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import signal
 from pathlib import Path
 from typing import Any, Unpack
 
@@ -9,12 +11,13 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
-from chibi.config import application_settings, gpt_settings
+from chibi.config import gpt_settings
 from chibi.models import Message
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT, MODERATOR_PROMPT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.user import get_cwd
 
 
 class ModeratorsAnswer(BaseModel):
@@ -76,7 +79,14 @@ class RunCommandInTerminalTool(ChibiTool):
                     "cwd": {
                         "type": "string",
                         "description": (
-                            f"The working directory to run the command in. Default: {application_settings.home_dir}"
+                            "The working directory to run the command in. The default value provided in user data."
+                        ),
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": (
+                            "The timeout for command execution in seconds. Default is 30 sec. "
+                            "Change it if you're expecting longer execution."
                         ),
                     },
                 },
@@ -88,20 +98,53 @@ class RunCommandInTerminalTool(ChibiTool):
 
     @classmethod
     async def function(
-        cls, cmd: str, cwd: str = application_settings.home_dir, **kwargs: Unpack[AdditionalOptions]
+        cls, cmd: str, cwd: str | None = None, timeout: int = 30, **kwargs: Unpack[AdditionalOptions]
     ) -> dict[str, Any]:
-        logger.log("CHECK", f"Pre-moderating command: '{cmd}'")
+        model = kwargs.get("model", "Unknown model")
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ValueError("This function requires user_id to be automatically provided.")
+
+        if not cwd:
+            cwd = await get_cwd(user_id=user_id)
+
+        logger.log("CHECK", f"[{model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
         moderator_answer: ModeratorsAnswer = await moderate_command(cmd)
         if moderator_answer.verdict == "declined":
-            raise ToolException(f"Moderator DECLINED command '{cmd}'. Reason: {moderator_answer.reason}")
+            raise ToolException(
+                f"[{model}] Moderator DECLINED command '{cmd}' from model {kwargs.get('model', 'unknown')}. "
+                f"Reason: {moderator_answer.reason}"
+            )
 
-        logger.log("CHECK", f"Moderator ACCEPTED command '{cmd}'")
-        logger.log("TOOL", f"Running command in terminal: {cmd}")
+        logger.log("CHECK", f"[{model}] Moderator ACCEPTED command '{cmd}' from model {kwargs.get('model', 'unknown')}")
+        logger.log("TOOL", f"[{model}] Running command in terminal: {cmd}. CWD: {cwd}. Timeout: {timeout}")
         try:
             process = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
+                cmd=cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=True,
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=float(timeout))
+        except asyncio.TimeoutError:
+            # Убиваем ВСЮ группу процессов.
+            # os.getpgid(process.pid) получает ID группы
+            # signal.SIGKILL убивает наверняка
+
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # Уже умерло
+
+            # На всякий случай, чтобы объект process в питоне тоже понял, что всё кончено
+            try:
+                process.kill()
+                await process.wait()
+            except ProcessLookupError:
+                pass
+
+            raise ToolException(f"Command execution timed out after {timeout} seconds. Process group killed.")
         except Exception as e:
             raise ToolException(f"Failed to run command in terminal! Command: '{cmd}'. Error: {e}")
 
@@ -125,7 +168,7 @@ class RunCommandInTerminalTool(ChibiTool):
 
         logger.log(
             "TOOL",
-            f"Command '{cmd}' executed. Return code: {process.returncode}.",
+            f"[{kwargs.get('model', 'Unknown model')}] Command '{cmd}' executed. Return code: {process.returncode}.",
         )
         return result
 

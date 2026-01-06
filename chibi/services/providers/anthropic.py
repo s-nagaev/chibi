@@ -180,7 +180,7 @@ class Anthropic(RestApiFriendlyProvider):
             ), messages
 
         # Tool calls handling
-        logger.log("CALL", f"LLM requested the call of {len(tool_call_parts)} tools.")
+        logger.log("CALL", f"{model} requested the call of {len(tool_call_parts)} tools.")
         thoughts_part: TextBlock | None = next(
             (part for part in response_message.content if isinstance(part, TextBlock)), None
         )

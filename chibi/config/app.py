@@ -55,7 +55,8 @@ class ApplicationSettings(BaseSettings):
     log_prompt_data: bool = Field(default=False)
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
-    home_dir: str = Field(default="~/dobby")
+    home_dir: str = Field(default="~/chibi")  # AI agent's home directory
+    working_dir: str = Field(default="~/chibi")  # AI agent's CWD
 
     # HeartBeat settings
     heartbeat_url: str | None = Field(default=None)

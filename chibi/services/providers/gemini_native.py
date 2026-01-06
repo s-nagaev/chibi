@@ -244,7 +244,7 @@ class Gemini(RestApiFriendlyProvider):
             return ChatResponseSchema(answer=answer, provider=self.name, model=model_name, usage=usage), messages
 
         # Tool calls handling
-        logger.log("CALL", f"LLM requested the call of {len(response.function_calls)} tools.")
+        logger.log("CALL", f"{model} requested the call of {len(response.function_calls)} tools.")
 
         if answer:
             await send_llm_thoughts(thoughts=answer, context=context, update=update)

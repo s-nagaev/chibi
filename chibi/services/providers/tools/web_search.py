@@ -53,7 +53,10 @@ class SearchNewsTool(ChibiTool):
             A JSON formatted string containing the list of news articles found,
             or an error message string if the search fails.
         """
-        logger.log("TOOL", f"Searching news for '{search_phrase}', max_results={max_results}")
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('model', 'Unknown model')}] Searching news for '{search_phrase}', max_results={max_results}",
+        )
         try:
             result = DDGS(proxy=gpt_settings.proxy).news(query=search_phrase, max_results=max_results, region="wt-wt")
         except Exception as e:
@@ -105,7 +108,13 @@ class DDGSWebSearchTool(ChibiTool):
             A JSON formatted string containing the list of search results found,
             or an error message string if the search fails.
         """
-        logger.log("TOOL", f"Using web-search for '{search_phrase}', max_results={max_results}")
+        logger.log(
+            "TOOL",
+            (
+                f"[{kwargs.get('model', 'Unknown model')}] Using web-search for '{search_phrase}', "
+                f"max_results={max_results}"
+            ),
+        )
         try:
             result = DDGS(proxy=gpt_settings.proxy).text(query=search_phrase, max_results=max_results, region="wt-wt")
         except Exception as e:
@@ -152,7 +161,7 @@ class GoogleSearchTool(ChibiTool):
             A JSON formatted string containing the list of search results found,
             or an error message string if the search fails.
         """
-        logger.log("TOOL", f"Using Google web-search for '{search_phrase}'")
+        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Using Google web-search for '{search_phrase}'")
         transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
         params = {
             "key": gpt_settings.google_search_api_key,
@@ -175,7 +184,11 @@ class GoogleSearchTool(ChibiTool):
             raise ToolException(f"An error occurred while calling the Google Search API: {e}")
 
         data = response.json()
-        items = data["items"]
+        items = data.get("items")
+        if not items:
+            logger.warning(f"{cls.name} tool returned an empty list of results. Search phrase: {search_phrase}.")
+            return {"search_results": "Ooops, the search returned an empty list of results."}
+
         target_keys = ["title", "link", "snippet"]
         search_results = [{key: item.get(key) for key in target_keys} for item in items]
         return {
@@ -216,7 +229,7 @@ class ReadWebPageTool(ChibiTool):
             content if extraction fails, or an error message string if fetching
             fails or status code is not 200.
         """
-        logger.log("TOOL", f"Reading URL: {url}")
+        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Reading URL: {url}")
         try:
             response: Response = await _get_url(url)
         except Exception as e:
@@ -232,13 +245,16 @@ class ReadWebPageTool(ChibiTool):
         content = extract(filecontent=data, include_links=True)
         if not content:
             msg = f"Failed to extract URL: {url}. Empty extracted data. Trying to send raw HTML to model"
-            logger.warning(msg)
+            logger.warning(f"[{kwargs.get('model', 'Unknown model')}] {msg}")
             return {
                 "data": data,
                 "warning": msg,
             }
 
-        logger.log("TOOL", f"The data from the URL {url} seems to be successfully extracted")
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('model', 'Unknown model')}] The data from the URL {url} seems to be successfully extracted",
+        )
 
         return {
             "content": content,

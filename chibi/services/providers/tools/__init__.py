@@ -1,7 +1,7 @@
 # flake8: noqa: F401
 
 from .cmd import CreateFileTool, RunCommandInTerminalTool
-from .common import TextToSpeechTool
+from .common import SendAudioTool, SendImageTool, SendMediaGroupTool, SendVideoTool, TextToSpeechTool
 from .current_date import GetCurrentDatetimeTool
 from .file_editor import (
     AppendToFileTool,

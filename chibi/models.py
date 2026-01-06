@@ -40,7 +40,7 @@ from openai.types.chat import (
 )
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import (
     NoApiKeyProvidedError,
     NoProviderSelectedError,
@@ -405,6 +405,7 @@ class User(BaseModel):
     selected_image_model_name: str | None = None
     selected_image_provider_name: str | None = None
     info: str = "No info provided"
+    working_dir: str = application_settings.working_dir
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
