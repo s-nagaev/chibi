@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-01-06
+### Added
+- **Suno AI Integration:**
+    - Support for high-quality music generation via Suno AI.
+    - New tools: `generate_music_via_suno` and `generate_music_via_suno_custom_mode`.
+    - Asynchronous polling for generation results with robust retry logic.
+- **Enhanced Media Tools:**
+    - New tools for direct media interaction: `send_audio`, `send_image`, `send_video`, and `send_media_group`.
+- **AI Skills System:**
+    - Added specialized prompting guides (Skills) for `Imagen`, `Jina Reader`, `Nano Banana`, `Suno`, and `Wan` models to improve output quality and consistency.
+- **Custom Telegram API Support:**
+    - Added `TELEGRAM_BASE_URL` and `TELEGRAM_BASE_FILE_URL` settings for compatibility with local Telegram Bot API servers.
+- **Agent Environment:**
+    - Added `WORKING_DIR` setting to define the default path for agent operations.
+
+### Changed
+- **Architecture:** Refactored `BackgroundTaskManager` to use a Singleton pattern for better task lifecycle management.
+- **MCP Improvements:** Increased `call_tool` timeout to 600s and improved error reporting for SSE connections.
+- **Dependencies:** Added `tenacity` for resilient API polling and updated `mistralai` and `mcp` versions.
+- **Logging:** Standardized tool call logging to include the specific model name requesting the action.
+
+### Fixed
+- Improved cleanup and error handling in background tasks to prevent "zombie" tasks on failure.
+
 ## [1.4.1] - 2025-12-27
 ### Added
 - **Model Context Protocol (MCP)** integration:
@@ -29,10 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Task Manager Refactoring:** Refactored `TaskManager` to better handle recursive delegation and metrics tracking.
 - **Provider Interface Updates:** Updated the base `Provider` class and implementations (`Anthropic`, `Gemini`, `DeepSeek`) to support the new metrics collection system.
 - **Dependency Updates:** Updated `poetry.lock` and requirements files to include `influxdb-client` and updated `mistralai` SDK.
-
-
-## [1.3.1] - 2025-11-26
-
 ### Changed
 - image generation functionality for Gemini models reimplemented using the official `google.genai` library
 - upload image to Telegram chat logic updated
@@ -330,7 +350,9 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/s-nagaev/chibi/compare/v1.4.1...v1.5.0
+[1.4.1]: https://github.com/s-nagaev/chibi/compare/v1.4.0...v1.4.1
 
 [1.4.0]: https://github.com/s-nagaev/chibi/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/s-nagaev/chibi/compare/v1.2.0...v1.3.1

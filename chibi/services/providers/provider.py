@@ -116,6 +116,10 @@ class RegisteredProviders:
         provider = self.available[provider_name]
         return self.get_instance(provider=provider)
 
+    @classmethod
+    def get_class(cls, provider_name: str) -> Optional[type["Provider"]]:
+        return cls.all.get(provider_name)
+
     @property
     def first_image_generation_ready(self) -> Optional["Provider"]:
         if provider := next(iter(self.image_generation_ready.values()), None):
@@ -320,10 +324,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog: list[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
+        temperature = 1 if model.startswith("o") else self.temperature
+
         response: ChatCompletion = await self.client.chat.completions.create(
             model=model,
             messages=dialog,
-            temperature=self.temperature,
+            temperature=temperature,
             max_tokens=self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
@@ -352,10 +358,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
-        logger.log("CALL", f"LLM requested the call of {len(tool_calls)} tools.")
+        logger.log("CALL", f"{model} requested the call of {len(tool_calls)} tools.")
 
         thoughts = answer or "No thoughts"
-        if thoughts:
+        if answer:
             await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
         logger.log("THINK", f"{model}: {thoughts}. {usage_message}")
 

@@ -15,7 +15,7 @@ from telegram.ext import ContextTypes
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import UserAction, UserContext
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
-from chibi.services.providers import registered_providers
+from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.utils import get_usage_msg
 from chibi.services.user import (
     check_history_and_summarize,
@@ -27,12 +27,12 @@ from chibi.services.user import (
     set_api_key,
     user_has_reached_images_generation_limit,
 )
-from chibi.utils import (
+from chibi.utils.app import handle_gpt_exceptions
+from chibi.utils.telegram import (
     chat_data,
     get_telegram_chat,
     get_telegram_message,
     get_telegram_user,
-    handle_gpt_exceptions,
     send_gpt_answer_message,
     send_images,
     send_message,
@@ -177,7 +177,7 @@ async def handle_provider_api_key_set(
     api_key = telegram_message.text.strip() if telegram_message.text else None
     if not api_key:
         return None
-    provider = registered_providers.get(provider_name)
+    provider = RegisteredProviders.get_class(provider_name)
     if not provider:
         return None
 
@@ -188,6 +188,8 @@ async def handle_provider_api_key_set(
         return None
 
     await set_api_key(user_id=telegram_user.id, api_key=api_key, provider_name=provider_name)
+    RegisteredProviders.register_as_available(provider=provider)
+
     msg = f"Your {provider_name} API Key successfully set! 🦾\n\nNow you may check available models in /gpt_models."
     await send_message(update=update, context=context, reply=False, text=msg)
     try:
@@ -220,7 +222,7 @@ async def handle_available_model_options(
 async def handle_available_provider_options() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(name, callback_data=name)]
-        for name, klass in registered_providers.items()
+        for name, klass in RegisteredProviders.all.items()
         if name != "Cloudflare"
         # Temporary removing the Cloudflare provider from the "public mode"
         # because we need to handle account id setting first. Will provide

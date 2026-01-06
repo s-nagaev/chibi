@@ -22,6 +22,7 @@ class GPTSettings(BaseSettings):
     mistralai_key: str | None = Field(alias="MISTRALAI_API_KEY", default=None)
     moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
+    suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
 
     frequency_penalty: float = Field(default=0)
     max_tokens: int = Field(default=32000)

@@ -12,11 +12,10 @@ async def manager():
     # We need to bypass the singleton pattern for testing purposes or reset it
     # But since it's a singleton, we should probably reset the global one or patch it
     # Here we will reset the singleton instance
-    BackgroundTaskManager._instance = None
     mgr = BackgroundTaskManager()
+    mgr._shutting_down = False
     yield mgr
     await mgr.shutdown()
-    BackgroundTaskManager._instance = None
 
 
 @pytest.mark.asyncio
@@ -107,8 +106,8 @@ async def test_shutdown_timeout_cancels_tasks(manager):
 
 @pytest.mark.asyncio
 async def test_singleton_behavior():
-    BackgroundTaskManager._instance = None
     m1 = BackgroundTaskManager()
+    m1._shutting_down = False
     m2 = BackgroundTaskManager()
     assert m1 is m2
 

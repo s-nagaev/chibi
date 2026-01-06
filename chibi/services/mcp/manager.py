@@ -146,18 +146,17 @@ class MCPManager:
             ready_event = asyncio.Event()
 
             task = task_manager.run_task(cls._session_lifecycle(name, sse_factory, ready_event, timeout))
-
             if not task:
                 raise RuntimeError("Failed to schedule MCP connection task")
 
             cls._server_tasks[name] = task
-
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
-            except Exception:
+            except Exception as e:
+                logger.error(f"An exception occurred while initializing MCP server: {e}")
                 task.cancel()
                 cls._server_tasks.pop(name, None)
-                raise
+                raise e
 
             session = cls._sessions.get(name)
             if not session:
@@ -224,7 +223,7 @@ class MCPManager:
 
     @classmethod
     async def call_tool(
-        cls, server_name: str, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0
+        cls, server_name: str, tool_name: str, arguments: dict[str, Any], timeout: float = 600.0
     ) -> CallToolResult:
         """Call a tool on the specified server.
 

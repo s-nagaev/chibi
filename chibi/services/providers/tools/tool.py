@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Callable, Coroutine, ParamSpec, TypeVar
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from chibi.services.providers.tools.schemas import ToolResponse
+from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.providers.utils import escape_and_truncate
 
 P = ParamSpec("P")
@@ -24,19 +24,27 @@ class ChibiTool:
 
     @classmethod
     async def tool(cls, *args: Any, **kwargs: Any) -> ToolResponse:
-        # non_printable_kwargs = list(AdditionalOptions.__annotations__.keys())
-        printable_kwargs = {k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update")}
+        non_printable_kwargs = list(AdditionalOptions.__annotations__.keys())
+        printable_kwargs = {k: v for k, v in kwargs.items() if k not in non_printable_kwargs}
         logger.log(
-            "CALL", f"Calling a function '{cls.name}'. Args: {escape_and_truncate(json.dumps(printable_kwargs))}"
+            "CALL",
+            (
+                f"[{kwargs.get('model', 'Unknown model')}] Calling a function '{cls.name}'. "
+                f"Args: {escape_and_truncate(printable_kwargs)}"
+            ),
         )
         try:
             result = await cls.function(*args, **kwargs)
             logger.log(
-                "CALL", f"Function '{cls.name}' called, result retrieved: {escape_and_truncate(json.dumps(result))}"
+                "CALL",
+                (
+                    f"[{kwargs.get('model', 'Unknown model')}] Function '{cls.name}' called, "
+                    f"result retrieved: {escape_and_truncate(result)}"
+                ),
             )
             return ToolResponse(tool_name=cls.name, status="ok", result=result)
         except Exception as e:
-            logger.warning(f"Tool {cls.name} raised an exception: {e}")
+            logger.warning(f"[{kwargs.get('model', 'Unknown model')}] Tool {cls.name} raised an exception: {e}")
             return ToolResponse(tool_name=cls.name, status="error", result=str(e))
 
     @classmethod

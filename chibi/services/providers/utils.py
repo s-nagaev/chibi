@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 from chibi.config import gpt_settings
 from chibi.models import User
 from chibi.schemas.app import UsageSchema
+from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
@@ -53,6 +54,7 @@ async def prepare_system_prompt(base_system_prompt: str, user: User | None = Non
         return base_system_prompt
 
     prompt = {
+        "current_working_dir": user.working_dir,
         "user_id": user.id,
         "user_info": user.info,
         "system_prompt": base_system_prompt,
@@ -64,7 +66,7 @@ async def send_llm_thoughts(thoughts: str, update: Update | None, context: Conte
     if not gpt_settings.show_llm_thoughts:
         return None
 
-    from chibi.utils import send_long_message
+    from chibi.utils.telegram import send_long_message
 
     if update is None or context is None:
         return None
@@ -136,3 +138,7 @@ def get_usage_msg(usage: UsageSchema | CompletionUsage | None) -> str:
         f"{cache_read or 0} cached read/prompt, "
         f"{cache_create or 0} cached creation)"
     )
+
+
+def suno_task_still_processing(task_data_response: SunoGetGenerationDetailsSchema) -> bool:
+    return task_data_response.is_in_progress

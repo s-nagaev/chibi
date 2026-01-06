@@ -1,5 +1,4 @@
 from collections import deque
-from functools import wraps
 from io import BytesIO
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
@@ -7,43 +6,38 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import telegramify_markdown
 from loguru import logger
-from telegram import Chat as TelegramChat
-from telegram import InputMediaDocument, InputMediaPhoto, Update, constants
-from telegram import Message as TelegramMessage
-from telegram import User as TelegramUser
+from telegram import (
+    Chat as TelegramChat,
+)
+from telegram import (
+    InputMediaDocument,
+    InputMediaPhoto,
+    Update,
+    constants,
+)
+from telegram import (
+    Message as TelegramMessage,
+)
+from telegram import (
+    User as TelegramUser,
+)
 from telegram.constants import FileSizeLimit
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from chibi.config import application_settings, gpt_settings, telegram_settings
+from chibi.config import telegram_settings
 from chibi.constants import (
     FILE_UPLOAD_TIMEOUT,
     GROUP_CHAT_TYPES,
     IMAGE_UPLOAD_TIMEOUT,
     MARKDOWN_TOKENS,
     PERSONAL_CHAT_TYPES,
-    SETTING_DISABLED,
-    SETTING_ENABLED,
-    SETTING_SET,
-    SETTING_UNSET,
     UserAction,
     UserContext,
 )
-from chibi.exceptions import (
-    NoApiKeyProvidedError,
-    NoModelSelectedError,
-    NoProviderSelectedError,
-    NoResponseError,
-    NotAuthorizedError,
-    ServiceRateLimitError,
-    ServiceResponseError,
-)
-from chibi.services.providers import registered_providers
 
 R = TypeVar("R")
 P = ParamSpec("P")
-
-CLOSER = {"```": "```", "`": "`", "*": "*", "_": "_", "~": "~"}
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -232,6 +226,15 @@ async def send_audio(
     )
 
 
+async def download_image(image_url: str) -> bytes:
+    parsed_url = urlparse(image_url)
+    params = parse_qs(parsed_url.query)
+    image_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+    response = await httpx.AsyncClient().get(url=image_url, params=params)
+    response.raise_for_status()
+    return response.content
+
+
 async def send_images(
     images: list[str] | list[BytesIO],
     update: Update,
@@ -352,16 +355,38 @@ async def send_gpt_answer_message(gpt_answer: str, update: Update, context: Cont
         await send_message_in_plain_text_and_file(message=gpt_answer, update=update, context=context)
 
 
-def user_is_allowed(tg_user: TelegramUser) -> bool:
-    if not telegram_settings.users_whitelist:
-        return True
-    return any(identifier in telegram_settings.users_whitelist for identifier in (str(tg_user.id), tg_user.username))
+def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:
+    """Get the current action state associated with the user.
+
+    Retrieve the action stored under the `UserContext.ACTION` key in the user's
+    context data. If `user_data` is missing or the action is not set, it defaults
+    to `UserAction.NONE`.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+
+    Returns:
+        The current `UserAction` enum member associated with the user. Defaults to
+        `UserAction.NONE` if no action is set or `user_data` is unavailable.
+    """
+    if context.user_data is None:
+        return UserAction.NONE
+    return context.user_data.get(UserContext.ACTION, UserAction.NONE)
 
 
-def group_is_allowed(tg_chat: TelegramChat) -> bool:
-    if not telegram_settings.groups_whitelist:
-        return True
-    return tg_chat.id in telegram_settings.groups_whitelist
+def set_user_action(context: ContextTypes.DEFAULT_TYPE, action: UserAction) -> None:
+    """Set the current action state for the user.
+
+    Store the provided `UserAction` under the `UserContext.ACTION` key in the user's
+    context data. If `user_data` does not exist, do nothing.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        action: The `UserAction` enum member to set as the user's current action state.
+    """
+    if context.user_data is not None:
+        context.user_data[UserContext.ACTION] = action
+    return None
 
 
 def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -379,6 +404,57 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return False
 
     return reply_message.from_user.id == context.bot.id
+
+
+def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expected_type: Type[R]) -> R | None:
+    """Retrieve a specific value from the user's context data.
+
+    Safely access the `user_data` dictionary associated with the current user
+    in the Telegram bot context and return the value associated with the given key,
+    cast to the expected type.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        key: An enum member (UserContext) representing the key for the data to retrieve.
+        expected_type: The Python type the retrieved value is expected to conform to.
+                       Used for casting the result.
+
+    Returns:
+        The value associated with the key, cast to `expected_type`, if it exists
+        and `user_data` is available. Otherwise, returns None.
+    """
+    if context.user_data is not None:
+        return cast(R, context.user_data.get(key, None))
+    return None
+
+
+def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value: object | None) -> None:
+    """Set or update a specific value in the user's context data.
+
+    Safely access the `user_data` dictionary associated with the current user
+    and store the provided value under the given key. If `user_data` does not
+    exist, do nothing.
+
+    Args:
+        context: The update context provided by the `python-telegram-bot` library.
+        key: An enum member (UserContext) representing the key under which to store the value.
+        value: The value to store in the user's context data. Can be any object or None.
+    """
+    if context.user_data is not None:
+        context.user_data[key] = value
+    return None
+
+
+def user_is_allowed(tg_user: TelegramUser) -> bool:
+    if not telegram_settings.users_whitelist:
+        return True
+    return any(identifier in telegram_settings.users_whitelist for identifier in (str(tg_user.id), tg_user.username))
+
+
+def group_is_allowed(tg_chat: TelegramChat) -> bool:
+    if not telegram_settings.groups_whitelist:
+        return True
+    return tg_chat.id in telegram_settings.groups_whitelist
 
 
 def check_user_allowance(
@@ -433,281 +509,3 @@ def check_user_allowance(
         return await func(*args, **kwargs)
 
     return wrapper
-
-
-def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator handling openai module's exceptions.
-
-    If the specific exception occurred, handles it and sends the corresponding message.
-
-    Args:
-        func: async function that may rise openai exception.
-
-    Returns:
-        Wrapper function object.
-    """
-
-    @wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        update: Update = kwargs.get("update") or args[1]
-        context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
-        error_msg_prefix = f"{user_data(update)} didn't get a GPT answer in the {chat_data(update)}"
-        try:
-            return await func(*args, **kwargs)
-        except NoApiKeyProvidedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text="Oops! It looks like you didn't set the API key for this provider.",
-            )
-            return None
-
-        except NotAuthorizedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text=(
-                    "We encountered an authorization problem when interacting with a remote service.\n"
-                    f"Please check your {e.provider} API key."
-                ),
-            )
-            return None
-
-        except ServiceResponseError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text=(
-                    f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
-                    f"Please, try again a bit later."
-                ),
-            )
-            return None
-
-        except NoResponseError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            return None
-
-        except ServiceRateLimitError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text=f"Rate Limit exceeded for {e.provider}. We should back off a bit.",
-            )
-            return None
-
-        except NoModelSelectedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text="Please, select your model first.",
-            )
-            return None
-
-        except NoProviderSelectedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text="Please, select your provider first.",
-            )
-            return None
-
-        except Exception as e:
-            logger.exception(f"{error_msg_prefix}: {e!r}")
-            msg = (
-                "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
-                "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
-            )
-            await send_message(update=update, context=context, text=msg)
-            # raise
-
-    return wrapper
-
-
-def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expected_type: Type[R]) -> R | None:
-    """Retrieve a specific value from the user's context data.
-
-    Safely access the `user_data` dictionary associated with the current user
-    in the Telegram bot context and return the value associated with the given key,
-    cast to the expected type.
-
-    Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        key: An enum member (UserContext) representing the key for the data to retrieve.
-        expected_type: The Python type the retrieved value is expected to conform to.
-                       Used for casting the result.
-
-    Returns:
-        The value associated with the key, cast to `expected_type`, if it exists
-        and `user_data` is available. Otherwise, returns None.
-    """
-    if context.user_data is not None:
-        return cast(R, context.user_data.get(key, None))
-    return None
-
-
-def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value: object | None) -> None:
-    """Set or update a specific value in the user's context data.
-
-    Safely access the `user_data` dictionary associated with the current user
-    and store the provided value under the given key. If `user_data` does not
-    exist, do nothing.
-
-    Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        key: An enum member (UserContext) representing the key under which to store the value.
-        value: The value to store in the user's context data. Can be any object or None.
-    """
-    if context.user_data is not None:
-        context.user_data[key] = value
-    return None
-
-
-def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:
-    """Get the current action state associated with the user.
-
-    Retrieve the action stored under the `UserContext.ACTION` key in the user's
-    context data. If `user_data` is missing or the action is not set, it defaults
-    to `UserAction.NONE`.
-
-    Args:
-        context: The update context provided by the `python-telegram-bot` library.
-
-    Returns:
-        The current `UserAction` enum member associated with the user. Defaults to
-        `UserAction.NONE` if no action is set or `user_data` is unavailable.
-    """
-    if context.user_data is None:
-        return UserAction.NONE
-    return context.user_data.get(UserContext.ACTION, UserAction.NONE)
-
-
-def set_user_action(context: ContextTypes.DEFAULT_TYPE, action: UserAction) -> None:
-    """Set the current action state for the user.
-
-    Store the provided `UserAction` under the `UserContext.ACTION` key in the user's
-    context data. If `user_data` does not exist, do nothing.
-
-    Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        action: The `UserAction` enum member to set as the user's current action state.
-    """
-    if context.user_data is not None:
-        context.user_data[UserContext.ACTION] = action
-    return None
-
-
-async def download_image(image_url: str) -> bytes:
-    parsed_url = urlparse(image_url)
-    params = parse_qs(parsed_url.query)
-    image_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
-    response = await httpx.AsyncClient().get(url=image_url, params=params)
-    response.raise_for_status()
-    return response.content
-
-
-async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a heartbeat GET request to a configured monitoring URL.
-
-    This function is designed to be called periodically by a scheduler
-    (python-telegram-bot's JobQueue) to signal the bot's operational status
-    to an external monitoring service (e.g., Healthchecks.io, Uptime Kuma, etc.).
-
-    Args:
-        context: The callback context provided by the JobQueue. Although
-                 required by the JobQueue signature, it's not directly used
-                 in this function's logic.
-    """
-    if not application_settings.heartbeat_url:
-        return None
-
-    transport = httpx.AsyncHTTPTransport(
-        retries=application_settings.heartbeat_retry_calls,
-        proxy=application_settings.heartbeat_proxy,
-    )
-
-    async with httpx.AsyncClient(transport=transport, proxy=application_settings.heartbeat_proxy) as client:
-        try:
-            result = await client.get(application_settings.heartbeat_url)
-        except Exception as error:
-            logger.error(f"Uptime Checker failed with an Exception: {error}")
-            return
-        if result.is_error:
-            logger.error(f"Uptime Checker failed, status_code: {result.status_code}, msg: {result.text}")
-
-
-def _provider_statuses() -> list[str]:
-    """Prepare a provider clients statuses data for logging.
-
-    Returns:
-        list of string containing the provider clients statuses data.
-    """
-    statuses = [
-        "<magenta>Provider clients:</magenta>",
-    ]
-    for provider_name in registered_providers:
-        status = SETTING_SET if getattr(gpt_settings, f"{provider_name.lower()}_key", None) else SETTING_UNSET
-        statuses.append(f"{provider_name} client: {status}")
-    return statuses
-
-
-def log_application_settings() -> None:
-    mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<cyan>PRIVATE</cyan>"
-    storage = "<red>REDIS</red>" if application_settings.redis else "<yellow>LOCAL</yellow>"
-    proxy = f"<cyan>{telegram_settings.proxy}</cyan>" if telegram_settings.proxy else SETTING_UNSET
-    users_whitelist = (
-        f"<cyan>{','.join(telegram_settings.users_whitelist)}</cyan>"
-        if telegram_settings.users_whitelist
-        else SETTING_UNSET
-    )
-    groups_whitelist = (
-        f"<cyan>{telegram_settings.groups_whitelist}</cyan>" if telegram_settings.groups_whitelist else SETTING_UNSET
-    )
-    models_whitelist = (
-        f"<cyan>{', '.join(gpt_settings.models_whitelist)}</cyan>" if gpt_settings.models_whitelist else SETTING_UNSET
-    )
-    images_whitelist = (
-        f"<cyan>{','.join(gpt_settings.image_generations_whitelist)}</cyan>"
-        if gpt_settings.image_generations_whitelist
-        else SETTING_UNSET
-    )
-
-    messages = [
-        "<magenta>General Settings:</magenta>",
-        f"Application is initialized in the {mode} mode using {storage} storage.",
-        f"Proxy is {proxy}",
-        "<magenta>LLM Settings:</magenta>",
-        f"Bot name is <cyan>{telegram_settings.bot_name}</cyan>",
-        # f"Initial assistant prompt: <cyan>{gpt_settings.assistant_prompt}</cyan>",
-        f"Messages TTL: <cyan>{gpt_settings.max_conversation_age_minutes} minutes</cyan>",
-        f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
-        f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
-        f"Images generation limit: <cyan>{gpt_settings.image_generations_monthly_limit}</cyan>",
-        f"Filesystem access: {SETTING_ENABLED if gpt_settings.filesystem_access else SETTING_DISABLED}",
-        "<magenta>Whitelists:</magenta>",
-        f"Images limit whitelist: {images_whitelist}",
-        f"Users whitelist: {users_whitelist}",
-        f"Groups whitelist: {groups_whitelist}",
-        f"Models whitelist: {models_whitelist}",
-        "<magenta>Heartbeat:</magenta>",
-        f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
-    ]
-    messages += _provider_statuses()
-
-    for message in messages:
-        logger.opt(colors=True).info(message)
-
-    if application_settings.redis_password:
-        logger.opt(colors=True).warning(
-            "`REDIS_PASSWORD` environment variable is <red>deprecated</red>. Use `REDIS` instead, i.e. "
-            "`redis://:password@localhost:6379/0`"
-        )

@@ -43,7 +43,7 @@ class ElevenLabs(Provider):
 
     async def speech(self, text: str, voice: str = default_tts_voice, model: str = default_tts_model) -> bytes:
         logger.info(f"Recording a voice message with model {model}...")
-        response = await self.client.text_to_speech.convert(
+        response = self.client.text_to_speech.convert(
             text=text,
             voice_id=voice,
             model_id=model,

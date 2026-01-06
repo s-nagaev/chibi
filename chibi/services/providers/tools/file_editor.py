@@ -96,13 +96,17 @@ class ReplaceInFileTool(ChibiTool):
             if replacements > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"Made {replacements} replacements in {path}")
+                logger.log(
+                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {replacements} replacements in {path}"
+                )
             else:
-                logger.log("TOOL", f"No occurrences of '{old_text}' found in {path}")
+                logger.log(
+                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] No occurrences of '{old_text}' found in {path}"
+                )
 
             return {"replacements": replacements}
         except Exception as e:
-            logger.error(f"Error replacing text in {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing text in {full_path}: {e}")
             raise
 
 
@@ -178,13 +182,20 @@ class ReplaceInFileRegexTool(ChibiTool):
             if replacements > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"Made {replacements} regex replacements in {path}")
+                logger.log(
+                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {replacements} regex replacements in {path}"
+                )
             else:
-                logger.log("TOOL", f"No matches for pattern '{pattern}' found in {path}")
+                logger.log(
+                    "TOOL",
+                    f"[{kwargs.get('model', 'Unknown model')}] No matches for pattern '{pattern}' found in {path}",
+                )
 
             return {"replacements": replacements}
         except Exception as e:
-            logger.error(f"Error replacing text with regex in {full_path}: {e}")
+            logger.error(
+                f"[{kwargs.get('model', 'Unknown model')}] Error replacing text with regex in {full_path}: {e}"
+            )
             raise
 
 
@@ -263,11 +274,15 @@ class InsertAtLineTool(ChibiTool):
             with path.open("w", encoding=encoding) as f:
                 f.writelines(lines)
 
-            logger.log("TOOL", f"Inserted content at line {line_number} in {path}")
+            logger.log(
+                "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Inserted content at line {line_number} in {path}"
+            )
             return {"success": True}
 
         except Exception as e:
-            logger.error(f"Error inserting at line {line_number} in {full_path}: {e}")
+            logger.error(
+                f"[{kwargs.get('model', 'Unknown model')}] Error inserting at line {line_number} in {full_path}: {e}"
+            )
             raise
 
 
@@ -358,11 +373,11 @@ class ReplaceLinesTool(ChibiTool):
             with path.open("w", encoding=encoding) as f:
                 f.writelines(lines)
 
-            logger.log("TOOL", f"Replaced {lines_replaced} lines in {path}")
+            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Replaced {lines_replaced} lines in {path}")
             return {"lines_replaced": lines_replaced}
 
         except Exception as e:
-            logger.error(f"Error replacing lines in {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing lines in {full_path}: {e}")
             raise
 
 
@@ -440,14 +455,17 @@ class FindAndReplaceSectionTool(ChibiTool):
                 content = f.read()
 
             if start_marker not in content or end_marker not in content:
-                logger.log("TOOL", f"Section markers not found in {path}")
+                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Section markers not found in {path}")
                 return {"success": False, "section_found": False}
 
             start_pos = content.find(start_marker)
             end_pos = content.find(end_marker, start_pos + len(start_marker))
 
             if start_pos == -1 or end_pos == -1:
-                logger.log("TOOL", f"Section markers not found in correct order in {path}")
+                logger.log(
+                    "TOOL",
+                    f"[{kwargs.get('model', 'Unknown model')}] Section markers not found in correct order in {path}",
+                )
                 return {"success": False, "section_found": False}
 
             if include_markers:
@@ -477,11 +495,11 @@ class FindAndReplaceSectionTool(ChibiTool):
             with path.open("w", encoding=encoding) as f:
                 f.write(new_content)
 
-            logger.log("TOOL", f"Replaced section in {path}")
+            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Replaced section in {path}")
             return {"success": True, "section_found": True}
 
         except Exception as e:
-            logger.error(f"Error replacing section in {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing section in {full_path}: {e}")
             raise
 
 
@@ -555,11 +573,11 @@ class AppendToFileTool(ChibiTool):
                     f.write("\n")
                 f.write(content)
 
-            logger.log("TOOL", f"Appended content to {path}")
+            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Appended content to {path}")
             return {"success": True}
 
         except Exception as e:
-            logger.error(f"Error appending to {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error appending to {full_path}: {e}")
             raise
 
 
@@ -639,7 +657,9 @@ class InsertAfterPatternTool(ChibiTool):
             if regex:
                 matches = list(re.finditer(pattern, file_content))
                 if not matches:
-                    logger.log("TOOL", f"Pattern '{pattern}' not found in {path}")
+                    logger.log(
+                        "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Pattern '{pattern}' not found in {path}"
+                    )
                     return {"insertions": 0}
 
                 matches = matches[:count]  # Limit to the specified count
@@ -668,12 +688,12 @@ class InsertAfterPatternTool(ChibiTool):
             if insertions > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"Made {insertions} insertions in {path}")
+                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {insertions} insertions in {path}")
 
             return {"insertions": insertions}
 
         except Exception as e:
-            logger.error(f"Error inserting after pattern in {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error inserting after pattern in {full_path}: {e}")
             raise
 
 
@@ -753,7 +773,9 @@ class InsertBeforePatternTool(ChibiTool):
             if regex:
                 matches = list(re.finditer(pattern, file_content))
                 if not matches:
-                    logger.log("TOOL", f"Pattern '{pattern}' not found in {path}")
+                    logger.log(
+                        "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Pattern '{pattern}' not found in {path}"
+                    )
                     return {"insertions": 0}
 
                 matches = matches[:count]  # Limit to the specified count
@@ -781,10 +803,10 @@ class InsertBeforePatternTool(ChibiTool):
             if insertions > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"Made {insertions} insertions in {path}")
+                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {insertions} insertions in {path}")
 
             return {"insertions": insertions}
 
         except Exception as e:
-            logger.error(f"Error inserting before pattern in {full_path}: {e}")
+            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error inserting before pattern in {full_path}: {e}")
             raise

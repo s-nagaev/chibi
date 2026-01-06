@@ -3,17 +3,10 @@ from typing import Any, Coroutine
 
 from loguru import logger
 
+from chibi.utils.app import SingletonMeta
 
-class BackgroundTaskManager:
-    _instance = None
 
-    def __new__(cls) -> "BackgroundTaskManager":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._tasks = set()
-            cls._instance._shutting_down = False
-        return cls._instance
-
+class BackgroundTaskManager(metaclass=SingletonMeta):
     def __init__(self) -> None:
         """Initialize the task manager."""
         if not hasattr(self, "_tasks"):
@@ -41,7 +34,7 @@ class BackgroundTaskManager:
         try:
             exc = task.exception()
             if exc:
-                logger.error(f"Background task failed: {exc}")
+                logger.error(f"Background task '{task.get_name()}' failed: {exc}")
         except asyncio.CancelledError:
             pass
         except Exception as e:

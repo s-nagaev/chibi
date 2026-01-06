@@ -175,7 +175,7 @@ class MistralAI(RestApiFriendlyProvider):
             ), messages
 
         # Tool calls handling
-        logger.log("CALL", f"LLM requested the call of {len(tool_calls)} tools.")
+        logger.log("CALL", f"{model} requested the call of {len(tool_calls)} tools.")
 
         thoughts = self.get_thoughts(assistant_message=message_data)
         if thoughts:
