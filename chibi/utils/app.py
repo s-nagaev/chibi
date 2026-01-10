@@ -38,9 +38,7 @@ async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
     to an external monitoring service (e.g., Healthchecks.io, Uptime Kuma, etc.).
 
     Args:
-        context: The callback context provided by the JobQueue. Although
-                 required by the JobQueue signature, it's not directly used
-                 in this function's logic.
+        context: The callback context provided by the JobQueue.
     """
     if not application_settings.heartbeat_url:
         return None
@@ -52,6 +50,8 @@ async def run_heartbeat(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     async with httpx.AsyncClient(transport=transport, proxy=application_settings.heartbeat_proxy) as client:
         try:
+            await context.bot.get_me()
+
             result = await client.get(application_settings.heartbeat_url)
         except Exception as error:
             logger.error(f"Uptime Checker failed with an Exception: {error}")

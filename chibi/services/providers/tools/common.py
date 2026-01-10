@@ -947,9 +947,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         if vocal_gender and vocal_gender not in ("f", "m"):
             raise ToolException("Vocal gender must be 'f' or 'm' if specified.")
 
-        logger.log(
-            "TOOL", f"Generating music via Suno. Custom mode. " f"Prompt: {prompt}. Style: {style}. Title: {title}"
-        )
+        logger.log("TOOL", f"Generating music via Suno. Custom mode. Prompt: {prompt}. Style: {style}. Title: {title}")
 
         task_id = await cls._get_provider().order_music_generation_advanced_mode(
             prompt=prompt,
