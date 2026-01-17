@@ -5,6 +5,7 @@ from loguru import logger
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError
+from chibi.schemas.app import ModelChangeSchema
 from chibi.services.providers.provider import Provider
 
 
@@ -18,7 +19,7 @@ class ElevenLabs(Provider):
     default_stt_model = "scribe_v1"
     tag_audio_events = False
     language_code = None
-    default_tts_voice = "JBFqnCBsd6RMkjVDRZzb"
+    default_tts_voice = "cgSgspJ2msm6clMCkdW9"
     default_tts_model = "eleven_multilingual_v2"
     output_format = "mp3_44100_128"
     music_length_ms = 10000
@@ -41,7 +42,9 @@ class ElevenLabs(Provider):
 
         return self._client
 
-    async def speech(self, text: str, voice: str = default_tts_voice, model: str = default_tts_model) -> bytes:
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        voice = voice or self.default_tts_voice
+        model = model or self.default_tts_model
         logger.info(f"Recording a voice message with model {model}...")
         response = self.client.text_to_speech.convert(
             text=text,
@@ -56,7 +59,8 @@ class ElevenLabs(Provider):
 
         return bytes(buf)
 
-    async def transcribe(self, audio: BytesIO, model: str = default_stt_model) -> str:
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        model = model or self.default_stt_model
         logger.info(f"Transcribing audio with model {model}...")
         response = await self.client.speech_to_text.convert(
             file=audio, model_id=model, tag_audio_events=self.tag_audio_events, language_code=self.language_code
@@ -76,3 +80,6 @@ class ElevenLabs(Provider):
             buf.extend(chunk)
 
         return bytes(buf)
+
+    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+        return []

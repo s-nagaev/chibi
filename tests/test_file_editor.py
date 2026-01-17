@@ -44,7 +44,11 @@ async def test_replace_section_include_markers():
     end_marker = "SECTION_END"
 
     result: ToolResponse = await find_and_replace_section(
-        file_path, start_marker, end_marker, new_content, include_markers=True
+        full_path=file_path,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        new_content=new_content,
+        include_markers=True,
     )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -63,7 +67,11 @@ async def test_replace_section_exclude_markers():
     end_marker = "SECTION_END"
 
     result: ToolResponse = await find_and_replace_section(
-        file_path, start_marker, end_marker, new_content, include_markers=False
+        full_path=file_path,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        new_content=new_content,
+        include_markers=False,
     )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -82,7 +90,11 @@ async def test_replace_section_markers_at_boundaries_exclude():
     end_marker = "SECTION_END"
 
     result: ToolResponse = await find_and_replace_section(
-        file_path, start_marker, end_marker, new_content, include_markers=False
+        full_path=file_path,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        new_content=new_content,
+        include_markers=False,
     )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -100,7 +112,9 @@ async def test_markers_not_found():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(file_path, start_marker, end_marker, new_content)
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
+    )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
     assert result.result.get("section_found") is False
@@ -117,7 +131,9 @@ async def test_only_start_marker_found():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(file_path, start_marker, end_marker, new_content)
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
+    )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
     assert result.result.get("section_found") is False
@@ -138,7 +154,10 @@ async def test_only_end_marker_found_after_start():
     file_path_with_start = await create_test_file("test_only_end_after_with_start.txt", content_with_start)
 
     result: ToolResponse = await find_and_replace_section(
-        file_path_with_start, "NON_EXISTENT_START", end_marker, new_content
+        full_path=file_path_with_start,
+        start_marker="NON_EXISTENT_START",
+        end_marker=end_marker,
+        new_content=new_content,
     )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -156,7 +175,9 @@ async def test_end_marker_before_start_marker():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(file_path, start_marker, end_marker, new_content)
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
+    )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
     assert result.result.get("section_found") is False
@@ -173,7 +194,9 @@ async def test_empty_file():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(file_path, start_marker, end_marker, new_content)
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
+    )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
     assert result.result.get("section_found") is False
@@ -190,7 +213,9 @@ async def test_no_markers_in_file():
     start_marker = "START"
     end_marker = "END"
 
-    result: ToolResponse = await find_and_replace_section(file_path, start_marker, end_marker, new_content)
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
+    )
     assert result.status == "ok"
     assert isinstance(result.result, dict)
     assert result.result.get("section_found") is False
@@ -208,7 +233,11 @@ async def test_markers_in_single_line():
     end_marker = "SECTION_END"
 
     result_include: ToolResponse = await find_and_replace_section(
-        file_path, start_marker, end_marker, new_content, include_markers=True
+        full_path=file_path,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        new_content=new_content,
+        include_markers=True,
     )
     assert result_include.status == "ok"
     assert isinstance(result_include.result, dict)
@@ -219,7 +248,11 @@ async def test_markers_in_single_line():
     # Reset file for exclude test
     await create_test_file("test_single_line.txt", content)
     result_exclude: ToolResponse = await find_and_replace_section(
-        file_path, start_marker, end_marker, new_content, include_markers=False
+        full_path=file_path,
+        start_marker=start_marker,
+        end_marker=end_marker,
+        new_content=new_content,
+        include_markers=False,
     )
     assert result_exclude.status == "ok"
     assert isinstance(result_exclude.result, dict)
@@ -236,7 +269,7 @@ async def test_markers_are_same():
     marker = "MARKER"
 
     result_include: ToolResponse = await find_and_replace_section(
-        file_path, marker, marker, new_content, include_markers=True
+        full_path=file_path, start_marker=marker, end_marker=marker, new_content=new_content, include_markers=True
     )
     assert result_include.status == "ok"
     assert isinstance(result_include.result, dict)
@@ -247,7 +280,7 @@ async def test_markers_are_same():
     # Reset file for exclude test
     await create_test_file("test_same_markers.txt", content)
     result_exclude: ToolResponse = await find_and_replace_section(
-        file_path, marker, marker, new_content, include_markers=False
+        full_path=file_path, start_marker=marker, end_marker=marker, new_content=new_content, include_markers=False
     )
     assert result_exclude.status == "ok"
     assert isinstance(result_exclude.result, dict)

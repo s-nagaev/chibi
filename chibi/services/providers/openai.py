@@ -5,7 +5,7 @@ from openai import NOT_GIVEN
 from openai.types import ImagesResponse
 
 from chibi.config import gpt_settings
-from chibi.constants import TTS_INSTRUCTIONS
+from chibi.constants import OPENAI_TTS_INSTRUCTIONS
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
@@ -27,7 +27,8 @@ class OpenAI(OpenAIFriendlyProvider):
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"
 
-    async def transcribe(self, audio: BytesIO, model: str = default_stt_model) -> str:
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        model = model or self.default_stt_model
         logger.info(f"Transcribing audio with model {model}...")
         response = await self.client.audio.transcriptions.create(
             model=model,
@@ -38,13 +39,15 @@ class OpenAI(OpenAIFriendlyProvider):
             return response.text
         raise ValueError("Could not transcribe audio message")
 
-    async def speech(self, text: str, voice: str = default_tts_voice, model: str = default_tts_model) -> bytes:
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        voice = voice or self.default_tts_voice
+        model = model or self.default_tts_model
         logger.info(f"Recording a voice message with model {model}...")
         response = await self.client.audio.speech.create(
             model=model,
             voice=voice,
             input=text,
-            instructions=TTS_INSTRUCTIONS,
+            instructions=OPENAI_TTS_INSTRUCTIONS,
         )
         return await response.aread()
 

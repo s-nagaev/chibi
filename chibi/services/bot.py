@@ -16,11 +16,12 @@ from chibi.config import application_settings, gpt_settings
 from chibi.constants import UserAction, UserContext
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers import RegisteredProviders
+from chibi.services.providers.tools import ToolResponse
 from chibi.services.providers.utils import get_usage_msg
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
-    get_gtp_chat_answer,
+    get_llm_chat_completion_answer,
     get_models_available,
     reset_chat_history,
     set_active_model,
@@ -55,8 +56,36 @@ async def handle_model_selection(
     await query.edit_message_text(text=f"Selected model: '{model.name} ({model.provider})'")
 
 
+async def handle_tool_response(tool_response: ToolResponse, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    telegram_user = get_telegram_user(update=update)
+    chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
+        user_id=telegram_user.id, tool_message=tool_response, context=context, update=update
+    )
+    usage_message = get_usage_msg(chat_response.usage)
+
+    if len(chat_response.answer) <= 5 and "ACK" in chat_response.answer:
+        logger.info(
+            f"[{user_data(update)}-{chat_data(update)}] LLM silently received tool result "
+            f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
+        )
+        return None
+
+    if application_settings.log_prompt_data:
+        answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
+        logged_answer = f"Answer: {answer_to_log}"
+    else:
+        logged_answer = ""
+
+    logger.info(
+        f"{user_data(update)} got {chat_response.provider} ({chat_response.model}) answer in "
+        f"the {chat_data(update)}. {logged_answer} {usage_message}"
+    )
+
+    await send_gpt_answer_message(gpt_answer=chat_response.answer, update=update, context=context)
+
+
 @handle_gpt_exceptions
-async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_user_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     telegram_user = get_telegram_user(update=update)
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
@@ -86,8 +115,12 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
     get_gtp_chat_answer_task = asyncio.ensure_future(
-        get_gtp_chat_answer(
-            user_id=telegram_user.id, text_prompt=text_prompt, voice_prompt=voice_prompt, context=context, update=update
+        get_llm_chat_completion_answer(
+            user_id=telegram_user.id,
+            user_text_message=text_prompt,
+            user_voice_message=voice_prompt,
+            context=context,
+            update=update,
         )
     )
 
@@ -104,6 +137,13 @@ async def handle_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logged_answer = f"Answer: {answer_to_log}"
     else:
         logged_answer = ""
+
+    if len(chat_response.answer) <= 5 and "ACK" in chat_response.answer:
+        logger.info(
+            f"[{user_data(update)}-{chat_data(update)}] LLM silently received user request "
+            f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
+        )
+        return None
 
     logger.info(
         f"{user_data(update)} got {chat_response.provider} ({chat_response.model}) answer in "

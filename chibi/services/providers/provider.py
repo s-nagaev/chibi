@@ -104,6 +104,14 @@ class RegisteredProviders:
     def image_generation_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.image_generation_ready}
 
+    @property
+    def stt_ready(self) -> dict[str, type["Provider"]]:
+        return {name: provider for name, provider in self.available.items() if provider.stt_ready}
+
+    @property
+    def tts_ready(self) -> dict[str, type["Provider"]]:
+        return {name: provider for name, provider in self.available.items() if provider.tts_ready}
+
     def get_instance(self, provider: type["Provider"]) -> Optional["Provider"]:
         api_key = self.get_api_key(provider)
         if not api_key:
@@ -119,6 +127,18 @@ class RegisteredProviders:
     @classmethod
     def get_class(cls, provider_name: str) -> Optional[type["Provider"]]:
         return cls.all.get(provider_name)
+
+    @property
+    def first_tts_ready(self) -> Optional["Provider"]:
+        if provider := next(iter(self.tts_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
+    @property
+    def first_stt_ready(self) -> Optional["Provider"]:
+        if provider := next(iter(self.stt_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
 
     @property
     def first_image_generation_ready(self) -> Optional["Provider"]:
@@ -147,6 +167,9 @@ class Provider(ABC):
     model_name_keywords_exclude: list[str] = []
     default_model: str
     default_image_model: str | None = None
+    default_stt_model: str | None = None
+    default_tts_voice: str | None = None
+    default_tts_model: str | None = None
     timeout: int = gpt_settings.timeout
 
     def __init__(self, token: str) -> None:
@@ -178,6 +201,12 @@ class Provider(ABC):
         raise NotImplementedError
 
     def get_model_display_name(self, model_name: str) -> str:
+        raise NotImplementedError
+
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        raise NotImplementedError
+
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         raise NotImplementedError
 
     async def api_key_is_valid(self) -> bool:

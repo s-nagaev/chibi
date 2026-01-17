@@ -318,10 +318,15 @@ async def send_text_file(file_content: str, file_name: str, update: Update, cont
     )
 
 
-async def send_message_in_plain_text_and_file(message: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def send_message_in_plain_text_and_file(
+    message: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    reply: bool = True,
+) -> None:
     telegram_chat = get_telegram_chat(update=update)
 
-    await send_long_message(message=message, update=update, context=context, normalize_md=False)
+    await send_long_message(message=message, update=update, context=context, normalize_md=False, reply=reply)
     file = BytesIO()
     file.write(message.encode())
     file.seek(0)
@@ -338,13 +343,16 @@ async def send_message_in_plain_text_and_file(message: str, update: Update, cont
     )
 
 
-async def send_gpt_answer_message(gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def send_gpt_answer_message(
+    gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True
+) -> None:
     try:
         await send_long_message(
             message=gpt_answer,
             update=update,
             context=context,
             parse_mode=constants.ParseMode.MARKDOWN_V2,
+            reply=reply,
         )
     except BadRequest as e:
         # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
@@ -352,7 +360,7 @@ async def send_gpt_answer_message(gpt_answer: str, update: Update, context: Cont
             f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
             f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
         )
-        await send_message_in_plain_text_and_file(message=gpt_answer, update=update, context=context)
+        await send_message_in_plain_text_and_file(message=gpt_answer, update=update, context=context, reply=reply)
 
 
 def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:

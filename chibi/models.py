@@ -435,10 +435,21 @@ class User(BaseModel):
 
     @property
     def stt_provider(self) -> "Provider":
-        stt_provider = self.providers.get(provider_name="OpenAI")  # TODO: temporary stub-solution
-        if not stt_provider:
-            raise ValueError("No stt-provider found.")
-        return stt_provider
+        if gpt_settings.stt_provider:
+            if provider := self.providers.get(gpt_settings.stt_provider):
+                return provider
+        if provider := self.providers.first_stt_ready:
+            return provider
+        raise ValueError("No stt-provider found.")
+
+    @property
+    def tts_provider(self) -> "Provider":
+        if gpt_settings.tts_provider:
+            if provider := self.providers.get(gpt_settings.tts_provider):
+                return provider
+        if provider := self.providers.first_tts_ready:
+            return provider
+        raise ValueError("No tts-provider found.")
 
     @property
     def active_gpt_provider(self) -> "Provider":
