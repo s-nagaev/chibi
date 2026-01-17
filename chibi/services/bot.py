@@ -143,6 +143,10 @@ async def handle_user_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"[{user_data(update)}-{chat_data(update)}] LLM silently received user request "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
         )
+        try:
+            await telegram_message.set_reaction(reaction="👌", is_big=True)
+        except Exception as e:
+            logger.error(f"{user_data(update)}: Couldn't set message reaction due to exception: {e}")
         return None
 
     logger.info(
