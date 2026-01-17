@@ -2,18 +2,26 @@ import datetime
 import json
 from datetime import timezone
 from io import BytesIO
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Optional
 
 from aiocache import cached
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
-from chibi.models import Message
+from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.lock_manager import LockManager
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+
+if TYPE_CHECKING:
+    from chibi.services.providers.tools import ToolResponse
+
+
+@inject_database
+async def get_chibi_user(db: Database, user_id: int) -> User:
+    return await db.get_or_create_user(user_id=user_id)
 
 
 @inject_database
@@ -55,37 +63,53 @@ async def emergency_summarization(db: Database, user_id: int) -> None:
 
 
 @inject_database
-async def get_gtp_chat_answer(
+async def get_llm_chat_completion_answer(
     db: Database,
     user_id: int,
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
-    text_prompt: str | None = None,
-    voice_prompt: BytesIO | None = None,
+    user_text_message: str | None = None,
+    user_voice_message: BytesIO | None = None,
+    tool_message: Optional["ToolResponse"] = None,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
     lock = await LockManager().get_lock(key=user_id)
 
-    async with lock:
-        user_content = None
-        if text_prompt:
-            user_content = text_prompt
-        elif voice_prompt:
-            user_content = await cast(Any, user.stt_provider).transcribe(audio=voice_prompt)
+    if not user_text_message and not user_voice_message and not tool_message:
+        raise ValueError("No prompt data provided")
 
-        if not user_content:
-            raise ValueError("No text or voice provided")
+    if user_voice_message and not user.stt_provider:
+        raise ValueError("Can't compute voice message: no STT provide available.")
 
-        conversation_messages: list[Message] = await db.get_conversation_messages(user=user)
+    prompt: dict[str, Any]
 
-        user_prompt = {
-            "prompt": user_content,
+    if tool_message:
+        prompt = {
+            "type": "tool response",
+            "desc": "background task is done",
+            "tool_name": tool_message.tool_name,
+            "tool_response": tool_message.model_dump(),
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
-            "transcribed_from_voice_message": bool(voice_prompt),
+            # "rule": (
+            #     "if you got just a service info and still don't have what to answer user, just say 'ACK' "
+            #     "(3 symbols, no more no less), and user won't see this service answer."
+            # ),
+        }
+    else:
+        user_message = (
+            await user.stt_provider.transcribe(audio=user_voice_message) if user_voice_message else user_text_message
+        )
+        assert user_message
+        prompt = {
+            "prompt": user_message,
+            "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+            "transcribed_from_voice_message": bool(user_voice_message),
         }
 
-        user_message = Message(role="user", content=json.dumps(user_prompt))
-        conversation_messages.append(user_message)
+    async with lock:
+        conversation_messages: list[Message] = await db.get_conversation_messages(user=user)
+        new_message_to_llm = Message(role="user", content=json.dumps(prompt))
+        conversation_messages.append(new_message_to_llm)
 
         chat_response, new_messages = await user.active_gpt_provider.get_chat_response(
             messages=conversation_messages,
@@ -94,7 +118,7 @@ async def get_gtp_chat_answer(
             update=update,
             context=context,
         )
-        await db.add_message(user=user, message=user_message, ttl=gpt_settings.messages_ttl)
+        await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl)
         for message in new_messages:
             await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl)
         return chat_response

@@ -45,6 +45,12 @@ class GPTSettings(BaseSettings):
 
     default_model: str | None = Field(default=None)
     default_provider: str | None = Field(default=None)
+
+    stt_provider: str | None = Field(default=None)
+    stt_model: str | None = Field(default=None)
+    tts_provider: str | None = Field(default=None)
+    tts_model: str | None = Field(default=None)
+
     filesystem_access: bool = Field(default=False)
     image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
     max_conversation_age_minutes: int = Field(default=360)

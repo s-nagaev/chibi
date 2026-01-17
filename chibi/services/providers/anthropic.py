@@ -130,6 +130,10 @@ class Anthropic(RestApiFriendlyProvider):
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
+
+        if len(initial_messages) >= 2:
+            initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
+
         chat_response, updated_messages = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,

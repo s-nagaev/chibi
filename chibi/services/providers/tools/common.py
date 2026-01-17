@@ -16,8 +16,7 @@ from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEE
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, download, get_sub_agent_response
-from chibi.services.task_manager import task_manager
-from chibi.services.user import generate_image, user_has_reached_images_generation_limit
+from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
 from chibi.utils.telegram import get_telegram_chat
 
 if TYPE_CHECKING:
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
 
 class TextToSpeechTool(ChibiTool):
     register = bool(gpt_settings.openai_key)
+    run_in_background_by_default = True
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -46,8 +46,9 @@ class TextToSpeechTool(ChibiTool):
 
     @classmethod
     async def function(cls, text: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
-        from chibi.services.providers import OpenAI, RegisteredProviders
-        from chibi.utils.telegram import send_audio
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ToolException("This function requires user_id to be automatically provided.")
 
         telegram_context = kwargs.get("telegram_context")
         telegram_update = kwargs.get("telegram_update")
@@ -58,15 +59,19 @@ class TextToSpeechTool(ChibiTool):
             )
         logger.log("TOOL", "Sending voice message to user...")
 
-        provider = RegisteredProviders().get(provider_name="OpenAI")
-        if not isinstance(provider, OpenAI):
-            raise ToolException("This function requires OpenAI provider.")  # TODO: temporary solution
-
+        user = await get_chibi_user(user_id=user_id)
+        provider = user.stt_provider
         audio_data = await provider.speech(text=text)
-        await send_audio(
+        title = f"{text[:15]}..."
+        await telegram_context.bot.send_audio(
+            chat_id=get_telegram_chat(update=telegram_update).id,
             audio=audio_data,
-            update=telegram_update,
-            context=telegram_context,
+            title=title,
+            performer=f"{telegram_settings.bot_name} AI",
+            filename=f"{title.replace(' ', '_')}.mp3",
+            parse_mode="HTML",
+            read_timeout=AUDIO_UPLOAD_TIMEOUT,
+            write_timeout=AUDIO_UPLOAD_TIMEOUT,
         )
         return {"detail": "Audio was successfully sent."}
 
@@ -139,6 +144,8 @@ class GetAvailableLLMModelsTool(ChibiTool):
 
 class GenerateImageTool(ChibiTool):
     register = True
+    run_in_background_by_default = True
+    allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -156,11 +163,6 @@ class GenerateImageTool(ChibiTool):
                     "provider": {"type": "string", "description": "Provider name, i.e. 'Gemini'"},
                     "image_model": {"type": "string", "description": "Model name, i.e. 'dall-e-3'"},
                     "prompt": {"type": "string", "description": "Image generation prompt. English recommended"},
-                    "execute_in_background": {
-                        "type": "boolean",
-                        "description": "Execute image generation in background.",
-                        "default": True,
-                    },
                 },
                 "required": ["provider", "image_model", "prompt"],
             },
@@ -190,7 +192,6 @@ class GenerateImageTool(ChibiTool):
         provider: str,
         image_model: str,
         prompt: str,
-        execute_in_background: bool = True,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
         user_id = kwargs.get("user_id")
@@ -207,7 +208,7 @@ class GenerateImageTool(ChibiTool):
         if await user_has_reached_images_generation_limit(user_id=user_id):
             raise ToolException("User has reached image generation monthly limit.")
 
-        coro = cls.generate_and_send_image(
+        await cls.generate_and_send_image(
             user_id=user_id,
             provider=provider,
             model=image_model,
@@ -215,16 +216,13 @@ class GenerateImageTool(ChibiTool):
             update=telegram_update,
             context=telegram_context,
         )
-        if execute_in_background:
-            task_manager.run_task(coro)
-            return {"detail": "Image generation was successfully scheduled. User will receive it soon."}
-
-        await coro
         return {"detail": "Image was successfully generated and sent."}
 
 
 class DelegateTool(ChibiTool):
     register = True
+    run_in_background_by_default = True
+    allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -233,7 +231,9 @@ class DelegateTool(ChibiTool):
                 "Delegate exactly one task to a sub-agent - an LLM identical to you. The prompt should be "
                 "exhaustive and expect a concrete result, or an explanation for its absence. The task should be "
                 "as atomic as possible. Delegate preferably tasks that involve processing large volumes of "
-                "information, to avoid saturating your context. If no model/provider specified, your model will be used"
+                "information, to avoid saturating your context. Try to assign simpler tasks to cheaper and faster "
+                "models. You can find out the list of available models by executing tool get_available_llm_models. "
+                "If no model/provider specified, your model will be used (be sure you know your model)."
             ),
             parameters={
                 "type": "object",
@@ -256,6 +256,9 @@ class DelegateTool(ChibiTool):
         model_name: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        import pprint
+
+        pprint.pprint(kwargs)
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
@@ -695,6 +698,8 @@ class SendMediaGroupTool(ChibiTool):
 
 class GenerateMusicViaSunoTool(ChibiTool):
     register = bool(gpt_settings.suno_key)
+    run_in_background_by_default: bool = True
+    allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -717,11 +722,6 @@ class GenerateMusicViaSunoTool(ChibiTool):
                         "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5",
                         "default": "V5",
                     },
-                    "execute_in_background": {
-                        "type": "boolean",
-                        "description": "Execute image generation in background.",
-                        "default": True,
-                    },
                 },
                 "required": ["prompt"],
             },
@@ -736,7 +736,6 @@ class GenerateMusicViaSunoTool(ChibiTool):
         prompt: str,
         suno_model: str = "V5",
         instrumental: bool = False,
-        execute_in_background: bool = True,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         telegram_context = kwargs.get("telegram_context")
@@ -754,19 +753,9 @@ class GenerateMusicViaSunoTool(ChibiTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        coro = cls._poll_and_send_audio(
+        return await cls._poll_and_send_audio(
             task_id=task_id, telegram_context=telegram_context, telegram_update=telegram_update
         )
-
-        if execute_in_background:
-            logger.log("TOOL", f"[Task #{task_id}] Polling the generation result in the background...")
-            task_manager.run_task(coro)
-            return {
-                "detail": "Music generation was successfully scheduled. User will receive it soon.",
-                "suno_task_id": task_id,
-            }
-
-        return await coro
 
     @classmethod
     def _get_provider(cls) -> "Suno":
@@ -787,6 +776,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
         telegram_context: ContextTypes.DEFAULT_TYPE,
         telegram_update: Update,
     ) -> dict[str, Any]:
+        logger.log("TOOL", f"[Task #{task_id}] Polling the generation result...")
         await sleep(POLLING_ATTEMPTS_WAIT_BETWEEN)
         music_generation_result = await cls._get_provider().poll_result(task_id=task_id)
 
@@ -805,6 +795,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
                 f"SunoGetGenerationDetails.data.response does not contain suno_data: "
                 f"{music_generation_result.model_dump()}"
             )
+        generated_data: dict[str | int, Any] = {"task_id": task_id}
 
         for version, suno_data in enumerate(music_generation_result.data.response.suno_data, start=1):
             music_url = (
@@ -817,7 +808,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
                 logger.warning(f"Suno task #{task_id} does not contain audio URL. Suno data ID: {suno_data.id}")
                 continue
 
-            image_url = suno_data.image_url or suno_data.source_image_url
+            image_url = suno_data.source_image_url or suno_data.image_url
             title = f"{suno_data.title} v{version}"
             chat_id = get_telegram_chat(update=telegram_update).id
 
@@ -834,13 +825,22 @@ class GenerateMusicViaSunoTool(ChibiTool):
                 read_timeout=AUDIO_UPLOAD_TIMEOUT,
                 write_timeout=AUDIO_UPLOAD_TIMEOUT,
             )
+            generated_version_data = {
+                "id": suno_data.id,
+                "title": title,
+                "music_url": str(music_url),
+                "image_url": str(image_url),
+            }
+            generated_data[version] = generated_version_data
         return {
             "detail": "Music was successfully generated and sent to user",
-            "suno_task_data": music_generation_result.model_dump(),
+            "suno_task_data": generated_data,
         }
 
 
 class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
+    run_in_background_by_default: bool = True
+    allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -904,11 +904,6 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
                         "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5",
                         "default": "V5",
                     },
-                    "execute_in_background": {
-                        "type": "boolean",
-                        "description": "Execute image generation in background.",
-                        "default": True,
-                    },
                 },
                 "required": ["prompt", "style", "title"],
             },
@@ -928,7 +923,6 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         vocal_gender: str | None = None,
         style_weight: float = 0.5,
         weirdness_constraint: float = 0.5,
-        execute_in_background: bool = True,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         telegram_context = kwargs.get("telegram_context")
@@ -947,9 +941,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         if vocal_gender and vocal_gender not in ("f", "m"):
             raise ToolException("Vocal gender must be 'f' or 'm' if specified.")
 
-        logger.log(
-            "TOOL", f"Generating music via Suno. Custom mode. " f"Prompt: {prompt}. Style: {style}. Title: {title}"
-        )
+        logger.log("TOOL", f"Generating music via Suno. Custom mode. Prompt: {prompt}. Style: {style}. Title: {title}")
 
         task_id = await cls._get_provider().order_music_generation_advanced_mode(
             prompt=prompt,
@@ -965,16 +957,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        coro = cls._poll_and_send_audio(
+        result = await cls._poll_and_send_audio(
             task_id=task_id, telegram_context=telegram_context, telegram_update=telegram_update
         )
-
-        if execute_in_background:
-            logger.log("TOOL", f"[Task #{task_id}] Polling the generation result in the background...")
-            task_manager.run_task(coro)
-            return {
-                "detail": "Music generation was successfully scheduled. User will receive it soon.",
-                "suno_task_id": task_id,
-            }
-
-        return await coro
+        return result

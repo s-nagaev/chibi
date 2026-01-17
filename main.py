@@ -29,9 +29,9 @@ from chibi.services.bot import (
     handle_available_provider_options,
     handle_image_generation,
     handle_model_selection,
-    handle_prompt,
     handle_provider_api_key_set,
     handle_reset,
+    handle_user_prompt,
 )
 from chibi.services.providers import RegisteredProviders
 from chibi.services.task_manager import task_manager
@@ -126,7 +126,7 @@ class ChibiBot:
         telegram_chat = get_telegram_chat(update=update)
         telegram_message = get_telegram_message(update=update)
         if telegram_message.voice:
-            self.run_task(handle_prompt(update=update, context=context))
+            self.run_task(handle_user_prompt(update=update, context=context))
             return None
 
         prompt = telegram_message.text
@@ -149,11 +149,11 @@ class ChibiBot:
             and not user_interacts_with_bot(update=update, context=context)
         ):
             return None
-        self.run_task(handle_prompt(update=update, context=context))
+        self.run_task(handle_user_prompt(update=update, context=context))
 
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.run_task(handle_prompt(update=update, context=context))
+        self.run_task(handle_user_prompt(update=update, context=context))
 
     @check_user_allowance
     async def show_gpt_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
