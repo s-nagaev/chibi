@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-01-17
+
+### Added
+- **Background Tasks:** Long-running tools (Image/Music generation, Delegation) now execute in the background, freeing up the chat interface.
+- **Silent ACK:** Implemented a protocol for the LLM to silently acknowledge tool completion without notifying the user.
+- **STT/TTS Configuration:** New settings in `GPTSettings` for explicit STT/TTS provider selection (`stt_provider`, `tts_provider`).
+
+### Changed
+- **Tool Execution:** `GenerateImageTool`, `GenerateMusicViaSunoTool`, `TextToSpeechTool`, and `DelegateTool` default to background execution.
+- **Provider Logic:** Refactored how STT and TTS providers are selected; added fallback to the first available provider if not explicitly configured.
+- **Anthropic:** Enabled ephemeral caching for prompts to optimize costs/performance.
+- **Internal:** Renamed core message handling functions (`handle_user_prompt`, `get_llm_chat_completion_answer`) for clarity.
+
 ## [1.5.0] - 2026-01-06
 ### Added
 - **Suno AI Integration:**
@@ -350,7 +363,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/s-nagaev/chibi/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/s-nagaev/chibi/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/s-nagaev/chibi/compare/v1.4.0...v1.4.1
 
