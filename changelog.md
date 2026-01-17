@@ -9,14 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Background Tasks:** Long-running tools (Image/Music generation, Delegation) now execute in the background, freeing up the chat interface.
+- **Global Tool Parameter:** Added a global `run_in_background` parameter to all compatible tools, allowing the LLM to choose execution mode.
 - **Silent ACK:** Implemented a protocol for the LLM to silently acknowledge tool completion without notifying the user.
+- **System Prompt:** Updated system prompt with instructions for the "ACK" rule and async tool handling.
 - **STT/TTS Configuration:** New settings in `GPTSettings` for explicit STT/TTS provider selection (`stt_provider`, `tts_provider`).
+- **Provider Helpers:** Added `first_stt_ready` and `first_tts_ready` helpers to `RegisteredProviders` for automatic provider selection.
 
 ### Changed
 - **Tool Execution:** `GenerateImageTool`, `GenerateMusicViaSunoTool`, `TextToSpeechTool`, and `DelegateTool` default to background execution.
 - **Provider Logic:** Refactored how STT and TTS providers are selected; added fallback to the first available provider if not explicitly configured.
+- **Provider Interface:** Standardized `transcribe` and `speech` methods in the `Provider` base class.
 - **Anthropic:** Enabled ephemeral caching for prompts to optimize costs/performance.
 - **Internal:** Renamed core message handling functions (`handle_user_prompt`, `get_llm_chat_completion_answer`) for clarity.
+- **Internal:** `GenerateAdvancedMusicViaSunoTool` migrated to the new global background execution mechanism.
 
 ## [1.5.0] - 2026-01-06
 ### Added
