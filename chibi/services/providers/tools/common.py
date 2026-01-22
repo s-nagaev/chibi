@@ -60,7 +60,7 @@ class TextToSpeechTool(ChibiTool):
         logger.log("TOOL", "Sending voice message to user...")
 
         user = await get_chibi_user(user_id=user_id)
-        provider = user.stt_provider
+        provider = user.tts_provider
         audio_data = await provider.speech(text=text)
         title = f"{text[:15]}..."
         await telegram_context.bot.send_audio(
