@@ -7,7 +7,7 @@ from tests.conftest import MockResponse
 
 
 @pytest.mark.asyncio
-async def test_speach(minimax: Mock) -> None:
+async def test_speech(minimax: Mock) -> None:
     provider = Minimax("test_token")
 
     data = {"data": {"audio": ""}}

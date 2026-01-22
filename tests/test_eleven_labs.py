@@ -7,7 +7,7 @@ from chibi.services.providers import ElevenLabs
 
 
 @pytest.mark.asyncio
-async def test_speach(eleven_labs: Mock) -> None:
+async def test_speech(eleven_labs: Mock) -> None:
     provider = ElevenLabs("test_token")
     result = await provider.speech(text="Hello world!", voice="test_voice", model="some_tts_model")
 
