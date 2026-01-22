@@ -57,3 +57,23 @@ def eleven_labs() -> Generator:
     _eleven_labs = AsyncElevenLabsMock("test_token")
     with patch("chibi.services.providers.eleven_labs.AsyncElevenLabs", return_value=_eleven_labs) as mock_tts_convert:
         yield mock_tts_convert
+
+
+class MockResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class RestApiFriendlyMock:
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+
+@pytest.fixture
+def minimax() -> Generator:
+    _minimax = RestApiFriendlyMock("test_token")
+    with patch("chibi.services.providers.minimax.Minimax", return_value=_minimax) as minimax:
+        yield minimax
