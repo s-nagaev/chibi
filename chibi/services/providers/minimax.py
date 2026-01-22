@@ -13,7 +13,7 @@ class Minimax(RestApiFriendlyProvider):
 
     base_url = "https://api.minimax.io/v1/"
     default_tts_model = "speech-2.6-hd"
-    default_tts_voice = "English_expressive_narrator"
+    default_tts_voice = "English_WhimsicalGirl"
 
     @property
     def _headers(self) -> dict[str, str]:
