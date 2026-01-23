@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from chibi.constants import BASE_PROMPT, FILESYSTEM_ACCESS_PROMPT, IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL
+from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL, get_llm_prompt
 
 
 class GPTSettings(BaseSettings):
@@ -34,8 +34,6 @@ class GPTSettings(BaseSettings):
     backoff_factor: float = Field(default=0.5)
     retries: int = Field(default=3)
     timeout: int = Field(default=600)
-
-    system_prompt: str = Field(alias="ASSISTANT_PROMPT", default=BASE_PROMPT)
 
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
     image_n_choices: int = Field(default=1, ge=1, le=4)
@@ -76,9 +74,7 @@ class GPTSettings(BaseSettings):
 
     @property
     def assistant_prompt(self) -> str:
-        if self.filesystem_access:
-            return self.system_prompt + FILESYSTEM_ACCESS_PROMPT
-        return self.system_prompt
+        return get_llm_prompt(filesystem_access=self.filesystem_access, allow_delegation=self.allow_delegation)
 
     @property
     def models_whitelist(self) -> list[str]:
@@ -106,4 +102,4 @@ def _get_gpt_settings() -> GPTSettings:
     return GPTSettings()
 
 
-gpt_settings = _get_gpt_settings()
+gpt_settings: GPTSettings = _get_gpt_settings()
