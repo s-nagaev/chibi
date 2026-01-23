@@ -1,6 +1,7 @@
 from loguru import logger
 
 from chibi.config import gpt_settings
+from chibi.schemas.app import ModelChangeSchema
 from chibi.services.providers.provider import RestApiFriendlyProvider
 
 
@@ -44,3 +45,6 @@ class Minimax(RestApiFriendlyProvider):
             return bytes()
         response_data = response.json()["data"]
         return bytes.fromhex(response_data["audio"])
+
+    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+        return []
