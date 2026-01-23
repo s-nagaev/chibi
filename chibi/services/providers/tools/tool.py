@@ -7,6 +7,7 @@ from openai.types.chat import ChatCompletionToolParam
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from chibi.config import gpt_settings
 from chibi.services.providers.tools.schemas import ToolResponse
 from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.providers.utils import escape_and_truncate
@@ -101,10 +102,17 @@ class ChibiTool:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+
+        if not cls.register:
+            return None
+
+        if gpt_settings.tools_whitelist and cls.name not in gpt_settings.tools_whitelist:
+            return None
+
         if cls.allow_model_to_change_background_mode:
             cast(dict, cls.definition["function"]["parameters"]["properties"]).update(cls.add_global_params())
-        if cls.register:
-            RegisteredChibiTools.register(cls)
+
+        RegisteredChibiTools.register(cls)
 
 
 class RegisteredChibiTools:

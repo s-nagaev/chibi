@@ -23,6 +23,8 @@ class GPTSettings(BaseSettings):
     moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
+    elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
+    minimax_api_key: str | None = Field(alias="MINIMAX_API_KEY", default=None)
 
     frequency_penalty: float = Field(default=0)
     max_tokens: int = Field(default=32000)
@@ -36,12 +38,13 @@ class GPTSettings(BaseSettings):
     system_prompt: str = Field(alias="ASSISTANT_PROMPT", default=BASE_PROMPT)
 
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
-    image_n_choices: int = Field(default=1)
+    image_n_choices: int = Field(default=1, ge=1, le=4)
     image_quality: Literal["standard", "hd"] = Field(default="standard")
     image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
     image_size_nano_banana: Literal["1K", "2K", "4K"] = Field(default="2K")
     image_size_imagen: Literal["1K", "2K"] = Field(default="2K")
+    image_size_alibaba: str = "1664*928"
 
     default_model: str | None = Field(default=None)
     default_provider: str | None = Field(default=None)
@@ -51,21 +54,21 @@ class GPTSettings(BaseSettings):
     tts_provider: str | None = Field(default=None)
     tts_model: str | None = Field(default=None)
 
-    filesystem_access: bool = Field(default=False)
-    image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
     max_conversation_age_minutes: int = Field(default=360)
     max_history_tokens: int = Field(default=64000)
+
+    image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
     models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
     proxy: str | None = Field(default=None)
     public_mode: bool = Field(default=False)
     show_llm_thoughts: bool = Field(default=False)
 
+    filesystem_access: bool = Field(default=False)
+    allow_delegation: bool = Field(default=True)
+    tools_whitelist_raw: str | None = Field(alias="TOOLS_WHITELIST", default=None)
+
     google_search_api_key: str | None = Field(default=None)
     google_search_cx: str | None = Field(default=None)
-
-    elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
-
-    minimax_api_key: str | None = Field(alias="MINIMAX_API_KEY", default=None)
 
     @property
     def google_search_client_set(self) -> bool:
@@ -88,6 +91,10 @@ class GPTSettings(BaseSettings):
             if self.image_generations_whitelist_raw
             else []
         )
+
+    @property
+    def tools_whitelist(self) -> list[str]:
+        return [x.strip() for x in self.tools_whitelist_raw.split(",")] if self.tools_whitelist_raw else []
 
     @property
     def messages_ttl(self) -> int:

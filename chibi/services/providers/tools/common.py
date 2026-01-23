@@ -10,7 +10,7 @@ from telegram import InputMediaAudio, InputMediaPhoto, InputMediaVideo, Update
 from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings, telegram_settings
-from chibi.constants import AUDIO_UPLOAD_TIMEOUT
+from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
@@ -220,7 +220,7 @@ class GenerateImageTool(ChibiTool):
 
 
 class DelegateTool(ChibiTool):
-    register = True
+    register = gpt_settings.allow_delegation
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
@@ -256,9 +256,6 @@ class DelegateTool(ChibiTool):
         model_name: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
-        import pprint
-
-        pprint.pprint(kwargs)
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
@@ -404,8 +401,8 @@ class SendAudioTool(ChibiTool):
             caption=caption,
             filename=filename,
             parse_mode="HTML",
-            read_timeout=60,
-            write_timeout=60,
+            read_timeout=AUDIO_UPLOAD_TIMEOUT,
+            write_timeout=AUDIO_UPLOAD_TIMEOUT,
         )
 
         return {"detail": "Audio was successfully sent."}
@@ -552,8 +549,8 @@ class SendImageTool(ChibiTool):
             photo=image_url,
             caption=caption,
             parse_mode="HTML",
-            read_timeout=60,
-            write_timeout=60,
+            read_timeout=IMAGE_UPLOAD_TIMEOUT,
+            write_timeout=IMAGE_UPLOAD_TIMEOUT,
         )
 
         return {"detail": "Image was successfully sent."}
@@ -689,8 +686,8 @@ class SendMediaGroupTool(ChibiTool):
         await telegram_context.bot.send_media_group(
             chat_id=get_telegram_chat(update=telegram_update).id,
             media=media_group,
-            read_timeout=60,
-            write_timeout=60,
+            read_timeout=FILE_UPLOAD_TIMEOUT,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
         )
 
         return {"detail": f"Media group with {len(media)} items was successfully sent."}

@@ -412,7 +412,7 @@ class Gemini(RestApiFriendlyProvider):
             display_name = model_name.replace("models/gemini-3-pro-image", "Nano Banana Pro")
             return display_name.replace("-", " ").capitalize()
 
-        if "gemini-2.5-flash" in model_name:
+        if "gemini-2.5-flash-image" in model_name:
             display_name = model_name.replace("models/gemini-2.5-flash-image", "Nano Banana")
             return display_name.replace("-", " ").capitalize()
 

@@ -253,11 +253,13 @@ async def send_images(
                 chat_id=telegram_chat.id,
                 media=[InputMediaPhoto(url) for url in image_files],
                 reply_to_message_id=telegram_message.message_id,
+                read_timeout=IMAGE_UPLOAD_TIMEOUT,
+                write_timeout=IMAGE_UPLOAD_TIMEOUT,
             )
         except Exception as e:
             logger.error(
                 f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
-                f"due to exception: {e}. Trying to send if via text message..."
+                f"due to exception: {e}. Trying to send it via text message..."
             )
             image_urls = cast(list[str], images)
             await send_message(
