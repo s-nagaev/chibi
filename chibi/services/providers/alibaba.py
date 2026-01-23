@@ -1,8 +1,8 @@
 from http import HTTPStatus
 
 import dashscope
-from dashscope.aigc import AioImageSynthesis
-from dashscope.api_entities.dashscope_response import ImageSynthesisResponse
+from dashscope.aigc.image_generation import AioImageGeneration
+from dashscope.api_entities.dashscope_response import Choice, ImageGenerationResponse, Message
 
 from chibi.config import gpt_settings
 from chibi.exceptions import ServiceResponseError
@@ -25,13 +25,22 @@ class Alibaba(OpenAIFriendlyProvider):
     max_tokens: int = 8192
     default_image_model = "qwen-image-plus"
 
+    @staticmethod
+    def _get_image_url(choice: Choice) -> str | None:
+        if isinstance(choice.message.content, str):
+            return choice.message.content
+        return choice.message.content[0].get("image")
+
     async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
-        response: ImageSynthesisResponse = await AioImageSynthesis.call(
+        model = model or self.default_model
+        message = Message(role="user", content=[{"text": prompt}])
+        number_of_images = 1 if "qwen" in model or "z-image" in model else gpt_settings.image_n_choices
+        response: ImageGenerationResponse = await AioImageGeneration.call(
             api_key=self.token,
-            model=model or self.default_model,
-            prompt=prompt,
-            n=1,
-            size="1920*1080" if model == "wan2.5-t2i-preview" else "1664*928",
+            model=model,
+            messages=[message],
+            n=number_of_images,
+            size=gpt_settings.image_size_alibaba,
             prompt_extend=True,
             watermark=False,
         )
@@ -39,13 +48,17 @@ class Alibaba(OpenAIFriendlyProvider):
         if response.status_code != HTTPStatus.OK:
             raise ServiceResponseError(
                 provider=self.name,
-                model=model or self.default_model,
+                model=model,
                 detail=(
                     f"Unexpected response status code: {response.status_code}. "
                     f"Response code: {response.code}. Message: {response.message}"
                 ),
             )
-        return [result.url for result in response.output.results]
+        image_urls: list[str] = []
+        for choice in response.output.choices:
+            if url := self._get_image_url(choice):
+                image_urls.append(url)
+        return image_urls
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         models = await super().get_available_models(image_generation=image_generation)
@@ -54,20 +67,8 @@ class Alibaba(OpenAIFriendlyProvider):
             wan_models = [
                 ModelChangeSchema(
                     provider=self.name,
-                    name="wan2.5-t2i-preview",
-                    display_name="Wan 2.5 Preview",
-                    image_generation=True,
-                ),
-                ModelChangeSchema(
-                    provider=self.name,
-                    name="wan2.2-t2i-flash",
-                    display_name="Wan 2.2 Flash",
-                    image_generation=True,
-                ),
-                ModelChangeSchema(
-                    provider=self.name,
-                    name="wan2.2-t2i-plus",
-                    display_name="Wan 2.2 Plus",
+                    name="wan2.6-t2i",
+                    display_name="Wan 2.6",
                     image_generation=True,
                 ),
             ]

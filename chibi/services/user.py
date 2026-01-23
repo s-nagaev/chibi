@@ -1,5 +1,6 @@
 import datetime
 import json
+from copy import deepcopy
 from datetime import timezone
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Optional
@@ -160,11 +161,31 @@ async def generate_image(
     return images
 
 
-@cached(ttl=6000)
+@cached(ttl=300)
+@inject_database
+async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+    user = await db.get_or_create_user(user_id=user_id)
+    return await user.get_available_models(image_generation=image_generation)
+
+
 @inject_database
 async def get_models_available(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    return await user.get_available_models(image_generation=image_generation)
+    user_models = await get_user_cached_models(user_id=user_id, image_generation=image_generation)
+
+    if not user_models:
+        return []
+
+    available_models = deepcopy(user_models)
+    if image_generation:
+        active_model = user.selected_image_model_name or user.active_image_provider.default_image_model
+    else:
+        active_model = user.selected_gpt_model_name or user.active_gpt_provider.default_image_model
+
+    for model in available_models:
+        if model.name == active_model:
+            model.display_name = f"🟢 {model.display_name}️"
+    return available_models
 
 
 @inject_database
