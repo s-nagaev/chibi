@@ -91,10 +91,6 @@ async def get_llm_chat_completion_answer(
             "tool_name": tool_message.tool_name,
             "tool_response": tool_message.model_dump(),
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
-            # "rule": (
-            #     "if you got just a service info and still don't have what to answer user, just say 'ACK' "
-            #     "(3 symbols, no more no less), and user won't see this service answer."
-            # ),
         }
     else:
         user_message = (
