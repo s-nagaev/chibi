@@ -33,7 +33,7 @@ Chibi currently supports models from the following providers:
 *   OpenAI (including DALL-E for images)
 *   xAI (Grok models, including image generation)
 *   ElevenLabs (ElevenLabs models, including text to speech, speech to text, music generation)
-*   MiniMax (Minimax models, text to speech)
+*   MiniMax (Minimax models, text to speech, chat completion)
 
 ## Features
 
@@ -369,6 +369,7 @@ To use Chibi in private mode, or for users interacting with the bot in public mo
 *   ElevenLabs (Music, STT, TTS): https://elevenlabs.io/ (Sign up and navigate to API Keys)
 *   Suno (Music, Unofficial API): https://sunoapi.org (Sign up and navigate to API Keys)
 *   MiniMax (TTS): https://api.minimax.io/ (Sign up and navigate to API Keys)
+*   MiniMax (Chat Completion): https://api.minimax.io/anthropic/ (Sign up and navigate to API Keys)
 
 ## Versioning
 
