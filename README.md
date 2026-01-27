@@ -12,11 +12,23 @@
   <a href="https://hub.docker.com/r/pysergio/chibi/tags"><img src="https://img.shields.io/badge/docker%20image%20arch-arm64%20%7C%20amd64-informational" alt="Architectures"></a>
   <a href="https://github.com/s-nagaev/chibi/blob/main/LICENSE"><img src="https://img.shields.io/github/license/s-nagaev/chibi" alt="License"></a>
   <a href="https://chibi.bot"><img src="https://img.shields.io/badge/docs-chibi.bot-blue" alt="Documentation"></a>
+
+<p align="center">
+  <strong>🌍 Read this in other languages:</strong><br/>
+  <a href="docs/README.es.md">Español</a> •
+  <a href="docs/README.pt-BR.md">Português (Brasil)</a> •
+  <a href="docs/README.uk.md">Українська</a> •
+  <a href="docs/README.id.md">Bahasa Indonesia</a> •
+  <a href="docs/README.tr.md">Türkçe</a> •
+  <a href="docs/README.ru.md">Русский</a> •
+  <a href="docs/README.ja.md">日本語</a> •
+  <a href="docs/README.zh-TW.md">繁體中文</a> •
+  <a href="docs/README.zh-CN.md">简体中文</a>
 </p>
 
 ---
 
-Chibi is built for the moment you realize you need more than “an AI tool.” You need a **partner** that can coordinate models, run work in the background, and integrate with your systems—without you babysitting prompts.
+Chibi is built for the moment you realize you need more than “an AI tool.” You need a **partner** that can coordinate models, run work in the background, and integrate with your systems - without you babysitting prompts.
 
 **Chibi** is an asynchronous, self-hosted **Telegram-based digital companion** that orchestrates multiple AI providers and tools to deliver outcomes: code changes, research syntheses, media generation, and operational tasks.
 
@@ -25,7 +37,7 @@ Chibi is built for the moment you realize you need more than “an AI tool.” Y
 ## Why Chibi
 
 - **One interface (Telegram).** Mobile/desktop/web, always with you.
-- **Provider-agnostic.** Use the best model for each task—without vendor lock-in.
+- **Provider-agnostic.** Use the best model for each task - without vendor lock-in.
 - **Autonomous execution.** Sub-agents work in parallel; long tasks run asynchronously.
 - **Tool-connected.** Filesystem + terminal + MCP integrations (GitHub, browser, DBs, etc.).
 - **Self-hosted.** Your data, your keys, your rules.
@@ -34,7 +46,7 @@ Chibi is built for the moment you realize you need more than “an AI tool.” Y
 
 ## Supported AI providers (and endpoints)
 
-Chibi supports multiple providers behind a single conversation. Add one key or many—Chibi can route per task.
+Chibi supports multiple providers behind a single conversation. Add one key or many - Chibi can route per task.
 
 ### LLM providers
 
@@ -125,7 +137,7 @@ Paste these into Telegram after you deploy.
 ## What makes Chibi different
 
 ### 🎭 Multi-provider orchestration
-Chibi can keep context while switching providers mid-thread, or choose the best model per step—balancing **cost**, **capability**, and **speed**.
+Chibi can keep context while switching providers mid-thread, or choose the best model per step - balancing **cost**, **capability**, and **speed**.
 
 ### 🤖 Autonomous agent capabilities
 - **Recursive delegation:** spawn sub-agents that can spawn their own sub-agents
@@ -222,7 +234,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT  -  see [LICENSE](LICENSE).
 
 ---
 
