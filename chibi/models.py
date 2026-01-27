@@ -406,6 +406,7 @@ class User(BaseModel):
     selected_image_provider_name: str | None = None
     info: str = "No info provided"
     working_dir: str = application_settings.working_dir
+    llm_skills: dict[str, str] = {}
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):

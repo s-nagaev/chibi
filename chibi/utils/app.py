@@ -1,4 +1,5 @@
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable
 
 import httpx
@@ -226,3 +227,8 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             # raise
 
     return wrapper
+
+
+def get_builtin_skill_names() -> list[str]:
+    path = Path(application_settings.skills_dir)
+    return [f.name for f in path.iterdir() if f.is_file()]

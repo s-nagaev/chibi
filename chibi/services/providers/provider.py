@@ -627,6 +627,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         initial_messages = [msg.to_anthropic() for msg in messages]
 
         if len(initial_messages) >= 2:
+            initial_messages[1]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
         chat_response, updated_messages = await self._get_chat_completion_response(

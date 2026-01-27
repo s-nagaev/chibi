@@ -91,10 +91,6 @@ async def get_llm_chat_completion_answer(
             "tool_name": tool_message.tool_name,
             "tool_response": tool_message.model_dump(),
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
-            # "rule": (
-            #     "if you got just a service info and still don't have what to answer user, just say 'ACK' "
-            #     "(3 symbols, no more no less), and user won't see this service answer."
-            # ),
         }
     else:
         user_message = (
@@ -104,6 +100,7 @@ async def get_llm_chat_completion_answer(
         prompt = {
             "prompt": user_message,
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+            "type": "user message",
             "transcribed_from_voice_message": bool(user_voice_message),
         }
 
@@ -212,6 +209,22 @@ async def get_info(db: Database, user_id: int) -> str:
 async def set_info(db: Database, user_id: int, new_info: str) -> None:
     user = await db.get_or_create_user(user_id=user_id)
     user.info = new_info
+    await db.save_user(user)
+
+
+@inject_database
+async def activate_llm_skill(db: Database, user_id: int, skill_name: str, skill_payload: str) -> None:
+    user = await db.get_or_create_user(user_id=user_id)
+    user.llm_skills[skill_name] = skill_payload
+    await db.save_user(user)
+
+
+@inject_database
+async def deactivate_llm_skill(db: Database, user_id: int, skill_name: str) -> None:
+    user = await db.get_or_create_user(user_id=user_id)
+    if skill_name not in user.llm_skills.keys():
+        raise ValueError(f"The skill {skill_name} seems never been activated")
+    user.llm_skills.pop(skill_name)
     await db.save_user(user)
 
 

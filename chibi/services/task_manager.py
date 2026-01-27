@@ -13,16 +13,37 @@ class BackgroundTaskManager(metaclass=SingletonMeta):
             self._tasks: set[asyncio.Task] = set()
             self._shutting_down: bool = False
 
-    def run_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task | None:
+    async def _wrap_with_timeout(self, coro: Coroutine[Any, Any, Any], timeout: float) -> Any:
+        """Wrap a coroutine with a timeout.
+
+        Args:
+            coro: The coroutine to wrap.
+
+        Returns:
+            The wrapped coroutine result.
+        """
+        try:
+            return await asyncio.wait_for(fut=coro, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Background task timed out after {timeout}s")
+            raise
+
+    def run_task(self, coro: Coroutine[Any, Any, Any], timeout: float | None = None) -> asyncio.Task | None:
         """Schedule a coroutine to run in the background.
 
         Args:
             coro: the coroutine to run
+            timeout: optional timeout in seconds. If the task doesn't complete
+                     within this time, it will be cancelled with TimeoutError
         """
         if self._shutting_down:
             logger.warning("Task manager is shutting down, refusing new task")
             coro.close()
             return None
+
+        # Wrap with timeout if specified
+        if timeout is not None:
+            coro = self._wrap_with_timeout(coro, timeout)
 
         task = asyncio.create_task(coro)
         self._tasks.add(task)
@@ -34,7 +55,9 @@ class BackgroundTaskManager(metaclass=SingletonMeta):
         try:
             exc = task.exception()
             if exc:
-                logger.error(f"Background task '{task.get_name()}' failed: {exc}")
+                logger.error(
+                    f"Background task '{task.get_name()}' failed: {exc.__class__.__name__} ({str(exc) or 'no details'})"
+                )
         except asyncio.CancelledError:
             pass
         except Exception as e:

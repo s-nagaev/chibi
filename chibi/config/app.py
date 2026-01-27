@@ -1,5 +1,6 @@
 import sys
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from loguru import logger
@@ -70,6 +71,7 @@ class ApplicationSettings(BaseSettings):
     hide_imagine: bool = Field(default=False)
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory
     working_dir: str = Field(default="~/chibi")  # AI agent's CWD
+    skills_dir: str = Field(default=(Path(".") / "skills").absolute().as_posix())  # absolute path to dir with skills
 
     @property
     def is_influx_configured(self) -> bool:

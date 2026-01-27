@@ -63,7 +63,7 @@ async def handle_tool_response(tool_response: ToolResponse, update: Update, cont
     )
     usage_message = get_usage_msg(chat_response.usage)
 
-    if len(chat_response.answer) <= 5 and "ACK" in chat_response.answer:
+    if "<chibi>ack</chibi>" in chat_response.answer.lower():
         logger.info(
             f"[{user_data(update)}-{chat_data(update)}] LLM silently received tool result "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
@@ -138,7 +138,7 @@ async def handle_user_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         logged_answer = ""
 
-    if len(chat_response.answer) <= 5 and "ACK" in chat_response.answer:
+    if "<chibi>ack</chibi>" in chat_response.answer.lower():
         logger.info(
             f"[{user_data(update)}-{chat_data(update)}] LLM silently received user request "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
