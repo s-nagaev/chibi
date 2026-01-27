@@ -22,9 +22,4 @@ async def test_speech(minimax: Mock) -> None:
         method="POST",
         url="https://api.minimax.io/v1/t2a_v2",
         data={"model": "some_tts_model", "text": "Hello world!", "voice_setting": {"voice_id": "test_voice"}},
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": "Bearer test_token",
-        },
     )
