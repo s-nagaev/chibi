@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import signal
-from pathlib import Path
 from typing import Any, Unpack
 
 from aiocache import cached
@@ -171,65 +170,3 @@ class RunCommandInTerminalTool(ChibiTool):
             f"[{kwargs.get('model', 'Unknown model')}] Command '{cmd}' executed. Return code: {process.returncode}.",
         )
         return result
-
-
-class CreateFileTool(ChibiTool):
-    register = gpt_settings.filesystem_access
-    definition = ChatCompletionToolParam(
-        type="function",
-        function=FunctionDefinition(
-            name="create_file",
-            description="Create a file at the given full path (including any directories).",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "File content",
-                    },
-                    "full_path": {
-                        "type": "string",
-                        "description": "Full file name, including file path.",
-                    },
-                    "overwrite": {
-                        "type": "string",
-                        "enum": ["true", "false"],
-                        "description": (
-                            "Set it to true to overwrite the file. If overwrite is false and "
-                            "the file exists, raises FileExistsError."
-                        ),
-                    },
-                },
-                "required": ["content", "full_path", "overwrite"],
-            },
-        ),
-    )
-    name = "create_file"
-
-    @classmethod
-    async def function(
-        cls,
-        full_path: str,
-        content: str,
-        overwrite: str = "false",
-        encoding: str = "utf-8",
-        **kwargs: Unpack[AdditionalOptions],
-    ) -> dict[str, Any]:
-        try:
-            path = Path(full_path).expanduser().resolve()
-            parent = path.parent
-            parent.mkdir(parents=True, exist_ok=True)
-
-            if path.exists():
-                if overwrite != "true":
-                    raise FileExistsError(f"File {path} already exists")
-                logger.log("TOOL", f"File {path} exists. Overwriting.")
-
-            with path.open("w", encoding=encoding) as f:
-                f.write(content)
-
-            logger.log("TOOL", f"File {path} created successfully.")
-            return {"file": str(path)}
-
-        except Exception as e:
-            raise ToolException(f"Failed to create file {full_path}. Error: {e}")

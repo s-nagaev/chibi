@@ -16,6 +16,7 @@ from chibi.config import gpt_settings
 from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
+from chibi.utils.app import get_builtin_skill_names
 
 T = TypeVar("T")
 M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
@@ -58,6 +59,8 @@ async def prepare_system_prompt(base_system_prompt: str, user: User | None = Non
         "user_id": user.id,
         "user_info": user.info,
         "system_prompt": base_system_prompt,
+        "available_builtin_skills": get_builtin_skill_names(),
+        "activated_skills": user.llm_skills,
     }
     return json.dumps(prompt)
 

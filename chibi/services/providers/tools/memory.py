@@ -1,14 +1,23 @@
+import os
 from typing import Unpack
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
-from chibi.services.user import drop_tool_call_history, get_cwd, set_info, set_working_dir, summarize_history
+from chibi.services.user import (
+    activate_llm_skill,
+    deactivate_llm_skill,
+    drop_tool_call_history,
+    get_cwd,
+    set_info,
+    set_working_dir,
+    summarize_history,
+)
 
 
 class SetUserInfoTool(ChibiTool):
@@ -146,15 +155,15 @@ class SummarizeHistoryTool(ChibiTool):
         function=FunctionDefinition(
             name="summarize_history",
             description=(
-                "Clear the whole chat history, replacing it with summary provided. "
-                "Use this tool fully independently and autonomously."
+                "Clear the whole chat history, replacing it with summary provided. Don't hesitate to provide "
+                "EXHAUSTIVE summary. Use this tool fully independently and autonomously."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": ("Provide a proper summary that you want to use to replace all the dialog."),
+                        "description": "Provide a proper summary that you want to use to replace ALL the dialog.",
                     },
                 },
                 "required": ["summary"],
@@ -164,10 +173,80 @@ class SummarizeHistoryTool(ChibiTool):
     name = "summarize_history"
 
     @classmethod
-    async def function(cls, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+    async def function(cls, summary: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
         logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Summarizing chat...")
         await summarize_history(user_id=user_id)
+        if application_settings.log_prompt_data:
+            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Summary: {summary}")
+        return {"status": "ok"}
+
+
+class LoadBuiltinSkillTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="load_builtin_skill",
+            description="Load built-in skill to system prompt.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "Skill name including file extension if provided"},
+                },
+                "required": ["skill_name"],
+            },
+        ),
+    )
+    name = "load_builtin_skill"
+
+    @classmethod
+    async def function(cls, skill_name: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ValueError("This function requires user_id to be automatically provided.")
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('model', 'Unknown model')}] Loading '{skill_name}' skill for user {user_id}...",
+        )
+        skill_path = os.path.join(application_settings.skills_dir, skill_name)
+        if not os.path.exists(skill_path):
+            raise ToolException(f"Skill '{skill_name}' does not exist.")
+
+        with open(skill_path, "rt") as skill_file:
+            skill_payload = skill_file.read()
+            await activate_llm_skill(user_id=user_id, skill_name=skill_name, skill_payload=skill_payload)
+        return {"status": "ok"}
+
+
+class UnloadSkillTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="unload_skill",
+            description="Unload activated but unused skill from system prompt.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "Skill name how it defined"},
+                },
+                "required": ["skill_name"],
+            },
+        ),
+    )
+    name = "unload_skill"
+
+    @classmethod
+    async def function(cls, skill_name: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ValueError("This function requires user_id to be automatically provided.")
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('model', 'Unknown model')}] Unloading '{skill_name}' skill for user {user_id}...",
+        )
+        await deactivate_llm_skill(user_id=user_id, skill_name=skill_name)
         return {"status": "ok"}
