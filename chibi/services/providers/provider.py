@@ -623,7 +623,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         context: ContextTypes.DEFAULT_TYPE | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
-        initial_messages = [msg.to_anthropic() for msg in messages]
+        initial_messages = []
+        anthropic_msg: MessageParam | None = None
+        for idx, msg in enumerate(messages):
+            if msg.role == "tool" and anthropic_msg and anthropic_msg["role"] == "assistant":
+                msg.tool_call_id = anthropic_msg["content"][1]["id"]  # type: ignore
+            anthropic_msg = msg.to_anthropic()
+            initial_messages.append(anthropic_msg)
 
         if len(initial_messages) >= 2:
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
