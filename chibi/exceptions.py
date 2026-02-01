@@ -42,3 +42,17 @@ class NoProviderSelectedError(GptException): ...
 
 
 class NoAccountIDSetError(GptException): ...
+
+
+class RecursionLimitExceeded(GptException):
+    def __init__(
+        self,
+        exceeded_limit: int,
+        provider: str = "unknown",
+        model: str = "unknown",
+        detail: str = "Failed to receive response from the service",
+    ) -> None:
+        self.model = model
+        self.provider = provider
+        self.detail = detail
+        self.exceeded_limit = exceeded_limit

@@ -27,7 +27,30 @@
   <strong>繁體中文</strong> •
   <a href="README.zh-CN.md">简体中文</a>
 </p>
+---## 🗝️ 取得 API 金鑰
+
+每個提供商都需要自己的 API 金鑰。以下是直接連結：
+
+**主要提供商：**
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+- **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
+- **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+
+**創意工具：**
+- **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
+- **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
+
+> 📚 **完整指南及設置說明：** [chibi.bot/guides/get-api-keys](https://chibi.bot/guides/get-api-keys)
+
 ---
+
 
 當您意識到需要的不僅僅是「一個 AI 工具」時，Chibi 應運而生。您需要的是一位能夠協調模型、在背景執行工作並與您的系統整合的**夥伴**——無需您時時監督提示詞。
 

@@ -176,6 +176,7 @@ class Provider(ABC):
     tts_ready: bool = False
     ocr_ready: bool = False
     chat_ready: bool = False
+    moderation_ready: bool = False
     image_generation_ready: bool = False
 
     name: str
@@ -187,6 +188,7 @@ class Provider(ABC):
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
+    default_moderation_model: str | None = None
     timeout: int = gpt_settings.timeout
 
     def __init__(self, token: str) -> None:
@@ -211,8 +213,6 @@ class Provider(ABC):
         context: ContextTypes.DEFAULT_TYPE | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
-        # model = model or self.default_model
-        # return await self._get_chat_completion_response(messages=messages, model=model, system_prompt=system_prompt)
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         raise NotImplementedError

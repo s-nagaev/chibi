@@ -107,7 +107,7 @@ class RunCommandInTerminalTool(ChibiTool):
         if not cwd:
             cwd = await get_cwd(user_id=user_id)
 
-        logger.log("CHECK", f"[{model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
+        logger.log("MODERATOR", f"[{model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
         moderator_answer: ModeratorsAnswer = await moderate_command(cmd)
         if moderator_answer.verdict == "declined":
             raise ToolException(
@@ -115,7 +115,9 @@ class RunCommandInTerminalTool(ChibiTool):
                 f"Reason: {moderator_answer.reason}"
             )
 
-        logger.log("CHECK", f"[{model}] Moderator ACCEPTED command '{cmd}' from model {kwargs.get('model', 'unknown')}")
+        logger.log(
+            "MODERATOR", f"[{model}] Moderator ACCEPTED command '{cmd}' from model {kwargs.get('model', 'unknown')}"
+        )
         logger.log("TOOL", f"[{model}] Running command in terminal: {cmd}. CWD: {cwd}. Timeout: {timeout}")
         try:
             process = await asyncio.create_subprocess_shell(
@@ -127,16 +129,11 @@ class RunCommandInTerminalTool(ChibiTool):
             )
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=float(timeout))
         except asyncio.TimeoutError:
-            # Убиваем ВСЮ группу процессов.
-            # os.getpgid(process.pid) получает ID группы
-            # signal.SIGKILL убивает наверняка
-
             try:
                 os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             except ProcessLookupError:
-                pass  # Уже умерло
+                pass
 
-            # На всякий случай, чтобы объект process в питоне тоже понял, что всё кончено
             try:
                 process.kill()
                 await process.wait()

@@ -15,14 +15,16 @@ class OpenAI(OpenAIFriendlyProvider):
     tts_ready = True
     stt_ready = True
     image_generation_ready = True
+    moderation_ready = True
 
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
     model_name_keywords_exclude = ["audio", "realtime", "transcribe", "tts", "image"]
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
-    default_model = "gpt-5.1"
+    default_model = "gpt-5.2"
     default_image_model = "dall-e-3"
+    default_moderation_model = "o4-mini"
     default_stt_model = "whisper-1"
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"

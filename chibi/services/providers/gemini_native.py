@@ -47,12 +47,14 @@ class Gemini(RestApiFriendlyProvider):
     api_key = gpt_settings.gemini_key
     chat_ready = True
     image_generation_ready = True
+    moderation_ready = True
 
     name = "Gemini"
     model_name_keywords = ["gemini", "gemma"]
     model_name_keywords_exclude = ["image", "vision", "tts", "embedding", "2.0", "1.5"]
-    default_model = "models/gemini-2.5-flash"
+    default_model = "models/gemini-2.5-pro"
     default_image_model = "models/imagen-4.0-fast-generate-001"
+    default_moderation_model = "models/gemini-2.5-flash"
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = gpt_settings.presence_penalty
