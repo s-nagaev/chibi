@@ -31,10 +31,11 @@ from telegram.ext import ContextTypes
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.utils import (
     get_usage_from_google_response,
     get_usage_msg,
@@ -54,7 +55,7 @@ class Gemini(RestApiFriendlyProvider):
     model_name_keywords_exclude = ["image", "vision", "tts", "embedding", "2.0", "1.5"]
     default_model = "models/gemini-2.5-pro"
     default_image_model = "models/imagen-4.0-fast-generate-001"
-    default_moderation_model = "models/gemini-2.5-flash"
+    default_moderation_model = "models/gemini-2.5-flash-lite"
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = gpt_settings.presence_penalty
@@ -394,6 +395,42 @@ class Gemini(RestApiFriendlyProvider):
             images_in_response = response.images
 
             return [image for image in images_in_response if image]
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        moderator_model = model or self.default_moderation_model or self.default_model
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            system_instruction=MODERATOR_PROMPT,
+            temperature=0.1,
+            max_output_tokens=1024,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            http_options=http_options,
+            response_schema=ModeratorsAnswer,
+        )
+        messages = [
+            Message(role="user", content=cmd).to_google(),
+        ]
+        response: GenerateContentResponse = await self._generate_content(
+            model=moderator_model,
+            contents=messages,
+            config=generation_config,
+        )
+        answer = self._get_text(response)
+        if not answer:
+            return ModeratorsAnswer(verdict="declined", reason="no moderator answer received", status="error")
+
+        answer = answer.strip("```").strip("json").strip()
+        usage = get_usage_from_google_response(response_message=response)
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+
+        try:
+            return ModeratorsAnswer.model_validate_json(answer)
+        except Exception as e:
+            logger.error(f"Error parsing moderator's response: {answer}. Error: {e}")
+            return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
 
     async def get_images(self, prompt: str, model: str | None = None) -> list[BytesIO]:
         selected_model = model or self.default_image_model

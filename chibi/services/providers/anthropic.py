@@ -8,10 +8,12 @@ from chibi.services.providers.provider import AnthropicFriendlyProvider
 class Anthropic(AnthropicFriendlyProvider):
     api_key = gpt_settings.anthropic_key
     chat_ready = True
+    moderation_ready = True
 
     name = "Anthropic"
     model_name_keywords = ["claude"]
     default_model = "claude-sonnet-4-5-20250929"
+    default_moderation_model = "claude-haiku-4-5-20251001"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None

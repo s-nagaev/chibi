@@ -46,3 +46,9 @@ class ModelChangeSchema(BaseModel):
         if not self.display_name:
             self.display_name = self.name
         return self
+
+
+class ModeratorsAnswer(BaseModel):
+    status: str | None = None
+    verdict: str
+    reason: str | None = None

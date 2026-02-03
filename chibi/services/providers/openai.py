@@ -24,7 +24,7 @@ class OpenAI(OpenAIFriendlyProvider):
     max_tokens = NOT_GIVEN
     default_model = "gpt-5.2"
     default_image_model = "dall-e-3"
-    default_moderation_model = "o4-mini"
+    default_moderation_model = "gpt-5-mini"
     default_stt_model = "whisper-1"
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"

@@ -1,64 +1,19 @@
 import asyncio
-import json
 import os
 import signal
 from typing import Any, Unpack
 
-from aiocache import cached
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
-from pydantic import BaseModel
 
 from chibi.config import gpt_settings
-from chibi.models import Message
-from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT, MODERATOR_PROMPT
+from chibi.schemas.app import ModeratorsAnswer
+from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
-from chibi.services.user import get_cwd
-
-
-class ModeratorsAnswer(BaseModel):
-    status: str
-    verdict: str
-    reason: str | None = None
-
-
-@cached(ttl=120)
-async def moderate_command(cmd: str) -> ModeratorsAnswer:
-    from chibi.services.providers import Gemini
-
-    if not gpt_settings.gemini_key:
-        raise ToolException("Moderator is not configured")  # TODO: very temporary solution
-    moderator = Gemini(token=gpt_settings.gemini_key)
-
-    messages = [
-        Message(role="user", content=cmd),
-    ]
-    response, _ = await moderator.get_chat_response(
-        messages=messages,
-        system_prompt=MODERATOR_PROMPT,
-    )
-    answer = response.answer
-    answer = answer.strip("```")
-    answer = answer.strip("json")
-    answer = answer.strip()
-    try:
-        result_data = json.loads(answer)
-    except Exception:
-        logger.error(f"Error parsing moderator's response: {answer}")
-        return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
-
-    verdict = result_data.get("verdict", "declined")
-    if verdict == "accepted":
-        return ModeratorsAnswer(verdict="accepted", status="ok")
-
-    reason = result_data.get("reason", None)
-    if reason is None:
-        logger.error(f"Moderator did not provide reason properly: {answer}")
-
-    return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
+from chibi.services.user import get_cwd, get_moderation_provider
 
 
 class RunCommandInTerminalTool(ChibiTool):
@@ -107,16 +62,24 @@ class RunCommandInTerminalTool(ChibiTool):
         if not cwd:
             cwd = await get_cwd(user_id=user_id)
 
+        moderation_provider = await get_moderation_provider(user_id=user_id)
+
         logger.log("MODERATOR", f"[{model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
-        moderator_answer: ModeratorsAnswer = await moderate_command(cmd)
+        moderator_answer: ModeratorsAnswer = await moderation_provider.moderate_command(
+            cmd=cmd, model=gpt_settings.moderation_model
+        )
         if moderator_answer.verdict == "declined":
             raise ToolException(
-                f"[{model}] Moderator DECLINED command '{cmd}' from model {kwargs.get('model', 'unknown')}. "
-                f"Reason: {moderator_answer.reason}"
+                f"Moderator ({moderation_provider.name}) DECLINED command '{cmd}' from model "
+                f"{kwargs.get('model', 'unknown')}. Reason: {moderator_answer.reason}"
             )
 
         logger.log(
-            "MODERATOR", f"[{model}] Moderator ACCEPTED command '{cmd}' from model {kwargs.get('model', 'unknown')}"
+            "MODERATOR",
+            (
+                f"[{model}] Moderator ({moderation_provider.name}) ACCEPTED command '{cmd}' "
+                f"from model {kwargs.get('model', 'unknown')}"
+            ),
         )
         logger.log("TOOL", f"[{model}] Running command in terminal: {cmd}. CWD: {cwd}. Timeout: {timeout}")
         try:

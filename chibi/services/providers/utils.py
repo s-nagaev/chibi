@@ -89,8 +89,8 @@ def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> Usa
     return UsageSchema(
         completion_tokens=response_message.usage.output_tokens,
         prompt_tokens=response_message.usage.input_tokens,
-        cache_creation_input_tokens=response_message.usage.cache_creation_input_tokens,
-        cache_read_input_tokens=response_message.usage.cache_read_input_tokens,
+        cache_creation_input_tokens=response_message.usage.cache_creation_input_tokens or 0,
+        cache_read_input_tokens=response_message.usage.cache_read_input_tokens or 0,
         total_tokens=response_message.usage.output_tokens + response_message.usage.input_tokens,
     )
 
