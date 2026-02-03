@@ -17,6 +17,7 @@ from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
 if TYPE_CHECKING:
+    from chibi.services.providers.provider import Provider
     from chibi.services.providers.tools import ToolResponse
 
 
@@ -239,6 +240,12 @@ async def set_working_dir(db: Database, user_id: int, new_wd: str) -> None:
 async def get_cwd(db: Database, user_id: int) -> str:
     user = await db.get_or_create_user(user_id=user_id)
     return user.working_dir
+
+
+@inject_database
+async def get_moderation_provider(db: Database, user_id: int) -> "Provider":
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.moderation_provider
 
 
 @inject_database

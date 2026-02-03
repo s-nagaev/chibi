@@ -11,13 +11,16 @@ class Minimax(AnthropicFriendlyProvider):
     api_key = gpt_settings.minimax_api_key
     chat_ready = True
     tts_ready = True
+    moderation_ready = True
 
     name = "Minimax"
     base_url = "https://api.minimax.io/anthropic"
     default_model = "MiniMax-M2.1"
+    default_moderation_model = "MiniMax-M2.1-lighting"
+
     base_tts_url = "https://api.minimax.io/v1/"
-    default_tts_model = "speech-2.6-hd"
-    default_tts_voice = "English_WhimsicalGirl"
+    default_tts_model = "speech-2.8-turbo"
+    default_tts_voice = "Korean_HaughtyLady"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None
@@ -80,6 +83,8 @@ class Minimax(AnthropicFriendlyProvider):
             "text": text,
             "voice_setting": {
                 "voice_id": voice,
+                "emotion": "happy",
+                "speed": 1.2,
             },
         }
         try:

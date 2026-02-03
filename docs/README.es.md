@@ -117,6 +117,30 @@ Siguiente:
 
 ---
 
+## 🔑 Obtener claves API
+
+Cada proveedor requiere su propia clave API. Aquí están los enlaces directos:
+
+**Proveedores principales:**
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+- **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
+- **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+
+**Herramientas creativas:**
+- **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
+- **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
+
+> 📖 **Guía completa con instrucciones de configuración:** [chibi.bot/guides/get-api-keys](https://chibi.bot/guides/get-api-keys)
+
+---
+
 ## Pruébalo en los primeros 5 minutos
 
 Pega esto en Telegram después de desplegar.

@@ -1,6 +1,6 @@
 import inspect
 import json
-from typing import Any, Callable, Coroutine, Type, TypeVar
+from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeAlias, TypeVar
 
 from anthropic.types import (
     Message as AnthropicMessage,
@@ -19,7 +19,9 @@ from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.utils.app import get_builtin_skill_names
 
 T = TypeVar("T")
+P = ParamSpec("P")
 M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
+AsyncFunc: TypeAlias = Callable[P, Coroutine[Any, Any, T]]
 
 
 def decorate_async_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
@@ -87,8 +89,8 @@ def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> Usa
     return UsageSchema(
         completion_tokens=response_message.usage.output_tokens,
         prompt_tokens=response_message.usage.input_tokens,
-        cache_creation_input_tokens=response_message.usage.cache_creation_input_tokens,
-        cache_read_input_tokens=response_message.usage.cache_read_input_tokens,
+        cache_creation_input_tokens=response_message.usage.cache_creation_input_tokens or 0,
+        cache_read_input_tokens=response_message.usage.cache_read_input_tokens or 0,
         total_tokens=response_message.usage.output_tokens + response_message.usage.input_tokens,
     )
 
@@ -145,3 +147,36 @@ def get_usage_msg(usage: UsageSchema | CompletionUsage | None) -> str:
 
 def suno_task_still_processing(task_data_response: SunoGetGenerationDetailsSchema) -> bool:
     return task_data_response.is_in_progress
+
+
+# def limit_recursion(
+#     max_depth: int = application_settings.max_consecutive_tool_calls,
+# ) -> Callable[[AsyncFunc[P, T]], AsyncFunc[P, T]]:
+#     def decorator(func: AsyncFunc[P, T]) -> AsyncFunc[P, T]:
+#         depth_var: ContextVar[int] = ContextVar(f"{func.__name__}_depth", default=0)
+#
+#         @wraps(func)
+#         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+#             current_depth = depth_var.get()
+#             depth_var.set(current_depth + 1)
+#             if depth_var.get() > max_depth + 1:
+#                 depth_var.set(current_depth)
+#                 class_name = ""
+#                 if args and hasattr(args[0], "__class__"):
+#                     class_name = f"{args[0].__class__.__name__}."
+#                 raise RecursionLimitExceeded(
+#                     provider=class_name,
+#                     model=cast(str, kwargs.get("model", "unknown")),
+#                     detail=f"Recursion depth exceeded: {max_depth} (function: {class_name}{func.__name__})",
+#                     exceeded_limit=max_depth,
+#                 )
+#
+#             try:
+#                 result = await func(*args, **kwargs)
+#                 return result
+#             finally:
+#                 depth_var.set(current_depth)
+#
+#         return async_wrapper
+#
+#     return decorator

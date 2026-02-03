@@ -16,12 +16,14 @@ class Alibaba(OpenAIFriendlyProvider):
     api_key = gpt_settings.alibaba_key
     chat_ready = True
     image_generation_ready = True
+    moderation_ready = True
 
     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     name = "Alibaba"
     model_name_keywords = ["qwen"]
     model_name_keywords_exclude = ["tts", "stt"]
     default_model = "qwen-plus"
+    default_moderation_model = "qwen-turbo"
     max_tokens: int = 8192
     default_image_model = "qwen-image-plus"
 

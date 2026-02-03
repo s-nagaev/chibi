@@ -5,7 +5,7 @@ from asyncio import sleep
 from typing import Any, Union
 
 from loguru import logger
-from mistralai import ChatCompletionResponse, Mistral, TextChunk
+from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
 from mistralai.models import (
     AssistantMessage,
     FunctionCall,
@@ -21,10 +21,11 @@ from telegram.ext import ContextTypes
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.utils import (
     get_usage_from_mistral_response,
     get_usage_msg,
@@ -38,11 +39,13 @@ MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMe
 class MistralAI(RestApiFriendlyProvider):
     api_key = gpt_settings.mistralai_key
     chat_ready = True
+    moderation_ready = True
 
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
     model_name_keywords_exclude = ["embed", "moderation", "ocr"]
     default_model = "mistral-medium-latest"
+    default_moderation_model = "mistral-small-latest"
     frequency_penalty: float | None = 0.6
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = 0.3
@@ -97,6 +100,7 @@ class MistralAI(RestApiFriendlyProvider):
                 temperature=self.temperature,
                 tools=self.tools_list,  # type: ignore[arg-type]
                 tool_choice="auto",
+                http_headers={"Cache-Control": "max-age=86400"},
             )
 
             if response.choices and len(response.choices) > 0:
@@ -231,6 +235,54 @@ class MistralAI(RestApiFriendlyProvider):
             context=context,
             update=update,
         )
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        moderator_model = model or self.default_moderation_model or self.default_model
+        messages = [
+            SystemMessage(content=MODERATOR_PROMPT, role="system"),
+            Message(role="user", content=cmd).to_mistral(),
+        ]
+        response = await self.client.chat.complete_async(
+            model=moderator_model,
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.2,
+            response_format=ResponseFormatTypedDict(
+                type="json_schema",
+                json_schema=JSONSchemaTypedDict(
+                    name="moderator_verdict",
+                    schema_definition={
+                        "type": "object",
+                        "properties": {
+                            "verdict": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "status": {"type": "string", "default": "ok"},
+                        },
+                        "required": ["verdict"],
+                    },
+                    strict=True,
+                ),
+            ),
+        )
+        if not response.choices:
+            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+
+        usage = get_usage_from_mistral_response(response_message=response)
+
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+
+        message_data = response.choices[0].message
+        answer = message_data.content
+        if not answer:
+            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+
+        try:
+            return ModeratorsAnswer.model_validate_json(answer, extra="ignore")  # type: ignore
+        except Exception as e:
+            msg = f"Error parsing moderator's response: {answer}. Error: {e}"
+            logger.error(msg)
+            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:

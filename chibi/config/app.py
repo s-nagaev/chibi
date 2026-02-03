@@ -65,13 +65,18 @@ class ApplicationSettings(BaseSettings):
     influxdb_org: str | None = Field(default=None)
     influxdb_bucket: str | None = Field(default=None)
 
-    # Other settings
-    log_prompt_data: bool = Field(default=False)
+    # Interface
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
+
+    # Other settings
+    log_prompt_data: bool = Field(default=False)
+
+    # Agent settings
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory
     working_dir: str = Field(default="~/chibi")  # AI agent's CWD
     skills_dir: str = Field(default=(Path(".") / "skills").absolute().as_posix())  # absolute path to dir with skills
+    # max_consecutive_tool_calls: int = Field(default=50)
 
     @property
     def is_influx_configured(self) -> bool:
@@ -100,7 +105,7 @@ def add_user_context(record) -> bool:
 logger.remove()
 logger.add(
     sys.stderr,
-    format="<level>{level: <8}</level> | "
+    format="<level>{level: <9}</level> | "
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | "
     "{extra[user_id]}"
     "<level>{message}</level>",
@@ -110,6 +115,7 @@ logger.level("TOOL", no=20, color="<light-blue>")
 logger.level("THINK", no=20, color="<light-magenta>")
 logger.level("CALL", no=20, color="<magenta>")
 logger.level("CHECK", no=20, color="<light-red>")
+logger.level("MODERATOR", no=20, color="<light-red>")
 logger.level("SUBAGENT", no=20, color="<cyan>")
 logger.level("DELEGATE", no=20, color="<blue>")
 

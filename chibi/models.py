@@ -453,6 +453,15 @@ class User(BaseModel):
         raise ValueError("No tts-provider found.")
 
     @property
+    def moderation_provider(self) -> "Provider":
+        if gpt_settings.moderation_provider:
+            if provider := self.providers.get(gpt_settings.moderation_provider):
+                return provider
+        if provider := self.providers.first_moderation_ready:
+            return provider
+        raise ValueError("No moderation-provider found.")
+
+    @property
     def active_gpt_provider(self) -> "Provider":
         if self.selected_gpt_provider_name:
             if provider := self.providers.get(provider_name=self.selected_gpt_provider_name):

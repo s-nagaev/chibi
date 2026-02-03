@@ -62,9 +62,10 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.utils import (
     get_usage_from_anthropic_response,
     get_usage_from_openai_response,
@@ -118,6 +119,12 @@ class RegisteredProviders:
         return {provider_name: provider for provider_name, provider in self.available.items() if provider.chat_ready}
 
     @property
+    def moderation_ready(self) -> dict[str, type["Provider"]]:
+        return {
+            provider_name: provider for provider_name, provider in self.available.items() if provider.moderation_ready
+        }
+
+    @property
     def image_generation_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.image_generation_ready}
 
@@ -169,6 +176,12 @@ class RegisteredProviders:
             return self.get_instance(provider=provider)
         return None
 
+    @property
+    def first_moderation_ready(self) -> Optional["Provider"]:
+        if provider := next(reversed(self.moderation_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
 
 class Provider(ABC):
     api_key: str | None = None
@@ -176,6 +189,7 @@ class Provider(ABC):
     tts_ready: bool = False
     ocr_ready: bool = False
     chat_ready: bool = False
+    moderation_ready: bool = False
     image_generation_ready: bool = False
 
     name: str
@@ -187,6 +201,7 @@ class Provider(ABC):
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
+    default_moderation_model: str | None = None
     timeout: int = gpt_settings.timeout
 
     def __init__(self, token: str) -> None:
@@ -211,8 +226,6 @@ class Provider(ABC):
         context: ContextTypes.DEFAULT_TYPE | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
-        # model = model or self.default_model
-        # return await self._get_chat_completion_response(messages=messages, model=model, system_prompt=system_prompt)
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         raise NotImplementedError
@@ -224,6 +237,9 @@ class Provider(ABC):
         raise NotImplementedError
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        raise NotImplementedError
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
         raise NotImplementedError
 
     async def api_key_is_valid(self) -> bool:
@@ -458,6 +474,62 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             context=context,
             update=update,
         )
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        moderator_model = model or self.default_moderation_model or self.default_model
+        system_message = ChatCompletionSystemMessageParam(role="system", content=MODERATOR_PROMPT)
+
+        messages = [
+            Message(role="user", content=cmd).to_openai(),
+        ]
+
+        dialog: list[ChatCompletionMessageParam] = [system_message] + messages
+        temperature = (
+            1 if moderator_model.startswith("o") or "mini" in moderator_model or "nano" in moderator_model else 0.0
+        )
+        response: ChatCompletion = await self.client.chat.completions.create(
+            model=moderator_model,
+            messages=dialog,
+            temperature=temperature,
+            max_completion_tokens=1024,
+            presence_penalty=self.presence_penalty,
+            frequency_penalty=self.frequency_penalty,
+            timeout=self.timeout,
+            # reasoning_effort="medium" if "reason" in moderator_model else NOT_GIVEN,
+        )
+
+        choices: list[Choice] = response.choices
+
+        if len(choices) == 0:
+            raise ServiceResponseError(
+                provider=self.name, model=moderator_model, detail="Unexpected (empty) response received"
+            )
+
+        data = choices[0]
+        answer: str = data.message.content or ""
+
+        usage = get_usage_from_openai_response(response_message=response)
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+        # usage_message = get_usage_msg(usage=usage)
+        answer = answer.strip("```")
+        answer = answer.strip("json")
+        answer = answer.strip()
+        try:
+            result_data = json.loads(answer)
+        except Exception:
+            logger.error(f"Error parsing moderator's response: {answer}")
+            return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
+
+        verdict = result_data.get("verdict", "declined")
+        if verdict == "accepted":
+            return ModeratorsAnswer(verdict="accepted", status="ok")
+
+        reason = result_data.get("reason", None)
+        if reason is None:
+            logger.error(f"Moderator did not provide reason properly: {answer}")
+
+        return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
 
     def get_model_display_name(self, model_name: str) -> str:
         return model_name.replace("-", " ")
@@ -736,6 +808,58 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             context=context,
             update=update,
         )
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        moderator_model = model or self.default_moderation_model or self.default_model
+        messages = [Message(role="user", content=cmd).to_anthropic()]
+        response_message: AnthropicMessage = await self.client.messages.create(
+            model=moderator_model,
+            max_tokens=1024,
+            temperature=0.1,
+            timeout=self.timeout,
+            system=[
+                TextBlockParam(
+                    text=MODERATOR_PROMPT,
+                    type="text",
+                )
+            ],
+            tools=[
+                {
+                    "name": "print_moderator_verdict",
+                    "description": "Provide moderator's verdict",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "verdict": {"type": "string"},
+                            "status": {"type": "string", "default": "ok"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["verdict"],
+                    },
+                }
+            ],
+            tool_choice={"type": "tool", "name": "print_moderator_verdict"},
+            messages=messages,
+        )
+        if not response_message.content:
+            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+        usage = get_usage_from_anthropic_response(response_message=response_message)
+
+        if application_settings.is_influx_configured:
+            MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+        tool_call: ToolUseBlock | None = next(
+            part for part in response_message.content if isinstance(part, ToolUseBlock)
+        )
+        if not tool_call:
+            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+        answer = tool_call.input
+
+        try:
+            return ModeratorsAnswer.model_validate(answer, extra="ignore")
+        except Exception as e:
+            msg = f"Error parsing moderator's response: {answer}. Error: {e}"
+            logger.error(msg)
+            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:

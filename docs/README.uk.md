@@ -27,7 +27,7 @@
 
 ---
 
-## Підтримувані AI-провайдери (та ендпоїнти)
+## Підтримувані AI-провайдери (та ендпоінти)
 
 Chibi підтримує кількох провайдерів у межах однієї розмови. Додайте один ключ або багато - Chibi може маршрутизувати запити під конкретну задачу.
 
@@ -44,7 +44,7 @@ Chibi підтримує кількох провайдерів у межах о�
 - **MiniMax**
 - **Cloudflare Workers AI** (багато open-source моделей)
 
-### OpenAI-сумісні ендпоїнти (self-host / локально)
+### OpenAI-сумісні ендпоінти (self-host / локально)
 
 - **Ollama**
 - **vLLM**
@@ -96,6 +96,30 @@ docker-compose up -d
 Далі:
 - **Гайд з інсталяції:** https://chibi.bot/installation
 - **Довідник з конфігурації:** https://chibi.bot/configuration
+
+---
+
+## 🔑 Отримання API-ключів
+
+Кожен провайдер вимагає свій API-ключ. Ось прямі посилання:
+
+**Основні провайдери:**
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+- **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
+- **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+
+**Креативні інструменти:**
+- **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
+- **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
+
+> 📖 **Повний посібник з інструкціями з налаштування:** [chibi.bot/guides/get-api-keys](https://chibi.bot/guides/get-api-keys)
 
 ---
 
@@ -201,7 +225,7 @@ Chibi: *аналізує зміни, пропонує покращення, он
 
 - **Мінімум:** Raspberry Pi 4 / AWS EC2 t4g.nano (2 vCPU, 512MB RAM)
 - **Архітектури:** `linux/amd64`, `linux/arm64`
-- **Залежності:** Docker (і, за бажання, Docker Compose)
+- **Залежності:** Docker (і, за бажанням, Docker Compose)
 
 ---
 

@@ -52,6 +52,9 @@ class GPTSettings(BaseSettings):
     tts_provider: str | None = Field(default=None)
     tts_model: str | None = Field(default=None)
 
+    moderation_provider: str | None = Field(default=None)
+    moderation_model: str | None = Field(default=None)
+
     max_conversation_age_minutes: int = Field(default=360)
     max_history_tokens: int = Field(default=64000)
 

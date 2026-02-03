@@ -15,6 +15,7 @@ from chibi.exceptions import (
     NoProviderSelectedError,
     NoResponseError,
     NotAuthorizedError,
+    RecursionLimitExceeded,
     ServiceRateLimitError,
     ServiceResponseError,
 )
@@ -216,6 +217,20 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                 text="Please, select your provider first.",
             )
             return None
+
+        except RecursionLimitExceeded as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+
+            await send_message(
+                update=update,
+                context=context,
+                text=(
+                    f"{e.provider} ({e.model}) exceeded the limit on the maximum number of consecutive tool calls "
+                    f"({e.exceeded_limit}) and was stopped. The model has likely entered an infinite loop of tool "
+                    f"calls. Please check the logs. If the model was functioning as intended, you should either "
+                    f"rephrase the task or increase the value of the `MAX_CONSECUTIVE_TOOL_CALLS` setting."
+                ),
+            )
 
         except Exception as e:
             logger.exception(f"{error_msg_prefix}: {e!r}")
