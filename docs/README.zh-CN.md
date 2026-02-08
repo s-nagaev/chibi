@@ -1,4 +1,4 @@
-## 🚀 快速开始（pip）
+## 🚀 Quick Start (pip)
 
 通过 pip 安装 Chibi 并作为命令行应用程序运行：
 
@@ -6,14 +6,14 @@
 # 安装软件包
 pip install chibi
 
-# 生成默认配置
+# 设置代理（添加 API 密钥、更新设置等）
 chibi config
 
 # 启动机器人
 chibi start
 ```
 
-机器人将在后台服务中运行。使用 CLI 命令进行管理。
+机器人将以后台服务运行。使用 CLI 命令进行管理。
 
 ### CLI 命令
 

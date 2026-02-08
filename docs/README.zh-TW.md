@@ -1,19 +1,19 @@
-## 🚀 快速入門（pip）
+## 🚀 Quick Start (pip)
 
 透過 pip 安裝 Chibi 並作為命令列應用程式執行：
 
 ```bash
-# 安裝套件
+# 安裝軟體套件
 pip install chibi
 
-# 產生預設組態
+# 設定代理（新增 API 金鑰、更新設定等）
 chibi config
 
 # 啟動機器人
 chibi start
 ```
 
-機器人將作為背景服務執行。使用 CLI 命令來管理它。
+機器人將以背景服務運行。使用 CLI 命令進行管理。
 
 ### CLI 命令
 

@@ -105,9 +105,7 @@ class Service:
                         self._write_pid(pid)
                         click.echo(f"Chibi service started. PID: {click.style(str(pid), fg='green', bold=True)}")
                     else:
-                        click.echo(
-                            f"The service seems started, but no PID was found. Please check the logs.", err=True
-                        )
+                        click.echo("The service seems started, but no PID was found. Please check the logs.", err=True)
 
         except Exception as e:
             click.echo(f"{click.style('Error starting Chibi service:', fg='red', bold=True)} {e}")

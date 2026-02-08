@@ -81,13 +81,13 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ## 🚀 Hızlı başlangıç (pip)
 
-Chibi'yi pip ile kurun ve komut satırı uygulaması olarak çalıştırın:
+Chibi'yi pip ile kurun ve bir komut satırı uygulaması olarak çalıştırın:
 
 ```bash
 # Paketi kur
 pip install chibi
 
-# Varsayılan yapılandırmayı oluştur
+# Ajanı ayarla (API anahtarları ekle, ayarları güncelle vb.)
 chibi config
 
 # Botu başlat
@@ -95,19 +95,6 @@ chibi start
 ```
 
 Bot arka plan hizmeti olarak çalışır. Yönetmek için CLI komutlarını kullanın.
-
-### CLI Komutları
-
-| Komut | Açıklama |
-|---------|-------------|
-| `chibi start` | Botu arka plan hizmeti olarak başlat |
-| `chibi stop` | Çalışan botu durdur |
-| `chibi restart` | Botu yeniden başlat |
-| `chibi config` | Yapılandırma oluştur veya düzenle |
-| `chibi logs` | Bot günlüklerini görüntüle |
-
----
-
 ## 🚀 Hızlı başlangıç (Docker)
 
 `docker-compose.yml` oluşturun:
