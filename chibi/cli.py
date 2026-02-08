@@ -60,10 +60,7 @@ def config() -> None:
         click.echo(f"Unexpected error: {e}", err=True)
         sys.exit(1)
 
-    # Сохраняем, только если были изменения
     if new_content is not None:
-        # click.edit возвращает строку с \n на конце, даже если исходник был без него.
-        # Можно добавить .strip(), если это критично, но для env файлов лучше оставить.
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 f.write(new_content)
