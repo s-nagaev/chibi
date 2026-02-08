@@ -1,16 +1,54 @@
 [tool.poetry]
-name = "chibi"
-version = "1.5.2"
-description = "An asynchronous Telegram bot providing access to various LLMs (OpenAI, Gemini, Anthropic, etc.) and image generation models, featuring context management and built-in tools for web search, news retrieval, and reading web pages."
+name = "chibi-bot"
+version = "1.6.0b8"
+description = "Your Digital Companion. Self-hosted Telegram bot orchestrating multiple AI providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Alibaba, MiniMax) with autonomous agent capabilities, MCP integrations, and async task execution. Not a tool. A partner."
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+keywords = [
+    "telegram",
+    "bot",
+    "ai",
+    "agent",
+    "llm",
+    "mcp",
+    "openai",
+    "anthropic",
+    "deepseek",
+    "gemini",
+    "ollama",
+    "asyncio",
+    "minimax",
+    "self-hosted",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Systems Administration",
+]
+packages = [{include = "chibi"}]
+include = ["data/.keep", "skills"]
+exclude = ["tests", "docs", "scripts", "examples", ".project", "data/*.pkl", "data/*.md", "data/old", "data/scripts"]
+
+[tool.poetry.urls]
+Homepage = "https://chibi.bot"
+Repository = "https://github.com/s-nagaev/chibi"
+Issues = "https://github.com/s-nagaev/chibi/issues"
+Changelog = "https://github.com/s-nagaev/chibi/releases"
 
 [tool.poetry.dependencies]
 python = "^3.11"
 aiocache = "0.12.3"
 anthropic = "0.75.0"
 boto3 = "1.42.4"
+click = ">=8.0.0"
 dashscope = "1.25.8"
 ddgs = "9.9.3"
 elevenlabs = "2.25.0"
@@ -80,3 +118,7 @@ select = ["E", "F", "W", "I"]
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+chibi = "chibi.cli:main"

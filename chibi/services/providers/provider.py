@@ -86,16 +86,18 @@ class RegisteredProviders:
         self.tokens = {} if not user_api_keys else user_api_keys
         if gpt_settings.public_mode:
             self.available: dict[str, type["Provider"]] = {
-                provider.name: provider for provider in RegisteredProviders.all.values() if provider.name in self.tokens
+                provider.name.lower(): provider
+                for provider in RegisteredProviders.all.values()
+                if provider.name in self.tokens
             }
 
     @classmethod
     def register(cls, provider: type["Provider"]) -> None:
-        cls.all[provider.name] = provider
+        cls.all[provider.name.lower()] = provider
 
     @classmethod
     def register_as_available(cls, provider: type["Provider"]) -> None:
-        cls.available[provider.name] = provider
+        cls.available[provider.name.lower()] = provider
 
     def get_api_key(self, provider: type["Provider"]) -> str | None:
         if not gpt_settings.public_mode:
@@ -143,9 +145,9 @@ class RegisteredProviders:
         return provider(token=api_key)
 
     def get(self, provider_name: str) -> Optional["Provider"]:
-        if provider_name not in self.available:
+        if provider_name.lower() not in self.available:
             return None
-        provider = self.available[provider_name]
+        provider = self.available[provider_name.lower()]
         return self.get_instance(provider=provider)
 
     @classmethod

@@ -79,6 +79,35 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 
 ---
 
+## 🚀 Inicio rápido (pip)
+
+Instale Chibi mediante pip y ejecútelo como una aplicación de línea de comandos:
+
+```bash
+# Instalar el paquete
+pip install chibi
+
+# Generar configuración por defecto
+chibi config
+
+# Iniciar el bot
+chibi start
+```
+
+El bot se ejecutará como un servicio en segundo plano. Utilice los comandos de CLI para gestionarlo.
+
+### Comandos de CLI
+
+| Comando | Descripción |
+|---------|-------------|
+| `chibi start` | Iniciar el bot como servicio en segundo plano |
+| `chibi stop` | Detener el bot en ejecución |
+| `chibi restart` | Reiniciar el bot |
+| `chibi config` | Generar o editar la configuración |
+| `chibi logs` | Ver los registros del bot |
+
+---
+
 ## 🚀 Inicio rápido (Docker)
 
 Crea `docker-compose.yml`:

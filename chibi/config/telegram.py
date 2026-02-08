@@ -9,7 +9,7 @@ class TelegramSettings(BaseSettings):
         env_file=(".env",),
         extra="ignore",
     )
-    token: str = Field(alias="TELEGRAM_BOT_TOKEN")
+    token: str | None = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
 
     telegram_base_url: str = Field(default="https://api.telegram.org/bot")
     telegram_base_file_url: str = Field(default="https://api.telegram.org/file/bot")

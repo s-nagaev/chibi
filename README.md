@@ -78,6 +78,35 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ---
 
+## 🚀 Quick Start (pip)
+
+Install Chibi via pip and run it as a command-line application:
+
+```bash
+# Install the package
+pip install chibi
+
+# Set up the agent (add API keys, update settings, etc)
+chibi config
+
+# Start the bot
+chibi start
+```
+
+The bot will run as a background service. Use CLI commands to manage it.
+
+### CLI Commands
+
+| Command         | Description                           |
+|-----------------|---------------------------------------|
+| `chibi start`   | Start the bot as a background service |
+| `chibi stop`    | Stop the running bot                  |
+| `chibi restart` | Restart the bot                       |
+| `chibi config`  | Generate or edit configuration        |
+| `chibi logs`    | View bot logs                         |
+
+---
+
 ## 🚀 Quick start (Docker)
 
 Create `docker-compose.yml`:

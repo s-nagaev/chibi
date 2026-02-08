@@ -50,6 +50,8 @@ Have an idea for a new capability?
    poetry shell
    ```
 
+   After `poetry install`, the `chibi` command will be available in your virtual environment for testing CLI changes during development.
+
 4. **Create a feature branch:**
    ```bash
    git checkout -b feature/your-feature-name

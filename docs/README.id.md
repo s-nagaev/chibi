@@ -79,6 +79,35 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ---
 
+## 🚀 Quick Start (pip)
+
+Instal Chibi melalui pip dan jalankan sebagai aplikasi command-line:
+
+```bash
+# Install paket
+pip install chibi
+
+# Hasilkan konfigurasi default
+chibi config
+
+# Mulai bot
+chibi start
+```
+
+Bot akan berjalan sebagai layanan background. Gunakan perintah CLI untuk mengelolanya.
+
+### Perintah CLI
+
+| Perintah | Deskripsi |
+|---------|-------------|
+| `chibi start` | Mulai bot sebagai layanan background |
+| `chibi stop` | Hentikan bot yang berjalan |
+| `chibi restart` | Restart bot |
+| `chibi config` | Hasilkan atau edit konfigurasi |
+| `chibi logs` | Lihat log bot |
+
+---
+
 ## 🚀 Quick start (Docker)
 
 Buat `docker-compose.yml`:
