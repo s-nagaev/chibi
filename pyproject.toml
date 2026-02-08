@@ -46,26 +46,26 @@ Changelog = "https://github.com/s-nagaev/chibi/releases"
 [tool.poetry.dependencies]
 python = "^3.11"
 aiocache = "0.12.3"
-anthropic = "0.75.0"
-boto3 = "1.42.4"
+anthropic = "0.79.0"
+boto3 = "1.42.44"
 click = ">=8.0.0"
-dashscope = "1.25.8"
-ddgs = "9.9.3"
-elevenlabs = "2.25.0"
+dashscope = "1.25.11"
+ddgs = "9.10.0"
+elevenlabs = "2.34.0"
 fake-useragent = "2.2.0"
-google-genai = "1.53.0"
+google-genai = "1.62.0"
 httpx = "0.28.1"
 influxdb-client = "^1.49.0"
 loguru = "0.7.3"
-mcp = "1.23.1"
-mistralai = "^1.9.11"
+mcp = "1.26.0"
+mistralai = "1.12.0"
 openai = "1.77.0"
 pydantic = "2.12.5"
 pydantic-settings = "2.12.0"
-python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.0"}
-redis = {extras = ["hiredis"], version = "5.2.1"}
-telegramify-markdown = "0.5.2"
-tenacity = "9.1.2"
+python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.5"}
+redis = {extras = ["hiredis"], version = "7.1.0"}
+telegramify-markdown = "0.5.4"
+tenacity = "9.1.4"
 trafilatura = "2.0.0"
 
 [tool.poetry.group.dev.dependencies]
