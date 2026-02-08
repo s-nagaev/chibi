@@ -33,3 +33,10 @@ tasks:
       - ruff format .
       - ruff check --fix .
       - mypy .
+
+  update:
+    desc: "Update dependencies and export deps to the requirements.txt/reuirements-dev.txt files"
+    cmds:
+      - poetry update
+      - poetry export -f requirements.txt --output requirements.txt --without-hashes
+      - poetry export --with dev -f requirements.txt --output requirements-dev.txt --without-hashes
