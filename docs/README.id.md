@@ -79,6 +79,22 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ---
 
+## 🚀 Quick Start (pip)
+
+Instal Chibi melalui pip dan jalankan sebagai aplikasi baris perintah:
+
+```bash
+# Menginstal paket
+pip install chibi
+
+# Mengatur agen (tambahkan kunci API, perbarui pengaturan, dll.)
+chibi config
+
+# Memulai bot
+chibi start
+```
+
+Bot akan berjalan sebagai layanan background. Gunakan perintah CLI untuk mengelolanya.
 ## 🚀 Quick start (Docker)
 
 Buat `docker-compose.yml`:

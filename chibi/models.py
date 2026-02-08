@@ -417,7 +417,7 @@ class User(BaseModel):
     def providers(self) -> "RegisteredProviders":
         from chibi.services.providers import RegisteredProviders
 
-        return RegisteredProviders(user_api_keys=self.tokens)
+        return RegisteredProviders(user_api_keys={name.lower(): key for name, key in self.tokens.items()})
 
     @property
     def active_image_provider(self) -> "Provider":
