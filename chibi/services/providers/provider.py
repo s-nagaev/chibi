@@ -41,12 +41,10 @@ from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
-    ChatCompletionMessageToolCallParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
-from openai.types.chat.chat_completion_message_tool_call_param import Function
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -390,7 +388,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         temperature = 1 if model.startswith("o") else self.temperature
 
-        response: ChatCompletion = await self.client.chat.completions.create(
+        response: ChatCompletion = await self.client.chat.completions.create(  # type: ignore
             model=model,
             messages=dialog,
             temperature=temperature,
@@ -415,7 +413,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
 
-        tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls
+        tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls  # type: ignore
 
         if not tool_calls:
             messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
@@ -445,26 +443,46 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         results = await asyncio.gather(*tool_coroutines)
 
         for tool_call, result in zip(tool_calls, results):
-            tool_call_message = ChatCompletionAssistantMessageParam(
-                role="assistant",
-                content=answer,
-                tool_calls=[
-                    ChatCompletionMessageToolCallParam(
-                        id=tool_call.id,
-                        type="function",
-                        function=Function(
-                            name=tool_call.function.name,
-                            arguments=tool_call.function.arguments,
-                        ),
-                    )
+            # tool_call_message = ChatCompletionAssistantMessageParam(
+            #     role="assistant",
+            #     content=answer,
+            #     tool_calls=[
+            #         ChatCompletionMessageToolCallParam(
+            #             id=tool_call.id,
+            #             type="function",
+            #             function=Function(
+            #                 name=tool_call.function.name,
+            #                 arguments=tool_call.function.arguments,
+            #             ),
+            #         )
+            # messages.append(tool_call_message)
+
+            # Temporary hotfix: preserve reasoning_content for DeepSeek/Moonshot thinking mode
+            message_dict: dict[str, Any] = {
+                "role": "assistant",
+                "content": answer,
+                "tool_calls": [
+                    {
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                        },
+                    }
                 ],
-            )
+            }
+            # Add reasoning_content if present (DeepSeek-Reasoner, Mootshot KIMI, etc.)
+            if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
+                logger.log("THINK", data.message.reasoning_content)
+                message_dict["reasoning_content"] = data.message.reasoning_content
+
+            messages.append(message_dict)  # type: ignore
             tool_result_message = ChatCompletionToolMessageParam(
                 tool_call_id=tool_call.id,
                 role="tool",
                 content=result.model_dump_json(),
             )
-            messages.append(tool_call_message)
             messages.append(tool_result_message)
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
@@ -494,10 +512,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             messages=dialog,
             temperature=temperature,
             max_completion_tokens=1024,
-            presence_penalty=self.presence_penalty,
+            presence_penalty=self.presence_penalty,  # type: ignore
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
-            # reasoning_effort="medium" if "reason" in moderator_model else NOT_GIVEN,
+            reasoning_effort="medium" if "reason" in moderator_model else NOT_GIVEN,
         )
 
         choices: list[Choice] = response.choices
@@ -563,7 +581,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         return [model for model in all_models if self.is_chat_ready_model(model.name)]
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
-        return await self.client.images.generate(
+        return await self.client.images.generate(  # type: ignore
             model=model,
             prompt=prompt,
             n=gpt_settings.image_n_choices,

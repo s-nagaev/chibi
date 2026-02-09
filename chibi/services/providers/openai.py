@@ -58,7 +58,7 @@ class OpenAI(OpenAIFriendlyProvider):
         return "dall-e" in model_name
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
-        return await self.client.images.generate(
+        return await self.client.images.generate(  # type: ignore
             model=model,
             prompt=prompt,
             n=gpt_settings.image_n_choices if "dall-e-2" in model else 1,
