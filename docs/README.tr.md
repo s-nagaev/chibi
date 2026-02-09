@@ -27,6 +27,7 @@
   <a href="README.zh-TW.md">繁體中文</a> •
   <a href="README.zh-CN.md">简体中文</a>
 </p>
+
 ---
 
 Chibi, “bir AI aracı”ndan fazlasına ihtiyaç duyduğunuzu fark ettiğiniz an için tasarlandı. Modelleri koordine edebilen, işleri arka planda çalıştırabilen ve sistemlerinize entegre olabilen—siz prompt’ları sürekli takip etmeden—bir **ortak**.
@@ -85,7 +86,7 @@ Chibi'yi pip ile kurun ve bir komut satırı uygulaması olarak çalıştırın:
 
 ```bash
 # Paketi kur
-pip install chibi
+pip install chibi-bot
 
 # Ajanı ayarla (API anahtarları ekle, ayarları güncelle vb.)
 chibi config

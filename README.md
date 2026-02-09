@@ -84,7 +84,7 @@ Install Chibi via pip and run it as a command-line application:
 
 ```bash
 # Install the package
-pip install chibi
+pip install chibi-bot
 
 # Set up the agent (add API keys, update settings, etc)
 chibi config
