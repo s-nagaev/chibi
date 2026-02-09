@@ -27,6 +27,7 @@
   <a href="README.zh-TW.md">繁體中文</a> •
   <a href="README.zh-CN.md">简体中文</a>
 </p>
+
 ---
 
 O Chibi foi feito para aquele momento em que você percebe que precisa de mais do que “uma ferramenta de IA”. Você precisa de um **parceiro** que coordene modelos, execute trabalho em segundo plano e se integre aos seus sistemas — sem você ficar “cuidando” de prompts.
@@ -85,7 +86,7 @@ Instale o Chibi via pip e execute-o como um aplicativo de linha de comando:
 
 ```bash
 # Instalar o pacote
-pip install chibi
+pip install chibi-bot
 
 # Configurar o agente (adicionar chaves de API, atualizar configurações, etc.)
 chibi config

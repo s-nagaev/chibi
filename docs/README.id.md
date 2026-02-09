@@ -27,6 +27,7 @@
   <a href="README.zh-TW.md">繁體中文</a> •
   <a href="README.zh-CN.md">简体中文</a>
 </p>
+
 ---
 
 Chibi dibuat untuk momen ketika Anda sadar bahwa Anda butuh lebih dari sekadar “alat AI”. Anda butuh **mitra** yang bisa mengoordinasikan model, menjalankan pekerjaan di background, dan terintegrasi dengan sistem Anda—tanpa Anda harus terus mengawasi prompt.
@@ -85,7 +86,7 @@ Instal Chibi melalui pip dan jalankan sebagai aplikasi baris perintah:
 
 ```bash
 # Menginstal paket
-pip install chibi
+pip install chibi-bot
 
 # Mengatur agen (tambahkan kunci API, perbarui pengaturan, dll.)
 chibi config
