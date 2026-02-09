@@ -513,7 +513,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             temperature=temperature,
             max_completion_tokens=1024,
             presence_penalty=self.presence_penalty,  # type: ignore
-            frequency_penalty=self.frequency_penalty,  # type: ignore
+            frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
             reasoning_effort="medium" if "reason" in moderator_model else NOT_GIVEN,
         )
