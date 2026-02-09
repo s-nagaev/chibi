@@ -17,4 +17,4 @@ class MoonshotAI(OpenAIFriendlyProvider):
     image_size = NOT_GIVEN
     default_model = "kimi-latest"
     default_moderation_model = "kimi-k2-turbo-preview"
-    temperature = 0.3
+    temperature = 1
