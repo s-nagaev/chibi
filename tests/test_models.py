@@ -2,7 +2,7 @@
 
 import json
 
-from google.genai.types import ContentDict, PartDict
+from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDict, PartDict
 
 from chibi.models import FunctionSchema, Message, ToolSchema
 
@@ -38,6 +38,7 @@ class TestMessageGoogleConversion:
                 {"text": "Let me check the weather for you."},
                 {
                     "function_call": {
+                        "id": "call_123",
                         "name": "get_weather",
                         "args": {"location": "San Francisco"},
                     },
@@ -59,7 +60,7 @@ class TestMessageGoogleConversion:
             "role": "model",
             "parts": [
                 {
-                    "function_call": {"name": "calculate", "args": {"expression": "2 + 2"}},
+                    "function_call": {"id": "call_456", "name": "calculate", "args": {"expression": "2 + 2"}},
                     "thought_signature": None,
                 }
             ],
@@ -69,7 +70,10 @@ class TestMessageGoogleConversion:
     def test_to_google_tool_response(self):
         """Test converting tool response message to Google format."""
         message = Message(
-            role="tool", content="The weather in San Francisco is sunny, 72°F", tool_call_id="get_weather"
+            role="tool",
+            content="The weather in San Francisco is sunny, 72°F",
+            tool_call_id="123",
+            tool_name="get_weather",
         )
         google_content = message.to_google()
 
@@ -78,8 +82,9 @@ class TestMessageGoogleConversion:
             "parts": [
                 {
                     "function_response": {
+                        "id": "123",
                         "name": "get_weather",
-                        "response": {"content": "The weather in San Francisco is sunny, 72°F"},
+                        "response": "The weather in San Francisco is sunny, 72°F",
                     }
                 }
             ],
@@ -148,11 +153,13 @@ class TestMessageGoogleConversion:
 
     def test_from_google_function_response(self):
         """Test converting from Google format function response."""
+        tool_call_id = "some_unique_id"
         google_content = {
             "role": "user",
             "parts": [
                 {
                     "function_response": {
+                        "id": tool_call_id,
                         "name": "get_weather",
                         "response": {"content": "The weather in San Francisco is sunny, 72°F"},
                     }
@@ -162,8 +169,8 @@ class TestMessageGoogleConversion:
         message = Message.from_google(google_content)
 
         assert message.role == "tool"
-        assert message.content == "The weather in San Francisco is sunny, 72°F"
-        assert message.tool_call_id == "get_weather"
+        assert json.loads(message.content) == {"content": "The weather in San Francisco is sunny, 72°F"}
+        assert message.tool_call_id == tool_call_id
         assert message.tool_calls is None
 
     def test_from_google_empty_parts(self):
@@ -220,14 +227,56 @@ class TestMessageGoogleConversion:
 
     def test_roundtrip_conversion_tool_response(self):
         """Test that tool response survives roundtrip conversion."""
-        original = Message(role="tool", content="Weather is sunny", tool_call_id="get_weather")
+        original = Message(
+            role="tool",
+            content=json.dumps({"result": {"sky": "clear"}}),
+            tool_call_id="some_unique_id",
+            tool_name="get_weather",
+        )
         google_content = original.to_google()
         converted = Message.from_google(google_content)
 
         assert converted.role == original.role
         assert converted.content == original.content
         assert converted.tool_call_id == original.tool_call_id
+        assert converted.tool_name == original.tool_name
         assert converted.tool_calls is None
+
+    def test_roundtrip_conversion_tool_response_g_c_g(self):
+        """Test that tool response survives roundtrip conversion. Google-Chibi-Google"""
+        source = ContentDict(
+            role="user",
+            parts=[
+                PartDict(
+                    function_response=FunctionResponseDict(
+                        id="some_unique_id", name="get_weather", response={"result": {"sky": "clear"}}
+                    )
+                ),
+            ],
+        )
+        converted = Message.from_google(source)
+        restored = converted.to_google()
+        assert restored == source
+
+    def test_roundtrip_conversion_tool_call_message_g_c_g(self):
+        """Test that tool call survives roundtrip conversion. Google-Chibi-Google"""
+
+        source = ContentDict(
+            role="model",
+            parts=[
+                PartDict(
+                    function_call=FunctionCallDict(
+                        name="get_weather",
+                        args={"location": "San Francisco"},
+                        id="some_unique_id",
+                    ),
+                    thought_signature=b"\x12",
+                )
+            ],
+        )
+        converted = Message.from_google(source)
+        restored = converted.to_google()
+        assert restored == source
 
     def test_tool_calls_with_empty_arguments(self):
         """Test handling tool calls with empty arguments."""
@@ -241,7 +290,7 @@ class TestMessageGoogleConversion:
             "role": "model",
             "parts": [
                 {
-                    "function_call": {"name": "ping", "args": {}},
+                    "function_call": {"name": "ping", "args": {}, "id": "call_789"},
                     "thought_signature": None,
                 }
             ],
