@@ -60,6 +60,7 @@ CHAT_COMPLETION_CLASSES = {
 
 
 class FunctionSchema(BaseModel):
+    id: str | None = None
     name: str
     arguments: str | None = None
 
@@ -101,6 +102,7 @@ class Message(BaseModel):
     expire_at: float | None = None
     tool_calls: list[ToolSchema] | None = None
     tool_call_id: str | None = None
+    tool_name: str | None = None
     source: str | None = None
 
     def to_openai(self) -> ChatCompletionMessageParam:
@@ -219,25 +221,28 @@ class Message(BaseModel):
                 args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
                 parts.append(
                     PartDict(
-                        function_call=FunctionCallDict(
-                            name=tool_call.function.name,
-                            args=args,
-                        ),
+                        function_call=FunctionCallDict(name=tool_call.function.name, args=args, id=tool_call.id),
                         thought_signature=tool_call.thought_signature,
                     )
                 )
 
             return ContentDict(role=google_role, parts=parts)
 
-        # Handle tool responses - Google uses 'user' role for tool responses
+        # tool_result_message
         if self.role == "tool" and self.tool_call_id:
+            try:
+                response_content = json.loads(self.content)
+            except Exception:
+                response_content = self.content
+
             return {
                 "role": "user",
                 "parts": [
                     {
                         "function_response": {
-                            "name": self.tool_call_id,  # This needs to be resolved to function name by provider
-                            "response": {"content": self.content},
+                            "id": self.tool_call_id,
+                            "name": self.tool_name,
+                            "response": response_content,
                         }
                     }
                 ],
@@ -259,6 +264,7 @@ class Message(BaseModel):
         content = ""
         tools: list[ToolSchema] = []
         tool_call_id: str | None = None
+        tool_name: str | None = None
 
         parts = google_content.get("parts") or []
 
@@ -268,33 +274,38 @@ class Message(BaseModel):
                 if part.get("text"):
                     content = str(part["text"])
 
-                # Function call from assistant
+                # tool_call_message
                 elif part.get("function_call"):
                     function_call = part["function_call"]
                     if function_call and isinstance(function_call, dict):
                         function = FunctionSchema(
                             name=function_call.get("name", ""),
                             arguments=json.dumps(function_call.get("args", {})),
+                            id=function_call.get("id"),
                         )
                         # Generate a unique ID for the tool call
-                        tool_id = f"call_{time.time_ns()}"
+                        tool_id = function_call.get("id", f"call_{time.time_ns()}")
                         tool = ToolSchema(
                             id=tool_id, function=function, thought_signature=part.get("thought_signature")
                         )
                         tools.append(tool)
 
-                # Function response (tool result)
+                # tool_result_message
                 elif part.get("function_response"):
                     chibi_role = "tool"
                     function_response = part["function_response"]
                     if function_response and isinstance(function_response, dict):
-                        tool_call_id = function_response.get("name")
-                        response_content = function_response.get("response", {})
-                        if isinstance(response_content, dict):
-                            content = response_content.get("content", "")
+                        tool_call_id = function_response.get("id")
+                        content = json.dumps(function_response.get("response", {}))
+                        tool_name = function_response.get("name", "")
 
         return cls(
-            role=chibi_role, content=content, tool_calls=tools or None, tool_call_id=tool_call_id, source="google"
+            role=chibi_role,
+            content=content,
+            tool_calls=tools or None,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            source="google",
         )
 
     def to_mistral(self) -> MistralSystemMessage | MistralUserMessage | MistralAssistantMessage | MistralToolMessage:
