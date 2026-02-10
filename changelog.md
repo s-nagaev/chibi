@@ -1,13 +1,32 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.6.0] - 2026-02-10
+### Added
+- **CLI Interface & Pip Installation:** New `chibi` command for easy bot management (`start`, `stop`, `restart`, `config`, `logs`)
+- **MiniMax Provider:** Added chat completion support via Anthropic-compatible API
+- **Chinese Localization:** Complete README translations for Simplified (zh-CN) and Traditional (zh-TW) Chinese
+
+### Changed
+- **Command Moderation System:** Upgraded feature allowing terminal commands to be validated by LLM providers before execution
+- **Dependencies Updated:** anthropic 0.75.0 → 0.79.0, google-genai 1.53.0 → 1.62.0, mcp 1.23.1 → 1.26.0, redis 5.2.1 → 7.1.0, and more
+- **Thinking Models:** Improved `reasoning_content` preservation for DeepSeek-Reasoner and Moonshot KIMI models
+- **MoonshotAI:** Default temperature changed from 0.3 to 1.0 for better reasoning
+- **Provider Defaults:** Gemini → `gemini-2.5-pro`, Grok → `grok-4-1-fast-reasoning`, OpenAI → `gpt-5.2`
+
+### Fixed
+- **Anthropic Messages:** Fixed loading messages with tools usage when switching providers
+- **Telegram Reaction:** Bot now sets `OK` reaction to user message when bot doesn't answer immediately
 
 ## [1.5.2] - 2026-01-18
 ### Added
 - **Telegram message reaction:** Bot now will set `OK` reaction to user message bot doesn't answer immediately.
+
+### Changed
+- **Base Prompt updated:** Multi-task aggregation protocol described.
 
 ### Changed
 - **Base Prompt updated:** Multi-task aggregation protocol described.
