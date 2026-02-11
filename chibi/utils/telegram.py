@@ -1,8 +1,10 @@
+import sys
 from collections import deque
 from io import BytesIO
-from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeVar, cast
+from typing import Any, Callable, Coroutine, Literal, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
+import click
 import httpx
 import telegramify_markdown
 from loguru import logger
@@ -25,7 +27,7 @@ from telegram.constants import FileSizeLimit
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from chibi.config import telegram_settings
+from chibi.config import gpt_settings, telegram_settings
 from chibi.constants import (
     FILE_UPLOAD_TIMEOUT,
     GROUP_CHAT_TYPES,
@@ -462,8 +464,6 @@ def user_is_allowed(tg_user: TelegramUser) -> bool:
 
 
 def group_is_allowed(tg_chat: TelegramChat) -> bool:
-    if not telegram_settings.groups_whitelist:
-        return True
     return tg_chat.id in telegram_settings.groups_whitelist
 
 
@@ -519,3 +519,79 @@ def check_user_allowance(
         return await func(*args, **kwargs)
 
     return wrapper
+
+
+def show_message(header: str, message: str, message_type: Literal["err", "warn", "inf"]) -> None:
+    if message_type == "err":
+        text_color = "red"
+    elif message_type == "warn":
+        text_color = "yellow"
+    else:
+        text_color = "green"
+
+    click.echo()
+    click.secho(f" {header.upper()} ".center(80, "="), fg=text_color, bold=True)
+    click.echo(message)
+    click.echo()
+    click.echo("If you're using Chibi installed via pip, please update settings using")
+    click.secho("$ chibi config", fg="green", bold=True)
+    click.echo()
+    click.echo(
+        "Otherwise, please check the config file manually  or ensure "
+        "that you've exported\nenvironment variables properly.",
+    )
+    click.secho("=" * 80, fg=text_color, bold=True)
+    click.echo()
+
+
+def _var(env_name: str) -> str:
+    return click.style(env_name, fg="yellow", bold=True)
+
+
+def telegram_security_pre_start_check() -> None:
+    security_error_header = "SECURITY CHECK FAILURE"
+    security_warning_header = "SECURITY CHECK WARNING"
+
+    security_error: bool = False
+    msg = ""
+
+    # Private mode requires users whitelist
+    if not gpt_settings.public_mode and not telegram_settings.users_whitelist:
+        security_error = True
+        msg = (
+            f"Chibi is running in PRIVATE mode, but the {_var('USERS_WHITELIST')} setting\nis not configured.  "
+            "This is EXTREMELY dangerous, as it allows ANY Telegram user\nto use YOUR bot with your API tokens.  "
+            f"Please specify your Telegram username or\nID in {_var('USERS_WHITELIST')} by running the command:"
+        )
+
+    # Public mode is not compatible with the file system access
+    if gpt_settings.filesystem_access and gpt_settings.public_mode:
+        security_error = True
+        msg = (
+            "Chibi is running in PUBLIC mode with access to the computer’s file system!\nThis is an  EXTREMELY  "
+            "dangerous combination of settings, allowing ANY Telegram\nuser to interact with data on your computer "
+            "via the Agent.\n\nYou must either disable public mode "
+            f"({_var('PUBLIC_MODE=false')}) or disable the Agent's\naccess to the file system "
+            f"({_var('FILESYSTEM_ACCESS=false')})."
+        )
+
+    if security_error:
+        show_message(header=security_error_header, message=msg, message_type="err")
+        sys.exit(1)
+
+    # Having an Agent with access to the file system in a Telegram group can be dangerous
+    if gpt_settings.filesystem_access and telegram_settings.groups_whitelist:
+        msg = (
+            "Having an Agent with access to the file system in a Telegram group can be\ndangerous. "
+            "We hope you know what you are doing!\nThe settings involved: "
+            f"{_var('FILESYSTEM_ACCESS')}, {_var('GROUPS_WHITELIST')}."
+        )
+        show_message(header=security_warning_header, message=msg, message_type="warn")
+
+
+def telegram_setting_pre_start_check() -> None:
+    if not telegram_settings.token:
+        header = "CONFIGURATION ERROR"
+        msg = f"Telegram token not set. Setting name: {_var('TELEGRAM_BOT_TOKEN')}."
+        show_message(header=header, message=msg, message_type="err")
+        sys.exit(1)

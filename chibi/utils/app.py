@@ -75,7 +75,7 @@ def _provider_statuses() -> list[str]:
     ]
     for provider_name in RegisteredProviders.all.keys():
         status = SETTING_SET if provider_name in RegisteredProviders.available else SETTING_UNSET
-        statuses.append(f"{provider_name} client: {status}")
+        statuses.append(f"{provider_name.capitalize()} client: {status}")
     return statuses
 
 
