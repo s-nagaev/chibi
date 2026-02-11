@@ -26,17 +26,16 @@ from httpx import Response
 from httpx._types import QueryParamTypes, RequestData
 from loguru import logger
 from openai import (
-    NOT_GIVEN,
     APIConnectionError,
     AsyncOpenAI,
     AuthenticationError,
     OpenAIError,
     RateLimitError,
+    omit,
 )
-from openai import (
-    NotGiven as OpenAINotGiven,
-)
-from openai.types import ImagesResponse
+from openai import NotGiven as OpenAINotGiven
+from openai import Omit as OpenAIOmit
+from openai.types import ImagesResponse, ReasoningEffort
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
@@ -293,12 +292,18 @@ class Provider(ABC):
     async def get_images(self, prompt: str, model: str | None) -> list[str] | list[BytesIO]:
         raise NotImplementedError
 
+    def _get_max_tokens_value(self, model_name: str) -> int:
+        return getattr(self, "max_tokens", gpt_settings.max_tokens)
+
+    def _get_temperature_value(self, model_name: str) -> float | OpenAIOmit:
+        return getattr(self, "temperature", gpt_settings.temperature)
+
 
 class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     temperature: float | OpenAINotGiven | None = gpt_settings.temperature
     max_tokens: int | OpenAINotGiven | None = gpt_settings.max_tokens
     presence_penalty: float | OpenAINotGiven | None = gpt_settings.presence_penalty
-    frequency_penalty: float | OpenAINotGiven | None = gpt_settings.frequency_penalty
+    frequency_penalty: float | OpenAIOmit | None = gpt_settings.frequency_penalty
     image_quality: Literal["standard", "hd"] | OpenAINotGiven = gpt_settings.image_quality
     image_size: IMAGE_SIZE_LITERAL | OpenAINotGiven | None = gpt_settings.image_size
     base_url: str
@@ -386,19 +391,17 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog: list[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
 
-        temperature = 1 if model.startswith("o") else self.temperature
-
         response: ChatCompletion = await self.client.chat.completions.create(  # type: ignore
             model=model,
             messages=dialog,
-            temperature=temperature,
-            max_tokens=self.max_tokens,
+            temperature=self._get_temperature_value(model_name=model),
+            max_tokens=self._get_max_tokens_value(model_name=model),
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
             tools=RegisteredChibiTools.get_tool_definitions(),
             tool_choice="auto",
-            reasoning_effort="medium" if "reason" in model else NOT_GIVEN,
+            reasoning_effort=self.get_reasoning_effort_value(model_name=model),
         )
         choices: list[Choice] = response.choices
 
@@ -472,7 +475,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                     }
                 ],
             }
-            # Add reasoning_content if present (DeepSeek-Reasoner, Mootshot KIMI, etc.)
+            # Add reasoning_content if present (DeepSeek-Reasoner, Moonshot KIMI, etc.)
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
                 logger.log("THINK", data.message.reasoning_content)
                 message_dict["reasoning_content"] = data.message.reasoning_content
@@ -495,6 +498,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             update=update,
         )
 
+    def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
+        return omit
+
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
         moderator_model = model or self.default_moderation_model or self.default_model
         system_message = ChatCompletionSystemMessageParam(role="system", content=MODERATOR_PROMPT)
@@ -515,7 +521,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             presence_penalty=self.presence_penalty,  # type: ignore
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
-            reasoning_effort="medium" if "reason" in moderator_model else NOT_GIVEN,
+            reasoning_effort=self.get_reasoning_effort_value(model_name=moderator_model),
         )
 
         choices: list[Choice] = response.choices
