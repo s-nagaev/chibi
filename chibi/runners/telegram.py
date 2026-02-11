@@ -1,8 +1,6 @@
-import sys
 from contextvars import Context
 from typing import Any, Coroutine, TypeVar
 
-import click
 from loguru import logger
 from telegram import (
     BotCommand,
@@ -46,6 +44,8 @@ from chibi.utils.telegram import (
     get_user_context,
     set_user_action,
     set_user_context,
+    telegram_security_pre_start_check,
+    telegram_setting_pre_start_check,
     user_interacts_with_bot,
 )
 
@@ -53,7 +53,9 @@ _T = TypeVar("_T")
 
 
 class ChibiBot:
-    def __init__(self, telegram_token: str) -> None:
+    def __init__(self, telegram_token: str | None) -> None:
+        if not telegram_token:
+            raise RuntimeError("No telegram token provider")
         self.telegram_token = telegram_token
         self.commands = [
             BotCommand(command="help", description="Show this help message"),
@@ -341,21 +343,8 @@ class ChibiBot:
 
 
 def run_chibi():
-    if not telegram_settings.token:
-        click.echo()
-        click.secho(" CONFIGURATION ERROR ".center(60, "="), fg="red", bold=True)
-        click.echo("Telegram token not set.\nIf you're using Chibi installed via pip, please set it using")
-        click.secho("$ chibi config", fg="green", bold=True)
-        click.echo()
-
-        click.echo(
-            "Otherwise,  please check the config file manually  or ensure\n"
-            f"that you've exported {click.style('TELEGRAM_BOT_TOKEN', bold=True, fg='yellow')} environment variable",
-        )
-        click.secho("=" * 60, fg="red", bold=True)
-        click.echo()
-        sys.exit(1)
-
+    telegram_setting_pre_start_check()
     log_application_settings()
+    telegram_security_pre_start_check()
     telegram_bot = ChibiBot(telegram_settings.token)
     telegram_bot.run()
