@@ -1,8 +1,8 @@
 from io import BytesIO
 
 from loguru import logger
-from openai import NOT_GIVEN
-from openai.types import ImagesResponse
+from openai import NOT_GIVEN, Omit, omit
+from openai.types import ImagesResponse, ReasoningEffort
 
 from chibi.config import gpt_settings
 from chibi.constants import OPENAI_TTS_INSTRUCTIONS
@@ -72,3 +72,17 @@ class OpenAI(OpenAIFriendlyProvider):
         if "dall" in model_name:
             return model_name.replace("dall-e-", "DALL·E ")
         return model_name.replace("-", " ")
+
+    def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | Omit | None:
+        if "chat" in model_name:
+            return omit
+        if "gpt-5" in model_name:
+            return "medium"
+        return omit
+
+    def _get_temperature_value(self, model_name: str) -> float | Omit:
+        if model_name.startswith("o"):
+            return omit
+        if model_name.startswith("gpt-5"):
+            return omit
+        return getattr(self, "temperature", gpt_settings.temperature)

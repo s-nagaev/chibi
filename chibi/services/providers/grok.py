@@ -1,7 +1,7 @@
-from openai import NOT_GIVEN
+from openai import NOT_GIVEN, Omit, omit
+from openai.types import ImagesResponse, ReasoningEffort
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ModelChangeSchema
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
@@ -14,27 +14,29 @@ class Grok(OpenAIFriendlyProvider):
     base_url = "https://api.x.ai/v1"
     name = "Grok"
     model_name_keywords = ["grok"]
-    model_name_keywords_exclude = ["vision", "image"]
+    model_name_keywords_exclude = ["vision", "imag"]
     image_quality = NOT_GIVEN
     image_size = NOT_GIVEN
     default_image_model = "grok-2-image-1212"
     default_model = "grok-4-1-fast-reasoning"
     default_moderation_model = "grok-4-1-fast-non-reasoning"
     presence_penalty = NOT_GIVEN
-    frequency_penalty = NOT_GIVEN
+    frequency_penalty = omit
     image_n_choices = 1
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
-        models = await super().get_available_models(image_generation=image_generation)
+    async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
+        return await self.client.images.generate(  # type: ignore
+            model=model,
+            prompt=prompt,
+            n=gpt_settings.image_n_choices,
+            quality=self.image_quality,
+            size=self.image_size,
+            timeout=gpt_settings.timeout,
+            response_format="url",
+            extra_body={"aspect_ratio": "16:9"},
+        )
 
-        if not image_generation:
-            return models
-
-        # For some reason we stopped getting a grok-2-image-1212 model from the API. But it still works.
-        if not models:
-            models.append(
-                ModelChangeSchema(
-                    provider=self.name, name="grok-2-image-1212", display_name="Grok 2 Image", image_generation=True
-                )
-            )
-        return models
+    def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | Omit | None:
+        if "grok-3-mini" in model_name:
+            return "high"
+        return omit
