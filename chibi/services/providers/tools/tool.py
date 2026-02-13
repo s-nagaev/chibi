@@ -8,8 +8,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
+from chibi.services.providers.tools.exceptions import LoopDetectedException
 from chibi.services.providers.tools.schemas import ToolResponse
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import CallTracker
 from chibi.services.providers.utils import escape_and_truncate
 from chibi.services.task_manager import task_manager
 
@@ -27,6 +28,8 @@ class ChibiTool:
     name: str
     run_in_background_by_default: bool = False
     allow_model_to_change_background_mode: bool = True
+    loop_warning: int = 5
+    loop_break: int = 7
 
     @classmethod
     def add_global_params(cls) -> dict[str, Any]:
@@ -65,22 +68,43 @@ class ChibiTool:
 
     @classmethod
     async def tool(cls, *args, run_in_background: bool | None = None, **kwargs: Any) -> ToolResponse:
-        non_printable_kwargs = list(AdditionalOptions.__annotations__.keys())
-        printable_kwargs = {k: v for k, v in kwargs.items() if k not in non_printable_kwargs}
         telegram_context = kwargs.get("telegram_context")
         telegram_update = kwargs.get("telegram_update")
         if run_in_background is None:
             run_in_background = cls.run_in_background_by_default
         background_run_ready = run_in_background and telegram_update and telegram_context
 
+        printable_kwargs = {k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update")}
+        model_name = kwargs.get("model", "Unknown model")
         logger.log(
             "CALL",
             (
-                f"[{kwargs.get('model', 'Unknown model')}] Calling a function '{cls.name}' "
+                f"[{model_name}] Calling a function '{cls.name}' "
                 f"in {'background' if background_run_ready else 'foreground'} mode. "
                 f"Args: {escape_and_truncate(printable_kwargs)}"
             ),
         )
+        hit_count = CallTracker().track(model_name=model_name, tool_name=cls.name, serializable_kwargs=printable_kwargs)
+        if hit_count > cls.loop_break:
+            raise LoopDetectedException(
+                f"A cyclical call of the {cls.name} function by model {model_name} has been interrupted."
+            )
+
+        if hit_count > cls.loop_warning:
+            logger.warning(
+                f"[{model_name}] Model seems stuck in a loop calling tool '{cls.name}'. Call #{hit_count}."
+            )
+            return ToolResponse(
+                tool_name=cls.name,
+                status="WARNING",
+                result="ABORTED",
+                additional_details=(
+                    f"You have already called the same tool with the same parameters {hit_count} times in a row. "
+                    "Most likely, you are stuck in a loop. STOP carrying out the task and clarify the "
+                    "assignment with the user IMMEDIATELY!"
+                ),
+            )
+
         if not background_run_ready:
             return await cls._get_tool_call_result(*args, **kwargs)
 

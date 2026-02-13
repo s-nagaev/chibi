@@ -14,3 +14,4 @@ from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.suno import Suno
+from chibi.services.providers.zhipuai import ZhipuAI

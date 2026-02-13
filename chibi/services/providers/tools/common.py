@@ -15,6 +15,8 @@ from chibi.services.providers.tools.utils import AdditionalOptions, get_sub_agen
 
 class GetAvailableLLMModelsTool(ChibiTool):
     register = True
+    loop_warning: int = 10
+    loop_break: int = 12
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
