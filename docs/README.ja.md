@@ -61,6 +61,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **Mistral AI**
 - **Moonshot AI**
 - **MiniMax**
+- **ZhipuAI**（GLMモデル）
 - **Cloudflare Workers AI**（多数のオープンソースモデル）
 
 ### OpenAI互換エンドポイント（セルフホスト / ローカル）
@@ -72,7 +73,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 
 ### マルチモーダルプロバイダー（任意）
 
-- **画像:** Google（Imagen, Nano Banana）、OpenAI（DALL·E）、Alibaba（Qwen Image）、xAI（Grok Image）、Wan
+- **画像:** Google（Imagen, Nano Banana）、OpenAI（DALL·E）、Alibaba（Qwen Image）、xAI（Grok Image）、Wan、ZhipuAI（CogView）、MiniMax
 - **音楽:** Suno
 - **音声:** ElevenLabs、MiniMax、OpenAI（Whisper）
 
@@ -161,6 +162,7 @@ docker-compose up -d
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **クリエイティブツール：**

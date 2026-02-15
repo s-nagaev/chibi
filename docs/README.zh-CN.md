@@ -61,6 +61,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **Mistral AI**
 - **月之暗面**（Moonshot AI）
 - **MiniMax**
+- **智谱AI**（GLM 系列模型）
 - **Cloudflare Workers AI**（众多开源模型）
 
 ### OpenAI 兼容端点（自托管/本地）
@@ -72,7 +73,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 
 ### 多模态提供商（可选）
 
-- **图像**：Google（Imagen、Nano Banana）、OpenAI（DALL·E）、阿里云（通义万相）、xAI（Grok Image）、Wan
+- **图像**：Google（Imagen、Nano Banana）、OpenAI（DALL·E）、阿里云（通义万相）、xAI（Grok Image）、Wan、**智谱AI（CogView）、MiniMax**
 - **音乐**：Suno
 - **语音**：ElevenLabs、MiniMax、OpenAI（Whisper）
 
@@ -161,6 +162,7 @@ docker-compose up -d
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **智谱AI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **创意工具：**
