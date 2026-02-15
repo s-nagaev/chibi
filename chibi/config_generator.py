@@ -79,6 +79,9 @@ MINIMAX_API_KEY=
 # Kimi models. https://platform.moonshot.cn/
 MOONSHOTAI_API_KEY=
 
+# Zhipu AI, GLM models. https://z.ai/manage-apikey/apikey-list
+ZHIPUAI_API_KEY=
+
 # Open-source models from Cloudflare. Chat-only. https://dash.cloudflare.com/profile/api-tokens
 CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.
