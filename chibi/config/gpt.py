@@ -25,7 +25,7 @@ class GPTSettings(BaseSettings):
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
     elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
     minimax_api_key: str | None = Field(alias="MINIMAX_API_KEY", default=None)
-    zai_key: str | None = Field(alias="Z_AI_API_KEY", default=None)
+    zhipuai_key: str | None = Field(alias="ZHIPUAI_API_KEY", default=None)
 
     frequency_penalty: float = Field(default=0)
     max_tokens: int = Field(default=32000)

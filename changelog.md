@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.6.3] - 2026-02-15
+
+### Changed
+- **ZhipuAI Provider:** Renamed env variable containing API Key.
+- **Config Generator:** Added `ZHIPUAI_API_KEY` variable with short description.
+
+
+## [1.6.2] - 2026-02-15
+
 ### Added
 - **ZhipuAI Provider:** Added support for ZhipuAI (GLM models) as a new LLM provider.
 - **MiniMax Image Generation:** Enabled image generation capabilities for the MiniMax provider.

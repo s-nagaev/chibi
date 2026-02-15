@@ -5,7 +5,7 @@ from chibi.services.providers.provider import OpenAIFriendlyProvider, RestApiFri
 
 
 class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
-    api_key = gpt_settings.zai_key
+    api_key = gpt_settings.zhipuai_key
     chat_ready = True
     moderation_ready = True
 
