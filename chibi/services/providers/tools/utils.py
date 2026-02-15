@@ -1,9 +1,11 @@
 import datetime
 import json
 import urllib.parse
-from typing import TYPE_CHECKING, ParamSpec, TypedDict, TypeVar
+from hashlib import sha256
+from typing import TYPE_CHECKING, Any, ParamSpec, TypedDict, TypeVar
 
 import httpx
+from cachetools import TTLCache
 from fake_useragent import UserAgent
 from httpx import Response
 from loguru import logger
@@ -16,6 +18,7 @@ from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.utils.app import SingletonMeta
 
 if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
@@ -144,3 +147,23 @@ async def download(url: str) -> bytes | None:
     except Exception as e:
         logger.error(f"Failed to download file from {url}: {e}")
     return None
+
+
+class CallTracker(metaclass=SingletonMeta):
+    def __init__(self, ttl: int = 60) -> None:
+        self._calls: TTLCache = TTLCache(maxsize=3000, ttl=ttl)
+
+    @staticmethod
+    def _make_key(model_name: str, tool_name: str, serializable_kwargs: dict[str, Any]) -> str:
+        kwargs_str = json.dumps(serializable_kwargs, sort_keys=True, default=str)
+        return f"{tool_name}_{model_name}:{sha256(kwargs_str.encode()).hexdigest()[:16]}"
+
+    def track(self, model_name: str, tool_name: str, serializable_kwargs: dict[str, Any]) -> int:
+        key = self._make_key(model_name=model_name, tool_name=tool_name, serializable_kwargs=serializable_kwargs)
+
+        if key not in self._calls:
+            self._calls[key] = 1
+            return 1
+
+        self._calls[key] += 1
+        return self._calls[key]

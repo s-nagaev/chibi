@@ -62,6 +62,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Moonshot AI**
 - **MiniMax**
 - **Cloudflare Workers AI** (muchos modelos open-source)
+- **ZhipuAI** (modelos GLM)
 
 ### Endpoints compatibles con OpenAI (autoalojado / local)
 
@@ -72,7 +73,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 
 ### Proveedores multimodales (opcional)
 
-- **Imágenes:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan
+- **Imágenes:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
 - **Música:** Suno
 - **Voz:** ElevenLabs, MiniMax, OpenAI (Whisper)
 
@@ -149,6 +150,7 @@ Cada proveedor requiere su propia clave API. Aquí están los enlaces directos:
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 
 **Herramientas creativas:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)

@@ -44,6 +44,7 @@ Chibi підтримує кількох провайдерів у межах о�
 - **Mistral AI**
 - **Moonshot AI**
 - **MiniMax**
+- **ZhipuAI** (моделі GLM)
 - **Cloudflare Workers AI** (багато open-source моделей)
 
 ### OpenAI-сумісні ендпоінти (self-host / локально)
@@ -55,7 +56,7 @@ Chibi підтримує кількох провайдерів у межах о�
 
 ### Мультимодальні провайдери (опціонально)
 
-- **Зображення:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan
+- **Зображення:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
 - **Музика:** Suno
 - **Голос:** ElevenLabs, MiniMax, OpenAI (Whisper)
 
@@ -144,6 +145,7 @@ docker-compose up -d
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **Креативні інструменти:**

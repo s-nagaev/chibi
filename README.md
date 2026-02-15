@@ -59,6 +59,7 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 - **Mistral AI**
 - **Moonshot AI**
 - **MiniMax**
+- **ZhipuAI** (GLM models)
 - **Cloudflare Workers AI** (many open-source models)
 
 ### OpenAI-compatible endpoints (self-host / local)
@@ -70,7 +71,7 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### Multimodal providers (optional)
 
-- **Images:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan
+- **Images:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
 - **Music:** Suno
 - **Voice:** ElevenLabs, MiniMax, OpenAI (Whisper)
 
@@ -159,6 +160,7 @@ Each provider requires its own API key. Here are the direct links:
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **Creative Tools:**

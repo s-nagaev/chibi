@@ -254,7 +254,7 @@ async def handle_available_model_options(
     mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models_available)}
     set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
     keyboard = [
-        [InlineKeyboardButton(f"{model.display_name.title()} ({model.provider})", callback_data=key)]
+        [InlineKeyboardButton(f"{model.display_name} ({model.provider})", callback_data=key)]
         for key, model in mapped_models.items()
     ]
     for model in models_available:

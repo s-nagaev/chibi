@@ -62,6 +62,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **Moonshot AI**
 - **MiniMax**
 - **Cloudflare Workers AI** (banyak model open-source)
+- **ZhipuAI** (model GLM)
 
 ### Endpoint kompatibel OpenAI (self-host / lokal)
 
@@ -72,7 +73,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ### Penyedia multimodal (opsional)
 
-- **Gambar:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan
+- **Gambar:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
 - **Musik:** Suno
 - **Suara:** ElevenLabs, MiniMax, OpenAI (Whisper)
 
@@ -149,6 +150,7 @@ Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 
 **Alat Kreatif:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)

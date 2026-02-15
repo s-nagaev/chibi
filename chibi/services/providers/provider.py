@@ -230,7 +230,7 @@ class Provider(ABC):
         raise NotImplementedError
 
     def get_model_display_name(self, model_name: str) -> str:
-        raise NotImplementedError
+        return model_name.replace("-", " ").title()
 
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         raise NotImplementedError
@@ -556,9 +556,6 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             logger.error(f"Moderator did not provide reason properly: {answer}")
 
         return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
-
-    def get_model_display_name(self, model_name: str) -> str:
-        return model_name.replace("-", " ")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:

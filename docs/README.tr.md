@@ -62,6 +62,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 - **Moonshot AI**
 - **MiniMax**
 - **Cloudflare Workers AI** (birçok açık kaynak model)
+- **ZhipuAI** (GLM modelleri)
 
 ### OpenAI uyumlu endpoint’ler (self-host / local)
 
@@ -72,7 +73,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ### Multimodal sağlayıcılar (opsiyonel)
 
-- **Görseller:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan
+- **Görseller:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
 - **Müzik:** Suno
 - **Ses:** ElevenLabs, MiniMax, OpenAI (Whisper)
 
@@ -149,6 +150,7 @@ Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantıl
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 
 **Yaratıcı Araçlar:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)

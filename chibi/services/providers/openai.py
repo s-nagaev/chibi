@@ -71,7 +71,13 @@ class OpenAI(OpenAIFriendlyProvider):
     def get_model_display_name(self, model_name: str) -> str:
         if "dall" in model_name:
             return model_name.replace("dall-e-", "DALL·E ")
-        return model_name.replace("-", " ")
+
+        model_display_name = super().get_model_display_name(model_name=model_name)
+
+        if "Gpt" in model_display_name:
+            model_display_name = model_display_name.replace("Gpt ", "GPT-")
+        print(model_name, "->", model_display_name)
+        return model_display_name
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | Omit | None:
         if "chat" in model_name:

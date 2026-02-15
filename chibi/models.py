@@ -4,7 +4,7 @@ import binascii
 import itertools
 import json
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from anthropic.types import (
     MessageParam,
@@ -13,6 +13,7 @@ from anthropic.types import (
     ToolUseBlockParam,
 )
 from google.genai.types import ContentDict, FunctionCallDict, PartDict
+from loguru import logger
 from mistralai.models import (
     AssistantMessage as MistralAssistantMessage,
 )
@@ -171,6 +172,7 @@ class Message(BaseModel):
         role: Literal["user", "assistant", "tool"] = anthropic_message["role"]
         tool_call_id: str | None = None
         content: str = ""
+        tool_name: str | None = None
         tools: list[ToolSchema] = []
 
         if isinstance(message_content, str):
@@ -186,12 +188,8 @@ class Message(BaseModel):
                 if content_block["type"] == "tool_result":
                     role = "tool"
                     tool_call_id = content_block.get("tool_use_id")
-                    content_data = content_block["content"]
-                    # It is not very clear under what circumstances the content
-                    # here might assume the value like `Iterable[Content]`.
-                    # In anthropic code (at the moment) there is nothing like
-                    # that. It is likely an atavism from the orig openai module
-                    content = content_data if isinstance(content_data, str) else "No content"
+                    content = cast(str, content_block["content"])
+                    tool_name = cls._get_tool_name(tool_result=content)
 
                 # ToolUseBlockParam
                 if content_block["type"] == "tool_use":
@@ -199,10 +197,18 @@ class Message(BaseModel):
                         name=content_block["name"],
                         arguments=json.dumps(content_block["input"]),
                     )
+                    tool_name = content_block["name"]
+                    tool_call_id = content_block["id"]
                     tool = ToolSchema(id=content_block["id"], function=function)
                     tools.append(tool)
-
-        return cls(role=role, content=content, tool_calls=tools or None, tool_call_id=tool_call_id, source="anthropic")
+        return cls(
+            role=role,
+            content=content,
+            tool_calls=tools or None,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            source="anthropic",
+        )
 
     def to_google(self) -> ContentDict:
         """Convert a Chibi Message to a Google AI ContentDict."""
@@ -241,7 +247,7 @@ class Message(BaseModel):
                     {
                         "function_response": {
                             "id": self.tool_call_id,
-                            "name": self.tool_name,
+                            "name": self.tool_name or self._get_tool_name(self.content),
                             "response": response_content,
                         }
                     }
@@ -392,6 +398,17 @@ class Message(BaseModel):
             tool_call_id=tool_call_id,
             source="mistral",
         )
+
+    @classmethod
+    def _get_tool_name(cls, tool_result: str | dict[str, Any]) -> str | None:
+        if isinstance(tool_result, dict):
+            return tool_result.get("tool_name")
+        try:
+            tool_result_dict = json.loads(tool_result)
+            return tool_result_dict.get("tool_name")
+        except Exception as e:
+            logger.warning(f"Could not parse tool name from tool result: {e}")
+            return None
 
 
 class ImageMeta(BaseModel):

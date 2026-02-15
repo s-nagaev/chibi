@@ -2,6 +2,7 @@
 
 import json
 
+from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlockParam
 from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDict, PartDict
 
 from chibi.models import FunctionSchema, Message, ToolSchema
@@ -315,3 +316,45 @@ class TestMessageGoogleConversion:
         assert google_content["parts"][1]["function_call"]["name"] == "get_weather"
         assert google_content["parts"][2]["function_call"]
         assert google_content["parts"][2]["function_call"]["name"] == "get_time"
+
+
+class TestMessageAnthropicConversion:
+    def test_anthropic_to_chibi_tool_call(self) -> None:
+        args = {"max_results": 5, "search_phrase": "weather forecast Krakow February 15 2026"}
+        source = MessageParam(
+            role="assistant",
+            content=[
+                ToolUseBlockParam(id="call_function_npanp5e9uv0s_1", input=args, name="get_weather", type="tool_use")
+            ],
+        )
+        result = Message.from_anthropic(source)
+        assert result.role == "assistant"
+        assert result.tool_name == "get_weather"
+        assert result.tool_call_id == "call_function_npanp5e9uv0s_1"
+        assert result.tool_calls
+
+        tool_call = result.tool_calls[0]
+        assert tool_call.type == "function"
+        assert tool_call.function
+
+        assert tool_call.function.name == "get_weather"
+        assert tool_call.function.arguments == json.dumps(args)
+
+    def test_anthropic_to_chibi_tool_result(self) -> None:
+        tool_result = {"tool_name": "ddgs_web_search", "status": "ok", "result": "some data here"}
+
+        source = MessageParam(
+            role="user",
+            content=[
+                ToolResultBlockParam(
+                    tool_use_id="call_function_npanp5e9uv0s_1",
+                    type="tool_result",
+                    content=json.dumps(tool_result),
+                )
+            ],
+        )
+        result = Message.from_anthropic(source)
+        assert result.role == "tool"
+        assert result.tool_call_id == "call_function_npanp5e9uv0s_1"
+        assert result.tool_name == "ddgs_web_search"
+        assert result.content == json.dumps(tool_result)
