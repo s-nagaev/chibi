@@ -91,9 +91,7 @@ class ChibiTool:
             )
 
         if hit_count > cls.loop_warning:
-            logger.warning(
-                f"[{model_name}] Model seems stuck in a loop calling tool '{cls.name}'. Call #{hit_count}."
-            )
+            logger.warning(f"[{model_name}] Model seems stuck in a loop calling tool '{cls.name}'. Call #{hit_count}.")
             return ToolResponse(
                 tool_name=cls.name,
                 status="WARNING",

@@ -21,6 +21,7 @@ class Minimax(AnthropicFriendlyProvider):
     base_tts_url = "https://api.minimax.io/v1/"
     default_tts_model = "speech-2.8-turbo"
     default_tts_voice = "Korean_HaughtyLady"
+    default_image_model = "image-01"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None
@@ -28,15 +29,6 @@ class Minimax(AnthropicFriendlyProvider):
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "x-api-key": self.token,
-            "anthropic-version": "2023-06-01",
-        }
-
-    @property
-    def tts_headers(self) -> dict[str, str]:
         return {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -56,11 +48,13 @@ class Minimax(AnthropicFriendlyProvider):
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
-            return []
+            return [ModelChangeSchema(provider=self.name, name="image-01", image_generation=True)]
 
         supported_models = [
+            "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
             "MiniMax-M2.1",
-            "MiniMax-M2.1-lightning",
+            "MiniMax-M2.1-highspeed",
             "MiniMax-M2",
         ]
         return [
@@ -91,9 +85,27 @@ class Minimax(AnthropicFriendlyProvider):
             },
         }
         try:
-            response = await self._request(method="POST", url=url, data=data, headers=self.tts_headers)
+            response = await self._request(method="POST", url=url, data=data)
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return bytes()
         response_data = response.json()["data"]
         return bytes.fromhex(response_data["audio"])
+
+    async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
+        url = "https://api.minimax.io/v1/image_generation"
+        response = await self._request(
+            method="POST",
+            url=url,
+            data={
+                "model": model,
+                "prompt": prompt,
+                "aspect_ratio": "16:9",
+                "response_format": "url",
+                "n": gpt_settings.image_n_choices,
+                "prompt_optimizer": True,
+            },
+        )
+        response_data = response.json()
+        images_urls = response_data.get("data", {}).get("image_urls", [])
+        return images_urls

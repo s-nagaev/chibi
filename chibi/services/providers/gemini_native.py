@@ -247,17 +247,17 @@ class Gemini(RestApiFriendlyProvider):
             return ChatResponseSchema(answer=answer, provider=self.name, model=model_name, usage=usage), messages
 
         # Tool calls handling
-        logger.log("CALL", f"{model} requested the call of {len(response.function_calls)} tools.")
+        logger.log("CALL", f"{model_name} requested the call of {len(response.function_calls)} tools.")
 
         if answer:
             await send_llm_thoughts(thoughts=answer, context=context, update=update)
-        logger.log("THINK", f"{model}: {answer or 'No thoughts...'}. {usage_message}")
+        logger.log("THINK", f"{model_name}: {answer or 'No thoughts...'}. {usage_message}")
 
         tool_context: dict[str, Any] = {
             "user_id": user.id if user else None,
             "telegram_context": context,
             "telegram_update": update,
-            "model": model,
+            "model": model_name,
         }
 
         tool_coroutines = [
@@ -270,8 +270,8 @@ class Gemini(RestApiFriendlyProvider):
         results = await asyncio.gather(*tool_coroutines)
 
         thought_signature = self._get_thought_signature(response=response)
-        if not thought_signature:
-            logger.error(
+        if not thought_signature and "gemini-3" in model_name:
+            logger.warning(
                 f"Could not get thought signature for function call, no response candidates found: "
                 f"{response.candidates}."
             )
@@ -449,16 +449,17 @@ class Gemini(RestApiFriendlyProvider):
     def get_model_display_name(self, model_name: str) -> str:
         if "gemini-3-pro-image" in model_name:
             display_name = model_name.replace("models/gemini-3-pro-image", "Nano Banana Pro")
-            return display_name.replace("-", " ").capitalize()
+            return super().get_model_display_name(model_name=display_name)
 
         if "gemini-2.5-flash-image" in model_name:
             display_name = model_name.replace("models/gemini-2.5-flash-image", "Nano Banana")
-            return display_name.replace("-", " ").capitalize()
+            return super().get_model_display_name(model_name=display_name)
 
         if "imagen" in model_name:
-            model_name = model_name.replace("generate-", "")
+            display_name = model_name.replace("generate-", "")
+            return super().get_model_display_name(model_name=display_name)
 
-        return model_name[7:].replace("-", " ")
+        return super().get_model_display_name(model_name=model_name[7:])
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:
