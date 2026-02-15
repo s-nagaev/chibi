@@ -26,9 +26,4 @@ async def test_speech(minimax: Mock) -> None:
             "text": "Hello world!",
             "voice_setting": {"voice_id": "test_voice", "emotion": "happy", "speed": 1.2},
         },
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": "Bearer test_token",
-        },
     )

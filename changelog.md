@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+
+### Added
+- **ZhipuAI Provider:** Added support for ZhipuAI (GLM models) as a new LLM provider.
+- **MiniMax Image Generation:** Enabled image generation capabilities for the MiniMax provider.
+- **Loop Detection:** Implemented `LoopDetectedException` to prevent infinite loops in tool calls.
+
+### Changed
+- **Documentation:** Updated README with new providers and API key links.
+
 
 
 ## [1.6.1] - 2026-02-11
