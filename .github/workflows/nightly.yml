@@ -1,0 +1,122 @@
+name: Nightly Pre-release
+
+on:
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Get latest stable tag
+        id: tag
+        run: |
+          # Find latest stable release tag (matching v[0-9]*.[0-9]*.[0-9]*)
+          LATEST_TAG=$(git describe --tags --match='v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -n "$LATEST_TAG" ]; then
+            # Check if there are commits since last tag
+            COMMITS=$(git rev-list --count $LATEST_TAG..HEAD 2>/dev/null || echo "1")
+          else
+            # No tags yet, build anyway
+            COMMITS=1
+          fi
+          
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "commits=$COMMITS" >> $GITHUB_OUTPUT
+
+      - name: Check if build needed
+        id: check
+        run: |
+          COMMITS="${{ steps.tag.outputs.commits }}"
+          if [ "$COMMITS" -eq 0 ]; then
+            echo "No changes since last release, skipping build"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected since last release, building..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract base version and set dev version
+        if: steps.check.outputs.skip == 'false'
+        id: version
+        run: |
+          # Extract base version and strip suffix
+          BASE_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' | sed 's/\.dev.*//')
+          
+          # Generate timestamp-based dev version in UTC
+          TIMESTAMP=$(date -u +%Y%m%d%H%M)
+          VERSION="${BASE_VERSION}.dev${TIMESTAMP}"
+          TAG_NAME="v${VERSION}"
+          
+          # Set the dev version using Poetry
+          poetry version $VERSION
+          
+          # Output for release
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          # Build the package
+          poetry build
+          
+          # Create git tag for the release
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag -a $TAG_NAME -m "Nightly release $VERSION"
+
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          poetry publish --username __token__ --password $PYPI_API_TOKEN
+
+      - name: Push git tag
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          git push origin ${{ steps.version.outputs.tag_name }}
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: "Nightly Build ${{ steps.version.outputs.tag_name }}"
+          body: |
+            ## Nightly Pre-release
+
+            **Version:** ${{ steps.version.outputs.version }}
+            **Built from:** main branch
+
+            This is an automated nightly build. Use with caution.
+
+            Install with: `pip install chibi-bot==${{ steps.version.outputs.version }} --pre`
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

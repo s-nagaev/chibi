@@ -136,6 +136,9 @@ FILESYSTEM_ACCESS=false
 # Allow AI agent to delegate tasks to sub-agents (default: true)
 ALLOW_DELEGATION=true
 
+# Timeout in seconds for delegated sub-agent tasks (default: None — no timeout)
+#DELEGATE_TASK_TIMEOUT=600
+
 # AI agent home directory (default: ~/chibi-bot/home)
 HOME_DIR={HOME_DIR.absolute()}
 

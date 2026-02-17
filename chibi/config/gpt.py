@@ -67,6 +67,7 @@ class GPTSettings(BaseSettings):
 
     filesystem_access: bool = Field(default=False)
     allow_delegation: bool = Field(default=True)
+    delegate_task_timeout: int | None = Field(default=None)
     tools_whitelist_raw: str | None = Field(alias="TOOLS_WHITELIST", default=None)
 
     google_search_api_key: str | None = Field(default=None)

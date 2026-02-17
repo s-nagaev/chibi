@@ -84,7 +84,7 @@ class DelegateTool(ChibiTool):
         prompt: str,
         provider_name: str | None = None,
         model_name: str | None = None,
-        timeout: int = 600,
+        timeout: int | None = gpt_settings.delegate_task_timeout,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
         user_id = kwargs.get("user_id")
