@@ -287,3 +287,67 @@ async def test_markers_are_same():
     assert result_exclude.result.get("success") is True
     updated_content_exclude = await read_test_file("test_same_markers.txt")
     assert updated_content_exclude == "before new content after"
+
+
+@pytest.mark.asyncio
+async def test_single_line_section_with_trailing_newline():
+    """Regression: newline after end_marker must not trick single-line detection."""
+    content = "before START_MARKERold contentEND_MARKER\nafter"
+    file_path = await create_test_file("test_trailing_nl.txt", content)
+
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path,
+        start_marker="START_MARKER",
+        end_marker="END_MARKER",
+        new_content="replaced",
+        include_markers=True,
+    )
+    assert result.status == "ok"
+    assert isinstance(result.result, dict)
+    assert result.result.get("success") is True
+
+    updated = await read_test_file("test_trailing_nl.txt")
+    # Single-line section: markers + content on one line, no extra \n injected
+    assert updated == "before START_MARKERreplacedEND_MARKER\nafter"
+
+
+@pytest.mark.asyncio
+async def test_multiline_section_not_broken_by_fix():
+    """Ensure multi-line sections still get newlines around body."""
+    content = "header\n<!-- BEGIN -->\nold line 1\nold line 2\n<!-- END -->\nfooter"
+    file_path = await create_test_file("test_multiline_ok.txt", content)
+
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path,
+        start_marker="<!-- BEGIN -->",
+        end_marker="<!-- END -->",
+        new_content="new line 1\nnew line 2",
+        include_markers=True,
+    )
+    assert result.status == "ok"
+    assert isinstance(result.result, dict)
+    assert result.result.get("success") is True
+
+    updated = await read_test_file("test_multiline_ok.txt")
+    assert updated == "header\n<!-- BEGIN -->\nnew line 1\nnew line 2\n<!-- END -->\nfooter"
+
+
+@pytest.mark.asyncio
+async def test_single_line_inline_markers_include():
+    """Inline markers on a single line with no newline anywhere in file."""
+    content = "prefix [START]value[END] suffix"
+    file_path = await create_test_file("test_inline.txt", content)
+
+    result: ToolResponse = await find_and_replace_section(
+        full_path=file_path,
+        start_marker="[START]",
+        end_marker="[END]",
+        new_content="new_val",
+        include_markers=True,
+    )
+    assert result.status == "ok"
+    assert isinstance(result.result, dict)
+    assert result.result.get("success") is True
+
+    updated = await read_test_file("test_inline.txt")
+    assert updated == "prefix [START]new_val[END] suffix"
