@@ -76,7 +76,6 @@ class OpenAI(OpenAIFriendlyProvider):
 
         if "Gpt" in model_display_name:
             model_display_name = model_display_name.replace("Gpt ", "GPT-")
-        print(model_name, "->", model_display_name)
         return model_display_name
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | Omit | None:
