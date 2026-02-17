@@ -5,6 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+
+## [1.6.5] - 2026-02-17
+
+### Changed
+- **Nightly Release Workflow:** Refactored GitHub Actions workflow to use scheduled builds (cron) instead of push-based triggers, with manual dispatch option and concurrency control to prevent duplicate runs.
+- **Workflow Optimization:** Conditional execution of setup steps only when builds are needed, improving CI efficiency.
+
+### Fixed
+- **File Editor:** Fixed `FindAndReplaceSectionTool` bug where single-line sections with trailing newlines were incorrectly detected as multi-line, causing unwanted newline injection.
+
+### Added
+- **Tests:** Added regression tests for single-line and multi-line section replacement in `FindAndReplaceSectionTool`.
+
 ## [1.6.4] - 2026-02-17
 
 ### Added
@@ -426,7 +439,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.6.4...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.6.5...HEAD
+[1.6.5]: https://github.com/s-nagaev/chibi/compare/v1.6.4...v1.6.5
 [1.6.4]: https://github.com/s-nagaev/chibi/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/s-nagaev/chibi/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/s-nagaev/chibi/compare/v1.6.1...v1.6.2

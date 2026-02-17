@@ -480,7 +480,7 @@ class FindAndReplaceSectionTool(ChibiTool):
                     body = body.strip()[: -len(end_marker.strip())].rstrip("\n")
 
                 # Check if markers are on the same line (no newline between them)
-                section_content = content[start_pos : end_pos + len(end_marker)]
+                section_content = content[start_pos:end_pos]
                 if "\n" not in section_content:
                     # Single line case - no newlines around content
                     replacement = f"{start_marker}{body}{end_marker}"

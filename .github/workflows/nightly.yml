@@ -1,14 +1,17 @@
 name: Nightly Pre-release
 
 on:
-  push:
-    branches:
-      - main
-    tags-ignore:
-      - '**'
+  schedule:
+    # 02:00 UTC (03:00 CET / 04:00 CEST)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: true
 
 jobs:
   nightly:
@@ -19,87 +22,72 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check if build needed
+        id: check
+        run: |
+          # Find latest stable release tag (exclude dev/pre-release tags)
+          LATEST_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+
+          if [ -n "$LATEST_TAG" ]; then
+            COMMITS=$(git rev-list --count "$LATEST_TAG..HEAD" 2>/dev/null || echo "1")
+          else
+            COMMITS=1
+          fi
+
+          if [ "$COMMITS" -eq 0 ]; then
+            echo "No changes since last release ($LATEST_TAG), skipping build"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Found $COMMITS commit(s) since ${LATEST_TAG:-'(no tags)'}, building..."
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set up Python
+        if: steps.check.outputs.skip == 'false'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Poetry
+        if: steps.check.outputs.skip == 'false'
         uses: snok/install-poetry@v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
-      - name: Install dependencies
-        run: poetry install --no-interaction
-
-      - name: Get latest stable tag
-        id: tag
-        run: |
-          # Find latest stable release tag (matching v[0-9]*.[0-9]*.[0-9]*)
-          LATEST_TAG=$(git describe --tags --match='v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -n "$LATEST_TAG" ]; then
-            # Check if there are commits since last tag
-            COMMITS=$(git rev-list --count $LATEST_TAG..HEAD 2>/dev/null || echo "1")
-          else
-            # No tags yet, build anyway
-            COMMITS=1
-          fi
-          
-          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "commits=$COMMITS" >> $GITHUB_OUTPUT
-
-      - name: Check if build needed
-        id: check
-        run: |
-          COMMITS="${{ steps.tag.outputs.commits }}"
-          if [ "$COMMITS" -eq 0 ]; then
-            echo "No changes since last release, skipping build"
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected since last release, building..."
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Extract base version and set dev version
+      - name: Build nightly package
         if: steps.check.outputs.skip == 'false'
         id: version
         run: |
-          # Extract base version and strip suffix
-          BASE_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/' | sed 's/\.dev.*//')
-          
+          # Extract base version via Poetry and strip any existing dev suffix
+          BASE_VERSION=$(poetry version -s | sed 's/\.dev.*//')
+
           # Generate timestamp-based dev version in UTC
           TIMESTAMP=$(date -u +%Y%m%d%H%M)
           VERSION="${BASE_VERSION}.dev${TIMESTAMP}"
           TAG_NAME="v${VERSION}"
-          
-          # Set the dev version using Poetry
-          poetry version $VERSION
-          
-          # Output for release
+
+          # Set the dev version and build
+          poetry version "$VERSION"
+          poetry build
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          
-          # Build the package
-          poetry build
-          
-          # Create git tag for the release
+
+      - name: Create tag and push
+        if: steps.check.outputs.skip == 'false'
+        run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git tag -a $TAG_NAME -m "Nightly release $VERSION"
+          git tag -a "${{ steps.version.outputs.tag_name }}" -m "Nightly release ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.tag_name }}"
 
       - name: Publish to PyPI
         if: steps.check.outputs.skip == 'false'
         env:
           PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          poetry publish --username __token__ --password $PYPI_API_TOKEN
-
-      - name: Push git tag
-        if: steps.check.outputs.skip == 'false'
-        run: |
-          git push origin ${{ steps.version.outputs.tag_name }}
+          poetry publish --username __token__ --password "$PYPI_API_TOKEN"
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip == 'false'
@@ -118,5 +106,3 @@ jobs:
             Install with: `pip install chibi-bot==${{ steps.version.outputs.version }} --pre`
           draft: false
           prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
