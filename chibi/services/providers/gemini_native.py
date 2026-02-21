@@ -1,6 +1,8 @@
 import asyncio
+import io
 import math
 import random
+import wave
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
@@ -11,6 +13,8 @@ from google.genai.client import Client
 from google.genai.errors import APIError
 from google.genai.types import (
     ContentDict,
+    ContentListUnion,
+    ContentListUnionDict,
     FunctionCallDict,
     FunctionDeclaration,
     FunctionResponseDict,
@@ -21,8 +25,12 @@ from google.genai.types import (
     HttpOptions,
     Image,
     ImageConfig,
+    Part,
     PartDict,
+    PrebuiltVoiceConfig,
+    SpeechConfig,
     Tool,
+    VoiceConfig,
 )
 from loguru import logger
 from telegram import Update
@@ -47,6 +55,8 @@ from chibi.services.providers.utils import (
 class Gemini(RestApiFriendlyProvider):
     api_key = gpt_settings.gemini_key
     chat_ready = True
+    tts_ready = True
+    stt_ready = True
     image_generation_ready = True
     moderation_ready = True
 
@@ -55,6 +65,9 @@ class Gemini(RestApiFriendlyProvider):
     model_name_keywords_exclude = ["image", "vision", "tts", "embedding", "2.0", "1.5"]
     default_model = "models/gemini-2.5-pro"
     default_image_model = "models/imagen-4.0-fast-generate-001"
+    default_tts_voice = "Kore"
+    default_tts_model = "gemini-2.5-flash-preview-tts"
+    default_stt_model = "gemini-3-flash-preview"
     default_moderation_model = "models/gemini-2.5-flash-lite"
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
@@ -153,7 +166,7 @@ class Gemini(RestApiFriendlyProvider):
         return retry_delay
 
     async def _generate_content(
-        self, model: str, contents: list[ContentDict], config: GenerateContentConfig
+        self, model: str, contents: ContentListUnion | ContentListUnionDict, config: GenerateContentConfig
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
             try:
@@ -165,6 +178,8 @@ class Gemini(RestApiFriendlyProvider):
                     )
                 answer = self._get_text(response)
                 if answer is not None or response.function_calls:
+                    return response
+                if answer is None and response.model_version == self.default_tts_model:
                     return response
             except APIError as err:
                 logger.error(f"Gemini API error: {err.message}")
@@ -488,3 +503,94 @@ class Gemini(RestApiFriendlyProvider):
             return [model for model in all_models if model.name in gpt_settings.models_whitelist]
 
         return [model for model in all_models if self.is_chat_ready_model(model.name)]
+
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        voice = voice or self.default_tts_voice
+        model = model or self.default_tts_model
+        logger.info(f"Recording a voice message with model {model}...")
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=PrebuiltVoiceConfig(
+                        voice_name=voice,
+                    )
+                )
+            ),
+            http_options=http_options,
+        )
+
+        response: GenerateContentResponse = await self._generate_content(
+            model=model,
+            contents=f"TTS the following: {text}",
+            config=generation_config,
+        )
+
+        if not response.parts:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Gemini API returned a response w/o parts data: {response.model_dump()}",
+            )
+
+        response_part: Part = response.parts[0]
+        if not response_part.inline_data:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"No inline data found in the response.parts[0]: {response_part}",
+            )
+
+        data: bytes | None = response_part.inline_data.data
+
+        if not data:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"No data found inside the Blob object (inline data): {response_part.inline_data}",
+            )
+
+        buf = io.BytesIO()
+
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)  # PCM16 = 2 bytes
+            w.setframerate(44100)
+            w.writeframes(data)
+
+        return buf.getvalue()
+
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        model = model or self.default_stt_model
+        logger.info(f"Transcribing audio with model {model}...")
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            http_options=http_options,
+        )
+
+        response = await self._generate_content(
+            model=model,
+            contents=[
+                "STT this audio clip",
+                Part.from_bytes(
+                    data=audio.read(),
+                    mime_type="audio/ogg",  # Telegram format
+                ),
+            ],
+            config=generation_config,
+        )
+
+        if application_settings.log_prompt_data:
+            logger.info(f"Transcribed text: {response.text}")
+
+        if result := response.text:
+            return result
+
+        raise ServiceResponseError(
+            provider=self.name,
+            model=model,
+            detail=f"Could not transcribe audio message: empty text data in response: {response}",
+        )
