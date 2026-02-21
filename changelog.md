@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.6.6] - 2026-02-21
+
+### Added
+- **Gemini TTS:** New text-to-speech capability using Gemini API, outputs PCM 16-bit 44.1kHz mono WAV.
+- **Gemini STT:** New speech-to-text capability for transcribing voice messages.
+
+
 ## [1.6.5] - 2026-02-17
 
 ### Changed
