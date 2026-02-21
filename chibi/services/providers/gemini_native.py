@@ -6,7 +6,7 @@ import wave
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
-from typing import Any, Union
+from typing import Any
 from uuid import uuid4
 
 from google.genai.client import Client
@@ -166,7 +166,7 @@ class Gemini(RestApiFriendlyProvider):
         return retry_delay
 
     async def _generate_content(
-        self, model: str, contents: Union[ContentListUnion, ContentListUnionDict], config: GenerateContentConfig
+        self, model: str, contents: ContentListUnion | ContentListUnionDict, config: GenerateContentConfig
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
             try:
@@ -522,20 +522,42 @@ class Gemini(RestApiFriendlyProvider):
             http_options=http_options,
         )
 
-        response = await self._generate_content(
+        response: GenerateContentResponse = await self._generate_content(
             model=model,
             contents=f"TTS the following: {text}",
             config=generation_config,
         )
 
-        data = bytes(response.parts[0].inline_data.data)  # type: ignore
+        if not response.parts:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Gemini API returned a response w/o parts data: {response.model_dump()}",
+            )
+
+        response_part: Part = response.parts[0]
+        if not response_part.inline_data:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"No inline data found in the response.parts[0]: {response_part}",
+            )
+
+        data: bytes | None = response_part.inline_data.data
+
+        if not data:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"No data found inside the Blob object (inline data): {response_part.inline_data}",
+            )
 
         buf = io.BytesIO()
 
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)  # PCM16 = 2 bytes
-            w.setframerate(24000)
+            w.setframerate(44100)
             w.writeframes(data)
 
         return buf.getvalue()
@@ -563,4 +585,12 @@ class Gemini(RestApiFriendlyProvider):
 
         if application_settings.log_prompt_data:
             logger.info(f"Transcribed text: {response.text}")
-        return response.text or ""
+
+        if result := response.text:
+            return result
+
+        raise ServiceResponseError(
+            provider=self.name,
+            model=model,
+            detail=f"Could not transcribe audio message: empty text data in response: {response}",
+        )
