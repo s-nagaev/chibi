@@ -6,13 +6,15 @@ import wave
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
-from typing import Any
+from typing import Any, Union
 from uuid import uuid4
 
 from google.genai.client import Client
 from google.genai.errors import APIError
 from google.genai.types import (
     ContentDict,
+    ContentListUnion,
+    ContentListUnionDict,
     FunctionCallDict,
     FunctionDeclaration,
     FunctionResponseDict,
@@ -23,8 +25,12 @@ from google.genai.types import (
     HttpOptions,
     Image,
     ImageConfig,
+    Part,
     PartDict,
-    Tool, SpeechConfig, VoiceConfig, PrebuiltVoiceConfig,
+    PrebuiltVoiceConfig,
+    SpeechConfig,
+    Tool,
+    VoiceConfig,
 )
 from loguru import logger
 from telegram import Update
@@ -50,6 +56,7 @@ class Gemini(RestApiFriendlyProvider):
     api_key = gpt_settings.gemini_key
     chat_ready = True
     tts_ready = True
+    stt_ready = True
     image_generation_ready = True
     moderation_ready = True
 
@@ -60,6 +67,7 @@ class Gemini(RestApiFriendlyProvider):
     default_image_model = "models/imagen-4.0-fast-generate-001"
     default_tts_voice = "Kore"
     default_tts_model = "gemini-2.5-flash-preview-tts"
+    default_stt_model = "gemini-3-flash-preview"
     default_moderation_model = "models/gemini-2.5-flash-lite"
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
@@ -158,7 +166,7 @@ class Gemini(RestApiFriendlyProvider):
         return retry_delay
 
     async def _generate_content(
-        self, model: str, contents: list[ContentDict] | str, config: GenerateContentConfig
+        self, model: str, contents: Union[ContentListUnion, ContentListUnionDict], config: GenerateContentConfig
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
             try:
@@ -520,9 +528,10 @@ class Gemini(RestApiFriendlyProvider):
             config=generation_config,
         )
 
-        data = response.parts[0].inline_data.data
+        data = bytes(response.parts[0].inline_data.data)  # type: ignore
 
         buf = io.BytesIO()
+
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)  # PCM16 = 2 bytes
@@ -530,3 +539,28 @@ class Gemini(RestApiFriendlyProvider):
             w.writeframes(data)
 
         return buf.getvalue()
+
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        model = model or self.default_stt_model
+        logger.info(f"Transcribing audio with model {model}...")
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            http_options=http_options,
+        )
+
+        response = await self._generate_content(
+            model=model,
+            contents=[
+                "STT this audio clip",
+                Part.from_bytes(
+                    data=audio.read(),
+                    mime_type="audio/ogg",  # Telegram format
+                ),
+            ],
+            config=generation_config,
+        )
+
+        if application_settings.log_prompt_data:
+            logger.info(f"Transcribed text: {response.text}")
+        return response.text or ""
