@@ -4,13 +4,12 @@ from typing import Any, Callable, Coroutine, ParamSpec, TypeVar, cast
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
-from chibi.services.providers.tools.exceptions import LoopDetectedException
+from chibi.services.interface import UserInterface
+from chibi.services.providers.tools.exceptions import LoopDetectedException, NoUserInterfaceProvidedException
 from chibi.services.providers.tools.schemas import ToolResponse
-from chibi.services.providers.tools.utils import CallTracker
+from chibi.services.providers.tools.utils import AdditionalOptions, CallTracker
 from chibi.services.providers.utils import escape_and_truncate
 from chibi.services.task_manager import task_manager
 
@@ -42,6 +41,12 @@ class ChibiTool:
         }
 
     @classmethod
+    def get_interface(cls, kwargs: AdditionalOptions | dict[str, Any]) -> UserInterface:
+        if interface := kwargs.get("interface"):
+            return interface
+        raise NoUserInterfaceProvidedException
+
+    @classmethod
     async def _get_tool_call_result(cls, *args, **kwargs) -> ToolResponse:
         try:
             result = await cls.function(**kwargs)
@@ -58,23 +63,23 @@ class ChibiTool:
             return ToolResponse(tool_name=cls.name, status="error", result=str(e))
 
     @classmethod
-    async def _get_and_send_tool_call_result(
-        cls, *args, update: Update, context: ContextTypes.DEFAULT_TYPE, **kwargs
-    ) -> None:
+    async def _get_and_send_tool_call_result(cls, *args, **kwargs) -> None:
         from chibi.services.bot import handle_tool_response
 
+        interface = cls.get_interface(kwargs)
         tool_call_result = await cls._get_tool_call_result(*args, **kwargs)
-        await handle_tool_response(tool_response=tool_call_result, update=update, context=context)
+        await handle_tool_response(tool_response=tool_call_result, interface=interface)
 
     @classmethod
     async def tool(cls, *args, run_in_background: bool | None = None, **kwargs: Any) -> ToolResponse:
-        telegram_context = kwargs.get("telegram_context")
-        telegram_update = kwargs.get("telegram_update")
+        interface = kwargs.get("interface")
         if run_in_background is None:
             run_in_background = cls.run_in_background_by_default
-        background_run_ready = run_in_background and telegram_update and telegram_context
+        background_run_ready = run_in_background and interface
 
-        printable_kwargs = {k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update")}
+        printable_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update", "interface")
+        }
         model_name = kwargs.get("model", "Unknown model")
         logger.log(
             "CALL",
@@ -106,10 +111,7 @@ class ChibiTool:
         if not background_run_ready:
             return await cls._get_tool_call_result(*args, **kwargs)
 
-        assert telegram_update
-        assert telegram_context
-
-        coro = cls._get_and_send_tool_call_result(*args, update=telegram_update, context=telegram_context, **kwargs)
+        coro = cls._get_and_send_tool_call_result(*args, **kwargs)
         task_manager.run_task(coro)
         return ToolResponse(
             tool_name=cls.name,

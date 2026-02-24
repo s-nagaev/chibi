@@ -4,7 +4,6 @@ from typing import Any, Callable
 
 import httpx
 from loguru import logger
-from telegram import Update
 from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
@@ -19,7 +18,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.utils.telegram import chat_data, send_message, user_data
+from chibi.services.interface import UserInterface
 
 
 class SingletonMeta(type):
@@ -146,104 +145,85 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        update: Update = kwargs.get("update") or args[1]
-        context: ContextTypes.DEFAULT_TYPE = kwargs.get("context") or args[2]
-        error_msg_prefix = f"{user_data(update)} didn't get a GPT answer in the {chat_data(update)}"
+        interface: UserInterface | None = kwargs.get("interface")
+        if not interface:
+            logger.warning(
+                f"The 'handle_gpt_exceptions' decorator couldn't get the interface object "
+                f"from function {func.__name__}."
+            )
+            return await func(*args, **kwargs)
+        error_msg_prefix = f"{interface.user_data} didn't get a GPT answer in the {interface.chat_data}"
+        text = (
+            "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
+            "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
+        )
+
         try:
             return await func(*args, **kwargs)
-        except NoApiKeyProvidedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text="Oops! It looks like you didn't set the API key for this provider.",
-            )
-            return None
-
-        except NotAuthorizedError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text=(
-                    "We encountered an authorization problem when interacting with a remote service.\n"
-                    f"Please check your {e.provider} API key."
-                ),
-            )
-            return None
-
-        except ServiceResponseError as e:
-            logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text=(
-                    f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
-                    f"Please, try again a bit later."
-                ),
-            )
-            return None
 
         except NoResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
             return None
 
+        except NoApiKeyProvidedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            text = "Oops! It looks like you didn't set the API key for this provider."
+
+        except NotAuthorizedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            text = (
+                "We encountered an authorization problem when interacting with a remote service.\n"
+                f"Please check your {e.provider} API key."
+            )
+
+        except ServiceResponseError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            text = (
+                f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
+                f"Please, try again a bit later."
+            )
+
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
-            await send_message(
-                update=update,
-                context=context,
-                text=f"Rate Limit exceeded for {e.provider}. We should back off a bit.",
-            )
-            return None
+            text = f"Rate Limit exceeded for {e.provider}. We should back off a bit."
 
         except NoModelSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
 
-            await send_message(
-                update=update,
-                context=context,
-                text="Please, select your model first.",
-            )
-            return None
+            text = "Please, select your model first."
 
         except NoProviderSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text="Please, select your provider first.",
-            )
-            return None
+            text = "Please, select your provider first."
 
         except RecursionLimitExceeded as e:
             logger.error(f"{error_msg_prefix}: {e}")
-
-            await send_message(
-                update=update,
-                context=context,
-                text=(
-                    f"{e.provider} ({e.model}) exceeded the limit on the maximum number of consecutive tool calls "
-                    f"({e.exceeded_limit}) and was stopped. The model has likely entered an infinite loop of tool "
-                    f"calls. Please check the logs. If the model was functioning as intended, you should either "
-                    f"rephrase the task or increase the value of the `MAX_CONSECUTIVE_TOOL_CALLS` setting."
-                ),
+            text = (
+                f"{e.provider} ({e.model}) exceeded the limit on the maximum number of consecutive tool calls "
+                f"({e.exceeded_limit}) and was stopped. The model has likely entered an infinite loop of tool "
+                f"calls. Please check the logs. If the model was functioning as intended, you should either "
+                f"rephrase the task or increase the value of the `MAX_CONSECUTIVE_TOOL_CALLS` setting."
             )
 
         except Exception as e:
             logger.exception(f"{error_msg_prefix}: {e!r}")
-            msg = (
-                "I'm sorry, but there seems to be a little hiccup with your request at the moment 😥 Would you mind "
-                "trying again later? Don't worry, I'll be here to assist you whenever you're ready! 😼"
-            )
-            await send_message(update=update, context=context, text=msg)
-            # raise
+
+        await interface.send_message(message=text)
 
     return wrapper
 
 
-def get_builtin_skill_names() -> list[str]:
+def get_builtin_skill_names() -> dict[str, str]:
     path = Path(application_settings.skills_dir)
-    return [f.name for f in path.iterdir() if f.is_file()]
+    result = {}
+    for f in path.iterdir():
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        try:
+            with f.open(encoding="utf-8") as fh:
+                first_line = fh.readline()
+            desc = first_line.lstrip("# ").strip() if first_line.startswith("#") else f.stem
+            result[f.name] = desc
+        except (UnicodeDecodeError, OSError):
+            continue
+    return result

@@ -33,13 +33,12 @@ from google.genai.types import (
     VoiceConfig,
 )
 from loguru import logger
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -210,11 +209,10 @@ class Gemini(RestApiFriendlyProvider):
     async def _get_chat_completion_response(
         self,
         messages: list[ContentDict],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
-        update: Update | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -265,14 +263,13 @@ class Gemini(RestApiFriendlyProvider):
         logger.log("CALL", f"{model_name} requested the call of {len(response.function_calls)} tools.")
 
         if answer:
-            await send_llm_thoughts(thoughts=answer, context=context, update=update)
+            await send_llm_thoughts(thoughts=answer, interface=interface)
         logger.log("THINK", f"{model_name}: {answer or 'No thoughts...'}. {usage_message}")
 
         tool_context: dict[str, Any] = {
             "user_id": user.id if user else None,
-            "telegram_context": context,
-            "telegram_update": update,
             "model": model_name,
+            "interface": interface,
         }
 
         tool_coroutines = [
@@ -321,33 +318,22 @@ class Gemini(RestApiFriendlyProvider):
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages,
-            model=model_name,
-            user=user,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=messages, model=model_name, user=user, system_prompt=system_prompt, interface=interface
         )
 
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(),
-            user=user,
-            model=model,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
         )
 
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]

@@ -1,10 +1,12 @@
+import platform
+
 from chibi.config import application_settings
 
 CMD_STDOUT_LIMIT = 10000  # Move to settings
 
 MODERATOR_BASE_PROMPT = """**Your Role:**
 
-You are an AI Security Moderator. Your primary function is to analyze Linux terminal commands proposed by another AI
+You are an AI Security Moderator. Your primary function is to analyze terminal commands proposed by another AI
 assistant and determine their safety before they are executed on the user's system.
 
 **CRITICAL RULE:** You are strictly prohibited to run any tool, even if tools are available.
@@ -62,7 +64,9 @@ exhaustive; use common sense and the principle of "better safe than sorry"):
 """
 
 MODERATOR_ADDITIONAL_CONDITIONS = (
-    f"You should accept the access to the {application_settings.home_dir} directory and files, excluding .env file. "
+    f"**Platform:** {platform.platform()}\n\n"
+    f"You should accept the access to the {application_settings.home_dir} directory and files, excluding .env file and"
+    f" .env.* files that may contain secrets (note: .env.example and .env.template are safe to read). "
     "You also should accept the AI assistant to use pip/poetry or similar tools "
     "to install/delete/update project dependencies. "
 )

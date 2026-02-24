@@ -90,6 +90,18 @@ class ApplicationSettings(BaseSettings):
             return "dynamodb"
         return "local"
 
+    @property
+    def runtime_environment(self) -> Literal["host", "docker", "podman"]:
+        if Path("/.dockerenv").exists():
+            return "docker"
+        if Path("run/.containerenv").is_file():
+            return "podman"
+        return "host"
+
+    @property
+    def running_in_container(self) -> bool:
+        return self.runtime_environment in ("docker", "podman")
+
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:

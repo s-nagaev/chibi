@@ -34,7 +34,7 @@ class GPTSettings(BaseSettings):
 
     backoff_factor: float = Field(default=0.5)
     retries: int = Field(default=3)
-    timeout: int = Field(default=600)
+    timeout: int = Field(default=180)
 
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
     image_n_choices: int = Field(default=1, ge=1, le=4)

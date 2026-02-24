@@ -1,5 +1,7 @@
 import inspect
 import json
+import os
+import platform
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeAlias, TypeVar
 
 from anthropic.types import (
@@ -9,13 +11,12 @@ from google.genai.types import GenerateContentResponse
 from mistralai import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
-from telegram import Update, constants
-from telegram.ext import ContextTypes
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
+from chibi.services.interface import UserInterface
 from chibi.utils.app import get_builtin_skill_names
 
 T = TypeVar("T")
@@ -52,37 +53,38 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user: User | None = None) -> str:
-    if user is None:
-        return base_system_prompt
-
-    prompt = {
-        "current_working_dir": user.working_dir,
-        "user_id": user.id,
-        "user_info": user.info,
+async def prepare_system_prompt(base_system_prompt: str, user: User) -> str:
+    prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
-        "activated_skills": user.llm_skills,
     }
+
+    if gpt_settings.filesystem_access:
+        system_data = {
+            "current_working_dir": user.working_dir,
+            "platform": platform.platform(),
+            "shell": os.environ.get("SHELL", "unknown"),
+            "running_inside_container": application_settings.running_in_container,
+        }
+        if application_settings.running_in_container:
+            system_data["container_type"] = application_settings.runtime_environment
+
+        prompt["system"] = system_data
+
+    prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)
 
 
-async def send_llm_thoughts(thoughts: str, update: Update | None, context: ContextTypes.DEFAULT_TYPE | None) -> None:
+async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = None) -> None:
     if not gpt_settings.show_llm_thoughts:
         return None
 
-    from chibi.utils.telegram import send_long_message
-
-    if update is None or context is None:
+    if not interface:
         return None
+
     message = f"💡💭 {thoughts}"
-    await send_long_message(
-        message=message,
-        update=update,
-        context=context,
-        parse_mode=constants.ParseMode.MARKDOWN_V2,
-        reply=False,
-    )
+
+    await interface.send_message(message=message, reply=False)
 
 
 def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> UsageSchema:

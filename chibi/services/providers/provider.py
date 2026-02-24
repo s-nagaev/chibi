@@ -44,8 +44,6 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_LITERAL
@@ -60,6 +58,7 @@ from chibi.exceptions import (
 )
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
@@ -218,11 +217,10 @@ class Provider(ABC):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
 
@@ -352,22 +350,16 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
         initial_messages = [msg.to_openai() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(),
-            model=model,
-            system_prompt=system_prompt,
-            user=user,
-            context=context,
-            update=update,
+            messages=initial_messages.copy(), model=model, system_prompt=system_prompt, user=user, interface=interface
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -379,10 +371,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         self,
         messages: list[ChatCompletionMessageParam],
         model: str,
-        user: User | None = None,
+        user: User,
         system_prompt: str | None = None,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         if not system_prompt:
             dialog = messages
@@ -427,13 +418,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         thoughts = answer or "No thoughts"
         if answer:
-            await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
+            await send_llm_thoughts(thoughts=thoughts, interface=interface)
         logger.log("THINK", f"{model}: {thoughts}. {usage_message}")
 
         tool_context: dict[str, Any] = {
             "user_id": user.id if user else None,
-            "telegram_context": context,
-            "telegram_update": update,
+            "interface": interface,
             "model": model,
         }
 
@@ -490,12 +480,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages,
-            model=model,
-            user=user,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -711,11 +696,10 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
@@ -724,12 +708,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(),
-            user=user,
-            model=model,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -741,10 +720,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         self,
         messages: list[MessageParam],
         model: str,
-        user: User | None = None,
+        user: User,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
         response_message: AnthropicMessage = await self._generate_content(
@@ -784,7 +762,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         )
 
         if thoughts_part:
-            await send_llm_thoughts(thoughts=thoughts_part.text, context=context, update=update)
+            await send_llm_thoughts(thoughts=thoughts_part.text, interface=interface)
 
         logger.log(
             "THINK", f"{model}: {thoughts_part.text if thoughts_part else 'No thoughts'}. {get_usage_msg(usage=usage)}"
@@ -792,8 +770,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         tool_context: dict[str, Any] = {
             "user_id": user.id if user else None,
-            "telegram_context": context,
-            "telegram_update": update,
+            "interface": interface,
             "model": model,
         }
 
@@ -824,12 +801,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages,
-            model=model,
-            user=user,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

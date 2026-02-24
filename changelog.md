@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [1.6.7] - 2026-02-25
+
+### Added
+- **Unified UserInterface**: Abstract interface (`chibi/services/interface.py`) separating bot logic from Telegram-specific implementation. Enables future platform support.
+- **Dual Docker Build**: Now builds two images in parallel — main bot and agent variant with `agent-*` tags.
+
 
 ## [1.6.6] - 2026-02-21
 
