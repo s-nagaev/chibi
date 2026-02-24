@@ -152,7 +152,7 @@ class TelegramInterface(UserInterface):
         await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE)
 
     async def send_reaction(self, reaction: str) -> None:
-        if message := self.update.message:
+        if message := self.update.effective_message:
             await message.set_reaction(reaction=reaction, is_big=True)
         raise ValueError("Telegram incoming update does not contain valid message data.")
 
