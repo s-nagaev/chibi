@@ -109,7 +109,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 
-    async with indicator(coro=interface.send_action_typing()):
+    async with indicator(coro_func=interface.send_action_typing):
         chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
             user_id=interface.user_id,
             user_text_message=text_prompt,
@@ -172,7 +172,7 @@ async def handle_image_generation(prompt: str, interface: UserInterface) -> None
 
     # The user finds it psychologically easier to wait for a response from the chatbot when they see its activity
     # during the entire waiting time.
-    async with indicator(coro=interface.send_action_uploading_photo()):
+    async with indicator(coro_func=interface.send_action_uploading_photo):
         image_data = await generate_image(user_id=interface.user_id, prompt=prompt)
         await interface.send_images(images=image_data)
 

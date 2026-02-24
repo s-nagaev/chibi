@@ -1,5 +1,7 @@
 import inspect
 import json
+import os
+import platform
 from typing import Any, Callable, Coroutine, ParamSpec, Type, TypeAlias, TypeVar
 
 from anthropic.types import (
@@ -10,7 +12,7 @@ from mistralai import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
@@ -51,18 +53,25 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user: User | None = None) -> str:
-    if user is None:
-        return base_system_prompt
-
-    prompt = {
-        "current_working_dir": user.working_dir,
-        "user_id": user.id,
-        "user_info": user.info,
+async def prepare_system_prompt(base_system_prompt: str, user: User) -> str:
+    prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
-        "activated_skills": user.llm_skills,
     }
+
+    if gpt_settings.filesystem_access:
+        system_data = {
+            "current_working_dir": user.working_dir,
+            "platform": platform.platform(),
+            "shell": os.environ.get("SHELL", "unknown"),
+            "running_inside_container": application_settings.running_in_container,
+        }
+        if application_settings.running_in_container:
+            system_data["container_type"] = application_settings.runtime_environment
+
+        prompt["system"] = system_data
+
+    prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)
 
 

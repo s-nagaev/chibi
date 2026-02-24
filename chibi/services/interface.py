@@ -125,14 +125,15 @@ class TelegramInterface(UserInterface):
         return f"{self._chat.type.upper()} chat ({self._chat.id})"
 
     async def get_text_prompt(self) -> str | None:
-        if message := self.update.message:
+        print(self.update.effective_message)
+        if message := self.update.effective_message:
             return message.text
         raise ValueError("Telegram incoming update does not contain valid message data.")
 
     async def get_voice_prompt(self) -> BytesIO | None:
-        if not self.update.message:
+        if not self.update.effective_message:
             raise ValueError("Telegram incoming update does not contain valid message data.")
-        if voice := self.update.message.voice:
+        if voice := self.update.effective_message.voice:
             file_id = voice.file_id
             file: File = await self.context.bot.get_file(file_id)
             voice_prompt = BytesIO()

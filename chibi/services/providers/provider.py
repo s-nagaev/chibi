@@ -217,7 +217,7 @@ class Provider(ABC):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -350,7 +350,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -371,7 +371,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         self,
         messages: list[ChatCompletionMessageParam],
         model: str,
-        user: User | None = None,
+        user: User,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
@@ -696,7 +696,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -720,7 +720,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         self,
         messages: list[MessageParam],
         model: str,
-        user: User | None = None,
+        user: User,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:

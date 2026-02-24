@@ -209,7 +209,7 @@ class Gemini(RestApiFriendlyProvider):
     async def _get_chat_completion_response(
         self,
         messages: list[ContentDict],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -324,7 +324,7 @@ class Gemini(RestApiFriendlyProvider):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,

@@ -213,6 +213,17 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def get_builtin_skill_names() -> list[str]:
+def get_builtin_skill_names() -> dict[str, str]:
     path = Path(application_settings.skills_dir)
-    return [f.name for f in path.iterdir() if f.is_file()]
+    result = {}
+    for f in path.iterdir():
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        try:
+            with f.open(encoding="utf-8") as fh:
+                first_line = fh.readline()
+            desc = first_line.lstrip("# ").strip() if first_line.startswith("#") else f.stem
+            result[f.name] = desc
+        except (UnicodeDecodeError, OSError):
+            continue
+    return result

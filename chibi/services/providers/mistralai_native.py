@@ -118,7 +118,7 @@ class MistralAI(RestApiFriendlyProvider):
     async def get_chat_response(
         self,
         messages: list[Message],
-        user: User | None = None,
+        user: User,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -138,7 +138,7 @@ class MistralAI(RestApiFriendlyProvider):
         self,
         messages: list[MistralMessageParam],
         model: str,
-        user: User | None = None,
+        user: User,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
