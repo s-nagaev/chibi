@@ -174,8 +174,6 @@ class SendVideoTool(ChibiTool):
         video_url: str,
         caption: str | None = None,
         duration: int | None = None,
-        width: int | None = None,
-        height: int | None = None,
         thumbnail_url: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
