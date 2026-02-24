@@ -9,13 +9,12 @@ from google.genai.types import GenerateContentResponse
 from mistralai import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
-from telegram import Update, constants
-from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
 from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
+from chibi.services.interface import UserInterface
 from chibi.utils.app import get_builtin_skill_names
 
 T = TypeVar("T")
@@ -67,22 +66,16 @@ async def prepare_system_prompt(base_system_prompt: str, user: User | None = Non
     return json.dumps(prompt)
 
 
-async def send_llm_thoughts(thoughts: str, update: Update | None, context: ContextTypes.DEFAULT_TYPE | None) -> None:
+async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = None) -> None:
     if not gpt_settings.show_llm_thoughts:
         return None
 
-    from chibi.utils.telegram import send_long_message
-
-    if update is None or context is None:
+    if not interface:
         return None
+
     message = f"💡💭 {thoughts}"
-    await send_long_message(
-        message=message,
-        update=update,
-        context=context,
-        parse_mode=constants.ParseMode.MARKDOWN_V2,
-        reply=False,
-    )
+
+    await interface.send_message(message=message, reply=False)
 
 
 def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> UsageSchema:

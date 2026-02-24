@@ -4,18 +4,15 @@ from typing import TYPE_CHECKING, Any, Optional, Unpack
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings, telegram_settings
-from chibi.constants import AUDIO_UPLOAD_TIMEOUT
 from chibi.schemas.app import ModelChangeSchema
+from chibi.services.interface import UserInterface
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, download
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
-from chibi.utils.telegram import get_telegram_chat
 
 if TYPE_CHECKING:
     from chibi.services.providers import Suno
@@ -44,32 +41,19 @@ class TextToSpeechTool(ChibiTool):
 
     @classmethod
     async def function(cls, text: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
-        user_id = kwargs.get("user_id")
-        if not user_id:
-            raise ToolException("This function requires user_id to be automatically provided.")
-
-        telegram_context = kwargs.get("telegram_context")
-        telegram_update = kwargs.get("telegram_update")
-
-        if telegram_context is None or telegram_update is None:
-            raise ToolException(
-                "This function requires telegram context & telegram update to be automatically provided."
-            )
+        interface = cls.get_interface(kwargs=kwargs)
         logger.log("TOOL", "Sending voice message to user...")
 
-        user = await get_chibi_user(user_id=user_id)
+        user = await get_chibi_user(user_id=interface.user_id)
         provider = user.tts_provider
         audio_data = await provider.speech(text=text)
         title = f"{text[:15]}..."
-        await telegram_context.bot.send_audio(
-            chat_id=get_telegram_chat(update=telegram_update).id,
+
+        await interface.send_audio(
             audio=audio_data,
             title=title,
             performer=f"{telegram_settings.bot_name} AI",
             filename=f"{title.replace(' ', '_')}.mp3",
-            parse_mode="HTML",
-            read_timeout=AUDIO_UPLOAD_TIMEOUT,
-            write_timeout=AUDIO_UPLOAD_TIMEOUT,
         )
         return {"detail": "Audio was successfully sent."}
 
@@ -136,19 +120,9 @@ class GenerateImageTool(ChibiTool):
     name = "generate_image"
 
     @classmethod
-    async def generate_and_send_image(
-        cls,
-        user_id: int,
-        provider: str,
-        model: str,
-        prompt: str,
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-    ) -> None:
-        from chibi.utils.telegram import send_images
-
-        images = await generate_image(user_id=user_id, provider_name=provider, model=model, prompt=prompt)
-        await send_images(images=images, update=update, context=context)
+    async def generate_and_send_image(cls, provider: str, model: str, prompt: str, interface: UserInterface) -> None:
+        images = await generate_image(user_id=interface.user_id, provider_name=provider, model=model, prompt=prompt)
+        await interface.send_images(images=images)
         return None
 
     @classmethod
@@ -159,27 +133,16 @@ class GenerateImageTool(ChibiTool):
         prompt: str,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
-        user_id = kwargs.get("user_id")
-        if not user_id:
-            raise ToolException("This function requires user_id to be automatically provided.")
-        telegram_context = kwargs.get("telegram_context")
-        telegram_update = kwargs.get("telegram_update")
+        interface = cls.get_interface(kwargs=kwargs)
 
-        if telegram_context is None or telegram_update is None:
-            raise ToolException(
-                "This function requires telegram context & telegram update to be automatically provided."
-            )
-
-        if await user_has_reached_images_generation_limit(user_id=user_id):
+        if await user_has_reached_images_generation_limit(user_id=interface.user_id):
             raise ToolException("User has reached image generation monthly limit.")
 
         await cls.generate_and_send_image(
-            user_id=user_id,
             provider=provider,
             model=image_model,
             prompt=prompt,
-            update=telegram_update,
-            context=telegram_context,
+            interface=interface,
         )
         return {"detail": "Image was successfully generated and sent."}
 
@@ -226,13 +189,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
         instrumental: bool = False,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
-        telegram_context = kwargs.get("telegram_context")
-        telegram_update = kwargs.get("telegram_update")
-
-        if telegram_context is None or telegram_update is None:
-            raise ToolException(
-                "This function requires telegram context & telegram update to be automatically provided."
-            )
+        interface = cls.get_interface(kwargs=kwargs)
         logger.log("TOOL", f"Generating music via Suno. Prompt: {prompt}")
 
         task_id = await cls._get_provider().order_music_generation(
@@ -241,9 +198,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        return await cls._poll_and_send_audio(
-            task_id=task_id, telegram_context=telegram_context, telegram_update=telegram_update
-        )
+        return await cls._poll_and_send_audio(task_id=task_id, interface=interface)
 
     @classmethod
     def _get_provider(cls) -> "Suno":
@@ -261,8 +216,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
     async def _poll_and_send_audio(
         cls,
         task_id: int | str,
-        telegram_context: ContextTypes.DEFAULT_TYPE,
-        telegram_update: Update,
+        interface: UserInterface,
     ) -> dict[str, Any]:
         logger.log("TOOL", f"[Task #{task_id}] Polling the generation result...")
         await sleep(POLLING_ATTEMPTS_WAIT_BETWEEN)
@@ -298,20 +252,15 @@ class GenerateMusicViaSunoTool(ChibiTool):
 
             image_url = suno_data.source_image_url or suno_data.image_url
             title = f"{suno_data.title} v{version}"
-            chat_id = get_telegram_chat(update=telegram_update).id
 
-            logger.log("TOOL", f"[Suno] Audio and thumbnail downloaded. Sending it to the chat #{chat_id}...")
-            await telegram_context.bot.send_audio(
-                chat_id=chat_id,
+            logger.log("TOOL", f"[Suno] Audio and thumbnail downloaded. Sending it to the chat #{interface.chat_id}...")
+            await interface.send_audio(
                 audio=await download(str(music_url)) or str(music_url),
                 title=title,
                 performer=f"{telegram_settings.bot_name} AI via Suno AI",
                 duration=int(suno_data.duration) if suno_data.duration else None,
                 thumbnail=await download(str(image_url)) if image_url else None,
                 filename=f"{title.replace(' ', '_')}.mp3",
-                parse_mode="HTML",
-                read_timeout=AUDIO_UPLOAD_TIMEOUT,
-                write_timeout=AUDIO_UPLOAD_TIMEOUT,
             )
             generated_version_data = {
                 "id": suno_data.id,
@@ -413,13 +362,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         weirdness_constraint: float = 0.5,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
-        telegram_context = kwargs.get("telegram_context")
-        telegram_update = kwargs.get("telegram_update")
-
-        if telegram_context is None or telegram_update is None:
-            raise ToolException(
-                "This function requires telegram context & telegram update to be automatically provided."
-            )
+        interface = cls.get_interface(kwargs=kwargs)
         if not style:
             raise ToolException("Style is mandatory in custom mode.")
 
@@ -445,7 +388,5 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        result = await cls._poll_and_send_audio(
-            task_id=task_id, telegram_context=telegram_context, telegram_update=telegram_update
-        )
+        result = await cls._poll_and_send_audio(task_id=task_id, interface=interface)
         return result

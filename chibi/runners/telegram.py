@@ -5,6 +5,8 @@ from loguru import logger
 from telegram import (
     BotCommand,
     CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
     Update,
@@ -26,13 +28,13 @@ from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
-    handle_available_provider_options,
     handle_image_generation,
     handle_model_selection,
     handle_provider_api_key_set,
     handle_reset,
     handle_user_prompt,
 )
+from chibi.services.interface import TelegramInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.task_manager import task_manager
 from chibi.utils.app import log_application_settings, run_heartbeat
@@ -41,6 +43,7 @@ from chibi.utils.telegram import (
     current_user_action,
     get_telegram_chat,
     get_telegram_message,
+    get_telegram_user,
     get_user_context,
     set_user_action,
     set_user_context,
@@ -106,13 +109,14 @@ class ChibiBot:
 
     @check_user_allowance
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.run_task(handle_reset(update=update, context=context))
+        self.run_task(handle_reset(interface=TelegramInterface(update=update, context=context)))
 
     async def _handle_message_with_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         provider_name = get_user_context(context=context, key=UserContext.SELECTED_PROVIDER, expected_type=str)
         if not provider_name:
             return None
-        self.run_task(handle_provider_api_key_set(update=update, context=context, provider_name=provider_name))
+        telegram_interface = TelegramInterface(update=update, context=context)
+        self.run_task(handle_provider_api_key_set(provider_name=provider_name, interface=telegram_interface))
         return None
 
     @check_user_allowance
@@ -121,7 +125,10 @@ class ChibiBot:
         assert telegram_message.text
         prompt = telegram_message.text.replace("/imagine", "", 1).strip()
         if prompt:
-            self.run_task(handle_image_generation(update=update, context=context, prompt=prompt))
+            set_user_action(context=context, action=UserAction.NONE)
+            self.run_task(
+                handle_image_generation(prompt=prompt, interface=TelegramInterface(update=update, context=context))
+            )
             return None
         set_user_action(context=context, action=UserAction.IMAGINE)
         await telegram_message.reply_text("Ok, now give me an image prompt.")
@@ -131,7 +138,7 @@ class ChibiBot:
         telegram_chat = get_telegram_chat(update=update)
         telegram_message = get_telegram_message(update=update)
         if telegram_message.voice:
-            self.run_task(handle_user_prompt(update=update, context=context))
+            self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
             return None
 
         prompt = telegram_message.text
@@ -144,7 +151,10 @@ class ChibiBot:
             return await self._handle_message_with_api_key(update=update, context=context)
 
         if current_user_action(context=context) == UserAction.IMAGINE:
-            self.run_task(handle_image_generation(update=update, context=context, prompt=prompt))
+            set_user_action(context=context, action=UserAction.NONE)
+            self.run_task(
+                handle_image_generation(prompt=prompt, interface=TelegramInterface(update=update, context=context))
+            )
             return None
 
         if (
@@ -154,16 +164,39 @@ class ChibiBot:
             and not user_interacts_with_bot(update=update, context=context)
         ):
             return None
-        self.run_task(handle_user_prompt(update=update, context=context))
+        self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
 
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.run_task(handle_user_prompt(update=update, context=context))
+        self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
+
+    @staticmethod
+    def create_model_selection_keyboad(
+        models: list[ModelChangeSchema], context: ContextTypes.DEFAULT_TYPE
+    ) -> InlineKeyboardMarkup:
+        mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models)}
+        set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
+
+        keyboard = [
+            [InlineKeyboardButton(f"{model.display_name} ({model.provider})", callback_data=key)]
+            for key, model in mapped_models.items()
+        ]
+        for model in models:
+            logger.debug(f"{model.provider}: {model.name}")
+        keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
+        return InlineKeyboardMarkup(keyboard)
 
     @check_user_allowance
     async def show_gpt_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
-        reply_markup = await handle_available_model_options(update=update, context=context)
+
+        available_models = await handle_available_model_options(
+            user_id=get_telegram_user(update=update).id,
+            image_generation=False,
+            interface=TelegramInterface(update=update, context=context),
+        )
+
+        reply_markup = self.create_model_selection_keyboad(models=available_models, context=context)
 
         if active_model := get_user_context(context=context, key=UserContext.ACTIVE_MODEL, expected_type=str):
             message = f"Active model: {active_model}. You  may select another one from the list below:"
@@ -175,7 +208,13 @@ class ChibiBot:
     @check_user_allowance
     async def show_image_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
-        reply_markup = await handle_available_model_options(update=update, context=context, image_generation=True)
+        available_models = await handle_available_model_options(
+            user_id=get_telegram_user(update=update).id,
+            image_generation=True,
+            interface=TelegramInterface(update=update, context=context),
+        )
+
+        reply_markup = self.create_model_selection_keyboad(models=available_models, context=context)
 
         if active_model := get_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, expected_type=str):
             message = f"Active model: {active_model}. You  may select another one from the list below:"
@@ -186,7 +225,17 @@ class ChibiBot:
 
     async def show_api_key_set_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
-        reply_markup = await handle_available_provider_options()
+        keyboard = [
+            [InlineKeyboardButton(name, callback_data=name)]
+            for name, klass in RegisteredProviders.all.items()
+            if name != "Cloudflare"
+            # Temporary removing the Cloudflare provider from the "public mode"
+            # because we need to handle account id setting first. Will provide
+            # such a support in one of the following releases.
+        ]
+        keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
         message = "Please, select a provider:"
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
@@ -219,10 +268,11 @@ class ChibiBot:
             set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, value=model.name)
         else:
             set_user_context(context=context, key=UserContext.ACTIVE_MODEL, value=model.name)
+        telegram_interface = TelegramInterface(update=update, context=context)
+
         self.run_task(
             handle_model_selection(
-                update=update,
-                context=context,
+                interface=telegram_interface,
                 model=model,
                 query=query,
             )

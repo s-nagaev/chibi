@@ -347,12 +347,12 @@ async def send_message_in_plain_text_and_file(
     )
 
 
-async def send_gpt_answer_message(
-    gpt_answer: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True
+async def send_answer_message(
+    message: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True
 ) -> None:
     try:
         await send_long_message(
-            message=gpt_answer,
+            message=message,
             update=update,
             context=context,
             parse_mode=constants.ParseMode.MARKDOWN_V2,
@@ -364,7 +364,7 @@ async def send_gpt_answer_message(
             f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
             f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
         )
-        await send_message_in_plain_text_and_file(message=gpt_answer, update=update, context=context, reply=reply)
+        await send_message_in_plain_text_and_file(message=message, update=update, context=context, reply=reply)
 
 
 def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:

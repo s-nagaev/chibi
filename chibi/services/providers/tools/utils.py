@@ -9,13 +9,12 @@ from cachetools import TTLCache
 from fake_useragent import UserAgent
 from httpx import Response
 from loguru import logger
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import gpt_settings
 from chibi.constants import SUB_EXECUTOR_PROMPT
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
+from chibi.services.interface import UserInterface
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 from chibi.utils.app import SingletonMeta
@@ -32,8 +31,7 @@ ua_generator = UserAgent()
 class AdditionalOptions(TypedDict, total=False):
     user_id: int | None
     model: str | None
-    telegram_context: ContextTypes.DEFAULT_TYPE | None
-    telegram_update: Update | None
+    interface: UserInterface | None
 
 
 def _generate_google_search_referrer(target_url: str) -> str:

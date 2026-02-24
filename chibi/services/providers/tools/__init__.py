@@ -18,6 +18,6 @@ from .mcp_simple import McpEchoTool
 from .media import TextToSpeechTool
 from .memory import SetUserInfoTool
 from .schemas import ToolResponse
-from .send import SendAudioTool, SendImageTool, SendMediaGroupTool, SendVideoTool
+from .send import SendAudioTool, SendImageTool, SendVideoTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
 from .web import DDGSWebSearchTool, GoogleSearchTool, ReadWebPageTool, SearchNewsTool

@@ -15,13 +15,12 @@ from mistralai.models import (
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
-from telegram import Update
-from telegram.ext import ContextTypes
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -122,18 +121,12 @@ class MistralAI(RestApiFriendlyProvider):
         user: User | None = None,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_mistral() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(),
-            user=user,
-            model=model,
-            system_prompt=system_prompt,
-            context=context,
-            update=update,
+            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -147,8 +140,7 @@ class MistralAI(RestApiFriendlyProvider):
         model: str,
         user: User | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
-        update: Update | None = None,
-        context: ContextTypes.DEFAULT_TYPE | None = None,
+        interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
         if not messages or not isinstance(messages[0], SystemMessage):
@@ -183,13 +175,12 @@ class MistralAI(RestApiFriendlyProvider):
 
         thoughts = self.get_thoughts(assistant_message=message_data)
         if thoughts:
-            await send_llm_thoughts(thoughts=thoughts, context=context, update=update)
+            await send_llm_thoughts(thoughts=thoughts, interface=interface)
 
         logger.log("THINK", f"{model}: {thoughts}. {get_usage_msg(usage=usage)}")
         tool_context: dict[str, Any] = {
             "user_id": user.id if user else None,
-            "telegram_context": context,
-            "telegram_update": update,
+            "interface": interface,
             "model": model,
         }
 
@@ -232,8 +223,7 @@ class MistralAI(RestApiFriendlyProvider):
             model=model,
             user=user,
             system_prompt=system_prompt,
-            context=context,
-            update=update,
+            interface=interface,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
