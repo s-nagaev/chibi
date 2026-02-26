@@ -78,14 +78,14 @@ async def test_send_usage_metrics_delegation(mock_settings, metric):
     with patch("chibi.services.metrics.application_settings", mock_settings):
         # Patch run_task on the global task_manager instance
         with patch.object(task_manager, "run_task") as mock_run_task:
-            MetricsService.send_usage_metrics(metric, model="gpt-4", provider="openai")
+            MetricsService.send_usage_metrics(metric=metric, model="gpt-4", provider="openai")
 
             mock_run_task.assert_called_once()
             # Verify that the argument passed to run_task is a coroutine
-            args, _ = mock_run_task.call_args
-            assert asyncio.iscoroutine(args[0])
+            call = mock_run_task.call_args_list[0]
+            assert asyncio.iscoroutine(call.kwargs["coro"])
             # Clean up the coroutine to avoid warnings
-            args[0].close()
+            call.kwargs["coro"].close()
 
 
 @pytest.mark.asyncio

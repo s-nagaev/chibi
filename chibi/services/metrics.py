@@ -45,10 +45,10 @@ class MetricsService:
     def send_usage_metrics(cls, metric: UsageSchema, model: str, provider: str, user: User | None = None) -> None:
         if not application_settings.is_influx_configured:
             return None
-
+        user_id = user.id if user else 0
         tags = MetricTagsSchema(
-            user_id=user.id if user else 0,
+            user_id=user_id,
             provider=provider,
             model=model,
         )
-        task_manager.run_task(cls._send_to_influx(metric=metric, tags=tags))
+        task_manager.run_task(coro=cls._send_to_influx(metric=metric, tags=tags), user_id=-1)

@@ -11,6 +11,7 @@ from chibi.services.interface import UserInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools import ToolResponse
 from chibi.services.providers.utils import get_usage_msg
+from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     check_history_and_summarize,
     generate_image,
@@ -151,7 +152,15 @@ async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
     await reset_chat_history(user_id=interface.user_id)
+    task_manager.kill_all_user_tasks(user_id=interface.user_id)
     await interface.send_message(message="Done!", reply=False)
+
+
+async def handle_stop(interface: UserInterface) -> None:
+    logger.info(f"{interface.user_data}: stopping everything...")
+
+    task_manager.kill_all_user_tasks(user_id=interface.user_id)
+    await interface.send_message(message="Everything stopped.", reply=False)
 
 
 @handle_gpt_exceptions

@@ -2,6 +2,7 @@ from abc import ABC
 from io import BytesIO
 from typing import Any
 
+from loguru import logger
 from telegram import Chat as TelegramChat
 from telegram import File, Update
 from telegram.constants import ChatAction
@@ -125,14 +126,13 @@ class TelegramInterface(UserInterface):
         return f"{self._chat.type.upper()} chat ({self._chat.id})"
 
     async def get_text_prompt(self) -> str | None:
-        print(self.update.effective_message)
         if message := self.update.effective_message:
             return message.text
         raise ValueError("Telegram incoming update does not contain valid message data.")
 
     async def get_voice_prompt(self) -> BytesIO | None:
         if not self.update.effective_message:
-            raise ValueError("Telegram incoming update does not contain valid message data.")
+            return None
         if voice := self.update.effective_message.voice:
             file_id = voice.file_id
             file: File = await self.context.bot.get_file(file_id)
@@ -154,7 +154,7 @@ class TelegramInterface(UserInterface):
     async def send_reaction(self, reaction: str) -> None:
         if message := self.update.effective_message:
             await message.set_reaction(reaction=reaction, is_big=True)
-        raise ValueError("Telegram incoming update does not contain valid message data.")
+        logger.warning("We tried to set the reaction on user message, but no user message found in TG update.")
 
     async def delete_last_user_message(self) -> None:
         if message := self.update.effective_message:
@@ -182,6 +182,7 @@ class TelegramInterface(UserInterface):
         await self.context.bot.send_audio(
             chat_id=self.chat_id,
             audio=audio,
+            title=title,
             performer=performer,
             caption=caption,
             duration=duration,

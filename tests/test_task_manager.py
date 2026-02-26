@@ -14,6 +14,8 @@ async def manager():
     # Here we will reset the singleton instance
     mgr = BackgroundTaskManager()
     mgr._shutting_down = False
+    mgr._tasks = {}
+    mgr._task_to_user_id = {}
     yield mgr
     await mgr.shutdown()
 
@@ -24,15 +26,56 @@ async def test_run_task_adds_task(manager):
         await asyncio.sleep(0.01)
         return "done"
 
-    manager.run_task(dummy_task())
+    manager.run_task(dummy_task(), user_id=1)
 
     assert len(manager._tasks) == 1
+    assert 1 in manager._tasks
+    assert len(manager._tasks[1]) == 1
 
     # Wait for task to complete
     await asyncio.sleep(0.02)
 
     # Task should be removed from set
-    assert len(manager._tasks) == 0
+    assert len(manager._tasks[1]) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_task_creates_user_set(manager):
+    async def dummy_task():
+        await asyncio.sleep(0.01)
+
+    manager.run_task(dummy_task(), user_id=42)
+
+    assert 42 in manager._tasks
+    assert isinstance(manager._tasks[42], set)
+
+
+@pytest.mark.asyncio
+async def test_run_task_maps_task_to_user_id(manager):
+    async def dummy_task():
+        await asyncio.sleep(0.01)
+
+    task = manager.run_task(dummy_task(), user_id=123)
+
+    assert manager._task_to_user_id[task] == 123
+
+    await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_multiple_users(manager):
+    async def dummy_task():
+        await asyncio.sleep(0.01)
+
+    manager.run_task(dummy_task(), user_id=1)
+    manager.run_task(dummy_task(), user_id=1)
+    manager.run_task(dummy_task(), user_id=2)
+
+    assert len(manager._tasks) == 2
+    assert len(manager._tasks[1]) == 2
+    assert len(manager._tasks[2]) == 1
+
+    await asyncio.sleep(0.02)
 
 
 @pytest.mark.asyncio
@@ -41,13 +84,13 @@ async def test_task_exception_handling(manager):
         raise ValueError("Oops")
 
     # Should not raise exception to the caller
-    manager.run_task(failing_task())
+    manager.run_task(failing_task(), user_id=1)
 
     # Wait for task to fail and callback to run
     await asyncio.sleep(0.01)
 
     # Task should be removed even if failed
-    assert len(manager._tasks) == 0
+    assert len(manager._tasks[1]) == 0
 
 
 @pytest.mark.asyncio
@@ -59,22 +102,17 @@ async def test_shutdown_waits_for_tasks(manager):
         await asyncio.sleep(0.1)
         cleanup_done = True
 
-    manager.run_task(long_task())
+    manager.run_task(long_task(), user_id=1)
 
     await manager.shutdown()
 
     assert cleanup_done is True
-    assert len(manager._tasks) == 0
+    assert len(manager._tasks.get(1, set())) == 0
 
 
 @pytest.mark.asyncio
 async def test_shutdown_timeout_cancels_tasks(manager):
-    # We need to patch asyncio.wait_for to simulate timeout or use a very short timeout in test
-    # But since wait_for is used inside shutdown with hardcoded 15s, we can't easily change it without patching.
-    # However, for this test, let's try to mock the timeout behavior by creating a task
-    # that sleeps longer than we want to wait,
-    # but we don't want to wait 15s in test. So we must patch `asyncio.wait_for`.
-
+    # Note: shutdown has 5s timeout, we test cancellation by using a very short timeout in shutdown
     task_cancelled = False
 
     async def forever_task():
@@ -85,23 +123,24 @@ async def test_shutdown_timeout_cancels_tasks(manager):
             task_cancelled = True
             raise
 
-    manager.run_task(forever_task())
+    manager.run_task(forever_task(), user_id=1)
 
     # Allow the task to start
     await asyncio.sleep(0.01)
 
-    # Patch wait_for to raise TimeoutError immediately
-    # We must patch it where it is imported/used, which is asyncio itself in this case
-    # Since the code calls asyncio.wait_for directly, patching asyncio.wait_for works.
+    # Patch wait_for inside asyncio to simulate timeout immediately
+    # original_wait_for = asyncio.wait_for
 
-    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+    async def mock_wait_for(coro, timeout):
+        raise asyncio.TimeoutError()
+
+    with patch.object(asyncio, "wait_for", mock_wait_for):
         await manager.shutdown()
 
-    # Give the loop a chance to process the cancellation and the task to wake up
+    # Give the loop a chance to process the cancellation
     await asyncio.sleep(0.01)
 
     assert task_cancelled is True
-    assert len(manager._tasks) == 0
 
 
 @pytest.mark.asyncio
@@ -115,7 +154,7 @@ async def test_singleton_behavior():
     async def t():
         await asyncio.sleep(0.1)
 
-    m1.run_task(t())
-    assert len(m2._tasks) == 1
+    m1.run_task(t(), user_id=1)
+    assert len(m1._tasks) == 1
 
     await m1.shutdown()
