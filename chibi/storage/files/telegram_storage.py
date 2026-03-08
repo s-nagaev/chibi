@@ -48,3 +48,9 @@ class TelegramFileStorage(FileStorage):
 
     async def delete(self, file_id: str) -> None:
         raise NotImplementedError
+
+    async def get_file_info(self, file_id: str) -> dict[str, Any]:
+        file_meta = await get_telegram_document(user_id=self.interface.user_id, file_unique_id=file_id)
+        if not file_meta:
+            raise FileNotFoundError(f"No file with ID '{file_id}' found")
+        return file_meta.model_dump()

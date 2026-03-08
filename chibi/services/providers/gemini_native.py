@@ -243,7 +243,7 @@ class Gemini(RestApiFriendlyProvider):
 
         response: GenerateContentResponse = await self._generate_content(
             model=model_name,
-            contents=messages,
+            contents=messages,  # type: ignore
             config=generation_config,
         )
         answer = self._get_text(response)
@@ -366,7 +366,7 @@ class Gemini(RestApiFriendlyProvider):
         async with Client(api_key=gpt_settings.gemini_key, http_options=http_options).aio as client:
             response: GenerateContentResponse = await client.models.generate_content(
                 model=model,
-                contents=[prompt],
+                contents=[prompt],  # type: ignore
                 config=generation_config,
             )
         if not response.parts:
@@ -421,7 +421,7 @@ class Gemini(RestApiFriendlyProvider):
         ]
         response: GenerateContentResponse = await self._generate_content(
             model=moderator_model,
-            contents=messages,
+            contents=messages,  # type: ignore
             config=generation_config,
         )
         answer = self._get_text(response)
@@ -569,7 +569,7 @@ class Gemini(RestApiFriendlyProvider):
 
         response = await self._generate_content(
             model=model,
-            contents=[
+            contents=[  # type: ignore
                 "STT this audio clip",
                 Part.from_bytes(
                     data=audio.read(),
@@ -606,7 +606,7 @@ class Gemini(RestApiFriendlyProvider):
 
         response = await self._generate_content(
             model=model,
-            contents=[
+            contents=[  # type: ignore
                 Part.from_bytes(
                     data=image,
                     mime_type=mime_type,

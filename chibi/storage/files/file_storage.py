@@ -18,5 +18,8 @@ class FileStorage(ABC):
     async def delete(self, file_id: str) -> None:
         raise NotImplementedError
 
+    async def get_file_info(self, file_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
     async def get_available_files(self, limit: int = 0) -> dict[str, str | int]:
         raise NotImplementedError

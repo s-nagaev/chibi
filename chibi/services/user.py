@@ -230,12 +230,30 @@ async def generate_image(
 
 @inject_database
 async def describe_image(
-    db: Database, user_id: int, image: bytes, mime_type: str, model: str | None = None
+    db: Database,
+    user_id: int,
+    image: bytes,
+    mime_type: str,
+    model: str | None = None,
+    prompt: str | None = None,
 ) -> VisionResultSchema:
+    """Analyze an image using the user's vision provider.
+
+    Args:
+        db: Database instance.
+        user_id: User ID.
+        image: Image data as bytes.
+        mime_type: MIME type of the image.
+        model: Optional vision model override.
+        prompt: Optional prompt to guide the vision analysis.
+
+    Returns:
+        Vision analysis result.
+    """
     user = await db.get_or_create_user(user_id=user_id)
     provider = user.vision_provider
 
-    return await provider.vision(image=image, model=model, mime_type=mime_type)
+    return await provider.vision(image=image, model=model, mime_type=mime_type, prompt=prompt)
 
 
 @cached(ttl=3600)

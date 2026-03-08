@@ -18,3 +18,6 @@ class LocalFileStorage(FileStorage):
 
     async def delete(self, file_id: str) -> None:
         raise NotImplementedError
+
+    async def get_file_info(self, file_id: str) -> dict[str, Any]:
+        raise NotImplementedError
