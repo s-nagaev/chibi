@@ -159,10 +159,6 @@ class ChibiBot:
 
         interface = TelegramInterface(update=update, context=context)
         storage = TelegramFileStorage(interface=interface)
-        import pprint
-
-        pp = pprint.PrettyPrinter(indent=4)
-        pp.pprint(message.to_dict())
 
         if document_meta := message.document:
             await storage.save(file_metadata=document_meta.to_dict())
