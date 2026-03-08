@@ -1,3 +1,4 @@
+import base64
 from io import BytesIO
 
 from loguru import logger
@@ -6,7 +7,8 @@ from openai.types import ImagesResponse, ReasoningEffort
 
 from chibi.config import gpt_settings
 from chibi.constants import OPENAI_TTS_INSTRUCTIONS
-from chibi.services.providers.provider import OpenAIFriendlyProvider
+from chibi.schemas.app import VisionResultSchema
+from chibi.services.providers.provider import OpenAIFriendlyProvider, ServiceResponseError
 
 
 class OpenAI(OpenAIFriendlyProvider):
@@ -16,6 +18,7 @@ class OpenAI(OpenAIFriendlyProvider):
     stt_ready = True
     image_generation_ready = True
     moderation_ready = True
+    vision_ready = True
 
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
@@ -28,6 +31,7 @@ class OpenAI(OpenAIFriendlyProvider):
     default_stt_model = "whisper-1"
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"
+    default_vision_model = "gpt-4.1-mini"
 
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         model = model or self.default_stt_model
@@ -40,6 +44,58 @@ class OpenAI(OpenAIFriendlyProvider):
             logger.info(f"Transcribed text: {response.text}")
             return response.text
         raise ValueError("Could not transcribe audio message")
+
+    async def vision(
+        self,
+        image: bytes,
+        mime_type: str,
+        model: str | None = None,
+        prompt: str | None = None,
+    ) -> VisionResultSchema:
+        model = model or self.default_vision_model
+        prompt = prompt or "Describe the image in detail."
+        logger.info(f"Analyzing image with model {model}...")
+
+        # Encode image to base64
+        image_base64 = base64.b64encode(image).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{image_base64}"
+
+        # Use parse() for structured output with Pydantic models
+        response = await self.get_client().chat.completions.parse(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "high"},
+                        },
+                    ],
+                }
+            ],
+            response_format=VisionResultSchema,
+            max_tokens=4096,
+        )
+
+        if not response.choices:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        result = response.choices[0].message
+        if not result or not result.parsed:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        logger.info(f"Image analyzed successfully: {result.parsed.short_description[:50]}...")
+        return result.parsed
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         voice = voice or self.default_tts_voice

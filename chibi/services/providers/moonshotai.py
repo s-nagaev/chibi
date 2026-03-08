@@ -9,7 +9,7 @@ class MoonshotAI(OpenAIFriendlyProvider):
     chat_ready = True
     moderation_ready = True
 
-    base_url = "https://api.moonshot.cn/v1"
+    base_url = "https://api.moonshot.ai/v1"
     name = "MoonshotAI"
     model_name_keywords = ["moonshot", "kimi"]
     model_name_keywords_exclude = ["vision"]

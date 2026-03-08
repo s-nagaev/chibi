@@ -43,28 +43,77 @@ P = ParamSpec("P")
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
+    """Retrieve the Telegram user from the update.
+
+    Args:
+        update: The incoming Telegram update.
+
+    Returns:
+        The Telegram user associated with the update.
+
+    Raises:
+        ValueError: If the update does not contain valid user data.
+    """
     if user := update.effective_user:
         return user
     raise ValueError(f"Telegram incoming update does not contain valid user data. Update ID: {update.update_id}")
 
 
 def get_telegram_chat(update: Update) -> TelegramChat:
+    """Retrieve the Telegram chat from the update.
+
+    Args:
+        update: The incoming Telegram update.
+
+    Returns:
+        The Telegram chat associated with the update.
+
+    Raises:
+        ValueError: If the update does not contain valid chat data.
+    """
     if chat := update.effective_chat:
         return chat
     raise ValueError(f"Telegram incoming update does not contain valid chat data. Update ID: {update.update_id}")
 
 
 def user_data(update: Update) -> str:
+    """Get a string representation of the user for logging.
+
+    Args:
+        update: The incoming Telegram update.
+
+    Returns:
+        A string containing the user's name and ID.
+    """
     user = get_telegram_user(update=update)
     return f"{user.name} ({user.id})"
 
 
 def chat_data(update: Update) -> str:
+    """Get a string representation of the chat for logging.
+
+    Args:
+        update: The incoming Telegram update.
+
+    Returns:
+        A string containing the chat type and ID.
+    """
     chat = get_telegram_chat(update=update)
     return f"{chat.type.upper()} chat ({chat.id})"
 
 
 def get_telegram_message(update: Update) -> TelegramMessage:
+    """Retrieve the Telegram message from the update.
+
+    Args:
+        update: The incoming Telegram update.
+
+    Returns:
+        The Telegram message associated with the update.
+
+    Raises:
+        ValueError: If the update does not contain valid message data.
+    """
     if message := update.effective_message:
         return message
     raise ValueError(f"Telegram incoming update does not contain valid message data. Update ID: {update.update_id}")
@@ -73,20 +122,13 @@ def get_telegram_message(update: Update) -> TelegramMessage:
 def _get_next_token(text: str, pos: int, escaped: bool) -> tuple[str | None, int]:
     """Find the next Markdown token at the given position.
 
-    Checks if the text starting from `pos` begins with any known Markdown token,
-    unless the preceding character was an escape character '\'.
-
     Args:
         text: The string to search within.
-        pos: The starting position in the text to check for a token.
-        escaped: True if the character immediately preceding `pos` was an
-                 escape character ('\'), False otherwise.
+        pos: The starting position in the text.
+        escaped: Whether the character at pos is escaped.
 
     Returns:
-        A tuple containing:
-        - The found Markdown token (str) or None if no token is found
-          at the position or if it's escaped.
-        - The length of the found token (int), or 0 if no token is found.
+        A tuple with the found token and its length.
     """
     if escaped:
         return None, 0
@@ -102,32 +144,16 @@ def split_markdown_v2(
     recommended_margin: int = 400,
     safety_margin: int = 50,
 ) -> list[str]:
-    """Split a Markdown text into chunks while trying to preserve formatting.
-
-    Attempts to split the text into chunks smaller than `limit`. It tracks
-    opening and closing Markdown tokens using a stack. When a chunk needs to be
-    split, it appends the necessary closing tokens to the end of the current
-    chunk and prepends the corresponding opening tokens to the beginning of the
-    next chunk.
-
-    Splitting priority:
-    1. At a newline character when the buffer size is close to the limit
-       (within `recommended_margin`).
-    2. Anywhere when the buffer size is very close to the limit
-       (within `safety_margin`).
+    """Split a Markdown text into chunks.
 
     Args:
         text: The Markdown string to split.
-        limit: The maximum desired length for each chunk. Defaults to
-               `constants.MessageLimit.MAX_TEXT_LENGTH`.
-        recommended_margin: The preferred distance from the `limit` at which
-               to split, ideally looking for a newline.
-        safety_margin: The absolute minimum distance from the `limit` at which
-               a split must occur, regardless of the character.
+        limit: The maximum desired length for each chunk.
+        recommended_margin: The preferred distance from the limit at which to split.
+        safety_margin: The absolute minimum distance from the limit at which a split must occur.
 
     Returns:
-        A list of strings, where each string is a chunk of the original text,
-        with formatting tokens adjusted to maintain validity across chunks.
+        A list of string chunks.
     """
     if len(text) <= limit:
         return [text]
@@ -175,6 +201,17 @@ async def send_message(
     reply: bool = True,
     **kwargs: Any,
 ) -> TelegramMessage:
+    """Send a message via Telegram.
+
+    Args:
+        update: The incoming Telegram update.
+        context: The update context.
+        reply: Whether to reply to the message.
+        **kwargs: Additional arguments for send_message.
+
+    Returns:
+        The sent Telegram message.
+    """
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
 
@@ -195,6 +232,16 @@ async def send_long_message(
     normalize_md: bool = True,
     reply: bool = True,
 ) -> None:
+    """Send a long message, splitting it if necessary.
+
+    Args:
+        message: The message text.
+        update: The incoming Telegram update.
+        context: The update context.
+        parse_mode: The parse mode for the message.
+        normalize_md: Whether to normalize Markdown.
+        reply: Whether to reply to the message.
+    """
     if normalize_md:
         message = telegramify_markdown.markdownify(message)
         chunks = split_markdown_v2(message)
@@ -219,6 +266,13 @@ async def send_audio(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
+    """Send audio to the user.
+
+    Args:
+        audio: The audio data.
+        update: The incoming Telegram update.
+        context: The update context.
+    """
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
     await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.RECORD_VOICE)
@@ -229,6 +283,14 @@ async def send_audio(
 
 
 async def download_image(image_url: str) -> bytes:
+    """Download an image from a URL.
+
+    Args:
+        image_url: The URL of the image.
+
+    Returns:
+        The image data as bytes.
+    """
     parsed_url = urlparse(image_url)
     params = parse_qs(parsed_url.query)
     image_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
@@ -242,6 +304,13 @@ async def send_images(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
+    """Send a list of images to the user.
+
+    Args:
+        images: A list of image URLs or BytesIO objects.
+        update: The incoming Telegram update.
+        context: The update context.
+    """
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
     await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
@@ -311,6 +380,14 @@ async def send_images(
 
 
 async def send_text_file(file_content: str, file_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a text file to the user.
+
+    Args:
+        file_content: The content of the file.
+        file_name: The name of the file.
+        update: The incoming Telegram update.
+        context: The update context.
+    """
     telegram_chat = get_telegram_chat(update=update)
     text_file = BytesIO(file_content.encode("utf-8"))
     text_file.name = file_name
@@ -328,6 +405,14 @@ async def send_message_in_plain_text_and_file(
     context: ContextTypes.DEFAULT_TYPE,
     reply: bool = True,
 ) -> None:
+    """Send a message as plain text and as a file.
+
+    Args:
+        message: The message text.
+        update: The incoming Telegram update.
+        context: The update context.
+        reply: Whether to reply to the message.
+    """
     telegram_chat = get_telegram_chat(update=update)
 
     await send_long_message(message=message, update=update, context=context, normalize_md=False, reply=reply)
@@ -350,6 +435,14 @@ async def send_message_in_plain_text_and_file(
 async def send_answer_message(
     message: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True
 ) -> None:
+    """Send an answer message, handling potential Markdown errors.
+
+    Args:
+        message: The message text.
+        update: The incoming Telegram update.
+        context: The update context.
+        reply: Whether to reply to the message.
+    """
     try:
         await send_long_message(
             message=message,
@@ -359,7 +452,6 @@ async def send_answer_message(
             reply=reply,
         )
     except BadRequest as e:
-        # Trying to handle an exception connected with markdown parsing: just re-sending the message in a text mode.
         logger.error(
             f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
             f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
@@ -370,16 +462,11 @@ async def send_answer_message(
 def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:
     """Get the current action state associated with the user.
 
-    Retrieve the action stored under the `UserContext.ACTION` key in the user's
-    context data. If `user_data` is missing or the action is not set, it defaults
-    to `UserAction.NONE`.
-
     Args:
-        context: The update context provided by the `python-telegram-bot` library.
+        context: The update context.
 
     Returns:
-        The current `UserAction` enum member associated with the user. Defaults to
-        `UserAction.NONE` if no action is set or `user_data` is unavailable.
+        The current UserAction.
     """
     if context.user_data is None:
         return UserAction.NONE
@@ -389,12 +476,9 @@ def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:
 def set_user_action(context: ContextTypes.DEFAULT_TYPE, action: UserAction) -> None:
     """Set the current action state for the user.
 
-    Store the provided `UserAction` under the `UserContext.ACTION` key in the user's
-    context data. If `user_data` does not exist, do nothing.
-
     Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        action: The `UserAction` enum member to set as the user's current action state.
+        context: The update context.
+        action: The UserAction to set.
     """
     if context.user_data is not None:
         context.user_data[UserContext.ACTION] = action
@@ -402,6 +486,15 @@ def set_user_action(context: ContextTypes.DEFAULT_TYPE, action: UserAction) -> N
 
 
 def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if the user is interacting with the bot.
+
+    Args:
+        update: The incoming Telegram update.
+        context: The update context.
+
+    Returns:
+        True if the user is interacting with the bot, False otherwise.
+    """
     telegram_message = get_telegram_message(update=update)
     prompt = telegram_message.text
 
@@ -421,19 +514,13 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expected_type: Type[R]) -> R | None:
     """Retrieve a specific value from the user's context data.
 
-    Safely access the `user_data` dictionary associated with the current user
-    in the Telegram bot context and return the value associated with the given key,
-    cast to the expected type.
-
     Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        key: An enum member (UserContext) representing the key for the data to retrieve.
-        expected_type: The Python type the retrieved value is expected to conform to.
-                       Used for casting the result.
+        context: The update context.
+        key: The key for the data to retrieve.
+        expected_type: The expected type of the value.
 
     Returns:
-        The value associated with the key, cast to `expected_type`, if it exists
-        and `user_data` is available. Otherwise, returns None.
+        The value associated with the key, or None.
     """
     if context.user_data is not None:
         return cast(R, context.user_data.get(key, None))
@@ -443,14 +530,10 @@ def get_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, expec
 def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value: object | None) -> None:
     """Set or update a specific value in the user's context data.
 
-    Safely access the `user_data` dictionary associated with the current user
-    and store the provided value under the given key. If `user_data` does not
-    exist, do nothing.
-
     Args:
-        context: The update context provided by the `python-telegram-bot` library.
-        key: An enum member (UserContext) representing the key under which to store the value.
-        value: The value to store in the user's context data. Can be any object or None.
+        context: The update context.
+        key: The key under which to store the value.
+        value: The value to store.
     """
     if context.user_data is not None:
         context.user_data[key] = value
@@ -458,12 +541,28 @@ def set_user_context(context: ContextTypes.DEFAULT_TYPE, key: UserContext, value
 
 
 def user_is_allowed(tg_user: TelegramUser) -> bool:
+    """Check if the user is allowed to interact with the bot.
+
+    Args:
+        tg_user: The Telegram user.
+
+    Returns:
+        True if the user is allowed, False otherwise.
+    """
     if not telegram_settings.users_whitelist:
         return True
     return any(identifier in telegram_settings.users_whitelist for identifier in (str(tg_user.id), tg_user.username))
 
 
 def group_is_allowed(tg_chat: TelegramChat) -> bool:
+    """Check if the group is allowed.
+
+    Args:
+        tg_chat: The Telegram chat.
+
+    Returns:
+        True if the group is allowed, False otherwise.
+    """
     return tg_chat.id in telegram_settings.groups_whitelist
 
 
@@ -472,19 +571,11 @@ def check_user_allowance(
 ) -> Callable[P, Coroutine[Any, Any, R | None]]:
     """Decorator controlling access to the chatbot.
 
-    This deco checks:
-        - if the specific user is allowed to interact with the chatbot, using ALLOW_BOTS and USERS_WHITELIST;
-        - if the chatbot is allowed to be in a specific group, using a GROUPS_WHITELIST.
-
-    If the specific user is disallowed to interact with the chatbot, the corresponding message will be sent.
-    If the chatbot is disallowed to be in a specific group, it will send the corresponding message
-    and leave it immediately.
-
     Args:
-        func: async function that may rise openai exception.
+        func: The async function to decorate.
 
     Returns:
-        Wrapper function object.
+        The wrapper function.
     """
 
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
@@ -522,6 +613,13 @@ def check_user_allowance(
 
 
 def show_message(header: str, message: str, message_type: Literal["err", "warn", "inf"]) -> None:
+    """Show a formatted message to the user.
+
+    Args:
+        header: The message header.
+        message: The message text.
+        message_type: The type of the message ("err", "warn", "inf").
+    """
     if message_type == "err":
         text_color = "red"
     elif message_type == "warn":
@@ -545,10 +643,19 @@ def show_message(header: str, message: str, message_type: Literal["err", "warn",
 
 
 def _var(env_name: str) -> str:
+    """Format an environment variable name.
+
+    Args:
+        env_name: The environment variable name.
+
+    Returns:
+        The formatted environment variable name.
+    """
     return click.style(env_name, fg="yellow", bold=True)
 
 
 def telegram_security_pre_start_check() -> None:
+    """Perform security checks before starting the bot."""
     security_error_header = "SECURITY CHECK FAILURE"
     security_warning_header = "SECURITY CHECK WARNING"
 
@@ -590,6 +697,7 @@ def telegram_security_pre_start_check() -> None:
 
 
 def telegram_setting_pre_start_check() -> None:
+    """Perform configuration checks before starting the bot."""
     if not telegram_settings.token:
         header = "CONFIGURATION ERROR"
         msg = f"Telegram token not set. Setting name: {_var('TELEGRAM_BOT_TOKEN')}."

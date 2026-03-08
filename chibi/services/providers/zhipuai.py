@@ -26,8 +26,12 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
             return [
-                ModelChangeSchema(provider=self.name, name="glm-image", image_generation=True),
-                ModelChangeSchema(provider=self.name, name="cogview-4-250304", image_generation=True),
+                ModelChangeSchema(
+                    provider=self.name, name="glm-image", display_name="GLM Image", image_generation=True
+                ),
+                ModelChangeSchema(
+                    provider=self.name, name="cogview-4-250304", display_name="CogView 4", image_generation=True
+                ),
             ]
         return await super().get_available_models(image_generation=False)
 

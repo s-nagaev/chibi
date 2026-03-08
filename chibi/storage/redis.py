@@ -3,9 +3,18 @@ from urllib.parse import urlparse
 
 from loguru import logger
 from redis.asyncio import Redis, from_url
+from redis.exceptions import ConnectionError, TimeoutError
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.models import Message, User
 from chibi.storage.abstract import Database
+
+retry_connection = retry(
+    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+    reraise=True,
+)
 
 
 class RedisStorage(Database):
@@ -45,17 +54,20 @@ class RedisStorage(Database):
 
         raise ValueError("Incorrect Redis DSN string provided.")
 
+    @retry_connection
     async def save_user(self, user: User) -> None:
         user_key = f"user:{user.id}"
         user_data = user.model_dump_json()
         await self.redis.set(user_key, user_data)
 
+    @retry_connection
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
         user_key = f"user:{user_id}"
         await self.redis.set(user_key, user.model_dump_json())
         return user
 
+    @retry_connection
     async def get_user(self, user_id: int) -> Optional[User]:
         user_key = f"user:{user_id}"
         user_data = await self.redis.get(user_key)
@@ -70,16 +82,19 @@ class RedisStorage(Database):
 
         return user
 
+    @retry_connection
     async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
         message_key = f"user:{user.id}:message:{message.id}"
         await self.redis.set(name=message_key, value=message.model_dump_json(exclude={"expire_at"}))
         if ttl:
             await self.redis.expire(name=message_key, time=ttl)
 
+    @retry_connection
     async def get_messages(self, user: User) -> list[dict[str, str]]:
         user_refreshed = await self.get_or_create_user(user_id=user.id)
         return [msg.model_dump(exclude={"expire_at", "id"}) for msg in user_refreshed.messages]
 
+    @retry_connection
     async def drop_messages(self, user: User) -> None:
         message_keys_pattern = f"user:{user.id}:message:*"
         message_keys = await self.redis.keys(message_keys_pattern)
@@ -87,5 +102,6 @@ class RedisStorage(Database):
         for message_key in message_keys:
             await self.redis.delete(message_key)
 
+    @retry_connection
     async def close(self) -> None:
         await self.redis.aclose()

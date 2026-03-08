@@ -37,7 +37,7 @@ from loguru import logger
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
@@ -58,16 +58,20 @@ class Gemini(RestApiFriendlyProvider):
     stt_ready = True
     image_generation_ready = True
     moderation_ready = True
+    vision_ready = True
 
     name = "Gemini"
     model_name_keywords = ["gemini", "gemma"]
     model_name_keywords_exclude = ["image", "vision", "tts", "embedding", "2.0", "1.5"]
+
     default_model = "models/gemini-2.5-pro"
     default_image_model = "models/imagen-4.0-fast-generate-001"
     default_tts_voice = "Kore"
     default_tts_model = "gemini-2.5-flash-preview-tts"
     default_stt_model = "gemini-3-flash-preview"
     default_moderation_model = "models/gemini-2.5-flash-lite"
+    default_vision_model = "models/gemini-3-flash-preview"
+
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = gpt_settings.presence_penalty
@@ -216,7 +220,9 @@ class Gemini(RestApiFriendlyProvider):
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
-        prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
+        prepared_system_prompt = await prepare_system_prompt(
+            base_system_prompt=system_prompt, user=user, interface=interface
+        )
 
         if "flash" in model_name and self.temperature > 0.4:
             temperature = 0.4
@@ -449,15 +455,19 @@ class Gemini(RestApiFriendlyProvider):
 
     def get_model_display_name(self, model_name: str) -> str:
         if "gemini-3-pro-image" in model_name:
-            display_name = model_name.replace("models/gemini-3-pro-image", "Nano Banana Pro")
+            display_name = "Nano Banana Pro"
+            return super().get_model_display_name(model_name=display_name)
+
+        if "gemini-3.1-flash-image" in model_name:
+            display_name = "Nano Banana 2"
             return super().get_model_display_name(model_name=display_name)
 
         if "gemini-2.5-flash-image" in model_name:
-            display_name = model_name.replace("models/gemini-2.5-flash-image", "Nano Banana")
+            display_name = "Nano Banana"
             return super().get_model_display_name(model_name=display_name)
 
         if "imagen" in model_name:
-            display_name = model_name.replace("generate-", "")
+            display_name = model_name.removeprefix("models/").rsplit("-generate-", 1)[0].replace("-", " ").title()
             return super().get_model_display_name(model_name=display_name)
 
         return super().get_model_display_name(model_name=model_name[7:])
@@ -580,3 +590,50 @@ class Gemini(RestApiFriendlyProvider):
             model=model,
             detail=f"Could not transcribe audio message: empty text data in response: {response}",
         )
+
+    async def vision(
+        self, image: bytes, mime_type: str, model: str | None = None, prompt: str | None = None
+    ) -> VisionResultSchema:
+        model = model or self.default_vision_model
+        prompt = prompt or "Describe the image in detail"
+        logger.info(f"Analyzing image with model {model}...")
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            http_options=http_options,
+            response_schema=VisionResultSchema,
+        )
+
+        response = await self._generate_content(
+            model=model,
+            contents=[
+                Part.from_bytes(
+                    data=image,
+                    mime_type=mime_type,
+                ),
+                prompt,
+            ],
+            config=generation_config,
+        )
+
+        result = response.text
+        if not result:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty text data in response: {response}",
+            )
+
+        try:
+            parsed_result = VisionResultSchema.model_validate_json(json_data=result, extra="ignore")
+        except Exception as e:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image or parse a result due to exception: {e}",
+            ) from e
+
+        if application_settings.log_prompt_data:
+            logger.info(f"Analyzed image: {parsed_result.model_dump()}")
+
+        return parsed_result

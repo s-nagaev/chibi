@@ -57,10 +57,13 @@ class RunCommandInTerminalTool(ChibiTool):
         model = kwargs.get("model", "Unknown model")
         user_id = kwargs.get("user_id")
         if not user_id:
-            raise ValueError("This function requires user_id to be automatically provided.")
+            raise ToolException("This function requires user_id to be automatically provided.")
 
         if not cwd:
             cwd = await get_cwd(user_id=user_id)
+
+        if cmd.startswith("cat ") and "|" not in cmd:
+            raise ToolException("To read the whole file, please use the 'read_file' tool instead.")
 
         moderation_provider = await get_moderation_provider(user_id=user_id)
 

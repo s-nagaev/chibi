@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 from openai.types import CompletionUsage
 from openai.types.completion_usage import CompletionTokensDetails, PromptTokensDetails
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from chibi.config import telegram_settings
 
@@ -52,3 +52,15 @@ class ModeratorsAnswer(BaseModel):
     status: str | None = None
     verdict: str
     reason: str | None = None
+
+
+class VisionResultSchema(BaseModel):
+    short_description: str = Field(description="Image short description, up to 100 characters")
+    full_description: str = Field(description="Image full description")
+    text: str | None = Field(
+        default=None,
+        description=(
+            "The text extracted from the image, must be filled if image is document and can be "
+            "omitted if image does not contain any text"
+        ),
+    )

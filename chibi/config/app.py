@@ -76,7 +76,8 @@ class ApplicationSettings(BaseSettings):
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory
     working_dir: str = Field(default="~/chibi")  # AI agent's CWD
     skills_dir: str = Field(default=(Path(".") / "skills").absolute().as_posix())  # absolute path to dir with skills
-    # max_consecutive_tool_calls: int = Field(default=50)
+
+    selected_file_storage: Literal["local", "telegram"] = Field(default="telegram", alias="FILE_STORAGE")
 
     @property
     def is_influx_configured(self) -> bool:

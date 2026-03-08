@@ -9,6 +9,7 @@ from .file_editor import (
     InsertAfterPatternTool,
     InsertAtLineTool,
     InsertBeforePatternTool,
+    ReadFileTool,
     ReplaceInFileRegexTool,
     ReplaceInFileTool,
     ReplaceLinesTool,

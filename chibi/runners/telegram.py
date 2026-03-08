@@ -1,3 +1,4 @@
+import json
 from typing import TypeVar
 
 from loguru import logger
@@ -8,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
+    PhotoSize,
     Update,
     constants,
 )
@@ -28,14 +30,17 @@ from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
     handle_image_generation,
+    handle_image_understanding,
     handle_model_selection,
     handle_provider_api_key_set,
     handle_reset,
-    handle_user_prompt, handle_stop,
+    handle_stop,
+    handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.task_manager import task_manager
+from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
 from chibi.utils.telegram import (
     check_user_allowance,
@@ -96,10 +101,7 @@ class ChibiBot:
         telegram_message = get_telegram_message(update=update)
         commands = [f"/{command.command} - {command.description}" for command in self.commands]
         commands_desc = "\n".join(commands)
-        help_text = (
-            f"Hey! My name is {telegram_settings.bot_name}, and I am your digital partner!\n\n"
-            f"{commands_desc}"
-        )
+        help_text = f"Hey! My name is {telegram_settings.bot_name}, and I am your digital partner!\n\n{commands_desc}"
         await telegram_message.reply_text(help_text, disable_web_page_preview=True)
 
     @check_user_allowance
@@ -148,6 +150,62 @@ class ChibiBot:
         set_user_action(context=context, action=UserAction.IMAGINE)
         await telegram_message.reply_text("Ok, now give me an image prompt.")
         return None
+
+    @check_user_allowance
+    async def file_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        message = update.effective_message
+        if not message:
+            return None
+
+        interface = TelegramInterface(update=update, context=context)
+        storage = TelegramFileStorage(interface=interface)
+        import pprint
+
+        pp = pprint.PrettyPrinter(indent=4)
+        pp.pprint(message.to_dict())
+
+        if document_meta := message.document:
+            await storage.save(file_metadata=document_meta.to_dict())
+            logger.info(
+                f"{interface.user_data}-{interface.chat_data}: File '{document_meta.file_name}' successfully uploaded."
+            )
+
+        if photo_variants := message.photo:
+            photo_meta: PhotoSize = photo_variants[-1]
+            photo_meta_dict = photo_meta.to_dict()
+            file_name = f"{photo_meta.file_unique_id}.jpeg"
+            photo_meta_dict["file_name"] = file_name
+            photo_meta_dict["mime_type"] = "image/jpeg"
+            file_id = await storage.save(file_metadata=photo_meta_dict)
+            if vision_result := await handle_image_understanding(
+                interface=interface,
+                storage=storage,
+                file_id=file_id,
+                mime_type="image/jpeg",
+            ):
+                photo_meta_dict["full_description"] = vision_result.full_description
+                photo_meta_dict["short_description"] = vision_result.short_description
+                photo_meta_dict["text"] = vision_result.text
+                await storage.save(file_metadata=photo_meta_dict)
+
+                caption = {
+                    "user_caption": message.caption or "no data",
+                    "photo_short_desc": vision_result.short_description,
+                    "file_id": file_id,
+                }
+                interface.set_caption(json.dumps(caption))
+
+            logger.info(f"{interface.user_data}-{interface.chat_data}: Photo '{file_name}' successfully uploaded.")
+
+        if await interface.get_caption():
+            task_manager.run_task(
+                coro=handle_user_prompt(interface=interface),
+                user_id=interface.user_id,
+            )
+        return None
+
+    @check_user_allowance
+    async def document_uploaded(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None: ...
 
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -398,6 +456,11 @@ class ChibiBot:
         app.add_handler(CommandHandler("start", self.help))
 
         app.add_handler(MessageHandler(filters.TEXT | filters.VOICE | filters.AUDIO & (~filters.COMMAND), self.prompt))
+        app.add_handler(
+            MessageHandler(
+                filters.ATTACHMENT | filters.PHOTO | filters.Document.ALL & (~filters.COMMAND), self.file_upload
+            )
+        )
 
         app.add_handler(
             InlineQueryHandler(

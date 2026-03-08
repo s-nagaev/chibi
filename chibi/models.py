@@ -4,6 +4,7 @@ import binascii
 import itertools
 import json
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from anthropic.types import (
@@ -416,6 +417,18 @@ class ImageMeta(BaseModel):
     expire_at: float
 
 
+class TelegramFileMeta(BaseModel):
+    file_id: str
+    file_name: str
+    file_size: int
+    mime_type: str
+    file_unique_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    short_description: str | None = None
+    full_description: str | None = None
+    text: str | None = None
+
+
 class User(BaseModel):
     id: int
     alibaba_token: str | None = gpt_settings.alibaba_key
@@ -435,6 +448,7 @@ class User(BaseModel):
     info: str = "No info provided"
     working_dir: str = application_settings.working_dir
     llm_skills: dict[str, str] = {}
+    telegram_files: dict[str, TelegramFileMeta] = {}
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
@@ -479,6 +493,15 @@ class User(BaseModel):
         if provider := self.providers.first_tts_ready:
             return provider
         raise ValueError("No tts-provider found.")
+
+    @property
+    def vision_provider(self) -> "Provider":
+        if gpt_settings.vision_provider:
+            if provider := self.providers.get(gpt_settings.vision_provider):
+                return provider
+        if provider := self.providers.first_vision_ready:
+            return provider
+        raise ValueError("No vision-ready provider found.")
 
     @property
     def moderation_provider(self) -> "Provider":

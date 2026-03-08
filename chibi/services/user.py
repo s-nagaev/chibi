@@ -3,14 +3,15 @@ import json
 from copy import deepcopy
 from datetime import timezone
 from io import BytesIO
+from itertools import islice
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from aiocache import cached
 
 from chibi.config import gpt_settings
-from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.models import Message, TelegramFileMeta, User
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.storage.abstract import Database
@@ -97,18 +98,52 @@ async def send_scheduled_message_to_llm(
 
 
 @inject_database
+async def save_telegram_document_metadata(db: Database, user_id: int, file_metadata: dict[str, Any]) -> str:
+    user = await db.get_or_create_user(user_id=user_id)
+    file_meta = TelegramFileMeta(**file_metadata)
+    files_update = {
+        file_meta.file_unique_id: file_meta,
+    }
+    if user.telegram_files:
+        user.telegram_files.update(files_update)
+    else:
+        user.telegram_files = files_update
+
+    await db.save_user(user)
+    return file_meta.file_unique_id
+
+
+@inject_database
+async def get_telegram_documents(db: Database, user_id: int, limit: int = 0) -> dict[str, TelegramFileMeta]:
+    user = await db.get_or_create_user(user_id=user_id)
+    files = user.telegram_files
+    if limit == 0:
+        return files
+
+    last_files = dict(islice(files.items(), max(len(files) - limit, 0), None))
+    return last_files
+
+
+@inject_database
+async def get_telegram_document(db: Database, user_id: int, file_unique_id: str) -> TelegramFileMeta | None:
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.telegram_files.get(file_unique_id)
+
+
+@inject_database
 async def get_llm_chat_completion_answer(
     db: Database,
     user_id: int,
     interface: UserInterface,
     user_text_message: str | None = None,
     user_voice_message: BytesIO | None = None,
+    user_caption: str | None = None,
     tool_message: Optional["ToolResponse"] = None,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
     lock = await LockManager().get_lock(key=user_id)
 
-    if not user_text_message and not user_voice_message and not tool_message:
+    if not user_text_message and not user_voice_message and not tool_message and not user_caption:
         raise ValueError("No prompt data provided")
 
     if user_voice_message and not user.stt_provider:
@@ -122,6 +157,13 @@ async def get_llm_chat_completion_answer(
             "desc": "background task is done",
             "tool_name": tool_message.tool_name,
             "tool_response": tool_message.model_dump(),
+            "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
+        }
+    elif user_caption:
+        prompt = {
+            "type": "system message",
+            "desc": "user uploaded a file",
+            "caption": user_caption,
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
         }
     else:
@@ -186,7 +228,17 @@ async def generate_image(
     return images
 
 
-@cached(ttl=300)
+@inject_database
+async def describe_image(
+    db: Database, user_id: int, image: bytes, mime_type: str, model: str | None = None
+) -> VisionResultSchema:
+    user = await db.get_or_create_user(user_id=user_id)
+    provider = user.vision_provider
+
+    return await provider.vision(image=image, model=model, mime_type=mime_type)
+
+
+@cached(ttl=3600)
 @inject_database
 async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)

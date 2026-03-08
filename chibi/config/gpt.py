@@ -50,8 +50,12 @@ class GPTSettings(BaseSettings):
 
     stt_provider: str | None = Field(default=None)
     stt_model: str | None = Field(default=None)
+
     tts_provider: str | None = Field(default=None)
     tts_model: str | None = Field(default=None)
+
+    vision_provider: str | None = Field(default=None)
+    vision_model: str | None = Field(default=None)
 
     moderation_provider: str | None = Field(default=None)
     moderation_model: str | None = Field(default=None)
