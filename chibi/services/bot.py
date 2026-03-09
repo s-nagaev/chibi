@@ -103,14 +103,18 @@ async def handle_user_prompt(interface: UserInterface) -> None:
     voice_prompt = await interface.get_voice_prompt()
     caption_prompt = await interface.get_caption()
 
-    if text_prompt:
-        if text_prompt.startswith("/ask"):
-            text_prompt = text_prompt.replace("/ask", "", 1).strip()
+    if text_prompt and text_prompt.startswith("/ask"):
+        text_prompt = text_prompt.replace("/ask", "", 1).strip()
 
-    prompt_to_log = text_prompt.replace("\r", " ").replace("\n", " ") if text_prompt else "voice message"
+    if text_prompt:
+        prompt_to_log = text_prompt.replace("\r", " ").replace("\n", " ")
+    elif caption_prompt:
+        prompt_to_log = caption_prompt.replace("\r", " ").replace("\n", " ")
+    else:
+        prompt_to_log = "voice message"
 
     logger.info(
-        f"{interface.user_data} sent a new message in the {interface.user_data}"
+        f"{interface.user_data} sent a new message in the {interface.chat_data}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 

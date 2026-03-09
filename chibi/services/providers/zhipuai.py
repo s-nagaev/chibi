@@ -8,6 +8,7 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
     api_key = gpt_settings.zhipuai_key
     chat_ready = True
     moderation_ready = True
+    vision_ready = False
 
     name = "ZhipuAI"
     model_name_keywords = ["glm"]
@@ -15,6 +16,7 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
     default_model = "glm-5"
     default_image_model = "glm-image"
     default_moderation_model = "glm-4-32b-0414-128k"
+    default_vision_model = "GLM-4.6V-FlashX"
 
     @property
     def _headers(self) -> dict[str, str]:

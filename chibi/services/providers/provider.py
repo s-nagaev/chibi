@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import inspect
 import json
 import random
@@ -621,6 +622,60 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         if not response.data:
             raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
         return [image.url for image in response.data if image.url]
+
+    async def vision(
+        self,
+        image: bytes,
+        mime_type: str,
+        model: str | None = None,
+        prompt: str | None = None,
+    ) -> VisionResultSchema:
+        model = model or self.default_vision_model
+        if not model:
+            raise NoModelSelectedError(provider=self.name, detail="No vision model selected")
+        prompt = prompt or "Describe the image in detail."
+        logger.info(f"[{self.name}] Analyzing image with model {model}...")
+
+        # Encode image to base64
+        image_base64 = base64.b64encode(image).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{image_base64}"
+
+        # Use parse() for structured output with Pydantic models
+        response = await self.get_client().chat.completions.parse(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "high"},
+                        },
+                    ],
+                }
+            ],
+            response_format=VisionResultSchema,
+            max_tokens=4096,
+        )
+
+        if not response.choices:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        result = response.choices[0].message
+        if not result or not result.parsed:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        logger.info(f"[{self.name}] Image analyzed successfully: {result.parsed.short_description}...")
+        return result.parsed
 
 
 class RestApiFriendlyProvider(Provider):
