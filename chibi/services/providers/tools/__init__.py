@@ -9,6 +9,7 @@ from .file_editor import (
     InsertAfterPatternTool,
     InsertAtLineTool,
     InsertBeforePatternTool,
+    ReadFileTool,
     ReplaceInFileRegexTool,
     ReplaceInFileTool,
     ReplaceLinesTool,
@@ -20,4 +21,5 @@ from .memory import SetUserInfoTool
 from .schemas import ToolResponse
 from .send import SendAudioTool, SendImageTool, SendVideoTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
+from .vision import AnalyzeImageTool, GetFileInfoTool
 from .web import DDGSWebSearchTool, GoogleSearchTool, ReadWebPageTool, SearchNewsTool

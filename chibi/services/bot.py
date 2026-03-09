@@ -6,13 +6,15 @@ from telegram import (
 )
 
 from chibi.config import application_settings, gpt_settings
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools import ToolResponse
 from chibi.services.providers.utils import get_usage_msg
+from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     check_history_and_summarize,
+    describe_image,
     generate_image,
     get_llm_chat_completion_answer,
     get_models_available,
@@ -22,6 +24,7 @@ from chibi.services.user import (
     set_api_key,
     user_has_reached_images_generation_limit,
 )
+from chibi.storage.files import FileStorage
 from chibi.utils.app import handle_gpt_exceptions
 from chibi.utils.bot import indicator
 
@@ -91,21 +94,27 @@ async def handle_scheduled_event(
         f"the {interface.chat_data}. {logged_answer} {usage_message}"
     )
     await interface.send_message(message=chat_response.answer)
+    return None
 
 
 @handle_gpt_exceptions
 async def handle_user_prompt(interface: UserInterface) -> None:
     text_prompt = await interface.get_text_prompt()
     voice_prompt = await interface.get_voice_prompt()
+    caption_prompt = await interface.get_caption()
+
+    if text_prompt and text_prompt.startswith("/ask"):
+        text_prompt = text_prompt.replace("/ask", "", 1).strip()
 
     if text_prompt:
-        if text_prompt.startswith("/ask"):
-            text_prompt = text_prompt.replace("/ask", "", 1).strip()
-
-    prompt_to_log = text_prompt.replace("\r", " ").replace("\n", " ") if text_prompt else "voice message"
+        prompt_to_log = text_prompt.replace("\r", " ").replace("\n", " ")
+    elif caption_prompt:
+        prompt_to_log = caption_prompt.replace("\r", " ").replace("\n", " ")
+    else:
+        prompt_to_log = "voice message"
 
     logger.info(
-        f"{interface.user_data} sent a new message in the {interface.user_data}"
+        f"{interface.user_data} sent a new message in the {interface.chat_data}"
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 
@@ -114,6 +123,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
             user_id=interface.user_id,
             user_text_message=text_prompt,
             user_voice_message=voice_prompt,
+            user_caption=caption_prompt,
             interface=interface,
         )
 
@@ -145,13 +155,22 @@ async def handle_user_prompt(interface: UserInterface) -> None:
     history_is_summarized = await check_history_and_summarize(user_id=interface.user_id)
     if history_is_summarized:
         logger.info(f"{interface.user_data}: history successfully summarized.")
+    return None
 
 
 async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
     await reset_chat_history(user_id=interface.user_id)
+    task_manager.kill_all_user_tasks(user_id=interface.user_id)
     await interface.send_message(message="Done!", reply=False)
+
+
+async def handle_stop(interface: UserInterface) -> None:
+    logger.info(f"{interface.user_data}: stopping everything...")
+
+    task_manager.kill_all_user_tasks(user_id=interface.user_id)
+    await interface.send_message(message="Everything stopped.", reply=False)
 
 
 @handle_gpt_exceptions
@@ -205,7 +224,7 @@ async def handle_provider_api_key_set(provider_name: str, interface: UserInterfa
 
     await interface.send_message(
         message=(
-            f"Your {provider_name} API Key successfully set! 🦾\n\nNow you may check available models in /gpt_models."
+            f"Your {provider_name} API Key successfully set! 🦾\n\nNow you may check available models in /llm_models."
         )
     )
     await interface.delete_last_user_message()
@@ -219,3 +238,13 @@ async def handle_available_model_options(
     image_generation: bool = False,
 ) -> list[ModelChangeSchema]:
     return await get_models_available(user_id=user_id, image_generation=image_generation)
+
+
+async def handle_image_understanding(
+    interface: UserInterface,
+    storage: FileStorage,
+    file_id: str,
+    mime_type: str,
+) -> VisionResultSchema:
+    file_bytes = await storage.get_bytes(file_id=file_id)
+    return await describe_image(user_id=interface.user_id, image=file_bytes, mime_type=mime_type)

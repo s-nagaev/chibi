@@ -98,7 +98,9 @@ class MCPManager:
 
             ready_event = asyncio.Event()
 
-            task = task_manager.run_task(cls._session_lifecycle(name, stdio_factory, ready_event, timeout))
+            task = task_manager.run_task(
+                coro=cls._session_lifecycle(name, stdio_factory, ready_event, timeout), user_id=-1
+            )
 
             if not task:
                 raise RuntimeError("Failed to schedule MCP connection task")
@@ -145,7 +147,9 @@ class MCPManager:
 
             ready_event = asyncio.Event()
 
-            task = task_manager.run_task(cls._session_lifecycle(name, sse_factory, ready_event, timeout))
+            task = task_manager.run_task(
+                coro=cls._session_lifecycle(name, sse_factory, ready_event, timeout), user_id=-1
+            )
             if not task:
                 raise RuntimeError("Failed to schedule MCP connection task")
 

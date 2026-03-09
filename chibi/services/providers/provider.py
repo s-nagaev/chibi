@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import inspect
 import json
 import random
@@ -57,7 +58,7 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -123,6 +124,10 @@ class RegisteredProviders:
         }
 
     @property
+    def vision_ready(self) -> dict[str, type["Provider"]]:
+        return {provider_name: provider for provider_name, provider in self.available.items() if provider.vision_ready}
+
+    @property
     def image_generation_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.image_generation_ready}
 
@@ -180,6 +185,12 @@ class RegisteredProviders:
             return self.get_instance(provider=provider)
         return None
 
+    @property
+    def first_vision_ready(self) -> Optional["Provider"]:
+        if provider := next(iter(self.vision_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
 
 class Provider(ABC):
     api_key: str | None = None
@@ -187,6 +198,7 @@ class Provider(ABC):
     tts_ready: bool = False
     ocr_ready: bool = False
     chat_ready: bool = False
+    vision_ready: bool = False
     moderation_ready: bool = False
     image_generation_ready: bool = False
 
@@ -194,12 +206,15 @@ class Provider(ABC):
     model_name_keywords: list[str] = []
     model_name_prefixes: list[str] = []
     model_name_keywords_exclude: list[str] = []
+
     default_model: str
     default_image_model: str | None = None
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
     default_moderation_model: str | None = None
+    default_vision_model: str | None = None
+
     timeout: int = gpt_settings.timeout
 
     def __init__(self, token: str) -> None:
@@ -237,6 +252,11 @@ class Provider(ABC):
         raise NotImplementedError
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        raise NotImplementedError
+
+    async def vision(
+        self, image: bytes, mime_type: str, model: str | None = None, prompt: str | None = None
+    ) -> VisionResultSchema:
         raise NotImplementedError
 
     async def api_key_is_valid(self) -> bool:
@@ -347,6 +367,18 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             raise NoApiKeyProvidedError(provider=self.name)
         return AsyncOpenAI(api_key=self.token, base_url=self.base_url)
 
+    @client.setter
+    def client(self, value: AsyncOpenAI) -> None:
+        """Setter for client property to allow mocking in tests."""
+        # Store the mock value in the instance __dict__ to bypass the property getter
+        self.__dict__["_mock_client"] = value
+
+    def get_client(self) -> AsyncOpenAI:
+        """Get the client, checking for mock first."""
+        if "_mock_client" in self.__dict__:
+            return self.__dict__["_mock_client"]
+        return self.client
+
     async def get_chat_response(
         self,
         messages: list[Message],
@@ -375,12 +407,15 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
+        dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
             dialog = messages
         else:
-            prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
+            prepared_system_prompt = await prepare_system_prompt(
+                base_system_prompt=system_prompt, user=user, interface=interface
+            )
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
-            dialog: list[ChatCompletionMessageParam] = [system_message] + messages  # type: ignore
+            dialog = [system_message] + messages
 
         response: ChatCompletion = await self.client.chat.completions.create(  # type: ignore
             model=model,
@@ -588,6 +623,60 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
         return [image.url for image in response.data if image.url]
 
+    async def vision(
+        self,
+        image: bytes,
+        mime_type: str,
+        model: str | None = None,
+        prompt: str | None = None,
+    ) -> VisionResultSchema:
+        model = model or self.default_vision_model
+        if not model:
+            raise NoModelSelectedError(provider=self.name, detail="No vision model selected")
+        prompt = prompt or "Describe the image in detail."
+        logger.info(f"[{self.name}] Analyzing image with model {model}...")
+
+        # Encode image to base64
+        image_base64 = base64.b64encode(image).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{image_base64}"
+
+        # Use parse() for structured output with Pydantic models
+        response = await self.get_client().chat.completions.parse(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "high"},
+                        },
+                    ],
+                }
+            ],
+            response_format=VisionResultSchema,
+            max_tokens=4096,
+        )
+
+        if not response.choices:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        result = response.choices[0].message
+        if not result or not result.parsed:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        logger.info(f"[{self.name}] Image analyzed successfully: {result.parsed.short_description}...")
+        return result.parsed
+
 
 class RestApiFriendlyProvider(Provider):
     @property
@@ -724,7 +813,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
-        prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
+        prepared_system_prompt = await prepare_system_prompt(
+            base_system_prompt=system_prompt, user=user, interface=interface
+        )
         response_message: AnthropicMessage = await self._generate_content(
             model=model,
             system_prompt=prepared_system_prompt,

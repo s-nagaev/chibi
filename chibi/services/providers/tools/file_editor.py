@@ -13,9 +13,11 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings
+from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.user import get_moderation_provider
 
 
 class ReplaceInFileTool(ChibiTool):
@@ -79,6 +81,9 @@ class ReplaceInFileTool(ChibiTool):
             Dict containing the number of replacements made
         """
         try:
+            if not old_text:
+                raise ValueError("old_text cannot be empty")
+
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
                 raise FileNotFoundError(f"File {path} does not exist")
@@ -178,6 +183,10 @@ class ReplaceInFileRegexTool(ChibiTool):
             with path.open("r", encoding=encoding) as f:
                 content = f.read()
 
+            # Handle count=-1 as "replace all"
+            if count == -1:
+                count = 0
+
             new_content, replacements = re.subn(pattern, replacement, content, count=count)
 
             if replacements > 0:
@@ -267,7 +276,7 @@ class InsertAtLineTool(ChibiTool):
             elif line_number > line_count:
                 line_number = line_count
 
-            if content and not content.endswith("\n"):
+            if not content.endswith("\n"):
                 content += "\n"
 
             lines.insert(line_number, content)
@@ -364,7 +373,7 @@ class ReplaceLinesTool(ChibiTool):
             start_line = min(max(0, start_line), line_count)
             end_line = min(max(start_line, end_line), line_count - 1)
 
-            if new_content and not new_content.endswith("\n"):
+            if not new_content.endswith("\n"):
                 new_content += "\n"
             new_lines = new_content.splitlines(True)
 
@@ -448,6 +457,9 @@ class FindAndReplaceSectionTool(ChibiTool):
             Dict indicating success and whether the section was found
         """
         try:
+            if not start_marker or not end_marker:
+                raise ValueError("Markers cannot be empty")
+
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
                 raise FileNotFoundError(f"File {path} does not exist")
@@ -663,6 +675,8 @@ class InsertAfterPatternTool(ChibiTool):
                     )
                     return {"insertions": 0}
 
+                if count == -1:
+                    count = len(matches)
                 matches = matches[:count]  # Limit to the specified count
 
                 new_content = file_content
@@ -672,6 +686,9 @@ class InsertAfterPatternTool(ChibiTool):
 
                 insertions = len(matches)
             else:
+                if count == -1:
+                    count = file_content.count(pattern)
+
                 insertions = 0
                 current_pos = 0
                 new_content = file_content
@@ -779,6 +796,8 @@ class InsertBeforePatternTool(ChibiTool):
                     )
                     return {"insertions": 0}
 
+                if count == -1:
+                    count = len(matches)
                 matches = matches[:count]  # Limit to the specified count
 
                 new_content = file_content
@@ -788,6 +807,9 @@ class InsertBeforePatternTool(ChibiTool):
 
                 insertions = len(matches)
             else:
+                if count == -1:
+                    count = file_content.count(pattern)
+
                 insertions = 0
                 current_pos = 0
                 new_content = file_content
@@ -873,3 +895,90 @@ class CreateFileTool(ChibiTool):
 
         except Exception as e:
             raise ToolException(f"Failed to create file {full_path}. Error: {e}")
+
+
+class ReadFileTool(ChibiTool):
+    register = gpt_settings.filesystem_access
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="read_file",
+            description="Read the content of a text-based file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "full_path": {
+                        "type": "string",
+                        "description": "Absolute path to the file to read.",
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "File encoding.",
+                        "default": "utf-8",
+                    },
+                },
+                "required": ["full_path"],
+            },
+        ),
+    )
+    name = "read_file"
+
+    @classmethod
+    async def function(
+        cls,
+        full_path: str,
+        encoding: str = "utf-8",
+        **kwargs: Unpack[AdditionalOptions],
+    ) -> dict[str, Any]:
+        """Read the content of a text-based file.
+
+        Args:
+            full_path: Path to the file to read
+            encoding: File encoding
+
+        Returns:
+            Dict containing the file content and metadata
+        """
+        model = kwargs.get("model", "Unknown model")
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ToolException("This function requires user_id to be automatically provided.")
+
+        # Moderate first
+        moderation_provider = await get_moderation_provider(user_id=user_id)
+        cmd = f"cat {full_path}"
+
+        logger.log("MODERATOR", f"[{model}] Pre-moderating file read: '{full_path}'")
+        moderator_answer: ModeratorsAnswer = await moderation_provider.moderate_command(
+            cmd=cmd, model=gpt_settings.moderation_model
+        )
+        if moderator_answer.verdict == "declined":
+            raise ToolException(
+                f"Moderator ({moderation_provider.name}) DECLINED file read '{full_path}' from model "
+                f"{kwargs.get('model', 'unknown')}. Reason: {moderator_answer.reason}"
+            )
+
+        logger.log(
+            "MODERATOR",
+            (
+                f"[{model}] Moderator ({moderation_provider.name}) ACCEPTED file read '{full_path}' "
+                f"from model {kwargs.get('model', 'unknown')}"
+            ),
+        )
+
+        try:
+            path = Path(full_path).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"File {path} does not exist")
+
+            if not path.is_file():
+                raise ValueError(f"{path} is not a file")
+
+            with path.open("r", encoding=encoding) as f:
+                content = f.read()
+
+            logger.log("TOOL", f"[{model}] Read file: {path}")
+            return {"content": content, "full_path": str(path)}
+
+        except Exception as e:
+            raise ToolException(f"Failed to read file {full_path}. Error: {e}")

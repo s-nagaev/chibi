@@ -10,7 +10,7 @@ from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, get_sub_agent_response
+from chibi.services.providers.tools.utils import AdditionalOptions, get_models_available_to_user, get_sub_agent_response
 
 
 class GetAvailableLLMModelsTool(ChibiTool):
@@ -39,9 +39,7 @@ class GetAvailableLLMModelsTool(ChibiTool):
 
         logger.log("TOOL", f"Getting available LLM models for user {user_id}...")
 
-        from chibi.services.user import get_models_available
-
-        data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=False)
+        data: list[ModelChangeSchema] = await get_models_available_to_user(user_id=user_id, image_generation=False)
 
         return {
             "available_models": [info.model_dump(include={"provider", "name", "display_name"}) for info in data],
@@ -90,9 +88,27 @@ class DelegateTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
+
         model = kwargs.get("model")
         if not model:
             raise ToolException("This function requires model to be automatically provided.")
+
+        if model_name and not provider_name:
+            raise ToolException("If you specify a model_name, you must also specify a provider_name.")
+
+        if model_name:
+            available_models: list[ModelChangeSchema] = await get_models_available_to_user(user_id=user_id)
+
+            model_setups = [
+                model for model in available_models if model.name == model_name and model.provider == provider_name
+            ]
+            if not model_setups:
+                model_provider_map = (f"{model.name} ({model.provider})" for model in available_models)
+                raise ToolException(
+                    f"Model name <-> Provider name mismatch. Please check your model name and provider name."
+                    f"Available models: {', '.join(model_provider_map)}"
+                )
+
         logger.log("DELEGATE", f"[{model}] Delegating a task to {model_name or model}: {prompt}")
 
         coro = get_sub_agent_response(

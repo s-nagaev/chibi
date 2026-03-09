@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import random
 from asyncio import sleep
@@ -19,10 +20,10 @@ from openai.types.chat import ChatCompletionToolParam
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
-from chibi.services.providers.provider import RestApiFriendlyProvider
+from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.utils import (
@@ -45,6 +46,7 @@ class MistralAI(RestApiFriendlyProvider):
     model_name_keywords_exclude = ["embed", "moderation", "ocr"]
     default_model = "mistral-medium-latest"
     default_moderation_model = "mistral-small-latest"
+    default_vision_model = "pixtral-12b-2409"
     frequency_penalty: float | None = 0.6
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = 0.3
@@ -142,7 +144,9 @@ class MistralAI(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
-        prepared_system_prompt = await prepare_system_prompt(base_system_prompt=system_prompt, user=user)
+        prepared_system_prompt = await prepare_system_prompt(
+            base_system_prompt=system_prompt, user=user, interface=interface
+        )
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages
         else:
@@ -273,6 +277,58 @@ class MistralAI(RestApiFriendlyProvider):
             msg = f"Error parsing moderator's response: {answer}. Error: {e}"
             logger.error(msg)
             return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+
+    async def vision(
+        self,
+        image: bytes,
+        mime_type: str,
+        model: str | None = None,
+        prompt: str | None = None,
+    ) -> VisionResultSchema:
+        model = model or self.default_vision_model
+        prompt = prompt or "Describe the image in detail."
+        logger.info(f"Analyzing image with model {model}...")
+
+        # Encode image to base64
+        image_base64 = base64.b64encode(image).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{image_base64}"
+
+        # Use parse_async() for structured output with Pydantic models
+        response = await self.client.chat.parse_async(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url},
+                        },
+                    ],
+                }
+            ],
+            response_format=VisionResultSchema,
+            max_tokens=4096,
+        )
+
+        if not response.choices:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        result = response.choices[0].message
+        if not result or not result.parsed:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response}",
+            )
+
+        logger.info(f"Image analyzed successfully: {result.parsed.short_description}\n{result.parsed.full_description}")
+        return result.parsed
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:

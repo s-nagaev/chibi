@@ -16,6 +16,7 @@ class OpenAI(OpenAIFriendlyProvider):
     stt_ready = True
     image_generation_ready = True
     moderation_ready = True
+    vision_ready = True
 
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
@@ -28,6 +29,7 @@ class OpenAI(OpenAIFriendlyProvider):
     default_stt_model = "whisper-1"
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"
+    default_vision_model = "gpt-4.1-mini"
 
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         model = model or self.default_stt_model

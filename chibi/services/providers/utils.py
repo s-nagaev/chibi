@@ -17,6 +17,8 @@ from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.interface import UserInterface
+from chibi.storage.files import get_file_storage
+from chibi.storage.files.file_storage import FileStorage
 from chibi.utils.app import get_builtin_skill_names
 
 T = TypeVar("T")
@@ -53,7 +55,7 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user: User) -> str:
+async def prepare_system_prompt(base_system_prompt: str, user: User, interface: UserInterface | None) -> str:
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
@@ -70,6 +72,10 @@ async def prepare_system_prompt(base_system_prompt: str, user: User) -> str:
             system_data["container_type"] = application_settings.runtime_environment
 
         prompt["system"] = system_data
+
+    if interface:
+        storage: FileStorage = get_file_storage(interface=interface)
+        prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)

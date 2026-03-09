@@ -1,5 +1,5 @@
-from contextvars import Context
-from typing import Any, Coroutine, TypeVar
+import json
+from typing import TypeVar
 
 from loguru import logger
 from telegram import (
@@ -9,6 +9,7 @@ from telegram import (
     InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
+    PhotoSize,
     Update,
     constants,
 )
@@ -29,14 +30,17 @@ from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
     handle_image_generation,
+    handle_image_understanding,
     handle_model_selection,
     handle_provider_api_key_set,
     handle_reset,
+    handle_stop,
     handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.task_manager import task_manager
+from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
 from chibi.utils.telegram import (
     check_user_allowance,
@@ -70,7 +74,11 @@ class ChibiBot:
             ),
             BotCommand(
                 command="reset",
-                description="Reset your conversation history (will reduce prompt and save some tokens)",
+                description="Stop LLM and reset your conversation history (will reduce prompt and save some tokens)",
+            ),
+            BotCommand(
+                command="stop",
+                description="Stop LLM and all the processes it runs.",
             ),
         ]
         if not application_settings.hide_imagine:
@@ -79,7 +87,7 @@ class ChibiBot:
             )
             self.commands.append(BotCommand(command="image_models", description="Select image generation model"))
         if not application_settings.hide_models:
-            self.commands.append(BotCommand(command="gpt_models", description="Select GPT model"))
+            self.commands.append(BotCommand(command="llm_models", description="Select LLM"))
 
         if gpt_settings.public_mode:
             self.commands.append(
@@ -89,34 +97,40 @@ class ChibiBot:
                 )
             )
 
-    def run_task(
-        self,
-        coro: Coroutine[Any, Any, _T],
-        name: str | None = None,
-        context: Context | None = None,
-    ) -> None:
-        task_manager.run_task(coro)
-
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
         commands = [f"/{command.command} - {command.description}" for command in self.commands]
         commands_desc = "\n".join(commands)
-        help_text = (
-            f"Hey! My name is {telegram_settings.bot_name}, and I'm your ChatGPT experience provider!\n\n"
-            f"{commands_desc}"
-        )
+        help_text = f"Hey! My name is {telegram_settings.bot_name}, and I am your digital partner!\n\n{commands_desc}"
         await telegram_message.reply_text(help_text, disable_web_page_preview=True)
 
     @check_user_allowance
     async def reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.run_task(handle_reset(interface=TelegramInterface(update=update, context=context)))
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_reset(interface=interface),
+            user_id=-1,
+        )
+        return None
+
+    @check_user_allowance
+    async def stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_stop(interface=interface),
+            user_id=-1,
+        )
+        return None
 
     async def _handle_message_with_api_key(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         provider_name = get_user_context(context=context, key=UserContext.SELECTED_PROVIDER, expected_type=str)
         if not provider_name:
             return None
-        telegram_interface = TelegramInterface(update=update, context=context)
-        self.run_task(handle_provider_api_key_set(provider_name=provider_name, interface=telegram_interface))
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_provider_api_key_set(provider_name=provider_name, interface=interface),
+            user_id=interface.user_id,
+        )
         return None
 
     @check_user_allowance
@@ -126,19 +140,80 @@ class ChibiBot:
         prompt = telegram_message.text.replace("/imagine", "", 1).strip()
         if prompt:
             set_user_action(context=context, action=UserAction.NONE)
-            self.run_task(
-                handle_image_generation(prompt=prompt, interface=TelegramInterface(update=update, context=context))
+            interface = TelegramInterface(update=update, context=context)
+            task_manager.run_task(
+                coro=handle_image_generation(prompt=prompt, interface=interface),
+                user_id=interface.user_id,
             )
             return None
+
         set_user_action(context=context, action=UserAction.IMAGINE)
         await telegram_message.reply_text("Ok, now give me an image prompt.")
+        return None
+
+    @check_user_allowance
+    async def file_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        message = update.effective_message
+        if not message:
+            return None
+
+        interface = TelegramInterface(update=update, context=context)
+        storage = TelegramFileStorage(interface=interface)
+
+        if document_meta := message.document:
+            await storage.save(file_metadata=document_meta.to_dict())
+            logger.info(
+                f"{interface.user_data}-{interface.chat_data}: File '{document_meta.file_name}' successfully uploaded."
+            )
+
+        if photo_variants := message.photo:
+            photo_meta: PhotoSize = photo_variants[-1]
+            photo_meta_dict = photo_meta.to_dict()
+            file_name = f"{photo_meta.file_unique_id}.jpeg"
+            photo_meta_dict["file_name"] = file_name
+            photo_meta_dict["mime_type"] = "image/jpeg"
+            file_id = await storage.save(file_metadata=photo_meta_dict)
+            if vision_result := await handle_image_understanding(
+                interface=interface,
+                storage=storage,
+                file_id=file_id,
+                mime_type="image/jpeg",
+            ):
+                photo_meta_dict["full_description"] = vision_result.full_description
+                photo_meta_dict["short_description"] = vision_result.short_description
+                photo_meta_dict["text"] = vision_result.text
+                await storage.save(file_metadata=photo_meta_dict)
+
+                caption = {
+                    "user_caption": message.caption or "no data",
+                    "photo_short_desc": vision_result.short_description,
+                    "file_id": file_id,
+                }
+                interface.set_caption(json.dumps(caption))
+
+            logger.info(f"{interface.user_data}-{interface.chat_data}: Photo '{file_name}' successfully uploaded.")
+
+        if await interface.get_caption():
+            task_manager.run_task(
+                coro=handle_user_prompt(interface=interface),
+                user_id=interface.user_id,
+            )
+        return None
+
+    @check_user_allowance
+    async def document_uploaded(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None: ...
 
     @check_user_allowance
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_chat = get_telegram_chat(update=update)
         telegram_message = get_telegram_message(update=update)
+        interface = TelegramInterface(update=update, context=context)
+
         if telegram_message.voice:
-            self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
+            task_manager.run_task(
+                coro=handle_user_prompt(interface=interface),
+                user_id=interface.user_id,
+            )
             return None
 
         prompt = telegram_message.text
@@ -152,8 +227,9 @@ class ChibiBot:
 
         if current_user_action(context=context) == UserAction.IMAGINE:
             set_user_action(context=context, action=UserAction.NONE)
-            self.run_task(
-                handle_image_generation(prompt=prompt, interface=TelegramInterface(update=update, context=context))
+            task_manager.run_task(
+                coro=handle_image_generation(prompt=prompt, interface=interface),
+                user_id=interface.user_id,
             )
             return None
 
@@ -164,11 +240,21 @@ class ChibiBot:
             and not user_interacts_with_bot(update=update, context=context)
         ):
             return None
-        self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
+
+        task_manager.run_task(
+            coro=handle_user_prompt(interface=interface),
+            user_id=interface.user_id,
+        )
+        return None
 
     @check_user_allowance
     async def ask(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.run_task(handle_user_prompt(interface=TelegramInterface(update=update, context=context)))
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_user_prompt(interface=interface),
+            user_id=interface.user_id,
+        )
+        return None
 
     @staticmethod
     def create_model_selection_keyboad(
@@ -187,7 +273,7 @@ class ChibiBot:
         return InlineKeyboardMarkup(keyboard)
 
     @check_user_allowance
-    async def show_gpt_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def show_llm_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
 
         available_models = await handle_available_model_options(
@@ -270,13 +356,15 @@ class ChibiBot:
             set_user_context(context=context, key=UserContext.ACTIVE_MODEL, value=model.name)
         telegram_interface = TelegramInterface(update=update, context=context)
 
-        self.run_task(
-            handle_model_selection(
+        task_manager.run_task(
+            coro=handle_model_selection(
                 interface=telegram_interface,
                 model=model,
                 query=query,
-            )
+            ),
+            user_id=telegram_interface.user_id,
         )
+
         set_user_action(context=context, action=UserAction.NONE)
 
     async def _compute_provider_selection_action(
@@ -317,7 +405,7 @@ class ChibiBot:
         results = [
             InlineQueryResultArticle(
                 id=query,
-                title="Ask ChatGPT",
+                title=f"Ask {telegram_settings.bot_name}",
                 input_message_content=InputTextMessageContent(query),
                 description=query,
                 thumbnail_url="https://github.com/s-nagaev/chibi/raw/main/docs/logo.png",
@@ -350,7 +438,7 @@ class ChibiBot:
             app.add_handler(CommandHandler(command="imagine", callback=self.imagine))
 
         if not application_settings.hide_models:
-            app.add_handler(CommandHandler("gpt_models", self.show_gpt_models_menu))
+            app.add_handler(CommandHandler("llm_models", self.show_llm_models_menu))
             app.add_handler(CommandHandler("image_models", self.show_image_models_menu))
         app.add_handler(CallbackQueryHandler(self.handle_selection))
 
@@ -360,9 +448,15 @@ class ChibiBot:
         app.add_handler(CommandHandler("ask", self.ask))
         app.add_handler(CommandHandler("help", self.help))
         app.add_handler(CommandHandler("reset", self.reset))
+        app.add_handler(CommandHandler("stop", self.stop))
         app.add_handler(CommandHandler("start", self.help))
 
         app.add_handler(MessageHandler(filters.TEXT | filters.VOICE | filters.AUDIO & (~filters.COMMAND), self.prompt))
+        app.add_handler(
+            MessageHandler(
+                filters.ATTACHMENT | filters.PHOTO | filters.Document.ALL & (~filters.COMMAND), self.file_upload
+            )
+        )
 
         app.add_handler(
             InlineQueryHandler(

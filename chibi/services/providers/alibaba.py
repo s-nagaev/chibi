@@ -17,6 +17,7 @@ class Alibaba(OpenAIFriendlyProvider):
     chat_ready = True
     image_generation_ready = True
     moderation_ready = True
+    vision_ready = True
 
     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     name = "Alibaba"
@@ -26,6 +27,7 @@ class Alibaba(OpenAIFriendlyProvider):
     default_moderation_model = "qwen-turbo"
     max_tokens: int = 8192
     default_image_model = "qwen-image-plus"
+    default_vision_model = "qwen3-vl-flash"
 
     @staticmethod
     def _get_image_url(choice: Choice) -> str | None:

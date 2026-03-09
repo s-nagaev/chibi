@@ -48,7 +48,9 @@ class Minimax(AnthropicFriendlyProvider):
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
-            return [ModelChangeSchema(provider=self.name, name="image-01", image_generation=True)]
+            return [
+                ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
+            ]
 
         supported_models = [
             "MiniMax-M2.5",

@@ -5,11 +5,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-## [1.6.7] - 2026-02-25
+## [1.7.0] - 2026-03-09
 
 ### Added
-- **Unified UserInterface**: Abstract interface (`chibi/services/interface.py`) separating bot logic from Telegram-specific implementation. Enables future platform support.
-- **Dual Docker Build**: Now builds two images in parallel — main bot and agent variant with `agent-*` tags.
+- Basic support for handling user-uploaded files (photos, documents) via Telegram
+- File storage abstraction layer (`FileStorage`, `LocalFileStorage`, `TelegramFileStorage`)
+- File metadata persistence in Redis
+- Initial vision support across multiple providers (Anthropic, OpenAI, Gemini, Mistral)
+- New vision tool for image analysis
+- OCR capabilities for uploaded images
+- Automatic image description generation
+- Task manager refactoring to support user-specific task execution
+- Added `user_id` parameter to task execution
+- Prepared infrastructure for future scheduling capabilities
+- **macos_desktop_developer_skill.md** — macOS Desktop App Developer role
+- **product_manager_skill.md** — Product Manager role  
+- **skill_maker_skill.md** — Skill creation and management
+- **pm_workflow_skill.md** — Artifact-driven PM workflow protocol
+- **executor_workflow_skill.md** — Executor workflow protocol
+- **reviewer_workflow_skill.md** — Reviewer workflow protocol
+- `/stop` command to stop LLM and running processes
+- handlers for file uploads (photo, document)
+
+### Changed
+- Renamed `/gpt_models` → `/llm_models` for better model-agnostic naming
+- Updated bot command descriptions
+- Command `/gpt_models` renamed to `/llm_models`
 
 
 ## [1.6.6] - 2026-02-21
@@ -452,7 +473,9 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.6.5...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/s-nagaev/chibi/compare/v1.6.6...v1.7.0
+[1.6.6]: https://github.com/s-nagaev/chibi/compare/v1.6.5...v1.6.6
 [1.6.5]: https://github.com/s-nagaev/chibi/compare/v1.6.4...v1.6.5
 [1.6.4]: https://github.com/s-nagaev/chibi/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/s-nagaev/chibi/compare/v1.6.2...v1.6.3

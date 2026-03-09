@@ -10,6 +10,7 @@ class Grok(OpenAIFriendlyProvider):
     chat_ready = True
     image_generation_ready = True
     moderation_ready = True
+    vision_ready = True
 
     base_url = "https://api.x.ai/v1"
     name = "Grok"
@@ -20,6 +21,7 @@ class Grok(OpenAIFriendlyProvider):
     default_image_model = "grok-2-image-1212"
     default_model = "grok-4-1-fast-reasoning"
     default_moderation_model = "grok-4-1-fast-non-reasoning"
+    default_vision_model = "grok-4-1-fast-reasoning"
     presence_penalty = NOT_GIVEN
     frequency_penalty = omit
     image_n_choices = 1

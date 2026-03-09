@@ -13,7 +13,7 @@ from loguru import logger
 from chibi.config import gpt_settings
 from chibi.constants import SUB_EXECUTOR_PROMPT
 from chibi.models import Message
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.interface import UserInterface
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
@@ -165,3 +165,10 @@ class CallTracker(metaclass=SingletonMeta):
 
         self._calls[key] += 1
         return self._calls[key]
+
+
+async def get_models_available_to_user(user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+    from chibi.services.user import get_models_available
+
+    data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=image_generation)
+    return data
