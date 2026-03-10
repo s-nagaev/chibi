@@ -161,10 +161,15 @@ class ChibiBot:
         storage = TelegramFileStorage(interface=interface)
 
         if document_meta := message.document:
-            await storage.save(file_metadata=document_meta.to_dict())
+            file_id = await storage.save(file_metadata=document_meta.to_dict())
             logger.info(
                 f"{interface.user_data}-{interface.chat_data}: File '{document_meta.file_name}' successfully uploaded."
             )
+            caption = {
+                "user_caption": message.caption or "no data",
+                "file_id": file_id,
+            }
+            interface.set_caption(json.dumps(caption))
 
         if photo_variants := message.photo:
             photo_meta: PhotoSize = photo_variants[-1]

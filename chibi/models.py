@@ -504,6 +504,15 @@ class User(BaseModel):
         raise ValueError("No vision-ready provider found.")
 
     @property
+    def ocr_provider(self) -> "Provider":
+        if gpt_settings.ocr_provider:
+            if provider := self.providers.get(gpt_settings.ocr_provider):
+                return provider
+        if provider := self.providers.first_ocr_ready:
+            return provider
+        raise ValueError("No OCR-ready provider found.")
+
+    @property
     def moderation_provider(self) -> "Provider":
         if gpt_settings.moderation_provider:
             if provider := self.providers.get(gpt_settings.moderation_provider):

@@ -351,14 +351,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.42.63"
+version = "1.42.64"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.9"
 groups = ["main", "dev"]
 files = [
-    {file = "botocore-1.42.63-py3-none-any.whl", hash = "sha256:83f39d04f2b316bdfc59a3cac2d12238bde7126ac99d9a57d910dbd86d58c528"},
-    {file = "botocore-1.42.63.tar.gz", hash = "sha256:1fdfc33cff58d21e8622cf620ba2bba3cff324557932aaf935b5374e4610f059"},
+    {file = "botocore-1.42.64-py3-none-any.whl", hash = "sha256:f77c5cb76ed30576ed0bc73b591265d03dddffff02a9208d3ee0c790f43d3cd2"},
+    {file = "botocore-1.42.64.tar.gz", hash = "sha256:4ee2aece227b9171ace8b749af694a77ab984fceab1639f2626bd0d6fb1aa69d"},
 ]
 
 [package.dependencies]
@@ -514,14 +514,14 @@ cffi = [
 
 [[package]]
 name = "cachetools"
-version = "7.0.3"
+version = "7.0.5"
 description = "Extensible memoizing collections and decorators"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "cachetools-7.0.3-py3-none-any.whl", hash = "sha256:c128ffca156eef344c25fcd08a96a5952803786fa33097f5f2d49edf76f79d53"},
-    {file = "cachetools-7.0.3.tar.gz", hash = "sha256:8c246313b95849964e54a909c03b327a87ab0428b068fac10da7b105ca275ef6"},
+    {file = "cachetools-7.0.5-py3-none-any.whl", hash = "sha256:46bc8ebefbe485407621d0a4264b23c080cedd913921bad7ac3ed2f26c183114"},
+    {file = "cachetools-7.0.5.tar.gz", hash = "sha256:0cd042c24377200c1dcd225f8b7b12b0ca53cc2c961b43757e774ebe190fd990"},
 ]
 
 [[package]]
@@ -2533,14 +2533,14 @@ realtime = ["websockets (>=13.0)"]
 
 [[package]]
 name = "moto"
-version = "5.1.21"
+version = "5.1.22"
 description = "A library that allows you to easily mock out tests based on AWS infrastructure"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "moto-5.1.21-py3-none-any.whl", hash = "sha256:311a30095b08b39dd2707f161f1440d361684fe0090b9fd0751dfd1c9b022445"},
-    {file = "moto-5.1.21.tar.gz", hash = "sha256:713dde46e71e2714fa9a29eec513ec618d35e1d84c256331b5aab3f30692feeb"},
+    {file = "moto-5.1.22-py3-none-any.whl", hash = "sha256:d9f20ae3cf29c44f93c1f8f06c8f48d5560e5dc027816ef1d0d2059741ffcfbe"},
+    {file = "moto-5.1.22.tar.gz", hash = "sha256:e5b2c378296e4da50ce5a3c355a1743c8d6d396ea41122f5bb2a40f9b9a8cc0e"},
 ]
 
 [package.dependencies]

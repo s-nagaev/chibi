@@ -23,18 +23,21 @@ async def test_vision_basic_image_analysis():
     # Create mock client with proper message response
     mock_client = MagicMock()
 
-    # Create mock response with proper TextBlock type
+    # Create mock response with proper ToolUseBlock type
     mock_response = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
-    mock_content = TextBlock(
-        type="text",
-        text=(
-            '{"short_description": "A test image", "full_description": '
-            '"This is a test image description", "text": null}'
-        ),
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "A test image",
+            "full_description": "This is a test image description",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     # Create async mock for messages.create
     async def mock_create(*args, **kwargs):
@@ -58,16 +61,20 @@ async def test_vision_with_custom_model():
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text",
-        text=(
-            '{"short_description": "Custom model test", "full_description": "Testing with custom model", "text": null}'
-        ),
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Custom model test",
+            "full_description": "Testing with custom model",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     captured_model = None
 
@@ -95,16 +102,20 @@ async def test_vision_with_text_extraction():
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text",
-        text='{"short_description": "Document with text", '
-        '"full_description": "A document containing important information", '
-        '"text": "Important information extracted from document"}',
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Document with text",
+            "full_description": "A document containing important information",
+            "text": "Important information extracted from document",
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     async def mock_create(*args, **kwargs):
         return mock_response
@@ -146,18 +157,19 @@ async def test_vision_empty_response_raises_error():
 
 @pytest.mark.asyncio
 async def test_vision_empty_content_raises_error():
-    """Test that empty content raises ServiceResponseError."""
+    """Test that content without ToolUseBlock raises ServiceResponseError."""
+    from anthropic.types import TextBlock
+
     from chibi.services.providers.provider import ServiceResponseError
 
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
 
-    from anthropic.types import TextBlock
-
     async def mock_create(*args, **kwargs):
         mock_response = MagicMock()
-        mock_content = TextBlock(type="text", text="")
+        # Use TextBlock instead of ToolUseBlock to simulate missing tool call
+        mock_content = TextBlock(type="text", text="Some text response without tool")
         mock_response.content = [mock_content]
         return mock_response
 
@@ -167,7 +179,7 @@ async def test_vision_empty_content_raises_error():
     with pytest.raises(ServiceResponseError) as exc_info:
         await provider.vision(image=SAMPLE_IMAGE_BYTES, mime_type="image/png")
 
-    assert "empty result text" in str(exc_info.value).lower()
+    assert "empty response" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -178,13 +190,20 @@ async def test_vision_base64_encoding():
     mock_client = MagicMock()
     captured_content = {}
 
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text", text='{"short_description": "Test", "full_description": "Test", "text": null}'
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Test",
+            "full_description": "Test",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     async def mock_create(*args, **kwargs):
         captured_content.update(kwargs)
@@ -221,13 +240,20 @@ async def test_vision_default_model():
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text", text='{"short_description": "Test", "full_description": "Test", "text": null}'
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Test",
+            "full_description": "Test",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     captured_model = None
 
@@ -250,14 +276,20 @@ async def test_vision_with_custom_prompt():
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text",
-        text='{"short_description": "Test", "full_description": "Test with custom prompt", "text": null}',
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Test",
+            "full_description": "Test with custom prompt",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     captured_prompt = None
 
@@ -292,14 +324,20 @@ async def test_vision_default_prompt():
     provider = Anthropic(token=TEST_TOKEN)
 
     mock_client = MagicMock()
-    from anthropic.types import TextBlock
+    from anthropic.types import ToolUseBlock
 
     mock_response = MagicMock()
-    mock_content = TextBlock(
-        type="text",
-        text='{"short_description": "Test", "full_description": "Test with default prompt", "text": null}',
+    mock_tool_call = ToolUseBlock(
+        type="tool_use",
+        id="test-id-123",
+        name="analyze_and_describe_image",
+        input={
+            "short_description": "Test",
+            "full_description": "Test with default prompt",
+            "text": None,
+        },
     )
-    mock_response.content = [mock_content]
+    mock_response.content = [mock_tool_call]
 
     captured_prompt = None
 

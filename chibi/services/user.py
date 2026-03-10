@@ -256,6 +256,32 @@ async def describe_image(
     return await provider.vision(image=image, model=model, mime_type=mime_type, prompt=prompt)
 
 
+@inject_database
+async def ocr_pdf(
+    db: Database,
+    user_id: int,
+    pdf: bytes,
+    model: str | None = None,
+) -> VisionResultSchema:
+    """Extract text from a PDF using the user's OCR-capable provider.
+
+    Args:
+        db: Database instance.
+        user_id: User ID.
+        pdf: PDF data as bytes.
+        model: Optional model override.
+
+    Returns:
+        OCR result as VisionResultSchema.
+
+    Raises:
+        ValueError: If no OCR-capable provider is available.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    provider = user.ocr_provider
+    return await provider.ocr(pdf=pdf, model=model)
+
+
 @cached(ttl=3600)
 @inject_database
 async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:

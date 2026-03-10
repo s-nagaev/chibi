@@ -9,6 +9,7 @@ from loguru import logger
 from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
 from mistralai.models import (
     AssistantMessage,
+    DocumentURLChunk,
     FunctionCall,
     SystemMessage,
     ToolCall,
@@ -40,6 +41,8 @@ class MistralAI(RestApiFriendlyProvider):
     api_key = gpt_settings.mistralai_key
     chat_ready = True
     moderation_ready = True
+    vision_ready = True
+    ocr_ready = True
 
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
@@ -47,6 +50,7 @@ class MistralAI(RestApiFriendlyProvider):
     default_model = "mistral-medium-latest"
     default_moderation_model = "mistral-small-latest"
     default_vision_model = "pixtral-12b-2409"
+    default_ocr_model = "mistral-ocr-latest"
     frequency_penalty: float | None = 0.6
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = 0.3
@@ -309,7 +313,7 @@ class MistralAI(RestApiFriendlyProvider):
                 }
             ],
             response_format=VisionResultSchema,
-            max_tokens=4096,
+            max_tokens=16384,
         )
 
         if not response.choices:
@@ -329,6 +333,65 @@ class MistralAI(RestApiFriendlyProvider):
 
         logger.info(f"Image analyzed successfully: {result.parsed.short_description}\n{result.parsed.full_description}")
         return result.parsed
+
+    async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
+        """Extract text from a PDF document using Mistral's OCR API.
+
+        Args:
+            pdf: The PDF file content as bytes.
+            model: The model to use for OCR. Defaults to mistral-ocr-latest.
+
+        Returns:
+            VisionResultSchema containing the extracted text and descriptions.
+        """
+        model = model or self.default_ocr_model
+        logger.info(f"[{self.name}] Extracting text from PDF with model {model}...")
+
+        # Encode PDF to base64
+        pdf_base64 = base64.b64encode(pdf).decode("utf-8")
+        document_url = f"data:application/pdf;base64,{pdf_base64}"
+
+        # Build the document using DocumentURLChunk
+        document = DocumentURLChunk(document_url=document_url)
+
+        try:
+            # Use the OCR API to process the PDF
+            response = await self.client.ocr.process_async(
+                model=model,
+                document=document,
+            )
+
+            if not response.pages:
+                raise ServiceResponseError(
+                    provider=self.name,
+                    model=model,
+                    detail="Could not extract text from PDF: empty response",
+                )
+
+            # Combine all pages' markdown content
+            full_text = "\n\n".join(page.markdown for page in response.pages)
+
+            # Create a short description from the first 100 characters
+            short_description = full_text[:100].replace("\n", " ").strip()
+            if len(full_text) > 100:
+                short_description += "..."
+
+            logger.info(f"[{self.name}] PDF text extracted successfully: {short_description}...")
+            return VisionResultSchema(
+                short_description=short_description,
+                full_description=full_text[:1000] if len(full_text) > 1000 else full_text,
+                text=full_text,
+            )
+
+        except ServiceResponseError:
+            raise
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not extract text from PDF: {e}",
+            )
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
