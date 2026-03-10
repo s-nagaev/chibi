@@ -38,6 +38,8 @@ jobs:
         with:
           images: |
             ${{ matrix.image_name }}
+          flavor: |
+            latest=${{ matrix.tag_prefix == '' }}
           tags: |
             type=schedule,prefix=${{ matrix.tag_prefix }}
             type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
