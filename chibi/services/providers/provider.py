@@ -16,6 +16,7 @@ from anthropic.types import (
     MessageParam,
     TextBlock,
     TextBlockParam,
+    ToolChoiceToolParam,
     ToolParam,
     ToolResultBlockParam,
     ToolUseBlock,
@@ -23,6 +24,7 @@ from anthropic.types import (
 from anthropic.types import (
     Message as AnthropicMessage,
 )
+from anthropic.types.tool_param import InputSchemaTyped
 from httpx import Response
 from httpx._types import QueryParamTypes, RequestData
 from loguru import logger
@@ -139,6 +141,10 @@ class RegisteredProviders:
     def tts_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.tts_ready}
 
+    @property
+    def ocr_ready(self) -> dict[str, type["Provider"]]:
+        return {name: provider for name, provider in self.available.items() if provider.ocr_ready}
+
     def get_instance(self, provider: type["Provider"]) -> Optional["Provider"]:
         api_key = self.get_api_key(provider)
         if not api_key:
@@ -191,6 +197,12 @@ class RegisteredProviders:
             return self.get_instance(provider=provider)
         return None
 
+    @property
+    def first_ocr_ready(self) -> Optional["Provider"]:
+        if provider := next(iter(self.ocr_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
 
 class Provider(ABC):
     api_key: str | None = None
@@ -214,6 +226,7 @@ class Provider(ABC):
     default_tts_model: str | None = None
     default_moderation_model: str | None = None
     default_vision_model: str | None = None
+    default_ocr_model: str | None = None
 
     timeout: int = gpt_settings.timeout
 
@@ -265,6 +278,9 @@ class Provider(ABC):
         except Exception:  # Some providers return 403, others - 400... Okay..
             return False
         return True
+
+    async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
+        raise NotImplementedError
 
     @classmethod
     def _model_name_has_prefix(cls, model_name: str) -> bool:
@@ -910,21 +926,21 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 )
             ],
             tools=[
-                {
-                    "name": "print_moderator_verdict",
-                    "description": "Provide moderator's verdict",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
+                ToolParam(
+                    name="print_moderator_verdict",
+                    description="Provide moderator's verdict",
+                    input_schema=InputSchemaTyped(
+                        type="object",
+                        properties={
                             "verdict": {"type": "string"},
                             "status": {"type": "string", "default": "ok"},
                             "reason": {"type": "string"},
                         },
-                        "required": ["verdict"],
-                    },
-                }
+                        required=["verdict"],
+                    ),
+                )
             ],
-            tool_choice={"type": "tool", "name": "print_moderator_verdict"},
+            tool_choice=ToolChoiceToolParam(type="tool", name="print_moderator_verdict"),
             messages=messages,
         )
         if not response_message.content:

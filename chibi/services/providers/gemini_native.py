@@ -59,6 +59,7 @@ class Gemini(RestApiFriendlyProvider):
     image_generation_ready = True
     moderation_ready = True
     vision_ready = True
+    ocr_ready = True
 
     name = "Gemini"
     model_name_keywords = ["gemini", "gemma"]
@@ -71,6 +72,7 @@ class Gemini(RestApiFriendlyProvider):
     default_stt_model = "gemini-3-flash-preview"
     default_moderation_model = "models/gemini-2.5-flash-lite"
     default_vision_model = "models/gemini-3-flash-preview"
+    default_ocr_model = "models/gemini-3-flash-preview"
 
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
@@ -596,7 +598,7 @@ class Gemini(RestApiFriendlyProvider):
     ) -> VisionResultSchema:
         model = model or self.default_vision_model
         prompt = prompt or "Describe the image in detail"
-        logger.info(f"Analyzing image with model {model}...")
+        logger.info(f"[{self.name}] Analyzing image with model {model}...")
 
         http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
@@ -633,7 +635,57 @@ class Gemini(RestApiFriendlyProvider):
                 detail=f"Could not analyze image or parse a result due to exception: {e}",
             ) from e
 
-        if application_settings.log_prompt_data:
-            logger.info(f"Analyzed image: {parsed_result.model_dump()}")
+        logger.info(f"[{self.name}] Analyzed image: {parsed_result.short_description}")
+
+        return parsed_result
+
+    async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
+        """Extract text from a PDF document using Google Gemini's document vision.
+
+        Args:
+            pdf: The PDF file content as bytes.
+            model: The model to use for OCR. Defaults to default_vision_model.
+
+        Returns:
+            VisionResultSchema containing the extracted text and descriptions.
+        """
+        model = model or self.default_ocr_model
+        logger.info(f"[{self.name}] Extracting text from PDF with model {model}...")
+
+        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        generation_config = GenerateContentConfig(
+            http_options=http_options,
+            response_schema=VisionResultSchema,
+        )
+        response = await self._generate_content(
+            model=model,
+            contents=[
+                Part.from_bytes(
+                    data=pdf,
+                    mime_type="application/pdf",
+                ),
+                "Extract all text from this PDF document.",
+            ],
+            config=generation_config,
+        )
+
+        result = response.text
+        if not result:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="Could not extract text from PDF: empty text data in response",
+            )
+
+        try:
+            parsed_result = VisionResultSchema.model_validate_json(json_data=result, extra="ignore")
+        except Exception as e:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not extract text from PDF or parse a result due to exception: {e}",
+            ) from e
+
+        logger.info(f"[{self.name}] PDF text extracted successfully: {parsed_result.short_description}")
 
         return parsed_result

@@ -57,6 +57,8 @@ class GPTSettings(BaseSettings):
     vision_provider: str | None = Field(default=None)
     vision_model: str | None = Field(default=None)
 
+    ocr_provider: str | None = Field(default=None)
+
     moderation_provider: str | None = Field(default=None)
     moderation_model: str | None = Field(default=None)
 

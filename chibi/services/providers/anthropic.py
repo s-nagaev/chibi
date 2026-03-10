@@ -1,8 +1,19 @@
 import base64
-from typing import cast
+from typing import Literal, cast
 
 from anthropic import AsyncClient
-from anthropic.types import Base64ImageSourceParam, ImageBlockParam, TextBlock, TextBlockParam
+from anthropic.types import (
+    Base64ImageSourceParam,
+    Base64PDFSourceParam,
+    DocumentBlockParam,
+    ImageBlockParam,
+    MessageParam,
+    TextBlockParam,
+    ToolChoiceToolParam,
+    ToolParam,
+    ToolUseBlock,
+)
+from anthropic.types.tool_param import InputSchemaTyped
 from loguru import logger
 
 from chibi.config import gpt_settings
@@ -16,6 +27,7 @@ class Anthropic(AnthropicFriendlyProvider):
     chat_ready = True
     moderation_ready = True
     vision_ready = True
+    ocr_ready = True
 
     name = "Anthropic"
     model_name_keywords = ["claude"]
@@ -68,58 +80,165 @@ class Anthropic(AnthropicFriendlyProvider):
 
         # Use the Anthropic messages API with vision
         # Use cast to satisfy mypy's strict literal type checking
-        image_source: Base64ImageSourceParam = cast(
-            Base64ImageSourceParam,
-            {"type": "base64", "media_type": mime_type, "data": image_base64},
+        image_source = Base64ImageSourceParam(
+            type="base64",
+            media_type=cast(Literal["image/jpeg", "image/png", "image/gif", "image/webp"], mime_type),
+            data=image_base64,
         )
         content: list[ImageBlockParam | TextBlockParam] = [
-            cast(ImageBlockParam, {"type": "image", "source": image_source}),
-            cast(
-                TextBlockParam,
-                {
-                    "type": "text",
-                    "text": (
-                        f"{prompt}. Your response must be valid JSON with the following "
-                        'structure: {"short_description": "<max 100 characters>", "full_description": '
-                        '"<detailed description>", "text": "<extracted text if any, otherwise null>"}'
-                    ),
-                },
+            ImageBlockParam(type="image", source=image_source),
+            TextBlockParam(
+                type="text",
+                text=prompt,
             ),
         ]
-        response = await self.client.messages.create(
+        tool = ToolParam(
+            name="analyze_and_describe_image",
+            description="Analyze and describe the image",
+            input_schema=InputSchemaTyped(
+                type="object",
+                properties={
+                    "short_description": {
+                        "type": "string",
+                        "description": "Image short description, up to 100 characters",
+                    },
+                    "full_description": {
+                        "type": "string",
+                        "description": "Image full description",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Extracted text from the image",
+                    },
+                },
+                required=["short_description", "full_description"],
+            ),
+        )
+        response_message = await self.client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=16384,
             messages=[
-                {
-                    "role": "user",
-                    "content": content,
-                }
+                MessageParam(
+                    role="user",
+                    content=content,
+                )
             ],
+            timeout=self.timeout,
+            temperature=0.1,
+            tools=[tool],
+            tool_choice=ToolChoiceToolParam(type="tool", name="analyze_and_describe_image"),
+        )
+        tool_call: ToolUseBlock | None = next(
+            (part for part in response_message.content if isinstance(part, ToolUseBlock)), None
+        )
+        if not tool_call:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image: empty response: {response_message}",
+            )
+
+        answer = tool_call.input
+        try:
+            result = VisionResultSchema.model_validate(answer)
+            logger.info(f"[{self.name}] Image analyzed successfully: {result.short_description}...")
+            return result
+        except Exception as e:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"Could not analyze image. Error parsing result: {e}",
+            )
+
+    async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
+        """Extract text from a PDF document using Anthropic Claude's document vision.
+
+        Args:
+            pdf: The PDF file content as bytes.
+            model: The model to use for OCR. Defaults to default_vision_model.
+
+        Returns:
+            VisionResultSchema containing the extracted text and descriptions.
+        """
+        model = model or self.default_vision_model
+        logger.info(f"[{self.name}] Extracting text from PDF with model {model}...")
+
+        # Encode PDF to base64
+        pdf_base64 = base64.b64encode(pdf).decode("utf-8")
+
+        # Build the document content block for Anthropic Messages API
+        # Use cast to satisfy mypy's strict literal type checking
+        document_source = Base64PDFSourceParam(
+            type="base64",
+            media_type="application/pdf",
+            data=pdf_base64,
         )
 
-        if not response.content:
+        content: list[DocumentBlockParam | TextBlockParam] = [
+            DocumentBlockParam(
+                type="document",
+                source=document_source,
+            ),
+            TextBlockParam(
+                type="text",
+                text="Extract all text from this PDF",
+            ),
+        ]
+
+        tool = ToolParam(
+            name="print_pdf_ocr_result",
+            description="Extract text from a PDF document",
+            input_schema=InputSchemaTyped(
+                type="object",
+                properties={
+                    "short_description": {
+                        "type": "string",
+                        "description": "Document short description, up to 100 characters",
+                    },
+                    "full_description": {
+                        "type": "string",
+                        "description": "Document full description",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Extracted text from the PDF document",
+                    },
+                },
+                required=["short_description", "text"],
+            ),
+        )
+        response_message = await self.client.messages.create(
+            model=model,
+            max_tokens=16384,
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=content,
+                )
+            ],
+            timeout=self.timeout,
+            temperature=0.1,
+            tools=[tool],
+            tool_choice=ToolChoiceToolParam(type="tool", name="print_pdf_ocr_result"),
+        )
+        tool_call: ToolUseBlock | None = next(
+            (part for part in response_message.content if isinstance(part, ToolUseBlock)), None
+        )
+        if not tool_call:
             raise ServiceResponseError(
                 provider=self.name,
                 model=model,
-                detail=f"Could not analyze image: empty response: {response}",
+                detail="Could not extract text from PDF: no tool use block found",
             )
 
-        first_content = response.content[0]
-        if not isinstance(first_content, TextBlock):
+        answer = tool_call.input
+        try:
+            result = VisionResultSchema.model_validate(answer)
+            logger.info(f"[{self.name}] PDF text extracted successfully: {result.short_description}...")
+            return result
+        except Exception as e:
             raise ServiceResponseError(
                 provider=self.name,
                 model=model,
-                detail=f"Could not analyze image: unexpected content type: {type(first_content)}",
+                detail=f"Could not extract text from PDF. Error parsing result: {e}",
             )
-
-        result_text = first_content.text
-
-        if not result_text:
-            raise ServiceResponseError(
-                provider=self.name,
-                model=model,
-                detail=f"Could not analyze image: empty result text: {response}",
-            )
-
-        logger.info(f"Image analyzed successfully: {result_text[:50]}...")
-        return VisionResultSchema.model_validate_json(result_text)

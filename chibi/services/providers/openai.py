@@ -1,11 +1,16 @@
+import base64
 from io import BytesIO
 
 from loguru import logger
 from openai import NOT_GIVEN, Omit, omit
 from openai.types import ImagesResponse, ReasoningEffort
+from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionUserMessageParam
+from openai.types.chat.chat_completion_content_part_param import File, FileFile
+from openai.types.chat.parsed_chat_completion import ParsedChatCompletion
 
 from chibi.config import gpt_settings
 from chibi.constants import OPENAI_TTS_INSTRUCTIONS
+from chibi.schemas.app import VisionResultSchema
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 
 
@@ -17,6 +22,7 @@ class OpenAI(OpenAIFriendlyProvider):
     image_generation_ready = True
     moderation_ready = True
     vision_ready = True
+    ocr_ready = True
 
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
@@ -30,6 +36,7 @@ class OpenAI(OpenAIFriendlyProvider):
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"
     default_vision_model = "gpt-4.1-mini"
+    default_ocr_model = "gpt-4.1-mini"
 
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         model = model or self.default_stt_model
@@ -93,3 +100,70 @@ class OpenAI(OpenAIFriendlyProvider):
         if model_name.startswith("gpt-5"):
             return omit
         return getattr(self, "temperature", gpt_settings.temperature)
+
+    async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
+        """Extract text from a PDF document using OpenAI's vision/OCR capabilities.
+
+        Args:
+            pdf: The PDF file content as bytes.
+            model: The model to use for OCR. Defaults to default_vision_model.
+
+        Returns:
+            VisionResultSchema containing the extracted text and descriptions.
+        """
+        model = model or self.default_ocr_model
+        logger.info(f"[{self.name}] Extracting text from PDF with model {model}...")
+
+        # Encode PDF to base64
+        pdf_base64 = base64.b64encode(pdf).decode("utf-8")
+        file_data = f"data:application/pdf;base64,{pdf_base64}"
+
+        # Build the message content with the PDF file
+        content: list[ChatCompletionContentPartTextParam | File] = [
+            File(
+                type="file",
+                file=FileFile(
+                    filename="document.pdf",
+                    file_data=file_data,
+                ),
+            ),
+            ChatCompletionContentPartTextParam(
+                type="text",
+                text="Extract all text from this PDF. Provide a short description and full text content.",
+            ),
+        ]
+
+        # Use parse() for structured output with Pydantic models
+        response: ParsedChatCompletion[VisionResultSchema] = await self.get_client().chat.completions.parse(
+            model=model,
+            messages=[
+                ChatCompletionUserMessageParam(
+                    role="user",
+                    content=content,
+                )
+            ],
+            response_format=VisionResultSchema,
+            # max_tokens=4096,
+        )
+
+        if not response.choices:
+            from chibi.exceptions import ServiceResponseError
+
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="Could not extract text from PDF: empty response",
+            )
+
+        result = response.choices[0].message
+        if not result or not result.parsed:
+            from chibi.exceptions import ServiceResponseError
+
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="Could not extract text from PDF: empty parsed result",
+            )
+
+        logger.info(f"[{self.name}] PDF text extracted successfully: {result.parsed.short_description}...")
+        return result.parsed

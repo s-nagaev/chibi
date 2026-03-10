@@ -18,6 +18,7 @@ from .mcp_management import DeinitializeMCPServer, InitializeSseMCPServer, Initi
 from .mcp_simple import McpEchoTool
 from .media import TextToSpeechTool
 from .memory import SetUserInfoTool
+from .ocr_pdf import OcrPdfTool
 from .schemas import ToolResponse
 from .send import SendAudioTool, SendImageTool, SendVideoTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
