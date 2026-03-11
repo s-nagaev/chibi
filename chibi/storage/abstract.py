@@ -1,6 +1,5 @@
 import time
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -35,16 +34,16 @@ class Database(ABC):
     async def get_user(self, user_id: int) -> User | None: ...
 
     @abstractmethod
-    async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None: ...
+    async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None: ...
 
     @abstractmethod
-    async def get_messages(self, user: User) -> list[dict[str, str]]: ...
+    async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]: ...
 
     @abstractmethod
-    async def drop_messages(self, user: User) -> None: ...
+    async def drop_messages(self, user: User, thread_id: int = 0) -> None: ...
 
-    async def get_conversation_messages(self, user: User) -> list[Message]:
-        messages = await self.get_messages(user=user)
+    async def get_conversation_messages(self, user: User, thread_id: int = 0) -> list[Message]:
+        messages = await self.get_messages(user=user, thread_id=thread_id)
         return [Message(**msg) for msg in messages]
 
     async def count_image(self, user_id: int) -> None:

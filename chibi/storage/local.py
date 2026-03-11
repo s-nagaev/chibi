@@ -1,7 +1,6 @@
 import os
 import pickle
 import time
-from typing import Optional
 
 from loguru import logger
 
@@ -37,7 +36,7 @@ class LocalStorage(Database):
         if isinstance(data, dict):
             user = User(**data)
         if isinstance(data, User):
-            user = User(**data.dict())
+            user = User(**data.model_dump())
         if user:
             current_time = time.time()
             if hasattr(user, "images"):
@@ -46,25 +45,36 @@ class LocalStorage(Database):
 
         return None
 
-    async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
+    async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
         user_refreshed = await self.get_or_create_user(user_id=user.id)
         expire_at = time.time() + ttl if ttl else None
 
         message.expire_at = expire_at
-        user_refreshed.messages.append(message)
+        if thread_id:
+            user_refreshed.thread_messages_map[thread_id].append(message)
+        else:
+            user_refreshed.messages.append(message)
         await self.save_user(user_refreshed)
 
-    async def get_messages(self, user: User) -> list[dict[str, str]]:
+    async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]:
         user_refreshed = await self.get_or_create_user(user_id=user.id)
         current_time = time.time()
 
+        if thread_id:
+            messages = user_refreshed.thread_messages_map.get(thread_id, [])
+        else:
+            messages = user_refreshed.messages
+
         msgs = [
             msg.model_dump(exclude={"expire_at", "id"})
-            for msg in user_refreshed.messages
+            for msg in messages
             if msg.expire_at is None or msg.expire_at > current_time
         ]
         return msgs
 
-    async def drop_messages(self, user: User) -> None:
-        user.messages = []
+    async def drop_messages(self, user: User, thread_id: int = 0) -> None:
+        if thread_id:
+            user.thread_messages_map[thread_id] = []
+        else:
+            user.messages = []
         await self.save_user(user=user)

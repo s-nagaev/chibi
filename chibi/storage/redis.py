@@ -1,4 +1,4 @@
-from typing import Optional
+import json
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -68,35 +68,48 @@ class RedisStorage(Database):
         return user
 
     @retry_connection
-    async def get_user(self, user_id: int) -> Optional[User]:
+    async def get_user(self, user_id: int) -> User | None:
         user_key = f"user:{user_id}"
         user_data = await self.redis.get(user_key)
         if not user_data:
             return None
 
         user = User.model_validate_json(user_data)
-        message_keys_pattern = f"user:{user.id}:message:*"
-        message_keys = set(await self.redis.keys(message_keys_pattern))
-        user_messages = [Message.model_validate_json(await self.redis.get(message_key)) for message_key in message_keys]
-        user.messages = sorted(user_messages, key=lambda msg: msg.id)
-
         return user
 
     @retry_connection
-    async def add_message(self, user: User, message: Message, ttl: Optional[int] = None) -> None:
-        message_key = f"user:{user.id}:message:{message.id}"
+    async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
+        if thread_id:
+            message_key = f"user:{user.id}:thread:{thread_id}:message:{message.id}"
+        else:
+            message_key = f"user:{user.id}:message:{message.id}"
+
         await self.redis.set(name=message_key, value=message.model_dump_json(exclude={"expire_at"}))
         if ttl:
             await self.redis.expire(name=message_key, time=ttl)
 
     @retry_connection
-    async def get_messages(self, user: User) -> list[dict[str, str]]:
-        user_refreshed = await self.get_or_create_user(user_id=user.id)
-        return [msg.model_dump(exclude={"expire_at", "id"}) for msg in user_refreshed.messages]
+    async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]:
+        if thread_id:
+            message_keys_pattern = f"user:{user.id}:thread:{thread_id}:message:*"
+        else:
+            message_keys_pattern = f"user:{user.id}:message:*"
+
+        message_keys = set(await self.redis.keys(message_keys_pattern))
+        if not message_keys:
+            return []
+
+        messages = [json.loads(await self.redis.get(message_key)) for message_key in message_keys]
+        messages.sort(key=lambda msg: msg.get("id", 0))
+        return messages
 
     @retry_connection
-    async def drop_messages(self, user: User) -> None:
-        message_keys_pattern = f"user:{user.id}:message:*"
+    async def drop_messages(self, user: User, thread_id: int = 0) -> None:
+        if thread_id:
+            message_keys_pattern = f"user:{user.id}:thread:{thread_id}:message:*"
+        else:
+            message_keys_pattern = f"user:{user.id}:message:*"
+
         message_keys = await self.redis.keys(message_keys_pattern)
 
         for message_key in message_keys:

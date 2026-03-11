@@ -149,7 +149,7 @@ class MistralAI(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages

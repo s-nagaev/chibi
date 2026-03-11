@@ -428,7 +428,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             dialog = messages
         else:
             prepared_system_prompt = await prepare_system_prompt(
-                base_system_prompt=system_prompt, user=user, interface=interface
+                base_system_prompt=system_prompt, user_id=user.id, interface=interface
             )
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
@@ -830,7 +830,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
         response_message: AnthropicMessage = await self._generate_content(
             model=model,

@@ -107,6 +107,10 @@ class Message(BaseModel):
     tool_name: str | None = None
     source: str | None = None
 
+    @property
+    def estimate_tokens(self) -> int:
+        return (len(self.content) + len(self.role)) // 4
+
     def to_openai(self) -> ChatCompletionMessageParam:
         wrapper_class = CHAT_COMPLETION_CLASSES.get(self.role)
         if not wrapper_class:
@@ -449,6 +453,7 @@ class User(BaseModel):
     working_dir: str = application_settings.working_dir
     llm_skills: dict[str, str] = {}
     telegram_files: dict[str, TelegramFileMeta] = {}
+    thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):

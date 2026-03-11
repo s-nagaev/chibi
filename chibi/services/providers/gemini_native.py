@@ -223,7 +223,7 @@ class Gemini(RestApiFriendlyProvider):
         model_name = model or self.default_model
 
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
 
         if "flash" in model_name and self.temperature > 0.4:

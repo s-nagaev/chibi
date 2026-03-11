@@ -32,6 +32,10 @@ class UserInterface(ABC):
         raise NotImplementedError
 
     @property
+    def thread_id(self) -> int | None:
+        raise NotImplementedError
+
+    @property
     def user_data(self) -> str:
         """Returns a string representation of the user data.
 
@@ -223,6 +227,12 @@ class TelegramInterface(UserInterface):
         raise ValueError("Telegram incoming update does not contain valid chat data.")
 
     @property
+    def thread_id(self) -> int | None:
+        if message := self.update.effective_message:
+            return message.message_thread_id
+        return None
+
+    @property
     def chat_id(self) -> str | int:
         """Returns the unique identifier for the current Telegram chat.
 
@@ -320,15 +330,15 @@ class TelegramInterface(UserInterface):
 
     async def send_action_typing(self) -> None:
         """Sends a typing action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.TYPING)
+        await self._chat.send_chat_action(action=ChatAction.TYPING, message_thread_id=self.thread_id)
 
     async def send_action_uploading_photo(self) -> None:
         """Sends an uploading photo action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.UPLOAD_PHOTO)
+        await self._chat.send_chat_action(action=ChatAction.UPLOAD_PHOTO, message_thread_id=self.thread_id)
 
     async def send_action_recording(self) -> None:
         """Sends a recording voice action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE)
+        await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE, message_thread_id=self.thread_id)
 
     async def send_reaction(self, reaction: str) -> None:
         """Sends a reaction to the user's message in Telegram.

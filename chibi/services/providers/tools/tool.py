@@ -59,7 +59,7 @@ class ChibiTool:
             )
             return ToolResponse(tool_name=cls.name, status="ok", result=result)
         except Exception as e:
-            logger.warning(f"[{kwargs.get('model', 'Unknown model')}] Tool {cls.name} raised an exception: {e}")
+            logger.exception(f"[{kwargs.get('model', 'Unknown model')}] Tool {cls.name} raised an exception: {e}")
             return ToolResponse(tool_name=cls.name, status="error", result=str(e))
 
     @classmethod

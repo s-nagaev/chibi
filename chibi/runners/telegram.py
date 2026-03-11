@@ -213,7 +213,12 @@ class ChibiBot:
         telegram_chat = get_telegram_chat(update=update)
         telegram_message = get_telegram_message(update=update)
         interface = TelegramInterface(update=update, context=context)
-
+        # print("="  * 120)
+        # import pprint
+        # pp = pprint.PrettyPrinter(indent=2, width=200)
+        # pp.pprint(telegram_message.to_dict())
+        # print("="  * 120)
+        # print("="  * 120)
         if telegram_message.voice:
             task_manager.run_task(
                 coro=handle_user_prompt(interface=interface),

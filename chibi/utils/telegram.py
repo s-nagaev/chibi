@@ -219,9 +219,12 @@ async def send_message(
         return await context.bot.send_message(
             chat_id=telegram_chat.id,
             reply_to_message_id=telegram_message.message_id,
+            message_thread_id=telegram_message.message_thread_id,
             **kwargs,
         )
-    return await context.bot.send_message(chat_id=telegram_chat.id, **kwargs)
+    return await context.bot.send_message(
+        chat_id=telegram_chat.id, message_thread_id=telegram_message.message_thread_id, **kwargs
+    )
 
 
 async def send_long_message(
@@ -324,6 +327,7 @@ async def send_images(
                 chat_id=telegram_chat.id,
                 media=[InputMediaPhoto(url) for url in image_files],
                 reply_to_message_id=telegram_message.message_id,
+                message_thread_id=telegram_message.message_thread_id,
                 read_timeout=IMAGE_UPLOAD_TIMEOUT,
                 write_timeout=IMAGE_UPLOAD_TIMEOUT,
             )
@@ -389,6 +393,7 @@ async def send_text_file(file_content: str, file_name: str, update: Update, cont
         context: The update context.
     """
     telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
     text_file = BytesIO(file_content.encode("utf-8"))
     text_file.name = file_name
 
@@ -396,6 +401,7 @@ async def send_text_file(file_content: str, file_name: str, update: Update, cont
         chat_id=telegram_chat.id,
         document=text_file,
         filename=file_name,
+        reply_to_message_id=telegram_message.message_thread_id,
     )
 
 
@@ -414,6 +420,7 @@ async def send_message_in_plain_text_and_file(
         reply: Whether to reply to the message.
     """
     telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
 
     await send_long_message(message=message, update=update, context=context, normalize_md=False, reply=reply)
     file = BytesIO()
@@ -429,6 +436,7 @@ async def send_message_in_plain_text_and_file(
         chat_id=telegram_chat.id,
         document=file,
         filename="answer.md",
+        message_thread_id=telegram_message.message_thread_id,
     )
 
 

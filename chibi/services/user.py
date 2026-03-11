@@ -195,11 +195,12 @@ async def get_llm_chat_completion_answer(
 @inject_database
 async def check_history_and_summarize(db: Database, user_id: int) -> bool:
     user = await db.get_or_create_user(user_id=user_id)
-    messages = await db.get_messages(user=user)
+    messages: list[Message] = await db.get_conversation_messages(user=user)
     # Roughly estimating how many tokens the current conversation history will comprise. It is possible to calculate
     # this accurately, but the modules that can be used for this need to be separately built for armv7, which is
     # difficult to do right now (but will be done further, I hope).
-    if len(str(messages)) / 4 >= gpt_settings.max_history_tokens:
+    tokens = sum(msg.estimate_tokens for msg in messages)
+    if tokens >= gpt_settings.max_history_tokens:
         await emergency_summarization(user_id=user_id)
         return True
     return False
