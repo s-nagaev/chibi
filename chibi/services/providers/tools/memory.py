@@ -6,6 +6,7 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
+from chibi.memory import memory
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
@@ -250,3 +251,61 @@ class UnloadSkillTool(ChibiTool):
         )
         await deactivate_llm_skill(user_id=user_id, skill_name=skill_name)
         return {"status": "ok"}
+
+
+class SearchInConversationHistoryTool(ChibiTool):
+    """Tool to search through conversation history using semantic search."""
+    register = False  # Registered manually in memory/__init__.py
+    name = "search_in_conversation_history"
+
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="search_in_conversation_history",
+            description="Search through your conversation history using semantic search. Use this when user asks about past discussions or wants to find information from previous conversations.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language search query"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum number of results to return (default: {application_settings.memory_search_limit})",
+                        "default": application_settings.memory_search_limit
+                    }
+                },
+                "required": ["query"],
+            },
+        ),
+    )
+
+    @classmethod
+    async def function(cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]) -> dict:
+        """Search through conversation history."""
+        if memory is None:
+            raise ToolException("Semantic memory is not configured.")
+
+        if not (user_id := kwargs.get("user_id")):
+            raise ValueError("This function requires user_id to be automatically provided.")
+
+        results = await memory.search(
+            user_id=user_id,
+            query=query,
+            n_results=limit or application_settings.memory_search_limit
+        )
+
+        if not results:
+            return {
+                "results": [],
+                "query": query,
+                "count": 0,
+                "message": "No matching conversations found"
+            }
+
+        return {
+            "results": results,
+            "query": query,
+            "count": len(results)
+        }
