@@ -65,6 +65,13 @@ class ApplicationSettings(BaseSettings):
     influxdb_org: str | None = Field(default=None)
     influxdb_bucket: str | None = Field(default=None)
 
+    # ChromaDB settings
+    chroma_host: str | None = Field(default=None)
+    chroma_port: int = Field(default=8000)
+    chroma_persist_dir: str = Field(default="./data/chroma")
+    chroma_history_retention_days: int = Field(default=90)
+    memory_search_limit: int = Field(default=5)
+
     # Interface
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
@@ -98,6 +105,10 @@ class ApplicationSettings(BaseSettings):
         if Path("run/.containerenv").is_file():
             return "podman"
         return "host"
+
+    @property
+    def is_chroma_configured(self) -> bool:
+        return bool(self.chroma_host or self.chroma_persist_dir)
 
     @property
     def running_in_container(self) -> bool:
