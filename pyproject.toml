@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi-bot"
-version = "1.8.0"
+version = "1.8.1"
 description = "Your Digital Companion. Self-hosted Telegram bot orchestrating multiple AI providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Alibaba, MiniMax) with autonomous agent capabilities, MCP integrations, and async task execution. Not a tool. A partner."
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
@@ -73,6 +73,11 @@ telegramify-markdown = "0.5.4"
 tenacity = "9.1.4"
 trafilatura = "2.0.0"
 
+apscheduler = "^3.11"
+sqlalchemy = "^2.0"
+onnxruntime = "1.18.1"
+chromadb = "^1.5.5"
+numpy = "<2"
 [tool.poetry.group.dev.dependencies]
 factory-boy = "^3.3.3"
 fakeredis = "^2.28.1"
