@@ -1,9 +1,8 @@
 """Tests for ChromaDecoratedStorage decorator."""
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from chibi.models import Message, User
 from chibi.storage.chroma_decorator import ChromaDecoratedStorage
@@ -85,9 +84,9 @@ class TestChromaDecoratedStorage:
     async def test_add_message_calls_archive_when_memory_exists(self, mock_inner, mock_memory, user, message):
         """Test that archive is called when memory is configured."""
         # Patch task_manager to avoid singleton issues in tests
-        with patch('chibi.storage.chroma_decorator.task_manager') as mock_task_manager:
+        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
-            
+
             decorator = ChromaDecoratedStorage(mock_inner, memory=mock_memory)
 
             await decorator.add_message(user, message)
@@ -101,7 +100,7 @@ class TestChromaDecoratedStorage:
     @pytest.mark.asyncio
     async def test_add_message_does_not_archive_when_memory_none(self, mock_inner, user, message):
         """Test that archive is NOT called when memory is None."""
-        with patch('chibi.storage.chroma_decorator.task_manager') as mock_task_manager:
+        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
 
             decorator = ChromaDecoratedStorage(mock_inner, memory=None)
@@ -162,7 +161,7 @@ class TestChromaDecoratedStorage:
         failing_memory.archive = AsyncMock(side_effect=Exception("Archive failed"))
 
         # Patch task_manager to avoid actual background task
-        with patch('chibi.storage.chroma_decorator.task_manager') as mock_task_manager:
+        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
 
             decorator = ChromaDecoratedStorage(mock_inner, memory=failing_memory)

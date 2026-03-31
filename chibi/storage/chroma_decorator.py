@@ -18,10 +18,7 @@ class ChromaDecoratedStorage(Database):
 
         # Then, archive to ChromaDB (fire-and-forget via background task manager)
         if self.memory is not None:
-            task_manager.run_task(
-                self.memory.archive(user.id, [message]),
-                user_id=user.id
-            )
+            task_manager.run_task(self.memory.archive(user.id, [message]), user_id=user.id)
 
     async def get_messages(self, user: User) -> list[dict[str, str]]:
         return await self.inner.get_messages(user)
