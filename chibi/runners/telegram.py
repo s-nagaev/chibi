@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import TypeVar
 
 from loguru import logger
@@ -27,6 +28,7 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
+from chibi.memory.chroma import memory, register_memory_tool
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -42,10 +44,10 @@ from chibi.services.bot import (
     handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
+from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
 from chibi.services.scheduler import ChibiScheduler
 from chibi.services.task_manager import task_manager
-from chibi.memory.chroma import register_memory_tool
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
 from chibi.utils.telegram import (
@@ -61,8 +63,6 @@ from chibi.utils.telegram import (
     telegram_setting_pre_start_check,
     user_interacts_with_bot,
 )
-from chibi.memory.chroma import memory
-from chibi.services.jobs.archive import perform_retention_cleanup
 
 _T = TypeVar("_T")
 
@@ -736,8 +736,8 @@ class ChibiBot:
                 "cron",
                 hour=0,
                 minute=0,
-                id="retention_cleanup",
-                replace_existing=True
+                id=f"retention_cleanup-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                replace_existing=False,
             )
             scheduler.start()
             logger.info("Semantic memory cleanup: job scheduled")

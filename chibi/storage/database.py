@@ -37,7 +37,7 @@ class DatabaseCache:
             backend = application_settings.storage_backend.lower()
             if backend == "redis":
                 # RedisStorage.create expects URL and password
-                inner = await RedisStorage.create(
+                inner: RedisStorage | DynamoDBStorage | LocalStorage = await RedisStorage.create(
                     url=cast(str, application_settings.redis),
                     password=application_settings.redis_password,
                 )

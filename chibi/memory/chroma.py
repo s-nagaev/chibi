@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timedelta
-from typing import Awaitable
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -21,6 +20,7 @@ def create_memory() -> LongConversationMemory | None:
     try:
         # Import here to avoid circular import at module level
         from chibi.memory.chroma import ChromaLongConversationMemory
+
         mem = ChromaLongConversationMemory()
         logger.info("Semantic memory initialized successfully")
         return mem
@@ -32,8 +32,9 @@ def create_memory() -> LongConversationMemory | None:
 def register_memory_tool() -> None:
     """Register the search tool if memory is available."""
     if memory is not None:
-        from chibi.services.providers.tools.memory import SearchInConversationHistoryTool
         from chibi.services.providers.tools import RegisteredChibiTools
+        from chibi.services.providers.tools.memory import SearchInConversationHistoryTool
+
         RegisteredChibiTools.register(SearchInConversationHistoryTool)
         logger.info("SearchInConversationHistoryTool registered")
 
@@ -43,43 +44,46 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     def __init__(self) -> None:
         """Initialize ChromaDB client based on configuration."""
-        self._client: chromadb.AsyncHttpClient = None
+        self._client: chromadb.AsyncHttpClient | None = None
         self._is_embedded: bool = False
         self._init_client()
+
+    @property
+    def client(self) -> chromadb.AsyncHttpClient:
+        if self._client is None:
+            self._init_client()
+            return self._client
+        return self._client
 
     def _init_client(self) -> None:
         """Initialize ChromaDB client (embedded or external)."""
         if application_settings.chroma_host:
             # External mode
-            logger.info(f"ChromaDB: using external mode ({application_settings.chroma_host}:{application_settings.chroma_port})")
             self._client = chromadb.AsyncHttpClient(
-                host=application_settings.chroma_host,
-                port=application_settings.chroma_port
+                host=application_settings.chroma_host, port=application_settings.chroma_port
             )
             self._is_embedded = False
+            logger.info(
+                f"ChromaDB: using external mode ({application_settings.chroma_host}:{application_settings.chroma_port})"
+            )
         else:
             # Embedded mode
-            persist_path = application_settings.chroma_persist_dir
-            logger.info(f"ChromaDB: using embedded mode (persist: {persist_path})")
             self._client = chromadb.PersistentClient(
-                path=persist_path,
-                settings=ChromaSettings(anonymized_telemetry=False)
+                path=application_settings.chroma_persist_dir, settings=ChromaSettings(anonymized_telemetry=False)
             )
             self._is_embedded = True
+            logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
 
     def _get_collection_name(self, user_id: int) -> str:
         """Get collection name for user."""
         return f"user_{user_id}"
 
-    async def _get_or_create_collection(self, user_id: int) -> Awaitable[chromadb.AsyncClientAPI]:
+    async def _get_or_create_collection(self, user_id: int) -> chromadb.AsyncClientAPI:
         """Get or create collection for user."""
         collection_name = self._get_collection_name(user_id)
         if self._is_embedded:
-            return await asyncio.to_thread(
-                self._client.get_or_create_collection,
-                name=collection_name
-            )
-        return await self._client.get_or_create_collection(name=collection_name)
+            return await asyncio.to_thread(self.client.get_or_create_collection, name=collection_name)
+        return await self.client.get_or_create_collection(name=collection_name)
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB."""
@@ -89,30 +93,19 @@ class ChromaLongConversationMemory(LongConversationMemory):
         try:
             collection = await self._get_or_create_collection(user_id)
 
-            documents = [msg.content for msg in messages]
-            metadatas = [
-                {
-                    "role": msg.role,
-                    "timestamp": datetime.now().isoformat(),
-                    "message_id": str(msg.id)
-                }
-                for msg in messages
-            ]
-            ids = [str(msg.id) for msg in messages]
+            args_to_save = {
+                "metadatas": [
+                    {"role": msg.role, "timestamp": datetime.now().isoformat(), "message_id": str(msg.id)}
+                    for msg in messages
+                ],
+                "ids": [str(msg.id) for msg in messages],
+                "documents": [msg.content for msg in messages],
+            }
 
             if self._is_embedded:
-                await asyncio.to_thread(
-                    collection.add,
-                    documents=documents,
-                    metadatas=metadatas,
-                    ids=ids
-                )
+                await asyncio.to_thread(collection.add, **args_to_save)
             else:
-                await collection.add(
-                    documents=documents,
-                    metadatas=metadatas,
-                    ids=ids
-                )
+                await collection.add(**args_to_save)
             logger.debug(f"Archived {len(messages)} messages for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to archive messages for user {user_id}: {e}")
@@ -122,30 +115,20 @@ class ChromaLongConversationMemory(LongConversationMemory):
         """Search archived messages by semantic similarity."""
         try:
             collection = await self._get_or_create_collection(user_id)
-
+            query_args = {
+                "query_texts": [query],
+                "n_results": n_results,
+            }
             if self._is_embedded:
-                result = await asyncio.to_thread(
-                    collection.query,
-                    query_texts=[query],
-                    n_results=n_results
-                )
+                result = await asyncio.to_thread(collection.query, **query_args)
             else:
-                result = await collection.query(
-                    query_texts=[query],
-                    n_results=n_results
-                )
+                result = await collection.query(**query_args)
 
             # Format results
             formatted_results = []
             if result.get("documents") and result["documents"][0]:
                 for i, doc in enumerate(result["documents"][0]):
-                    formatted_results.append({
-                        "content": doc,
-                        "role": result["metadatas"][0][i].get("role"),
-                        "timestamp": result["metadatas"][0][i].get("timestamp"),
-                        "message_id": result["metadatas"][0][i].get("message_id"),
-                        "distance": result["distances"][0][i] if result.get("distances") else None
-                    })
+                    formatted_results.append({"content": doc, **result["metadatas"][0][i]})
 
             return formatted_results
         except Exception as e:
@@ -154,25 +137,20 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days."""
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        cutoff = datetime.now() - timedelta(days=retention_days)
 
         try:
             # Get all collections
             if self._is_embedded:
-                collections = await asyncio.to_thread(self._client.list_collections)
+                collections = await asyncio.to_thread(self.client.list_collections)
             else:
-                collections = await self._client.list_collections()
+                collections = await self.client.list_collections()
 
-            # Filter user collections
-            user_collections = [c for c in collections if c.name.startswith("user_")]
-
-            for coll in user_collections:
+            for coll in [c for c in collections if c.name.startswith("user_")]:
                 try:
                     # Get all IDs and metadata
                     if self._is_embedded:
-                        result = await asyncio.to_thread(
-                            coll.get
-                        )
+                        result = await asyncio.to_thread(coll.get)
                     else:
                         result = await coll.get()
 
@@ -184,21 +162,17 @@ class ChromaLongConversationMemory(LongConversationMemory):
                     metadatas = result.get("metadatas", [])
                     for i, metadata in enumerate(metadatas):
                         timestamp_str = metadata.get("timestamp")
-                        if timestamp_str:
-                            try:
-                                msg_time = datetime.fromisoformat(timestamp_str)
-                                if msg_time < cutoff:
-                                    ids_to_delete.append(result["ids"][i])
-                            except (ValueError, TypeError):
-                                pass
+                        try:
+                            if (timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff) or not timestamp_str:
+                                ids_to_delete.append(result["ids"][i])
+                        except (ValueError, TypeError):
+                            # remove invalid data as well
+                            ids_to_delete.append(result["ids"][i])
 
                     # Delete old documents
                     if ids_to_delete:
                         if self._is_embedded:
-                            await asyncio.to_thread(
-                                coll.delete,
-                                ids=ids_to_delete
-                            )
+                            await asyncio.to_thread(coll.delete, ids=ids_to_delete)
                         else:
                             await coll.delete(ids=ids_to_delete)
                         logger.info(f"Deleted {len(ids_to_delete)} old messages from {coll.name}")
