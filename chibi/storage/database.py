@@ -5,7 +5,7 @@ from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVa
 from chibi.config.app import application_settings
 from chibi.memory.chroma import memory
 from chibi.storage.abstract import Database
-from chibi.storage.chroma_decorator import ChromaDecoratedStorage
+from chibi.storage.chroma_wrapper import ChromaWrappedStorage
 from chibi.storage.dynamodb import DynamoDBStorage
 from chibi.storage.local import LocalStorage
 from chibi.storage.redis import RedisStorage
@@ -54,9 +54,9 @@ class DatabaseCache:
                 # default to local storage
                 inner = LocalStorage(application_settings.local_data_path)
 
-            # Wrap with ChromaDecoratedStorage if memory is configured
-            if memory is not None:
-                self._cache = ChromaDecoratedStorage(inner, memory)
+            # Wrap with ChromaWrappedStorage if memory is configured
+            if memory:
+                self._cache = ChromaWrappedStorage(inner, memory)
             else:
                 self._cache = inner
 
