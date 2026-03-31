@@ -1,8 +1,5 @@
 from typing import Any, Optional
 
-from loguru import logger
-
-from chibi.memory import memory
 from chibi.models import Message, User
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
