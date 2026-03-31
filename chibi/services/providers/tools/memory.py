@@ -255,26 +255,27 @@ class UnloadSkillTool(ChibiTool):
 
 class SearchInConversationHistoryTool(ChibiTool):
     """Tool to search through conversation history using semantic search."""
-    register = False  # Registered manually in memory/__init__.py
+
+    register = False
     name = "search_in_conversation_history"
 
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
             name="search_in_conversation_history",
-            description="Search through your conversation history using semantic search. Use this when user asks about past discussions or wants to find information from previous conversations.",
+            description="Search through your conversation history using semantic search. Use this when user asks "
+            "about past discussions or wants to find information from previous conversations.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language search query"
-                    },
+                    "query": {"type": "string", "description": "Natural language search query"},
                     "limit": {
                         "type": "integer",
-                        "description": f"Maximum number of results to return (default: {application_settings.memory_search_limit})",
-                        "default": application_settings.memory_search_limit
-                    }
+                        "description": (
+                            f"Maximum number of results to return (default: {application_settings.memory_search_limit})"
+                        ),
+                        "default": application_settings.memory_search_limit,
+                    },
                 },
                 "required": ["query"],
             },
@@ -291,21 +292,10 @@ class SearchInConversationHistoryTool(ChibiTool):
             raise ValueError("This function requires user_id to be automatically provided.")
 
         results = await memory.search(
-            user_id=user_id,
-            query=query,
-            n_results=limit or application_settings.memory_search_limit
+            user_id=user_id, query=query, n_results=limit or application_settings.memory_search_limit
         )
 
         if not results:
-            return {
-                "results": [],
-                "query": query,
-                "count": 0,
-                "message": "No matching conversations found"
-            }
+            return {"results": [], "query": query, "count": 0, "message": "No matching conversations found"}
 
-        return {
-            "results": results,
-            "query": query,
-            "count": len(results)
-        }
+        return {"results": results, "query": query, "count": len(results)}
