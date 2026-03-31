@@ -82,19 +82,20 @@ class TestSearchInConversationHistoryTool:
 
     def test_tool_definition(self):
         """Test that tool definition is correct."""
-        assert SearchInConversationHistoryTool.name == "search_in_conversation_history"
-        assert SearchInConversationHistoryTool.register is False
+        with patch("chibi.services.providers.tools.memory.memory", None):
+            assert SearchInConversationHistoryTool.name == "search_in_conversation_history"
+            assert SearchInConversationHistoryTool.register is False
 
-        # Check definition structure
-        definition = SearchInConversationHistoryTool.definition
-        assert definition["type"] == "function"
-        assert "function" in definition
-        assert definition["function"]["name"] == "search_in_conversation_history"
+            # Check definition structure
+            definition = SearchInConversationHistoryTool.definition
+            assert definition["type"] == "function"
+            assert "function" in definition
+            assert definition["function"]["name"] == "search_in_conversation_history"
 
-        # Check parameters
-        params = definition["function"]["parameters"]
-        assert params["type"] == "object"
-        assert isinstance(params["properties"], dict)
-        assert "query" in params["properties"]
-        assert "limit" in params["properties"]
-        assert params["required"] == ["query"]
+            # Check parameters
+            params = definition["function"]["parameters"]
+            assert params["type"] == "object"
+            assert isinstance(params["properties"], dict)
+            assert "query" in params["properties"]
+            assert "limit" in params["properties"]
+            assert params["required"] == ["query"]

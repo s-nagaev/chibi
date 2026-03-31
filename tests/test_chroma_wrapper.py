@@ -1,11 +1,11 @@
-"""Tests for ChromaDecoratedStorage decorator."""
+"""Tests for ChromaWrappedStorage decorator."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from chibi.models import Message, User
-from chibi.storage.chroma_decorator import ChromaDecoratedStorage
+from chibi.storage.chroma_wrapper import ChromaWrappedStorage
 
 
 class MockDatabase:
@@ -68,13 +68,13 @@ def message():
     return Message(role="user", content="Test message")
 
 
-class TestChromaDecoratedStorage:
-    """Tests for ChromaDecoratedStorage."""
+class TestChromaWrappedStorage:
+    """Tests for ChromaWrappedStorage."""
 
     @pytest.mark.asyncio
     async def test_add_message_calls_inner(self, mock_inner, user, message):
         """Test that add_message calls inner storage."""
-        decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+        decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
         await decorator.add_message(user, message)
 
@@ -84,10 +84,10 @@ class TestChromaDecoratedStorage:
     async def test_add_message_calls_archive_when_memory_exists(self, mock_inner, mock_memory, user, message):
         """Test that archive is called when memory is configured."""
         # Patch task_manager to avoid singleton issues in tests
-        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
+        with patch("chibi.storage.chroma_wrapper.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
 
-            decorator = ChromaDecoratedStorage(mock_inner, memory=mock_memory)
+            decorator = ChromaWrappedStorage(mock_inner, memory=mock_memory)
 
             await decorator.add_message(user, message)
 
@@ -100,10 +100,10 @@ class TestChromaDecoratedStorage:
     @pytest.mark.asyncio
     async def test_add_message_does_not_archive_when_memory_none(self, mock_inner, user, message):
         """Test that archive is NOT called when memory is None."""
-        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
+        with patch("chibi.storage.chroma_wrapper.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
 
-            decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+            decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
             await decorator.add_message(user, message)
 
@@ -114,7 +114,7 @@ class TestChromaDecoratedStorage:
     async def test_get_messages_proxies_to_inner(self, mock_inner, user):
         """Test that get_messages proxies to inner storage."""
         mock_inner.get_messages = AsyncMock(return_value=[{"role": "user", "content": "test"}])
-        decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+        decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
         result = await decorator.get_messages(user)
 
@@ -125,7 +125,7 @@ class TestChromaDecoratedStorage:
     async def test_drop_messages_proxies_to_inner(self, mock_inner, user):
         """Test that drop_messages proxies to inner storage."""
         mock_inner.drop_messages = AsyncMock()
-        decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+        decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
         await decorator.drop_messages(user)
 
@@ -136,7 +136,7 @@ class TestChromaDecoratedStorage:
         """Test that get_user proxies to inner storage."""
         mock_user = User(id=123)
         mock_inner.get_user = AsyncMock(return_value=mock_user)
-        decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+        decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
         result = await decorator.get_user(123)
 
@@ -147,7 +147,7 @@ class TestChromaDecoratedStorage:
     async def test_create_user_proxies_to_inner(self, mock_inner):
         """Test that create_user proxies to inner storage."""
         mock_inner.create_user = AsyncMock(return_value=User(id=123))
-        decorator = ChromaDecoratedStorage(mock_inner, memory=None)
+        decorator = ChromaWrappedStorage(mock_inner, memory=None)
 
         result = await decorator.create_user(123)
 
@@ -161,10 +161,10 @@ class TestChromaDecoratedStorage:
         failing_memory.archive = AsyncMock(side_effect=Exception("Archive failed"))
 
         # Patch task_manager to avoid actual background task
-        with patch("chibi.storage.chroma_decorator.task_manager") as mock_task_manager:
+        with patch("chibi.storage.chroma_wrapper.task_manager") as mock_task_manager:
             mock_task_manager.run_task = MagicMock()
 
-            decorator = ChromaDecoratedStorage(mock_inner, memory=failing_memory)
+            decorator = ChromaWrappedStorage(mock_inner, memory=failing_memory)
 
             # This should NOT raise an exception
             await decorator.add_message(user, message)

@@ -118,6 +118,8 @@ def log_application_settings() -> None:
         f"Models whitelist: {models_whitelist}",
         "<magenta>Heartbeat:</magenta>",
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
+        "<magenta>ChromaDB:</magenta>",
+        f"✨Semantic memory ✨: {SETTING_SET if application_settings.is_chroma_configured else SETTING_UNSET}",
     ]
     messages += _provider_statuses()
 

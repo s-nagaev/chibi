@@ -27,7 +27,7 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
-from chibi.memory.chroma import memory, register_memory_tool
+from chibi.memory.chroma import memory
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -429,19 +429,16 @@ class ChibiBot:
     async def post_init(self, application: Application) -> None:
         await application.bot.set_my_commands(self.commands)
 
-        if memory is not None:
-            # Register semantic memory tool
-            register_memory_tool()
-
+        if memory:
             # Register retention cleanup job if memory is configured
             scheduler = ChibiScheduler()
             scheduler.add_job(
                 perform_retention_cleanup,
-                "cron",
-                hour=0,
-                minute=0,
+                trigger="interval",
+                days=application_settings.chroma_history_retention_days,
                 id=f"retention_cleanup-{datetime.now().strftime('%Y%m%d%H%M%S')}",
                 replace_existing=False,
+                next_run_time=datetime.now(),
             )
             scheduler.start()
             logger.info("Semantic memory cleanup: job scheduled")

@@ -262,7 +262,7 @@ class UnloadSkillTool(ChibiTool):
 class SearchInConversationHistoryTool(ChibiTool):
     """Tool to search through conversation history using semantic search."""
 
-    register = False
+    register = bool(memory)
     name = "search_in_conversation_history"
 
     definition = ChatCompletionToolParam(

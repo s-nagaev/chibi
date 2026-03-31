@@ -1,17 +1,16 @@
-from typing import Any, Optional
-
+from chibi.memory.abstract import LongConversationMemory
 from chibi.models import Message, User
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
 
 
-class ChromaDecoratedStorage(Database):
-    """Decorator that adds automatic archival to ChromaDB when messages are added.
+class ChromaWrappedStorage(Database):
+    """Wrapper that adds automatic archival to ChromaDB when messages are added.
 
     Uses __getattr__ to delegate all methods to inner storage except add_message.
     """
 
-    def __init__(self, inner: Database, memory: Optional[Any] = None):
+    def __init__(self, inner: Database, memory: LongConversationMemory | None = None):
         self.inner = inner
         self.memory = memory
 
@@ -20,7 +19,7 @@ class ChromaDecoratedStorage(Database):
         await self.inner.add_message(user, message, ttl)
 
         # Then, archive to ChromaDB (fire-and-forget via background task manager)
-        if self.memory is not None:
+        if self.memory:
             task_manager.run_task(self.memory.archive(user.id, [message]), user_id=user.id)
 
     # Required abstract methods - delegate via __getattr__
@@ -43,6 +42,6 @@ class ChromaDecoratedStorage(Database):
         return await self.inner.count_image(user_id)
 
     # Additional methods via __getattr__
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         """Delegate all other methods to inner storage."""
         return getattr(self.inner, name)

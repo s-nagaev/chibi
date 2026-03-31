@@ -18,9 +18,10 @@ class TestCreateMemory:
             assert result is None
 
     def test_create_memory_returns_instance_when_configured(self):
-        """Test that create_memory returns instance when ChromaDB is configured."""
+        """Test that create_memory returns instance when ChromaDB is configured (embedded mode)."""
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
+            mock_settings.chroma_host = None  # Embedded mode
 
             with patch("chibi.memory.chroma.ChromaLongConversationMemory") as mock_chroma_class:
                 mock_instance = MagicMock()
@@ -31,12 +32,41 @@ class TestCreateMemory:
                 mock_chroma_class.assert_called_once()
                 assert result is mock_instance
 
+    def test_create_memory_returns_async_client_when_host_configured(self):
+        """Test that create_memory returns AsyncChromaLongConversationMemory when external server configured."""
+        with patch("chibi.memory.chroma.application_settings") as mock_settings:
+            mock_settings.is_chroma_configured = True
+            mock_settings.chroma_host = "localhost"  # External mode
+
+            with patch("chibi.memory.chroma.AsyncChromaLongConversationMemory") as mock_async_class:
+                mock_instance = MagicMock()
+                mock_async_class.return_value = mock_instance
+
+                result = create_memory()
+
+                mock_async_class.assert_called_once()
+                assert result is mock_instance
+
     def test_create_memory_returns_none_on_exception(self):
         """Test that create_memory returns None when ChromaDB initialization fails."""
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
+            mock_settings.chroma_host = None  # Embedded mode
 
             with patch("chibi.memory.chroma.ChromaLongConversationMemory", side_effect=Exception("DB error")):
+                with patch("chibi.memory.chroma.logger") as mock_logger:
+                    result = create_memory()
+
+                    assert result is None
+                    mock_logger.error.assert_called_once()
+
+    def test_create_memory_returns_none_on_async_exception(self):
+        """Test that create_memory returns None when AsyncChromaLongConversationMemory initialization fails."""
+        with patch("chibi.memory.chroma.application_settings") as mock_settings:
+            mock_settings.is_chroma_configured = True
+            mock_settings.chroma_host = "localhost"  # External mode
+
+            with patch("chibi.memory.chroma.AsyncChromaLongConversationMemory", side_effect=Exception("DB error")):
                 with patch("chibi.memory.chroma.logger") as mock_logger:
                     result = create_memory()
 
