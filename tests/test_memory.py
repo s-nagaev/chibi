@@ -43,18 +43,6 @@ class TestCreateMemory:
                     assert result is None
                     mock_logger.error.assert_called_once()
 
-
-class TestMemoryType:
-    """Tests for memory module type."""
-
-    def test_memory_type_is_correct(self):
-        """Test that memory variable has correct type hint."""
-
-        # Memory can be None or LongConversationMemory
-        # If it's not None, it should be an instance of LongConversationMemory
-        # (or mock in test environment)
-        pass  # Just check it doesn't crash
-
     def test_create_memory_import(self):
         """Test that create_memory can be imported."""
         from chibi.memory.chroma import create_memory
