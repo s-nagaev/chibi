@@ -3,7 +3,7 @@ from functools import wraps
 from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar, cast
 
 from chibi.config.app import application_settings
-from chibi.memory import memory
+from chibi.memory.chroma import memory
 from chibi.storage.abstract import Database
 from chibi.storage.chroma_decorator import ChromaDecoratedStorage
 from chibi.storage.dynamodb import DynamoDBStorage

@@ -1,7 +1,7 @@
 from loguru import logger
 
 from chibi.config import application_settings
-from chibi.memory import memory
+from chibi.memory.chroma import memory
 
 
 async def perform_retention_cleanup() -> None:
