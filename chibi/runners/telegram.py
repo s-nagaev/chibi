@@ -41,7 +41,7 @@ from chibi.services.interface import TelegramInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.scheduler import ChibiScheduler
 from chibi.services.task_manager import task_manager
-from chibi.memory import register_memory_tool
+from chibi.memory.chroma import register_memory_tool
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
 from chibi.utils.telegram import (
@@ -57,7 +57,7 @@ from chibi.utils.telegram import (
     telegram_setting_pre_start_check,
     user_interacts_with_bot,
 )
-from chibi.memory import memory
+from chibi.memory.chroma import memory
 from chibi.services.jobs.archive import perform_retention_cleanup
 
 _T = TypeVar("_T")

@@ -6,7 +6,7 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
-from chibi.memory import memory
+from chibi.memory.chroma import memory
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions

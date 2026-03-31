@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Awaitable
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -11,12 +11,39 @@ from chibi.memory.abstract import LongConversationMemory
 from chibi.models import Message
 
 
+def create_memory() -> LongConversationMemory | None:
+    """Create memory instance if ChromaDB is configured."""
+
+    if not application_settings.is_chroma_configured:
+        logger.info("ChromaDB not configured, semantic memory disabled")
+        return None
+
+    try:
+        # Import here to avoid circular import at module level
+        from chibi.memory.chroma import ChromaLongConversationMemory
+        mem = ChromaLongConversationMemory()
+        logger.info("Semantic memory initialized successfully")
+        return mem
+    except Exception as e:
+        logger.error(f"Failed to initialize ChromaDB: {e}")
+        return None
+
+
+def register_memory_tool() -> None:
+    """Register the search tool if memory is available."""
+    if memory is not None:
+        from chibi.services.providers.tools.memory import SearchInConversationHistoryTool
+        from chibi.services.providers.tools import RegisteredChibiTools
+        RegisteredChibiTools.register(SearchInConversationHistoryTool)
+        logger.info("SearchInConversationHistoryTool registered")
+
+
 class ChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation of long-term conversation memory."""
 
     def __init__(self) -> None:
         """Initialize ChromaDB client based on configuration."""
-        self._client: Any = None
+        self._client: chromadb.AsyncHttpClient = None
         self._is_embedded: bool = False
         self._init_client()
 
@@ -44,7 +71,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
         """Get collection name for user."""
         return f"user_{user_id}"
 
-    async def _get_or_create_collection(self, user_id: int) -> Any:
+    async def _get_or_create_collection(self, user_id: int) -> Awaitable[chromadb.AsyncClientAPI]:
         """Get or create collection for user."""
         collection_name = self._get_collection_name(user_id)
         if self._is_embedded:
@@ -66,7 +93,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
             metadatas = [
                 {
                     "role": msg.role,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now().isoformat(),
                     "message_id": str(msg.id)
                 }
                 for msg in messages
@@ -182,3 +209,6 @@ class ChromaLongConversationMemory(LongConversationMemory):
         except Exception as e:
             logger.error(f"Failed to delete old messages: {e}")
             raise
+
+
+memory: LongConversationMemory | None = create_memory()
