@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from loguru import logger
 
 from chibi.config import application_settings
@@ -15,6 +16,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     def __init__(self) -> None:
         """Initialize ChromaDB embedded client."""
+        self._cached_embedding_fn = DefaultEmbeddingFunction()
         self._client = chromadb.PersistentClient(
             path=application_settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
@@ -28,7 +30,11 @@ class ChromaLongConversationMemory(LongConversationMemory):
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
         """Get or create collection for user."""
         collection_name = self._get_collection_name(user_id)
-        return await asyncio.to_thread(self._client.get_or_create_collection, name=collection_name)
+        return await asyncio.to_thread(
+            self._client.get_or_create_collection,
+            name=collection_name,
+            embedding_function=self._cached_embedding_fn,
+        )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB."""
@@ -114,6 +120,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
     def __init__(self) -> None:
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClient | None = None
+        self._cached_embedding_fn = DefaultEmbeddingFunction()
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
@@ -136,7 +143,10 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         """Get or create collection for user."""
         collection_name = self._get_collection_name(user_id)
         client = await self._get_client()
-        return await client.get_or_create_collection(name=collection_name)
+        return await client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=self._cached_embedding_fn,
+        )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB."""
