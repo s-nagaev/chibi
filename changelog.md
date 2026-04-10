@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Added
+- **Semantic Memory:** Implemented ChromaDB-backed long-term conversation memory
+  - Messages are automatically archived to vector storage when saved
+  - New `search_in_conversation_history` tool for semantic search through past conversations
+  - Configurable retention period (default 90 days)
+  - Supports both embedded and external ChromaDB deployments
+- Background job for automatic retention cleanup
+
+### Changed
+- Updated dependencies: `chromadb`, `onnxruntime>=1.18,<1.20`, `numpy<2`
+
 ## [1.7.2] - 2026-03-10
 
 ### Fixed

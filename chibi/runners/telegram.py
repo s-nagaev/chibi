@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import TypeVar
 
 from loguru import logger
@@ -26,6 +27,7 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
+from chibi.memory.chroma import memory, register_memory_tool
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -38,7 +40,9 @@ from chibi.services.bot import (
     handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
+from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
+from chibi.services.scheduler import ChibiScheduler
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
@@ -424,6 +428,23 @@ class ChibiBot:
 
     async def post_init(self, application: Application) -> None:
         await application.bot.set_my_commands(self.commands)
+
+        if memory is not None:
+            # Register semantic memory tool
+            register_memory_tool()
+
+            # Register retention cleanup job if memory is configured
+            scheduler = ChibiScheduler()
+            scheduler.add_job(
+                perform_retention_cleanup,
+                "cron",
+                hour=0,
+                minute=0,
+                id=f"retention_cleanup-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                replace_existing=False,
+            )
+            scheduler.start()
+            logger.info("Semantic memory cleanup: job scheduled")
 
     def run(self) -> None:
         builder = (

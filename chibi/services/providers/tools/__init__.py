@@ -17,7 +17,7 @@ from .file_editor import (
 from .mcp_management import DeinitializeMCPServer, InitializeSseMCPServer, InitializeStdioMCPServer
 from .mcp_simple import McpEchoTool
 from .media import TextToSpeechTool
-from .memory import SetUserInfoTool
+from .memory import SearchInConversationHistoryTool, SetUserInfoTool
 from .ocr_pdf import OcrPdfTool
 from .schemas import ToolResponse
 from .send import SendAudioTool, SendImageTool, SendVideoTool
