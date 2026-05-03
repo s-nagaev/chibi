@@ -5,16 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-### Fixed
-- **Storage**: DynamoDB storage now properly supports `thread_id` parameter in `add_message()`, `get_messages()`, and `drop_messages()` methods
-- **Storage**: DynamoDB now correctly filters messages when `thread_id=0` (returns only global messages, not all messages)
-- **Storage**: Fixed CRITICAL data loss in DynamoDB - now uses `Message.model_dump_json()` to preserve all fields including `tool_calls`, `tool_call_id`, `tool_name`, and `source`
-- **Storage**: Fixed `LocalStorage` KeyError when using `thread_id > 0` (missing map initialization)
-- **Storage**: Fixed `LocalStorage` stale data bug in `drop_messages()` - now refreshes user before modifying
+## [1.8.0] - 2026-05-04
 
-### Changed
-- **Tests**: Updated `test_database.py` to use `get_messages()` API instead of direct `user.messages` access
-- **Tests**: Added `test_thread_isolation` and `test_drop_messages_specific_thread` tests for thread_id functionality
+### Added
+- **Threads**: Telegram message threads support — `thread_id` is now tracked and handled across all components
+- **Interface**: Added `thread_id` property to `UserInterface` base class; 
+thread-aware message sending (typing, photo upload, voice recording actions)
+- **Storage**: All backends (DynamoDB, Redis, Local) now support thread-scoped message storage and retrieval 
+via `thread_id` parameter
 
 
 ## [1.7.2] - 2026-03-10
@@ -497,7 +495,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/s-nagaev/chibi/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/s-nagaev/chibi/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/s-nagaev/chibi/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/s-nagaev/chibi/compare/v1.6.6...v1.7.0
