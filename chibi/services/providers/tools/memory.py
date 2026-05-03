@@ -46,9 +46,10 @@ class SetUserInfoTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
+        caller_model = kwargs.get("caller_model", "unknown model")
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] Setting new user info about user #{user_id}: {new_user_info}",
+            f"[{caller_model}] Setting new user info about user #{user_id}: {new_user_info}",
         )
         await set_info(user_id=user_id, new_info=new_user_info)
         return {"status": "ok"}
@@ -78,7 +79,8 @@ class SetWorkingDirTool(ChibiTool):
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
         logger.log(
-            "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Setting new working DIR for user #{user_id}: {new_wd}"
+            "TOOL",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Setting new working DIR for user #{user_id}: {new_wd}",
         )
         await set_working_dir(user_id=user_id, new_wd=new_wd)
         return {"status": "ok"}
@@ -106,7 +108,7 @@ class GetCurrentWorkingDirTool(ChibiTool):
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
         cwd = await get_cwd(user_id=user_id)
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Getting CWD for user #{user_id}: {cwd}")
+        logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Getting CWD for user #{user_id}: {cwd}")
         return {"cwd": cwd}
 
 
@@ -143,8 +145,10 @@ class ClearToolCallHistoryTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Clearing tool call history")
-        await drop_tool_call_history(user_id=user_id)
+        interface = cls.get_interface(kwargs=kwargs)
+
+        logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Clearing tool call history")
+        await drop_tool_call_history(user_id=user_id, thread_id=interface.thread_id)
         return {"status": "ok"}
 
 
@@ -177,10 +181,12 @@ class SummarizeHistoryTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Summarizing chat...")
-        await summarize_history(user_id=user_id)
+        interface = cls.get_interface(kwargs=kwargs)
+
+        logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summarizing chat...")
+        await summarize_history(user_id=user_id, thread_id=interface.thread_id)
         if application_settings.log_prompt_data:
-            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Summary: {summary}")
+            logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summary: {summary}")
         return {"status": "ok"}
 
 
@@ -209,7 +215,7 @@ class LoadBuiltinSkillTool(ChibiTool):
             raise ValueError("This function requires user_id to be automatically provided.")
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] Loading '{skill_name}' skill for user {user_id}...",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Loading '{skill_name}' skill for user {user_id}...",
         )
         skill_path = os.path.join(application_settings.skills_dir, skill_name)
         if not os.path.exists(skill_path):
@@ -246,7 +252,7 @@ class UnloadSkillTool(ChibiTool):
             raise ValueError("This function requires user_id to be automatically provided.")
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] Unloading '{skill_name}' skill for user {user_id}...",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Unloading '{skill_name}' skill for user {user_id}...",
         )
         await deactivate_llm_skill(user_id=user_id, skill_name=skill_name)
         return {"status": "ok"}

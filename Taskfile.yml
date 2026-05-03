@@ -34,6 +34,11 @@ tasks:
       - ruff check --fix .
       - mypy .
 
+  test:
+    desc: "Run tests"
+    cmds:
+      - pytest -vv .
+
   update:
     desc: "Update dependencies and export deps to the requirements.txt/reuirements-dev.txt files"
     cmds:

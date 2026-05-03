@@ -51,6 +51,8 @@ class LocalStorage(Database):
 
         message.expire_at = expire_at
         if thread_id:
+            if thread_id not in user_refreshed.thread_messages_map:
+                user_refreshed.thread_messages_map[thread_id] = []
             user_refreshed.thread_messages_map[thread_id].append(message)
         else:
             user_refreshed.messages.append(message)
@@ -73,8 +75,9 @@ class LocalStorage(Database):
         return msgs
 
     async def drop_messages(self, user: User, thread_id: int = 0) -> None:
+        user_refreshed = await self.get_or_create_user(user_id=user.id)
         if thread_id:
-            user.thread_messages_map[thread_id] = []
+            user_refreshed.thread_messages_map[thread_id] = []
         else:
-            user.messages = []
-        await self.save_user(user=user)
+            user_refreshed.messages = []
+        await self.save_user(user_refreshed)

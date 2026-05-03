@@ -32,7 +32,7 @@ class UserInterface(ABC):
         raise NotImplementedError
 
     @property
-    def thread_id(self) -> int | None:
+    def thread_id(self) -> int:
         raise NotImplementedError
 
     @property
@@ -227,10 +227,10 @@ class TelegramInterface(UserInterface):
         raise ValueError("Telegram incoming update does not contain valid chat data.")
 
     @property
-    def thread_id(self) -> int | None:
+    def thread_id(self) -> int:
         if message := self.update.effective_message:
-            return message.message_thread_id
-        return None
+            return message.message_thread_id or 0
+        return 0
 
     @property
     def chat_id(self) -> str | int:
@@ -270,7 +270,7 @@ class TelegramInterface(UserInterface):
         Returns:
             The chat data string.
         """
-        return f"{self._chat.type.upper()} chat ({self._chat.id})"
+        return f"{self._chat.type.upper()} chat #{self._chat.id}, thread #{self.thread_id}"
 
     @property
     def attached_document(self) -> dict[str, str] | None:
@@ -406,6 +406,7 @@ class TelegramInterface(UserInterface):
             thumbnail=thumbnail,
             filename=filename,
             parse_mode="HTML",
+            message_thread_id=self.thread_id,
             read_timeout=AUDIO_UPLOAD_TIMEOUT,
             write_timeout=AUDIO_UPLOAD_TIMEOUT,
         )
@@ -440,6 +441,7 @@ class TelegramInterface(UserInterface):
             duration=duration,
             thumbnail=thumbnail,
             filename=filename,
+            message_thread_id=self.thread_id,
             parse_mode="HTML",
             read_timeout=FILE_UPLOAD_TIMEOUT,
             write_timeout=FILE_UPLOAD_TIMEOUT,
@@ -478,6 +480,7 @@ class TelegramInterface(UserInterface):
             filename=filename,
             caption=caption,
             thumbnail=thumbnail,
+            message_thread_id=self.thread_id,
         )
 
     async def get_caption(self) -> str | None:

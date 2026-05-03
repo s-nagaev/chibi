@@ -12,7 +12,7 @@ from chibi.services.providers.tools import (
     ReplaceInFileRegexTool,
     ReplaceInFileTool,
 )
-from chibi.services.providers.tools.schemas import ToolResponse
+from chibi.services.providers.tools.schemas import ToolResponseSchema
 
 TEST_DIR = Path(__file__).parent / "test_files"
 
@@ -60,7 +60,7 @@ async def test_insert_at_line_empty_content():
     content = "line 1\nline 2\nline 3"
     file_path = await create_test_file("test_empty_content.txt", content)
 
-    result: ToolResponse = await insert_at_line(
+    result: ToolResponseSchema = await insert_at_line(
         full_path=file_path,
         line_number=1,
         content="",
@@ -83,7 +83,7 @@ async def test_insert_at_line_content_without_newline():
     content = "line 1\nline 2"
     file_path = await create_test_file("test_no_newline.txt", content)
 
-    result: ToolResponse = await insert_at_line(
+    result: ToolResponseSchema = await insert_at_line(
         full_path=file_path,
         line_number=1,
         content="inserted",
@@ -100,7 +100,7 @@ async def test_insert_at_line_content_with_newline():
     content = "line 1\nline 2"
     file_path = await create_test_file("test_with_newline.txt", content)
 
-    result: ToolResponse = await insert_at_line(
+    result: ToolResponseSchema = await insert_at_line(
         full_path=file_path,
         line_number=1,
         content="inserted\n",
@@ -124,7 +124,7 @@ async def test_replace_section_include_markers():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker=start_marker,
         end_marker=end_marker,
@@ -147,7 +147,7 @@ async def test_replace_section_exclude_markers():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker=start_marker,
         end_marker=end_marker,
@@ -170,7 +170,7 @@ async def test_replace_section_markers_at_boundaries_exclude():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker=start_marker,
         end_marker=end_marker,
@@ -193,7 +193,7 @@ async def test_markers_not_found():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
     )
     assert result.status == "ok"
@@ -212,7 +212,7 @@ async def test_only_start_marker_found():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
     )
     assert result.status == "ok"
@@ -234,7 +234,7 @@ async def test_only_end_marker_found_after_start():
     content_with_start = "start\nSECTION_START\ncontent to replace\nSECTION_END\nend"
     file_path_with_start = await create_test_file("test_only_end_after_with_start.txt", content_with_start)
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path_with_start,
         start_marker="NON_EXISTENT_START",
         end_marker=end_marker,
@@ -256,7 +256,7 @@ async def test_end_marker_before_start_marker():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
     )
     assert result.status == "ok"
@@ -275,7 +275,7 @@ async def test_empty_file():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
     )
     assert result.status == "ok"
@@ -294,7 +294,7 @@ async def test_no_markers_in_file():
     start_marker = "START"
     end_marker = "END"
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=start_marker, end_marker=end_marker, new_content=new_content
     )
     assert result.status == "ok"
@@ -313,7 +313,7 @@ async def test_markers_in_single_line():
     start_marker = "SECTION_START"
     end_marker = "SECTION_END"
 
-    result_include: ToolResponse = await find_and_replace_section(
+    result_include: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker=start_marker,
         end_marker=end_marker,
@@ -328,7 +328,7 @@ async def test_markers_in_single_line():
 
     # Reset file for exclude test
     await create_test_file("test_single_line.txt", content)
-    result_exclude: ToolResponse = await find_and_replace_section(
+    result_exclude: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker=start_marker,
         end_marker=end_marker,
@@ -349,7 +349,7 @@ async def test_markers_are_same():
     new_content = "new content"
     marker = "MARKER"
 
-    result_include: ToolResponse = await find_and_replace_section(
+    result_include: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=marker, end_marker=marker, new_content=new_content, include_markers=True
     )
     assert result_include.status == "ok"
@@ -360,7 +360,7 @@ async def test_markers_are_same():
 
     # Reset file for exclude test
     await create_test_file("test_same_markers.txt", content)
-    result_exclude: ToolResponse = await find_and_replace_section(
+    result_exclude: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path, start_marker=marker, end_marker=marker, new_content=new_content, include_markers=False
     )
     assert result_exclude.status == "ok"
@@ -376,7 +376,7 @@ async def test_single_line_section_with_trailing_newline():
     content = "before START_MARKERold contentEND_MARKER\nafter"
     file_path = await create_test_file("test_trailing_nl.txt", content)
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker="START_MARKER",
         end_marker="END_MARKER",
@@ -398,7 +398,7 @@ async def test_multiline_section_not_broken_by_fix():
     content = "header\n<!-- BEGIN -->\nold line 1\nold line 2\n<!-- END -->\nfooter"
     file_path = await create_test_file("test_multiline_ok.txt", content)
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker="<!-- BEGIN -->",
         end_marker="<!-- END -->",
@@ -419,7 +419,7 @@ async def test_single_line_inline_markers_include():
     content = "prefix [START]value[END] suffix"
     file_path = await create_test_file("test_inline.txt", content)
 
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker="[START]",
         end_marker="[END]",
@@ -446,7 +446,7 @@ async def test_find_and_replace_empty_markers_raises_error():
     new_content = "new content"
 
     # Test empty start_marker
-    result: ToolResponse = await find_and_replace_section(
+    result: ToolResponseSchema = await find_and_replace_section(
         full_path=file_path,
         start_marker="",
         end_marker="SECTION_END",
@@ -485,7 +485,7 @@ async def test_replace_in_file_empty_old_text_returns_error():
     content = "some content to replace"
     file_path = await create_test_file("test_empty_old_text.txt", content)
 
-    result: ToolResponse = await replace_in_file(
+    result: ToolResponseSchema = await replace_in_file(
         full_path=file_path,
         old_text="",
         new_text="new text",
@@ -505,7 +505,7 @@ async def test_insert_before_pattern_count_minus_one_all_occurrences():
     content = "line1\nTARGET\nline2\nTARGET\nline3\nTARGET\n"
     file_path = await create_test_file("test_before_count_all.txt", content)
 
-    result: ToolResponse = await insert_before_pattern(
+    result: ToolResponseSchema = await insert_before_pattern(
         full_path=file_path,
         pattern="TARGET",
         content="# INSERTED\n",
@@ -524,7 +524,7 @@ async def test_insert_before_pattern_count_specific():
     content = "line1\nTARGET\nline2\nTARGET\nline3\nTARGET\n"
     file_path = await create_test_file("test_before_count_specific.txt", content)
 
-    result: ToolResponse = await insert_before_pattern(
+    result: ToolResponseSchema = await insert_before_pattern(
         full_path=file_path,
         pattern="TARGET",
         content="# INSERTED\n",
@@ -543,7 +543,7 @@ async def test_insert_before_pattern_regex_count_minus_one():
     content = "line1\nitem1\nitem2\nitem3\n"
     file_path = await create_test_file("test_before_regex_count_all.txt", content)
 
-    result: ToolResponse = await insert_before_pattern(
+    result: ToolResponseSchema = await insert_before_pattern(
         full_path=file_path,
         pattern=r"item\d+",
         content="# MATCHED\n",
@@ -565,7 +565,7 @@ async def test_insert_after_pattern_count_minus_one_all_occurrences():
     content = "line1\nTARGET\nline2\nTARGET\nline3\nTARGET\n"
     file_path = await create_test_file("test_after_count_all.txt", content)
 
-    result: ToolResponse = await insert_after_pattern(
+    result: ToolResponseSchema = await insert_after_pattern(
         full_path=file_path,
         pattern="TARGET",
         content="# INSERTED\n",
@@ -584,7 +584,7 @@ async def test_insert_after_pattern_count_specific():
     content = "line1\nTARGET\nline2\nTARGET\nline3\nTARGET\n"
     file_path = await create_test_file("test_after_count_specific.txt", content)
 
-    result: ToolResponse = await insert_after_pattern(
+    result: ToolResponseSchema = await insert_after_pattern(
         full_path=file_path,
         pattern="TARGET",
         content="# INSERTED\n",
@@ -603,7 +603,7 @@ async def test_insert_after_pattern_regex_count_minus_one():
     content = "line1\nitem1\nitem2\nitem3\n"
     file_path = await create_test_file("test_after_regex_count_all.txt", content)
 
-    result: ToolResponse = await insert_after_pattern(
+    result: ToolResponseSchema = await insert_after_pattern(
         full_path=file_path,
         pattern=r"item\d+",
         content="# MATCHED\n",
@@ -625,7 +625,7 @@ async def test_replace_in_file_regex_count_minus_one_all_occurrences():
     content = "foo bar foo baz foo"
     file_path = await create_test_file("test_regex_count_all.txt", content)
 
-    result: ToolResponse = await replace_in_file_regex(
+    result: ToolResponseSchema = await replace_in_file_regex(
         full_path=file_path,
         pattern="foo",
         replacement="qux",
@@ -644,7 +644,7 @@ async def test_replace_in_file_regex_count_specific():
     content = "foo bar foo baz foo"
     file_path = await create_test_file("test_regex_count_specific.txt", content)
 
-    result: ToolResponse = await replace_in_file_regex(
+    result: ToolResponseSchema = await replace_in_file_regex(
         full_path=file_path,
         pattern="foo",
         replacement="qux",
@@ -676,7 +676,7 @@ async def test_read_file_success():
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
     with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
-        result: ToolResponse = await read_file(full_path=file_path, user_id=123)
+        result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -694,7 +694,7 @@ async def test_read_file_not_found():
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
     with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
-        result: ToolResponse = await read_file(full_path=file_path, user_id=123)
+        result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "error"
     assert "does not exist" in str(result.result).lower()
@@ -708,7 +708,7 @@ async def test_read_file_directory_raises_error():
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
     with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
-        result: ToolResponse = await read_file(full_path=str(TEST_DIR), user_id=123)
+        result: ToolResponseSchema = await read_file(full_path=str(TEST_DIR), user_id=123)
 
     assert result.status == "error"
     assert "not a file" in str(result.result).lower()
@@ -725,7 +725,7 @@ async def test_read_file_with_encoding():
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
     with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
-        result: ToolResponse = await read_file(full_path=file_path, encoding="utf-8", user_id=123)
+        result: ToolResponseSchema = await read_file(full_path=file_path, encoding="utf-8", user_id=123)
 
     assert result.status == "ok"
     assert isinstance(result.result, dict)
@@ -743,7 +743,7 @@ async def test_read_file_moderation_declined():
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="declined", reason="Not allowed"))
 
     with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
-        result: ToolResponse = await read_file(full_path=file_path, user_id=123)
+        result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "error"
     assert "declined" in str(result.result).lower()

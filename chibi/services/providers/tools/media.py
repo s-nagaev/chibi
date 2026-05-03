@@ -121,7 +121,7 @@ class GenerateImageTool(ChibiTool):
 
     @classmethod
     async def generate_and_send_image(cls, provider: str, model: str, prompt: str, interface: UserInterface) -> None:
-        images = await generate_image(user_id=interface.user_id, provider_name=provider, model=model, prompt=prompt)
+        images = await generate_image(interface=interface, provider_name=provider, model=model, prompt=prompt)
         await interface.send_images(images=images)
         return None
 

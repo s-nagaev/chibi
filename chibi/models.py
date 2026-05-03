@@ -44,7 +44,6 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import (
-    NoApiKeyProvidedError,
     NoProviderSelectedError,
 )
 from chibi.schemas.app import ModelChangeSchema
@@ -433,6 +432,11 @@ class TelegramFileMeta(BaseModel):
     text: str | None = None
 
 
+class SelectedModel(BaseModel):
+    name: str
+    provider_name: str
+
+
 class User(BaseModel):
     id: int
     alibaba_token: str | None = gpt_settings.alibaba_key
@@ -444,16 +448,18 @@ class User(BaseModel):
     tokens: dict[str, str] = {}
     messages: list[Message] = Field(default_factory=list)
     images: list[ImageMeta] = Field(default_factory=list)
-    gpt_model: str | None = None  # Deprecated
-    selected_gpt_model_name: str | None = None
-    selected_gpt_provider_name: str | None = None
-    selected_image_model_name: str | None = None
-    selected_image_provider_name: str | None = None
+    gpt_model: str | None = None  # TODO: Deprecated
+    selected_gpt_model_name: str | None = None  # TODO: Deprecated
+    selected_gpt_provider_name: str | None = None  # TODO: Deprecated
+    selected_image_model_name: str | None = None  # TODO: Deprecated
+    selected_image_provider_name: str | None = None  # TODO: Deprecated
     info: str = "No info provided"
     working_dir: str = application_settings.working_dir
     llm_skills: dict[str, str] = {}
     telegram_files: dict[str, TelegramFileMeta] = {}
     thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
+    thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
+    thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
@@ -466,20 +472,36 @@ class User(BaseModel):
 
         return RegisteredProviders(user_api_keys={name.lower(): key for name, key in self.tokens.items()})
 
-    @property
-    def active_image_provider(self) -> "Provider":
-        if not self.selected_image_provider_name:
-            image_provider = self.providers.first_image_generation_ready
+    def get_active_image_provider(self, thread_id: int) -> "Provider":
+        provider_name: str | None = None
+
+        if selected_image_model := self.thread_selected_image_model.get(thread_id):
+            provider_name = selected_image_model.provider_name
+
+        elif self.selected_image_provider_name:
+            provider_name = self.selected_image_provider_name
+            self.thread_selected_image_model[thread_id] = SelectedModel(
+                name=self.selected_image_model_name, provider_name=provider_name
+            )
+
+        elif self.providers.first_image_generation_ready:
+            provider_name = self.providers.first_image_generation_ready.name
+
         else:
-            image_provider = self.providers.get(provider_name=self.selected_image_provider_name)
+            raise NoProviderSelectedError
 
-        if not image_provider:
-            raise NoApiKeyProvidedError(provider="Unset", detail="No API key provided")
+        if not provider_name:
+            raise NoProviderSelectedError
 
-        if not self.selected_image_provider_name:
-            self.selected_image_provider_name = image_provider.name
-            self.selected_image_model_name = image_provider.default_image_model
-        return image_provider
+        if provider := self.providers.get(provider_name=provider_name):
+            return provider
+
+        raise NoProviderSelectedError
+
+    def get_active_image_model(self, thread_id: int) -> str | None:
+        if selected_model := self.thread_selected_image_model.get(thread_id):
+            return selected_model.name
+        return None
 
     @property
     def stt_provider(self) -> "Provider":
@@ -526,24 +548,39 @@ class User(BaseModel):
             return provider
         raise ValueError("No moderation-provider found.")
 
-    @property
-    def active_gpt_provider(self) -> "Provider":
-        if self.selected_gpt_provider_name:
-            if provider := self.providers.get(provider_name=self.selected_gpt_provider_name):
-                return provider
+    def get_active_llm_provider(self, thread_id: int) -> "Provider":
+        provider_name: str | None = None
 
-        if gpt_settings.default_provider:
-            if provider := self.providers.get(provider_name=gpt_settings.default_provider):
-                self.selected_gpt_provider_name = provider.name
-                self.selected_gpt_model_name = gpt_settings.default_model or provider.default_model
-                return provider
+        if selected_llm := self.thread_selected_llm.get(thread_id):
+            provider_name = selected_llm.provider_name
 
-        if provider := self.providers.first_chat_ready:
-            self.selected_gpt_provider_name = provider.name
-            self.selected_gpt_model_name = provider.default_model
+        elif self.selected_gpt_provider_name:
+            provider_name = self.selected_gpt_provider_name
+            self.thread_selected_llm[thread_id] = SelectedModel(
+                name=self.selected_gpt_model_name, provider_name=provider_name
+            )
+
+        elif gpt_settings.default_provider:
+            provider_name = gpt_settings.default_provider
+
+        elif self.providers.first_chat_ready:
+            provider_name = self.providers.first_chat_ready.name
+
+        else:
+            raise NoProviderSelectedError
+
+        if not provider_name:
+            raise NoProviderSelectedError
+
+        if provider := self.providers.get(provider_name=provider_name):
             return provider
 
         raise NoProviderSelectedError
+
+    def get_active_llm_model(self, thread_id: int) -> str | None:
+        if selected_model := self.thread_selected_llm.get(thread_id):
+            return selected_model.name
+        return None
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances

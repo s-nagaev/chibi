@@ -8,7 +8,7 @@ from openai.types.chat import ChatCompletionToolParam
 from chibi.config import gpt_settings
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import LoopDetectedException, NoUserInterfaceProvidedException
-from chibi.services.providers.tools.schemas import ToolResponse
+from chibi.services.providers.tools.schemas import ToolResponseSchema
 from chibi.services.providers.tools.utils import AdditionalOptions, CallTracker
 from chibi.services.providers.utils import escape_and_truncate
 from chibi.services.task_manager import task_manager
@@ -16,7 +16,7 @@ from chibi.services.task_manager import task_manager
 P = ParamSpec("P")
 R = TypeVar("R")
 
-ToolFunction = Callable[P, Coroutine[Any, Any, ToolResponse]]
+ToolFunction = Callable[P, Coroutine[Any, Any, ToolResponseSchema]]
 RegisteredFunctionsMap = dict[str, ToolFunction]
 ToolsDefinitionMap = dict[str, ChatCompletionToolParam]
 
@@ -47,20 +47,20 @@ class ChibiTool:
         raise NoUserInterfaceProvidedException
 
     @classmethod
-    async def _get_tool_call_result(cls, *args, **kwargs) -> ToolResponse:
+    async def _get_tool_call_result(cls, *args, **kwargs) -> ToolResponseSchema:
         try:
             result = await cls.function(**kwargs)
             logger.log(
                 "CALL",
                 (
-                    f"[{kwargs.get('model', 'Unknown model')}] Function '{cls.name}' called, "
+                    f"[{kwargs.get('caller_model', 'unknown model')}] Function '{cls.name}' called, "
                     f"result retrieved: {escape_and_truncate(result)}"
                 ),
             )
-            return ToolResponse(tool_name=cls.name, status="ok", result=result)
+            return ToolResponseSchema(tool_name=cls.name, status="ok", result=result)
         except Exception as e:
-            logger.exception(f"[{kwargs.get('model', 'Unknown model')}] Tool {cls.name} raised an exception: {e}")
-            return ToolResponse(tool_name=cls.name, status="error", result=str(e))
+            logger.warning(f"[{kwargs.get('caller_model', 'unknown model')}] Tool {cls.name} raised an exception: {e}")
+            return ToolResponseSchema(tool_name=cls.name, status="error", result=str(e))
 
     @classmethod
     async def _get_and_send_tool_call_result(cls, *args, **kwargs) -> None:
@@ -71,7 +71,7 @@ class ChibiTool:
         await handle_tool_response(tool_response=tool_call_result, interface=interface)
 
     @classmethod
-    async def tool(cls, *args, run_in_background: bool | None = None, **kwargs: Any) -> ToolResponse:
+    async def tool(cls, *args, run_in_background: bool | None = None, **kwargs: Any) -> ToolResponseSchema:
         interface = kwargs.get("interface")
         if run_in_background is None:
             run_in_background = cls.run_in_background_by_default
@@ -80,24 +80,28 @@ class ChibiTool:
         printable_kwargs = {
             k: v for k, v in kwargs.items() if k not in ("telegram_context", "telegram_update", "interface")
         }
-        model_name = kwargs.get("model", "Unknown model")
+        caller_model = kwargs.get("caller_model", "unknown model")
         logger.log(
             "CALL",
             (
-                f"[{model_name}] Calling a function '{cls.name}' "
+                f"[{caller_model}] Calling a function '{cls.name}' "
                 f"in {'background' if background_run_ready else 'foreground'} mode. "
                 f"Args: {escape_and_truncate(printable_kwargs)}"
             ),
         )
-        hit_count = CallTracker().track(model_name=model_name, tool_name=cls.name, serializable_kwargs=printable_kwargs)
+        hit_count = CallTracker().track(
+            model_name=caller_model, tool_name=cls.name, serializable_kwargs=printable_kwargs
+        )
         if hit_count > cls.loop_break:
             raise LoopDetectedException(
-                f"A cyclical call of the {cls.name} function by model {model_name} has been interrupted."
+                f"A cyclical call of the {cls.name} function by model {caller_model} has been interrupted."
             )
 
         if hit_count > cls.loop_warning:
-            logger.warning(f"[{model_name}] Model seems stuck in a loop calling tool '{cls.name}'. Call #{hit_count}.")
-            return ToolResponse(
+            logger.warning(
+                f"[{caller_model}] Model seems stuck in a loop calling tool '{cls.name}'. Call #{hit_count}."
+            )
+            return ToolResponseSchema(
                 tool_name=cls.name,
                 status="WARNING",
                 result="ABORTED",
@@ -114,7 +118,7 @@ class ChibiTool:
         coro = cls._get_and_send_tool_call_result(*args, **kwargs)
         user_id = kwargs.get("user_id", -1)
         task_manager.run_task(coro=coro, user_id=user_id)
-        return ToolResponse(
+        return ToolResponseSchema(
             tool_name=cls.name,
             status="tool is running in background",
             result="in progress",
@@ -173,16 +177,16 @@ class RegisteredChibiTools:
         return cls._stub_function
 
     @classmethod
-    async def call(cls, tool_name: str, tools_args: dict[str, Any]) -> ToolResponse:
+    async def call(cls, tool_name: str, tools_args: dict[str, Any]) -> ToolResponseSchema:
         tool = cls.get(tool_name)
         return await tool(**tools_args)
 
     @classmethod
-    async def _stub_function(cls, *args: Any, **kwargs: Any) -> ToolResponse:
+    async def _stub_function(cls, *args: Any, **kwargs: Any) -> ToolResponseSchema:
         """A stub function that is executed when the LLM calls a non-existent function.
 
         Returns:
             A ToolResponse object describing the error.
         """
         logger.log("TOOL", f"Running stub function. Args: {args}, kwargs: {kwargs}")
-        return ToolResponse(tool_name="stub", status="error", result="A non-existent function called")
+        return ToolResponseSchema(tool_name="stub", status="error", result="A non-existent function called")

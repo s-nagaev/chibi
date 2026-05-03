@@ -342,6 +342,7 @@ async def send_images(
                 context=context,
                 text="\n".join(image_urls),
                 disable_web_page_preview=False,
+                message_thread_id=telegram_message.message_thread_id,
             )
         return None
 
@@ -369,6 +370,7 @@ async def send_images(
             chat_id=telegram_chat.id,
             media=[InputMediaPhoto(img) for img in media_photos],
             reply_to_message_id=telegram_message.message_id,
+            message_thread_id=telegram_message.message_thread_id,
             write_timeout=IMAGE_UPLOAD_TIMEOUT,
         )
 
@@ -379,6 +381,7 @@ async def send_images(
             chat_id=telegram_chat.id,
             media=[InputMediaDocument(media=img, filename="file.jpeg") for img in media_docs],
             reply_to_message_id=telegram_message.message_id,
+            message_thread_id=telegram_message.message_thread_id,
             write_timeout=FILE_UPLOAD_TIMEOUT,
         )
 
@@ -401,7 +404,10 @@ async def send_text_file(file_content: str, file_name: str, update: Update, cont
         chat_id=telegram_chat.id,
         document=text_file,
         filename=file_name,
-        reply_to_message_id=telegram_message.message_thread_id,
+        reply_to_message_id=telegram_message.message_id,
+        message_thread_id=telegram_message.message_thread_id,
+        read_timeout=FILE_UPLOAD_TIMEOUT,
+        write_timeout=FILE_UPLOAD_TIMEOUT,
     )
 
 

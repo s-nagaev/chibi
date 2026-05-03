@@ -53,9 +53,10 @@ class SearchNewsTool(ChibiTool):
             A JSON formatted string containing the list of news articles found,
             or an error message string if the search fails.
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] Searching news for '{search_phrase}', max_results={max_results}",
+            f"[{caller_model}] Searching news for '{search_phrase}', max_results={max_results}",
         )
         try:
             result = DDGS(proxy=gpt_settings.proxy).news(query=search_phrase, max_results=max_results, region="wt-wt")
@@ -111,7 +112,7 @@ class DDGSWebSearchTool(ChibiTool):
         logger.log(
             "TOOL",
             (
-                f"[{kwargs.get('model', 'Unknown model')}] Using web-search for '{search_phrase}', "
+                f"[{kwargs.get('caller_model', 'unknown model')}] Using web-search for '{search_phrase}', "
                 f"max_results={max_results}"
             ),
         )
@@ -161,7 +162,9 @@ class GoogleSearchTool(ChibiTool):
             A JSON formatted string containing the list of search results found,
             or an error message string if the search fails.
         """
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Using Google web-search for '{search_phrase}'")
+        logger.log(
+            "TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Using Google web-search for '{search_phrase}'"
+        )
         transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
         params = {
             "key": gpt_settings.google_search_api_key,
@@ -229,7 +232,8 @@ class ReadWebPageTool(ChibiTool):
             content if extraction fails, or an error message string if fetching
             fails or status code is not 200.
         """
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Reading URL: {url}")
+        caller_model = kwargs.get("caller_model", "unknown model")
+        logger.log("TOOL", f"[{caller_model}] Reading URL: {url}")
         try:
             response: Response = await _get_url(url)
         except Exception as e:
@@ -245,7 +249,7 @@ class ReadWebPageTool(ChibiTool):
         content = extract(filecontent=data, include_links=True)
         if not content:
             msg = f"Failed to extract URL: {url}. Empty extracted data. Trying to send raw HTML to model"
-            logger.warning(f"[{kwargs.get('model', 'Unknown model')}] {msg}")
+            logger.warning(f"[{caller_model}] {msg}")
             return {
                 "data": data,
                 "warning": msg,
@@ -253,7 +257,7 @@ class ReadWebPageTool(ChibiTool):
 
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] The data from the URL {url} seems to be successfully extracted",
+            f"[{caller_model}] The data from the URL {url} seems to be successfully extracted",
         )
 
         return {

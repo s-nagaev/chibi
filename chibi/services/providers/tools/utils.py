@@ -30,7 +30,8 @@ ua_generator = UserAgent()
 
 class AdditionalOptions(TypedDict, total=False):
     user_id: int | None
-    model: str | None
+    caller_model: str
+    caller_provider: str
     interface: UserInterface | None
 
 
@@ -101,20 +102,14 @@ async def get_sub_agent_response(
     db: Database,
     user_id: int,
     prompt: str,
-    model_name: str | None = None,
-    provider_name: str | None = None,
+    model_name: str,
+    provider_name: str,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
-    provider: Provider | None
-    if not model_name or not provider_name:
-        provider = user.active_gpt_provider
-        model = user.selected_gpt_model_name
-    else:
-        provider = user.providers.get(provider_name=provider_name)
-        model = model_name
+    provider: Provider | None = user.providers.get(provider_name=provider_name)
 
     if not provider:
-        raise ValueError(f"No provider found. Provided provider name: {provider_name}")
+        raise ValueError(f"No provider with name '{provider_name}' found.")
 
     user_prompt = {
         "user_type": "llm",
@@ -129,7 +124,7 @@ async def get_sub_agent_response(
     ]
 
     chat_response, _ = await provider.get_chat_response(
-        messages=conversation_messages, user=user, model=model, system_prompt=SUB_EXECUTOR_PROMPT
+        messages=conversation_messages, user=user, model=model_name, system_prompt=SUB_EXECUTOR_PROMPT
     )
     return chat_response
 

@@ -9,3 +9,4 @@ class CustomOpenAI(OpenAIFriendlyProvider):
     name = "CustomOpenAI"
     base_url = gpt_settings.customopenai_url
     default_model = ""
+    max_tokens: int = 8192

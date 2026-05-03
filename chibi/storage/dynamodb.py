@@ -177,40 +177,16 @@ class DynamoDBStorage(Database):
         user = await self.get_user(user_id)
         if not user:
             user = await self.create_user(user_id)
-
-        # load messages
-        def _load() -> list[dict[str, Any]]:
-            resp = self.messages_table.query(
-                KeyConditionExpression="user_id = :u",
-                ExpressionAttributeValues={":u": str(user_id)},
-            )
-            return resp.get("Items", [])
-
-        items = await asyncio.to_thread(_load)
-        now_ts = int(time.time())
-        msgs: list[Message] = []
-        for it in items:
-            exp = it.get("expire_at")
-            if exp is None or exp >= now_ts:
-                msgs.append(
-                    Message(
-                        id=int(it["message_id"]),
-                        role=it.get("role", ""),
-                        content=it.get("content", ""),
-                        expire_at=exp,
-                    )
-                )
-        msgs.sort(key=lambda m: m.id)
-        user.messages = msgs
         return user
 
-    async def add_message(self, user: User, message: Message, ttl: int | None = None) -> None:
+    async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
         """Add a Message record with optional TTL in seconds.
 
         Args:
             user: The user to whom the message belongs.
             message: The message object to add.
             ttl: Optional Time To Live for the message in seconds.
+            thread_id: Thread identifier (0 for global messages).
         """
         expire_at: int | None = None
         if ttl is not None:
@@ -219,38 +195,86 @@ class DynamoDBStorage(Database):
         item: dict[str, Any] = {
             "user_id": str(user.id),
             "message_id": str(message.id),
-            "role": message.role,
-            "content": message.content,
+            "thread_id": thread_id,
+            "data": message.model_dump_json(exclude={"expire_at"}),
         }
         if expire_at is not None:
             item["expire_at"] = expire_at
 
         await asyncio.to_thread(self.messages_table.put_item, Item=item)
 
-    async def get_messages(self, user: User) -> list[dict[str, str]]:
+    async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, Any]]:
         """Retrieve non-expired messages as simple dicts.
 
         Args:
             user: The user whose messages are to be retrieved.
+            thread_id: Thread identifier (0 for global messages).
 
         Returns:
             A list of non-expired messages, where each message is a dictionary (excluding 'expire_at' and 'id').
         """
-        user_ref = await self.get_or_create_user(user.id)
-        return [msg.model_dump(exclude={"expire_at", "id"}) for msg in user_ref.messages]
+        now_ts = int(time.time())
 
-    async def drop_messages(self, user: User) -> None:
-        """Delete all messages for a user.
+        def _sync() -> list[dict[str, Any]]:
+            query_params: dict[str, Any] = {
+                "KeyConditionExpression": "user_id = :u",
+                "ExpressionAttributeValues": {":u": str(user.id)},
+            }
+            # thread_id=0 must explicitly filter for global messages (backward compatibility)
+            if thread_id == 0:
+                query_params["FilterExpression"] = "thread_id = :t OR attribute_not_exists(thread_id)"
+                query_params["ExpressionAttributeValues"][":t"] = 0
+            else:
+                query_params["FilterExpression"] = "thread_id = :t"
+                query_params["ExpressionAttributeValues"][":t"] = thread_id
+
+            resp = self.messages_table.query(**query_params)
+            items = resp.get("Items", [])
+
+            # Filter expired messages
+            result = []
+            for it in items:
+                exp = it.get("expire_at")
+                if exp is None or exp >= now_ts:
+                    # Use "data" field for full message serialization (new format)
+                    if "data" in it:
+                        msg = Message.model_validate_json(it["data"])
+                        result.append(msg.model_dump(exclude={"expire_at", "id"}))
+                    else:
+                        # Backward compatibility: reconstruct from individual fields (old format)
+                        result.append(
+                            {
+                                "role": it.get("role", ""),
+                                "content": it.get("content", ""),
+                            }
+                        )
+            return result
+
+        items = await asyncio.to_thread(_sync)
+        return items
+
+    async def drop_messages(self, user: User, thread_id: int = 0) -> None:
+        """Delete messages for a user, optionally filtered by thread_id.
 
         Args:
             user: The user whose messages are to be deleted.
+            thread_id: Thread identifier (0 for global messages, >0 for specific thread).
         """
 
         def _sync() -> None:
-            resp = self.messages_table.query(
-                KeyConditionExpression="user_id = :u",
-                ExpressionAttributeValues={":u": str(user.id)},
-            )
+            query_params: dict[str, Any] = {
+                "KeyConditionExpression": "user_id = :u",
+                "ExpressionAttributeValues": {":u": str(user.id)},
+            }
+            # thread_id=0 must explicitly filter for global messages (backward compatibility)
+            if thread_id == 0:
+                query_params["FilterExpression"] = "thread_id = :t OR attribute_not_exists(thread_id)"
+                query_params["ExpressionAttributeValues"][":t"] = 0
+            else:
+                query_params["FilterExpression"] = "thread_id = :t"
+                query_params["ExpressionAttributeValues"][":t"] = thread_id
+
+            resp = self.messages_table.query(**query_params)
             for it in resp.get("Items", []):
                 self.messages_table.delete_item(Key={"user_id": it["user_id"], "message_id": it["message_id"]})
 
