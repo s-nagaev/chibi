@@ -373,14 +373,14 @@ crt = ["awscrt (==0.31.2)"]
 
 [[package]]
 name = "cachetools"
-version = "7.1.0"
+version = "7.1.1"
 description = "Extensible memoizing collections and decorators"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "cachetools-7.1.0-py3-none-any.whl", hash = "sha256:05afd1d309309e7c8971db462b4cf516d93fa8c9aea1b906e26e61b4399d0d82"},
-    {file = "cachetools-7.1.0.tar.gz", hash = "sha256:ea5406e92956f9006b121f8032177c6b02cc5f9a488d1e53b2e4d9cb5aae15c6"},
+    {file = "cachetools-7.1.1-py3-none-any.whl", hash = "sha256:0335cd7a0952d2b22327441fb0628139e234c565559eeb91a8a4ac7551c5353d"},
+    {file = "cachetools-7.1.1.tar.gz", hash = "sha256:27bdf856d68fd3c71c26c01b5edc312124ed427524d1ddb31aa2b7746fe20d4b"},
 ]
 
 [[package]]
@@ -791,24 +791,25 @@ langdetect = ["langdetect (>=1.0.0)"]
 
 [[package]]
 name = "ddgs"
-version = "9.12.0"
+version = "9.14.2"
 description = "Dux Distributed Global Search. A metasearch library that aggregates results from diverse web search services."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "ddgs-9.12.0-py3-none-any.whl", hash = "sha256:54f24abdff538e8f9b83f99af99455776021419b704b11d796b17825f8baff1a"},
-    {file = "ddgs-9.12.0.tar.gz", hash = "sha256:29e8285cb0492602d979ea5b0842baa9960e9168f82ccf8c21841a8341128835"},
+    {file = "ddgs-9.14.2-py3-none-any.whl", hash = "sha256:47f5002ebe72d0e7d342d9ce9c0cd9d1125fa7b9ee38dc47069449f4a8382d37"},
+    {file = "ddgs-9.14.2.tar.gz", hash = "sha256:a9e6ad5bd7357707163d1cf03dbbcc9413a5820738ba5176efe36955b32aab38"},
 ]
 
 [package.dependencies]
 click = ">=8.1.8"
 lxml = ">=4.9.4"
-primp = ">=1.2.0"
+primp = ">=1.2.3"
 
 [package.extras]
-api = ["fastapi (>=0.135.1)", "mcp (>=1.26.0)", "uvicorn[standard] (>=0.41.0)"]
-dev = ["lxml-stubs", "mypy (>=1.17.1)", "prek", "pytest (>=8.4.1)", "ruff (>=0.13.0)", "types-PyYAML", "types-Pygments", "types-pexpect", "types-ujson"]
+api = ["fastapi (>=0.135.1)", "uvicorn[standard] (>=0.41.0)"]
+dev = ["lxml-stubs", "mypy (>=1.17.1)", "prek", "pytest (>=8.4.1)", "pytest-trio", "ruff (>=0.13.0)", "types-PyYAML", "types-Pygments", "types-pexpect", "types-ujson"]
+dht = ["fastapi (>=0.135.1)", "trio (>=0.25.0)", "uvicorn[standard] (>=0.41.0)"]
 mcp = ["mcp (>=1.26.0)"]
 
 [[package]]
@@ -4484,14 +4485,14 @@ files = [
 
 [[package]]
 name = "wcwidth"
-version = "0.6.0"
+version = "0.7.0"
 description = "Measures the displayed width of unicode strings in a terminal"
 optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
-    {file = "wcwidth-0.6.0-py3-none-any.whl", hash = "sha256:1a3a1e510b553315f8e146c54764f4fb6264ffad731b3d78088cdb1478ffbdad"},
-    {file = "wcwidth-0.6.0.tar.gz", hash = "sha256:cdc4e4262d6ef9a1a57e018384cbeb1208d8abbc64176027e2c2455c81313159"},
+    {file = "wcwidth-0.7.0-py3-none-any.whl", hash = "sha256:5d69154c429a82910e241c738cd0e2976fac8a2dd47a1a805f4afed1c0f136f2"},
+    {file = "wcwidth-0.7.0.tar.gz", hash = "sha256:90e3a7ea092341c44b99562e75d09e4d5160fe7a3974c6fb842a101a95e7eed0"},
 ]
 
 [[package]]
@@ -4805,4 +4806,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "a3904c6de07207ace91848571aa6bc50d9057cf1d0719f087138cd887ac941cc"
+content-hash = "f3a98348d6ca6c8fae44e9288db00a8e63643b56a327520e954113ec88a374d5"
