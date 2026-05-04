@@ -89,14 +89,17 @@ class DelegateTool(ChibiTool):
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
 
-        model = kwargs.get("model")
-        if not model:
-            raise ToolException("This function requires model to be automatically provided.")
-
         if model_name and not provider_name:
             raise ToolException("If you specify a model_name, you must also specify a provider_name.")
 
+        if provider_name and not model_name:
+            raise ToolException("If you specify a provider_name, you must also specify a model_name.")
+
+        caller_model = kwargs.get("caller_model", "unknown model")
+        caller_provider = kwargs["caller_provider"]
+
         if model_name:
+            assert isinstance(provider_name, str)
             available_models: list[ModelChangeSchema] = await get_models_available_to_user(user_id=user_id)
 
             model_setups = [
@@ -108,8 +111,11 @@ class DelegateTool(ChibiTool):
                     f"Model name <-> Provider name mismatch. Please check your model name and provider name."
                     f"Available models: {', '.join(model_provider_map)}"
                 )
+        else:
+            model_name = caller_model
+            provider_name = caller_provider
 
-        logger.log("DELEGATE", f"[{model}] Delegating a task to {model_name or model}: {prompt}")
+        logger.log("DELEGATE", f"[{caller_model}] Delegating a task to {model_name}: {prompt}")
 
         coro = get_sub_agent_response(
             user_id=user_id, prompt=prompt, provider_name=provider_name, model_name=model_name
@@ -119,7 +125,7 @@ class DelegateTool(ChibiTool):
         except asyncio.TimeoutError:
             raise ToolException("Timed out waiting for delegated task to complete!")
 
-        logger.log("SUBAGENT", f"[{model_name or model}] Delegated task is done: {response.answer}")
+        logger.log("SUBAGENT", f"[{model_name or caller_model}] Delegated task is done: {response.answer}")
 
         return {"response": response.answer}
 
@@ -138,7 +144,7 @@ class GetCurrentDatetimeTool(ChibiTool):
 
     @classmethod
     async def function(cls, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
-        logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Getting current date & time")
+        logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Getting current date & time")
         now = datetime.datetime.now()
         return {
             "datetime_now": now.strftime("%Y-%m-%d %H:%M:%S"),

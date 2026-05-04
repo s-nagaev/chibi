@@ -43,6 +43,7 @@ from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import (
     get_usage_from_google_response,
     get_usage_msg,
@@ -223,7 +224,7 @@ class Gemini(RestApiFriendlyProvider):
         model_name = model or self.default_model
 
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
 
         if "flash" in model_name and self.temperature > 0.4:
@@ -274,20 +275,31 @@ class Gemini(RestApiFriendlyProvider):
             await send_llm_thoughts(thoughts=answer, interface=interface)
         logger.log("THINK", f"{model_name}: {answer or 'No thoughts...'}. {usage_message}")
 
-        tool_context: dict[str, Any] = {
-            "user_id": user.id if user else None,
-            "model": model_name,
-            "interface": interface,
-        }
-
-        tool_coroutines = [
-            RegisteredChibiTools.call(
+        calls = [
+            ToolCallSchema(
                 tool_name=str(function_call.name),
-                tools_args=tool_context | copy(function_call.args) if function_call.args else tool_context,
+                args=copy(function_call.args),
             )
             for function_call in response.function_calls
         ]
-        results = await asyncio.gather(*tool_coroutines)
+        results = await self.call_functions(
+            calls=calls, caller_model=model_name, caller_provider=self.name, user_id=user.id, interface=interface
+        )
+        #
+        # tool_context: dict[str, Any] = {
+        #     "user_id": user.id if user else None,
+        #     "model": model_name,
+        #     "interface": interface,
+        # }
+        #
+        # tool_coroutines = [
+        #     RegisteredChibiTools.call(
+        #         tool_name=str(function_call.name),
+        #         tools_args=tool_context | copy(function_call.args) if function_call.args else tool_context,
+        #     )
+        #     for function_call in response.function_calls
+        # ]
+        # results = await asyncio.gather(*tool_coroutines)
 
         thought_signature = self._get_thought_signature(response=response)
         if not thought_signature and "gemini-3" in model_name:

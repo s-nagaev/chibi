@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from loguru import logger
 from telegram import (
     CallbackQuery,
@@ -9,7 +7,7 @@ from chibi.config import application_settings, gpt_settings
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers import RegisteredProviders
-from chibi.services.providers.tools import ToolResponse
+from chibi.services.providers.tools import ToolResponseSchema
 from chibi.services.providers.utils import get_usage_msg
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
@@ -19,7 +17,6 @@ from chibi.services.user import (
     get_llm_chat_completion_answer,
     get_models_available,
     reset_chat_history,
-    send_scheduled_message_to_llm,
     set_active_model,
     set_api_key,
     user_has_reached_images_generation_limit,
@@ -35,12 +32,12 @@ async def handle_model_selection(
     model: ModelChangeSchema,
     query: CallbackQuery,
 ) -> None:
-    await set_active_model(user_id=interface.user_id, model=model)
+    await set_active_model(interface=interface, model=model)
     logger.info(f"{interface.user_data} switched to model '{model.name} ({model.provider})'")
     await query.edit_message_text(text=f"Selected model: '{model.name} ({model.provider})'")
 
 
-async def handle_tool_response(tool_response: ToolResponse, interface: UserInterface) -> None:
+async def handle_tool_response(tool_response: ToolResponseSchema, interface: UserInterface) -> None:
     chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
         user_id=interface.user_id, tool_message=tool_response, interface=interface
     )
@@ -66,35 +63,35 @@ async def handle_tool_response(tool_response: ToolResponse, interface: UserInter
     await interface.send_message(message=chat_response.answer)
 
 
-async def handle_scheduled_event(
-    message: str,
-    event_id: UUID,
-    interface: UserInterface,
-) -> None:
-    chat_response: ChatResponseSchema = await send_scheduled_message_to_llm(
-        user_id=interface.user_id, event_id=event_id, message=message, interface=interface
-    )
-    usage_message = get_usage_msg(chat_response.usage)
-
-    if "<chibi>ack</chibi>" in chat_response.answer.lower():
-        logger.info(
-            f"[{interface.user_data}-{interface.chat_data}] LLM silently received scheduled message "
-            f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
-        )
-        return None
-
-    if application_settings.log_prompt_data:
-        answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
-        logged_answer = f"Answer: {answer_to_log}"
-    else:
-        logged_answer = ""
-
-    logger.info(
-        f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer in "
-        f"the {interface.chat_data}. {logged_answer} {usage_message}"
-    )
-    await interface.send_message(message=chat_response.answer)
-    return None
+# async def handle_scheduled_event(
+#     message: str,
+#     event_id: UUID,
+#     interface: UserInterface,
+# ) -> None:
+#     chat_response: ChatResponseSchema = await send_scheduled_message_to_llm(
+#         user_id=interface.user_id, event_id=event_id, message=message, interface=interface
+#     )
+#     usage_message = get_usage_msg(chat_response.usage)
+#
+#     if "<chibi>ack</chibi>" in chat_response.answer.lower():
+#         logger.info(
+#             f"[{interface.user_data}-{interface.chat_data}] LLM silently received scheduled message "
+#             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
+#         )
+#         return None
+#
+#     if application_settings.log_prompt_data:
+#         answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
+#         logged_answer = f"Answer: {answer_to_log}"
+#     else:
+#         logged_answer = ""
+#
+#     logger.info(
+#         f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer in "
+#         f"the {interface.chat_data}. {logged_answer} {usage_message}"
+#     )
+#     await interface.send_message(message=chat_response.answer)
+#     return None
 
 
 @handle_gpt_exceptions
@@ -152,7 +149,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         f"the {interface.chat_data}. {logged_answer} {usage_message}"
     )
     await interface.send_message(message=chat_response.answer)
-    history_is_summarized = await check_history_and_summarize(user_id=interface.user_id)
+    history_is_summarized = await check_history_and_summarize(user_id=interface.user_id, thread_id=interface.thread_id)
     if history_is_summarized:
         logger.info(f"{interface.user_data}: history successfully summarized.")
     return None
@@ -161,7 +158,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
 async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
-    await reset_chat_history(user_id=interface.user_id)
+    await reset_chat_history(user_id=interface.user_id, thread_id=interface.thread_id)
     task_manager.kill_all_user_tasks(user_id=interface.user_id)
     await interface.send_message(message="Done!", reply=False)
 
@@ -192,13 +189,14 @@ async def handle_image_generation(prompt: str, interface: UserInterface) -> None
     # The user finds it psychologically easier to wait for a response from the chatbot when they see its activity
     # during the entire waiting time.
     async with indicator(coro_func=interface.send_action_uploading_photo):
-        image_data = await generate_image(user_id=interface.user_id, prompt=prompt)
+        image_data = await generate_image(interface=interface, prompt=prompt)
         await interface.send_images(images=image_data)
 
     log_message = f"{interface.user_data} got a successfully generated image(s)"
     if application_settings.log_prompt_data and isinstance(image_data[0], str):
         log_message += f": {image_data}"
     logger.info(log_message)
+    return None
 
 
 async def handle_provider_api_key_set(provider_name: str, interface: UserInterface) -> None:
@@ -237,7 +235,7 @@ async def handle_available_model_options(
     interface: UserInterface,
     image_generation: bool = False,
 ) -> list[ModelChangeSchema]:
-    return await get_models_available(user_id=user_id, image_generation=image_generation)
+    return await get_models_available(user_id=user_id, image_generation=image_generation, thread_id=interface.thread_id)
 
 
 async def handle_image_understanding(

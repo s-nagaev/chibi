@@ -13,10 +13,10 @@ from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 
 from chibi.config import application_settings, gpt_settings
-from chibi.models import User
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.interface import UserInterface
+from chibi.services.user import get_chibi_user
 from chibi.storage.files import get_file_storage
 from chibi.storage.files.file_storage import FileStorage
 from chibi.utils.app import get_builtin_skill_names
@@ -55,7 +55,8 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user: User, interface: UserInterface | None) -> str:
+async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface: UserInterface | None) -> str:
+    user = await get_chibi_user(user_id=user_id)
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
@@ -91,6 +92,7 @@ async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = Non
     message = f"💡💭 {thoughts}"
 
     await interface.send_message(message=message, reply=False)
+    return None
 
 
 def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> UsageSchema:

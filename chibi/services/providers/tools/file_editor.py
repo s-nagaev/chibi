@@ -80,6 +80,7 @@ class ReplaceInFileTool(ChibiTool):
         Returns:
             Dict containing the number of replacements made
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             if not old_text:
                 raise ValueError("old_text cannot be empty")
@@ -103,16 +104,18 @@ class ReplaceInFileTool(ChibiTool):
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
                 logger.log(
-                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {replacements} replacements in {path}"
+                    "TOOL",
+                    f"[{caller_model}] Made {replacements} replacements in {path}",
                 )
             else:
                 logger.log(
-                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] No occurrences of '{old_text}' found in {path}"
+                    "TOOL",
+                    f"[{caller_model}] No occurrences of '{old_text}' found in {path}",
                 )
 
             return {"replacements": replacements}
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing text in {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error replacing text in {full_path}: {e}")
             raise
 
 
@@ -175,6 +178,7 @@ class ReplaceInFileRegexTool(ChibiTool):
         Returns:
             Dict containing the number of replacements made
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -193,19 +197,18 @@ class ReplaceInFileRegexTool(ChibiTool):
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
                 logger.log(
-                    "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {replacements} regex replacements in {path}"
+                    "TOOL",
+                    f"[{caller_model}] Made {replacements} regex replacements in {path}",
                 )
             else:
                 logger.log(
                     "TOOL",
-                    f"[{kwargs.get('model', 'Unknown model')}] No matches for pattern '{pattern}' found in {path}",
+                    f"[{caller_model}] No matches for pattern '{pattern}' found in {path}",
                 )
 
             return {"replacements": replacements}
         except Exception as e:
-            logger.error(
-                f"[{kwargs.get('model', 'Unknown model')}] Error replacing text with regex in {full_path}: {e}"
-            )
+            logger.error(f"[{caller_model}] Error replacing text with regex in {full_path}: {e}")
             raise
 
 
@@ -262,6 +265,7 @@ class InsertAtLineTool(ChibiTool):
         Returns:
             Dict indicating success
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -285,14 +289,13 @@ class InsertAtLineTool(ChibiTool):
                 f.writelines(lines)
 
             logger.log(
-                "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Inserted content at line {line_number} in {path}"
+                "TOOL",
+                f"[{caller_model}] Inserted content at line {line_number} in {path}",
             )
             return {"success": True}
 
         except Exception as e:
-            logger.error(
-                f"[{kwargs.get('model', 'Unknown model')}] Error inserting at line {line_number} in {full_path}: {e}"
-            )
+            logger.error(f"[{caller_model}] Error inserting at line {line_number} in {full_path}: {e}")
             raise
 
 
@@ -355,6 +358,7 @@ class ReplaceLinesTool(ChibiTool):
         Returns:
             Dict containing the number of lines replaced
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -383,11 +387,11 @@ class ReplaceLinesTool(ChibiTool):
             with path.open("w", encoding=encoding) as f:
                 f.writelines(lines)
 
-            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Replaced {lines_replaced} lines in {path}")
+            logger.log("TOOL", f"[{caller_model}] Replaced {lines_replaced} lines in {path}")
             return {"lines_replaced": lines_replaced}
 
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing lines in {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error replacing lines in {full_path}: {e}")
             raise
 
 
@@ -456,6 +460,7 @@ class FindAndReplaceSectionTool(ChibiTool):
         Returns:
             Dict indicating success and whether the section was found
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             if not start_marker or not end_marker:
                 raise ValueError("Markers cannot be empty")
@@ -468,7 +473,7 @@ class FindAndReplaceSectionTool(ChibiTool):
                 content = f.read()
 
             if start_marker not in content or end_marker not in content:
-                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Section markers not found in {path}")
+                logger.log("TOOL", f"[{caller_model}] Section markers not found in {path}")
                 return {"success": False, "section_found": False}
 
             start_pos = content.find(start_marker)
@@ -477,7 +482,7 @@ class FindAndReplaceSectionTool(ChibiTool):
             if start_pos == -1 or end_pos == -1:
                 logger.log(
                     "TOOL",
-                    f"[{kwargs.get('model', 'Unknown model')}] Section markers not found in correct order in {path}",
+                    f"[{caller_model}] Section markers not found in correct order in {path}",
                 )
                 return {"success": False, "section_found": False}
 
@@ -508,11 +513,11 @@ class FindAndReplaceSectionTool(ChibiTool):
             with path.open("w", encoding=encoding) as f:
                 f.write(new_content)
 
-            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Replaced section in {path}")
+            logger.log("TOOL", f"[{caller_model}] Replaced section in {path}")
             return {"success": True, "section_found": True}
 
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error replacing section in {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error replacing section in {full_path}: {e}")
             raise
 
 
@@ -569,6 +574,7 @@ class AppendToFileTool(ChibiTool):
         Returns:
             Dict indicating success
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -586,11 +592,11 @@ class AppendToFileTool(ChibiTool):
                     f.write("\n")
                 f.write(content)
 
-            logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Appended content to {path}")
+            logger.log("TOOL", f"[{caller_model}] Appended content to {path}")
             return {"success": True}
 
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error appending to {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error appending to {full_path}: {e}")
             raise
 
 
@@ -659,6 +665,7 @@ class InsertAfterPatternTool(ChibiTool):
         Returns:
             Dict containing the number of insertions made
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -671,7 +678,8 @@ class InsertAfterPatternTool(ChibiTool):
                 matches = list(re.finditer(pattern, file_content))
                 if not matches:
                     logger.log(
-                        "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Pattern '{pattern}' not found in {path}"
+                        "TOOL",
+                        f"[{caller_model}] Pattern '{pattern}' not found in {path}",
                     )
                     return {"insertions": 0}
 
@@ -706,12 +714,12 @@ class InsertAfterPatternTool(ChibiTool):
             if insertions > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {insertions} insertions in {path}")
+                logger.log("TOOL", f"[{caller_model}] Made {insertions} insertions in {path}")
 
             return {"insertions": insertions}
 
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error inserting after pattern in {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error inserting after pattern in {full_path}: {e}")
             raise
 
 
@@ -780,6 +788,7 @@ class InsertBeforePatternTool(ChibiTool):
         Returns:
             Dict containing the number of insertions made
         """
+        caller_model = kwargs.get("caller_model", "unknown model")
         try:
             path = Path(full_path).expanduser().resolve()
             if not path.exists():
@@ -792,7 +801,8 @@ class InsertBeforePatternTool(ChibiTool):
                 matches = list(re.finditer(pattern, file_content))
                 if not matches:
                     logger.log(
-                        "TOOL", f"[{kwargs.get('model', 'Unknown model')}] Pattern '{pattern}' not found in {path}"
+                        "TOOL",
+                        f"[{caller_model}] Pattern '{pattern}' not found in {path}",
                     )
                     return {"insertions": 0}
 
@@ -826,12 +836,12 @@ class InsertBeforePatternTool(ChibiTool):
             if insertions > 0:
                 with path.open("w", encoding=encoding) as f:
                     f.write(new_content)
-                logger.log("TOOL", f"[{kwargs.get('model', 'Unknown model')}] Made {insertions} insertions in {path}")
+                logger.log("TOOL", f"[{caller_model}] Made {insertions} insertions in {path}")
 
             return {"insertions": insertions}
 
         except Exception as e:
-            logger.error(f"[{kwargs.get('model', 'Unknown model')}] Error inserting before pattern in {full_path}: {e}")
+            logger.error(f"[{caller_model}] Error inserting before pattern in {full_path}: {e}")
             raise
 
 
@@ -939,7 +949,7 @@ class ReadFileTool(ChibiTool):
         Returns:
             Dict containing the file content and metadata
         """
-        model = kwargs.get("model", "Unknown model")
+        caller_model = kwargs.get("caller_model", "unknown model")
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
@@ -948,22 +958,19 @@ class ReadFileTool(ChibiTool):
         moderation_provider = await get_moderation_provider(user_id=user_id)
         cmd = f"cat {full_path}"
 
-        logger.log("MODERATOR", f"[{model}] Pre-moderating file read: '{full_path}'")
+        logger.log("MODERATOR", f"[{caller_model}] Pre-moderating file read: '{full_path}'")
         moderator_answer: ModeratorsAnswer = await moderation_provider.moderate_command(
             cmd=cmd, model=gpt_settings.moderation_model
         )
         if moderator_answer.verdict == "declined":
             raise ToolException(
-                f"Moderator ({moderation_provider.name}) DECLINED file read '{full_path}' from model "
-                f"{kwargs.get('model', 'unknown')}. Reason: {moderator_answer.reason}"
+                f"Moderator ({moderation_provider.name}) DECLINED file read '{full_path}'. "
+                f"Reason: {moderator_answer.reason}"
             )
 
         logger.log(
             "MODERATOR",
-            (
-                f"[{model}] Moderator ({moderation_provider.name}) ACCEPTED file read '{full_path}' "
-                f"from model {kwargs.get('model', 'unknown')}"
-            ),
+            (f"[{caller_model}] Moderator ({moderation_provider.name}) ACCEPTED file read '{full_path}'"),
         )
 
         try:
@@ -977,7 +984,7 @@ class ReadFileTool(ChibiTool):
             with path.open("r", encoding=encoding) as f:
                 content = f.read()
 
-            logger.log("TOOL", f"[{model}] Read file: {path}")
+            logger.log("TOOL", f"[{caller_model}] Read file: {path}")
             return {"content": content, "full_path": str(path)}
 
         except Exception as e:

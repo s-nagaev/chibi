@@ -54,7 +54,7 @@ class RunCommandInTerminalTool(ChibiTool):
     async def function(
         cls, cmd: str, cwd: str | None = None, timeout: int = 30, **kwargs: Unpack[AdditionalOptions]
     ) -> dict[str, Any]:
-        model = kwargs.get("model", "Unknown model")
+        caller_model = kwargs.get("caller_model", "unknown model")
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
@@ -67,24 +67,24 @@ class RunCommandInTerminalTool(ChibiTool):
 
         moderation_provider = await get_moderation_provider(user_id=user_id)
 
-        logger.log("MODERATOR", f"[{model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
+        logger.log("MODERATOR", f"[{caller_model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
         moderator_answer: ModeratorsAnswer = await moderation_provider.moderate_command(
             cmd=cmd, model=gpt_settings.moderation_model
         )
         if moderator_answer.verdict == "declined":
             raise ToolException(
                 f"Moderator ({moderation_provider.name}) DECLINED command '{cmd}' from model "
-                f"{kwargs.get('model', 'unknown')}. Reason: {moderator_answer.reason}"
+                f"{caller_model}. Reason: {moderator_answer.reason}"
             )
 
         logger.log(
             "MODERATOR",
             (
-                f"[{model}] Moderator ({moderation_provider.name}) ACCEPTED command '{cmd}' "
-                f"from model {kwargs.get('model', 'unknown')}"
+                f"[{caller_model}] Moderator ({moderation_provider.name}) ACCEPTED command '{cmd}' "
+                f"from model {caller_model}"
             ),
         )
-        logger.log("TOOL", f"[{model}] Running command in terminal: {cmd}. CWD: {cwd}. Timeout: {timeout}")
+        logger.log("TOOL", f"[{caller_model}] Running command in terminal: {cmd}. CWD: {cwd}. Timeout: {timeout}")
         try:
             process = await asyncio.create_subprocess_shell(
                 cmd=cmd,
@@ -130,6 +130,6 @@ class RunCommandInTerminalTool(ChibiTool):
 
         logger.log(
             "TOOL",
-            f"[{kwargs.get('model', 'Unknown model')}] Command '{cmd}' executed. Return code: {process.returncode}.",
+            f"[{caller_model}] Command '{cmd}' executed. Return code: {process.returncode}.",
         )
         return result

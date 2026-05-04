@@ -32,6 +32,10 @@ class UserInterface(ABC):
         raise NotImplementedError
 
     @property
+    def thread_id(self) -> int:
+        raise NotImplementedError
+
+    @property
     def user_data(self) -> str:
         """Returns a string representation of the user data.
 
@@ -223,6 +227,12 @@ class TelegramInterface(UserInterface):
         raise ValueError("Telegram incoming update does not contain valid chat data.")
 
     @property
+    def thread_id(self) -> int:
+        if message := self.update.effective_message:
+            return message.message_thread_id or 0
+        return 0
+
+    @property
     def chat_id(self) -> str | int:
         """Returns the unique identifier for the current Telegram chat.
 
@@ -260,7 +270,7 @@ class TelegramInterface(UserInterface):
         Returns:
             The chat data string.
         """
-        return f"{self._chat.type.upper()} chat ({self._chat.id})"
+        return f"{self._chat.type.upper()} chat #{self._chat.id}, thread #{self.thread_id}"
 
     @property
     def attached_document(self) -> dict[str, str] | None:
@@ -320,15 +330,15 @@ class TelegramInterface(UserInterface):
 
     async def send_action_typing(self) -> None:
         """Sends a typing action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.TYPING)
+        await self._chat.send_chat_action(action=ChatAction.TYPING, message_thread_id=self.thread_id)
 
     async def send_action_uploading_photo(self) -> None:
         """Sends an uploading photo action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.UPLOAD_PHOTO)
+        await self._chat.send_chat_action(action=ChatAction.UPLOAD_PHOTO, message_thread_id=self.thread_id)
 
     async def send_action_recording(self) -> None:
         """Sends a recording voice action to the Telegram chat."""
-        await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE)
+        await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE, message_thread_id=self.thread_id)
 
     async def send_reaction(self, reaction: str) -> None:
         """Sends a reaction to the user's message in Telegram.
@@ -396,6 +406,7 @@ class TelegramInterface(UserInterface):
             thumbnail=thumbnail,
             filename=filename,
             parse_mode="HTML",
+            message_thread_id=self.thread_id,
             read_timeout=AUDIO_UPLOAD_TIMEOUT,
             write_timeout=AUDIO_UPLOAD_TIMEOUT,
         )
@@ -430,6 +441,7 @@ class TelegramInterface(UserInterface):
             duration=duration,
             thumbnail=thumbnail,
             filename=filename,
+            message_thread_id=self.thread_id,
             parse_mode="HTML",
             read_timeout=FILE_UPLOAD_TIMEOUT,
             write_timeout=FILE_UPLOAD_TIMEOUT,
@@ -468,6 +480,7 @@ class TelegramInterface(UserInterface):
             filename=filename,
             caption=caption,
             thumbnail=thumbnail,
+            message_thread_id=self.thread_id,
         )
 
     async def get_caption(self) -> str | None:

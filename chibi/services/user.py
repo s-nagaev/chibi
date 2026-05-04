@@ -10,7 +10,8 @@ from uuid import UUID
 from aiocache import cached
 
 from chibi.config import gpt_settings
-from chibi.models import Message, TelegramFileMeta, User
+from chibi.exceptions import NoProviderSelectedError
+from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.lock_manager import LockManager
@@ -19,7 +20,7 @@ from chibi.storage.database import inject_database
 
 if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
-    from chibi.services.providers.tools import ToolResponse
+    from chibi.services.providers.tools import ToolResponseSchema
 
 
 @inject_database
@@ -28,41 +29,45 @@ async def get_chibi_user(db: Database, user_id: int) -> User:
 
 
 @inject_database
-async def set_active_model(db: Database, user_id: int, model: ModelChangeSchema) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def set_active_model(db: Database, interface: UserInterface, model: ModelChangeSchema) -> None:
+    user = await db.get_or_create_user(user_id=interface.user_id)
     if model.image_generation:
-        user.selected_image_model_name = model.name
-        user.selected_image_provider_name = model.provider
+        user.thread_selected_image_model[interface.thread_id] = SelectedModel(
+            name=model.name, provider_name=model.provider
+        )
+        # user.selected_image_model_name = model.name  # TODO: Legacy
+        # user.selected_image_provider_name = model.provider  # TODO: Legacy
     else:
-        user.selected_gpt_model_name = model.name
-        user.selected_gpt_provider_name = model.provider
+        user.thread_selected_llm[interface.thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
+        # user.selected_gpt_model_name = model.name  # TODO: Legacy
+        # user.selected_gpt_provider_name = model.provider  # TODO: Legacy
     await db.save_user(user)
 
 
 @inject_database
-async def reset_chat_history(db: Database, user_id: int) -> None:
+async def reset_chat_history(db: Database, user_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    await db.drop_messages(user=user)
+    await db.drop_messages(user=user, thread_id=thread_id)
 
 
 @inject_database
-async def emergency_summarization(db: Database, user_id: int) -> None:
+async def emergency_summarization(db: Database, user_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
 
-    chat_history = await db.get_messages(user=user)
+    chat_history = await db.get_messages(user=user, thread_id=thread_id)
     chat_history_string = str(msg for msg in chat_history if not any((msg.get("tool_calls"), msg.get("tool_call_id"))))
     user_messages: list[Message] = [Message(role="user", content=chat_history_string)]
 
-    response, _ = await user.active_gpt_provider.get_chat_response(
+    response, _ = await user.get_active_llm_provider(thread_id=thread_id).get_chat_response(
         messages=user_messages,
         user=user,
         system_prompt="Summarize this conversation, keeping the most important and useful information using English.",
     )
     initial_message = Message(role="user", content="What we were talking about?")
     answer_message = Message(role="assistant", content=response.answer)
-    await reset_chat_history(user_id=user_id)
-    await db.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl)
-    await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl)
+    await reset_chat_history(user_id=user_id, thread_id=thread_id)
+    await db.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
+    await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
 
 @inject_database
@@ -72,9 +77,10 @@ async def send_scheduled_message_to_llm(
     interface: UserInterface,
     message: str,
     event_id: UUID,
+    thread_id: int = 0,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
-    lock = await LockManager().get_lock(key=user_id)
+    lock = await LockManager().get_lock(key=f"{user_id}_{thread_id}")
 
     prompt = {
         "type": "scheduled message",
@@ -84,16 +90,19 @@ async def send_scheduled_message_to_llm(
         "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
     }
     async with lock:
-        conversation_messages: list[Message] = await db.get_conversation_messages(user=user)
+        conversation_messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
         new_message_to_llm = Message(role="user", content=json.dumps(prompt))
         conversation_messages.append(new_message_to_llm)
 
-        chat_response, new_messages = await user.active_gpt_provider.get_chat_response(
-            messages=conversation_messages, user=user, model=user.selected_gpt_model_name, interface=interface
+        active_provider = user.get_active_llm_provider(thread_id=thread_id)
+        active_model = user.get_active_llm_model(thread_id=thread_id)
+
+        chat_response, new_messages = await active_provider.get_chat_response(
+            messages=conversation_messages, user=user, model=active_model, interface=interface
         )
-        await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl)
+        await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for msg in new_messages:
-            await db.add_message(user=user, message=msg, ttl=gpt_settings.messages_ttl)
+            await db.add_message(user=user, message=msg, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         return chat_response
 
 
@@ -138,10 +147,11 @@ async def get_llm_chat_completion_answer(
     user_text_message: str | None = None,
     user_voice_message: BytesIO | None = None,
     user_caption: str | None = None,
-    tool_message: Optional["ToolResponse"] = None,
+    tool_message: Optional["ToolResponseSchema"] = None,
 ) -> ChatResponseSchema:
     user = await db.get_or_create_user(user_id=user_id)
-    lock = await LockManager().get_lock(key=user_id)
+    thread_id = interface.thread_id
+    lock = await LockManager().get_lock(key=f"{user_id}_{thread_id}")
 
     if not user_text_message and not user_voice_message and not tool_message and not user_caption:
         raise ValueError("No prompt data provided")
@@ -179,52 +189,56 @@ async def get_llm_chat_completion_answer(
         }
 
     async with lock:
-        conversation_messages: list[Message] = await db.get_conversation_messages(user=user)
+        conversation_messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
         new_message_to_llm = Message(role="user", content=json.dumps(prompt))
         conversation_messages.append(new_message_to_llm)
 
-        chat_response, new_messages = await user.active_gpt_provider.get_chat_response(
-            messages=conversation_messages, user=user, model=user.selected_gpt_model_name, interface=interface
+        active_provider = user.get_active_llm_provider(thread_id=thread_id)
+
+        chat_response, new_messages = await active_provider.get_chat_response(
+            messages=conversation_messages,
+            user=user,
+            model=user.get_active_llm_model(thread_id=thread_id),
+            interface=interface,
         )
-        await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl)
+        await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
-            await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl)
+            await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         return chat_response
 
 
 @inject_database
-async def check_history_and_summarize(db: Database, user_id: int) -> bool:
+async def check_history_and_summarize(db: Database, user_id: int, thread_id: int) -> bool:
     user = await db.get_or_create_user(user_id=user_id)
-    messages = await db.get_messages(user=user)
+    messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
     # Roughly estimating how many tokens the current conversation history will comprise. It is possible to calculate
     # this accurately, but the modules that can be used for this need to be separately built for armv7, which is
     # difficult to do right now (but will be done further, I hope).
-    if len(str(messages)) / 4 >= gpt_settings.max_history_tokens:
-        await emergency_summarization(user_id=user_id)
+    tokens = sum(msg.estimate_tokens for msg in messages)
+    if tokens >= gpt_settings.max_history_tokens:
+        await emergency_summarization(user_id=user_id, thread_id=thread_id)
         return True
     return False
 
 
 @inject_database
 async def generate_image(
-    db: Database, user_id: int, prompt: str, model: str | None = None, provider_name: str | None = None
+    db: Database, interface: UserInterface, prompt: str, model: str | None = None, provider_name: str | None = None
 ) -> list[str] | list[BytesIO]:
-    user = await db.get_or_create_user(user_id=user_id)
+    user = await db.get_or_create_user(user_id=interface.user_id)
 
     if provider_name:
         provider = user.providers.get(provider_name)
         selected_model = model
-    elif user.selected_image_provider_name:
-        provider = user.active_image_provider
-        selected_model = model or user.selected_image_model_name
     else:
-        provider = user.active_image_provider
-        selected_model = None
+        provider = user.get_active_image_provider(thread_id=interface.thread_id)
+        selected_model = user.get_active_image_model(thread_id=interface.thread_id)
+
     if not provider:
-        raise ValueError(f"User {user_id}: no image provider available.")
+        raise NoProviderSelectedError("No image provider available")
     images = await provider.get_images(prompt=prompt, model=selected_model)
-    if user_id not in gpt_settings.image_generations_whitelist:
-        await db.count_image(user_id)
+    if interface.user_id not in gpt_settings.image_generations_whitelist:
+        await db.count_image(interface.user_id)
     return images
 
 
@@ -290,7 +304,9 @@ async def get_user_cached_models(db: Database, user_id: int, image_generation: b
 
 
 @inject_database
-async def get_models_available(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+async def get_models_available(
+    db: Database, user_id: int, image_generation: bool = False, thread_id: int = 0
+) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
     user_models = await get_user_cached_models(user_id=user_id, image_generation=image_generation)
 
@@ -298,10 +314,15 @@ async def get_models_available(db: Database, user_id: int, image_generation: boo
         return []
 
     available_models = deepcopy(user_models)
+
     if image_generation:
-        active_model = user.selected_image_model_name or user.active_image_provider.default_image_model
+        active_model = (
+            user.get_active_image_model(thread_id=thread_id)
+            or user.get_active_image_provider(thread_id=thread_id).default_image_model
+        )
     else:
-        active_model = user.selected_gpt_model_name or user.active_gpt_provider.default_image_model
+        active_provider = user.get_active_llm_provider(thread_id=thread_id)
+        active_model = user.get_active_llm_model(thread_id=thread_id) or active_provider.default_image_model
 
     for model in available_models:
         if model.name == active_model:
@@ -372,21 +393,21 @@ async def get_moderation_provider(db: Database, user_id: int) -> "Provider":
 
 
 @inject_database
-async def drop_tool_call_history(db: Database, user_id: int) -> None:
+async def drop_tool_call_history(db: Database, user_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    chat_history: list[Message] = await db.get_conversation_messages(user=user)
-    await reset_chat_history(user_id=user_id)
+    chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
+    await reset_chat_history(user_id=user_id, thread_id=thread_id)
     for message in chat_history:
         if message.role == "tool":
             continue
         message.tool_calls = None
         message.tool_call_id = None
-        await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl)
+        await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
 
 @inject_database
-async def summarize_history(db: Database, user_id: int) -> None:
+async def summarize_history(db: Database, user_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=user_id)
-    chat_history: list[Message] = await db.get_conversation_messages(user=user)
-    await reset_chat_history(user_id=user_id)
-    await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl)
+    chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
+    await reset_chat_history(user_id=user_id, thread_id=thread_id)
+    await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl, thread_id=thread_id)

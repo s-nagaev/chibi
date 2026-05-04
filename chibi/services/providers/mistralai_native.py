@@ -1,9 +1,8 @@
-import asyncio
 import base64
 import json
 import random
 from asyncio import sleep
-from typing import Any, Union
+from typing import Union
 
 from loguru import logger
 from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
@@ -27,6 +26,7 @@ from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import (
     get_usage_from_mistral_response,
     get_usage_msg,
@@ -149,7 +149,7 @@ class MistralAI(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages
@@ -186,23 +186,39 @@ class MistralAI(RestApiFriendlyProvider):
             await send_llm_thoughts(thoughts=thoughts, interface=interface)
 
         logger.log("THINK", f"{model}: {thoughts}. {get_usage_msg(usage=usage)}")
-        tool_context: dict[str, Any] = {
-            "user_id": user.id if user else None,
-            "interface": interface,
-            "model": model,
-        }
 
-        tool_coroutines = []
-        for tool_call in tool_calls:
-            function_args = (
-                json.loads(tool_call.function.arguments)
-                if isinstance(tool_call.function.arguments, str)
-                else tool_call.function.arguments
+        calls = [
+            ToolCallSchema(
+                tool_name=tool_call.function.name,
+                args=(
+                    json.loads(tool_call.function.arguments)
+                    if isinstance(tool_call.function.arguments, str)
+                    else tool_call.function.arguments
+                ),
             )
-            tool_coroutines.append(
-                RegisteredChibiTools.call(tool_name=tool_call.function.name, tools_args=tool_context | function_args)
-            )
-        results = await asyncio.gather(*tool_coroutines)
+            for tool_call in tool_calls
+        ]
+        results = await self.call_functions(
+            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+        )
+
+        # tool_context: dict[str, Any] = {
+        #     "user_id": user.id if user else None,
+        #     "interface": interface,
+        #     "model": model,
+        # }
+        #
+        # tool_coroutines = []
+        # for tool_call in tool_calls:
+        #     function_args = (
+        #         json.loads(tool_call.function.arguments)
+        #         if isinstance(tool_call.function.arguments, str)
+        #         else tool_call.function.arguments
+        #     )
+        #     tool_coroutines.append(
+        #         RegisteredChibiTools.call(tool_name=tool_call.function.name, tools_args=tool_context | function_args)
+        #     )
+        # results = await asyncio.gather(*tool_coroutines)
 
         for tool_call, result in zip(tool_calls, results):
             tool_call_message = AssistantMessage(

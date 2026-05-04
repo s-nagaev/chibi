@@ -65,6 +65,7 @@ from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
 from chibi.services.providers.utils import (
     get_usage_from_anthropic_response,
     get_usage_from_openai_response,
@@ -332,6 +333,26 @@ class Provider(ABC):
     def _get_temperature_value(self, model_name: str) -> float | OpenAIOmit:
         return getattr(self, "temperature", gpt_settings.temperature)
 
+    async def call_functions(
+        self,
+        calls: list[ToolCallSchema],
+        caller_model: str,
+        caller_provider: str,
+        user_id: int | None = None,
+        interface: UserInterface | None = None,
+    ) -> list[ToolResponseSchema]:
+        tool_context: dict[str, Any] = {
+            "user_id": user_id,
+            "interface": interface,
+            "caller_model": caller_model,
+            "caller_provider": caller_provider,
+        }
+        tool_coroutines = [
+            RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args) for call in calls
+        ]
+        results = await asyncio.gather(*tool_coroutines)
+        return results
+
 
 class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     temperature: float | OpenAINotGiven | None = gpt_settings.temperature
@@ -428,7 +449,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             dialog = messages
         else:
             prepared_system_prompt = await prepare_system_prompt(
-                base_system_prompt=system_prompt, user=user, interface=interface
+                base_system_prompt=system_prompt, user_id=user.id, interface=interface
             )
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
@@ -472,19 +493,30 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             await send_llm_thoughts(thoughts=thoughts, interface=interface)
         logger.log("THINK", f"{model}: {thoughts}. {usage_message}")
 
-        tool_context: dict[str, Any] = {
-            "user_id": user.id if user else None,
-            "interface": interface,
-            "model": model,
-        }
-
-        tool_coroutines = [
-            RegisteredChibiTools.call(
-                tool_name=tool_call.function.name, tools_args=tool_context | json.loads(tool_call.function.arguments)
+        calls = [
+            ToolCallSchema(
+                tool_name=tool_call.function.name,
+                args=json.loads(tool_call.function.arguments),
             )
             for tool_call in tool_calls
         ]
-        results = await asyncio.gather(*tool_coroutines)
+        results = await self.call_functions(
+            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+        )
+
+        # tool_context: dict[str, Any] = {
+        #     "user_id": user.id if user else None,
+        #     "interface": interface,
+        #     "model": model,
+        # }
+        #
+        # tool_coroutines = [
+        #     RegisteredChibiTools.call(
+        #         tool_name=tool_call.function.name, tools_args=tool_context | json.loads(tool_call.function.arguments)
+        #     )
+        #     for tool_call in tool_calls
+        # ]
+        # results = await asyncio.gather(*tool_coroutines)
 
         for tool_call, result in zip(tool_calls, results):
             # tool_call_message = ChatCompletionAssistantMessageParam(
@@ -830,7 +862,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user=user, interface=interface
+            base_system_prompt=system_prompt, user_id=user.id, interface=interface
         )
         response_message: AnthropicMessage = await self._generate_content(
             model=model,
@@ -875,17 +907,28 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             "THINK", f"{model}: {thoughts_part.text if thoughts_part else 'No thoughts'}. {get_usage_msg(usage=usage)}"
         )
 
-        tool_context: dict[str, Any] = {
-            "user_id": user.id if user else None,
-            "interface": interface,
-            "model": model,
-        }
-
-        tool_coroutines = [
-            RegisteredChibiTools.call(tool_name=tool_call_part.name, tools_args=tool_context | tool_call_part.input)
+        calls = [
+            ToolCallSchema(
+                tool_name=tool_call_part.name,
+                args=tool_call_part.input,
+            )
             for tool_call_part in tool_call_parts
         ]
-        results = await asyncio.gather(*tool_coroutines)
+        results = await self.call_functions(
+            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+        )
+        #
+        # tool_context: dict[str, Any] = {
+        #     "user_id": user.id if user else None,
+        #     "interface": interface,
+        #     "model": model,
+        # }
+        #
+        # tool_coroutines = [
+        #     RegisteredChibiTools.call(tool_name=tool_call_part.name, tools_args=tool_context | tool_call_part.input)
+        #     for tool_call_part in tool_call_parts
+        # ]
+        # results = await asyncio.gather(*tool_coroutines)
 
         for tool_call_part, result in zip(tool_call_parts, results):
             tool_call_message = MessageParam(
