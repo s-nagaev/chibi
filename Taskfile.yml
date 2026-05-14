@@ -39,6 +39,12 @@ tasks:
     cmds:
       - pytest -vv .
 
+  checks:
+    desc: "Run linters + tests"
+    cmds:
+      - task lint
+      - task test
+
   update:
     desc: "Update dependencies and export deps to the requirements.txt/reuirements-dev.txt files"
     cmds:

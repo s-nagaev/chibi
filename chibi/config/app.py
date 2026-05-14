@@ -66,9 +66,9 @@ class ApplicationSettings(BaseSettings):
     influxdb_bucket: str | None = Field(default=None)
 
     # ChromaDB settings
-    chroma_host: str | None = Field(default=None)
+    chroma_host: str = Field(default="")
     chroma_port: int = Field(default=8000)
-    chroma_persist_dir: str | None = Field(default=None)
+    chroma_persist_dir: str = Field(default="")
     chroma_history_retention_days: int = Field(default=90)
     memory_search_limit: int = Field(default=5)
 
