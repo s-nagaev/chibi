@@ -2,6 +2,8 @@ import asyncio
 from datetime import datetime, timedelta
 
 import chromadb
+from chromadb import EmbeddingFunction
+from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from loguru import logger
@@ -16,7 +18,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     def __init__(self) -> None:
         """Initialize ChromaDB embedded client."""
-        self._cached_embedding_fn = DefaultEmbeddingFunction()
+        self._cached_embedding_fn: EmbeddingFunction = DefaultEmbeddingFunction()
         self._client = chromadb.PersistentClient(
             path=application_settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
@@ -69,9 +71,11 @@ class ChromaLongConversationMemory(LongConversationMemory):
             )
 
             formatted_results = []
-            if result.get("documents") and result["documents"][0]:
-                for i, doc in enumerate(result["documents"][0]):
-                    formatted_results.append({"content": doc, **result["metadatas"][0][i]})
+            documents = result.get("documents")
+            metadatas = result.get("metadatas")
+            if documents and metadatas and documents[0]:
+                for i, doc in enumerate(documents[0]):
+                    formatted_results.append({"content": doc, **metadatas[0][i]})
 
             return formatted_results
         except Exception as e:
@@ -93,14 +97,18 @@ class ChromaLongConversationMemory(LongConversationMemory):
                         continue
 
                     ids_to_delete = []
-                    metadatas = result.get("metadatas", [])
-                    for i, metadata in enumerate(metadatas):
-                        timestamp_str = metadata.get("timestamp")
-                        try:
-                            if (timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff) or not timestamp_str:
-                                ids_to_delete.append(result["ids"][i])
-                        except (ValueError, TypeError):
-                            ids_to_delete.append(result["ids"][i])
+                    metadatas = result.get("metadatas")
+                    ids = result.get("ids")
+                    if metadatas and ids:
+                        for i, metadata in enumerate(metadatas):
+                            timestamp_str = str(metadata.get("timestamp"))
+                            try:
+                                if (
+                                    timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff
+                                ) or not timestamp_str:
+                                    ids_to_delete.append(ids[i])
+                            except (ValueError, TypeError):
+                                ids_to_delete.append(ids[i])
 
                     if ids_to_delete:
                         await asyncio.to_thread(coll.delete, ids=ids_to_delete)
@@ -119,14 +127,14 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     def __init__(self) -> None:
         """Initialize ChromaDB async client for external server."""
-        self._client: chromadb.AsyncClient | None = None
-        self._cached_embedding_fn = DefaultEmbeddingFunction()
+        self._client: chromadb.AsyncClientAPI | None = None
+        self._cached_embedding_fn: EmbeddingFunction = DefaultEmbeddingFunction()
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
         )
 
-    async def _get_client(self) -> "chromadb.AsyncClient":
+    async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization)."""
         if self._client is None:
             self._client = await chromadb.AsyncHttpClient(
@@ -139,7 +147,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         """Get collection name for user."""
         return f"user_{user_id}"
 
-    async def _get_or_create_collection(self, user_id: int) -> "chromadb.AsyncCollection":
+    async def _get_or_create_collection(self, user_id: int) -> AsyncCollection:
         """Get or create collection for user."""
         collection_name = self._get_collection_name(user_id)
         client = await self._get_client()
@@ -179,9 +187,11 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             )
 
             formatted_results = []
-            if result.get("documents") and result["documents"][0]:
-                for i, doc in enumerate(result["documents"][0]):
-                    formatted_results.append({"content": doc, **result["metadatas"][0][i]})
+            documents = result.get("documents")
+            metadatas = result.get("metadatas")
+            if documents and metadatas and documents[0]:
+                for i, doc in enumerate(documents[0]):
+                    formatted_results.append({"content": doc, **metadatas[0][i]})
 
             return formatted_results
         except Exception as e:
@@ -204,14 +214,18 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
                         continue
 
                     ids_to_delete = []
-                    metadatas = result.get("metadatas", [])
-                    for i, metadata in enumerate(metadatas):
-                        timestamp_str = metadata.get("timestamp")
-                        try:
-                            if (timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff) or not timestamp_str:
-                                ids_to_delete.append(result["ids"][i])
-                        except (ValueError, TypeError):
-                            ids_to_delete.append(result["ids"][i])
+                    metadatas = result.get("metadatas")
+                    ids = result.get("ids")
+                    if metadatas and ids:
+                        for i, metadata in enumerate(metadatas):
+                            timestamp_str = str(metadata.get("timestamp"))
+                            try:
+                                if (
+                                    timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff
+                                ) or not timestamp_str:
+                                    ids_to_delete.append(ids[i])
+                            except (ValueError, TypeError):
+                                ids_to_delete.append(ids[i])
 
                     if ids_to_delete:
                         await coll.delete(ids=ids_to_delete)
