@@ -14,7 +14,7 @@ class ChromaWrappedStorage(Database):
         self.inner = inner
         self.memory = memory
 
-    async def add_message(self, user: User, message: Message, ttl: int | None = None) -> None:
+    async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
         # First, add to primary storage
         await self.inner.add_message(user, message, ttl)
 
@@ -23,10 +23,10 @@ class ChromaWrappedStorage(Database):
             task_manager.run_task(self.memory.archive(user.id, [message]), user_id=user.id)
 
     # Required abstract methods - delegate via __getattr__
-    async def get_messages(self, user: User) -> list[dict[str, str]]:
+    async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]:
         return await self.inner.get_messages(user)
 
-    async def drop_messages(self, user: User) -> None:
+    async def drop_messages(self, user: User, thread_id: int = 0) -> None:
         return await self.inner.drop_messages(user)
 
     async def get_user(self, user_id: int) -> User | None:
