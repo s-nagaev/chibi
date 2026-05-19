@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+
 ## [1.8.0] - 2026-05-04
 
 ### Added
@@ -30,7 +31,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 ## [1.7.0] - 2026-03-09
 
 ### Added
-- Basic support for handling[changelog.md](changelog.md) user-uploaded files (photos, documents) via Telegram
+- Basic support for handling user-uploaded files (photos, documents) via Telegram
 - File storage abstraction layer (`FileStorage`, `LocalFileStorage`, `TelegramFileStorage`)
 - File metadata persistence in Redis
 - Initial vision support across multiple providers (Anthropic, OpenAI, Gemini, Mistral)

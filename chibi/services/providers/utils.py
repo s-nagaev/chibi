@@ -78,6 +78,16 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
         storage: FileStorage = get_file_storage(interface=interface)
         prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
+        thread_id = interface.thread_id
+        context_size = user.approximate_context_size(thread_id=thread_id)
+        prompt["approximate_context_size"] = context_size
+        if context_size > gpt_settings.max_history_tokens * 0.7:
+            prompt["context_size_warning"] = (
+                f"The context size is more than 70% of the maximum allowed ({gpt_settings.max_history_tokens}) tokens. "
+                f"It is strongly recommended to reduce the context by calling 'summarize_history' "
+                f"or 'clear_tool_call_history' and generating the most detailed summary possible."
+            )
+
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)
 
