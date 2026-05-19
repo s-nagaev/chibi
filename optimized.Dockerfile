@@ -1,29 +1,38 @@
 # === builder ===
-FROM python:3.11-alpine AS builder
+FROM python:3.11-slim-bookworm AS builder
 
-# Install build dependencies
-RUN apk add --no-cache build-base libffi-dev openssl-dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Copy and install Python dependencies
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && apk del build-base libffi-dev openssl-dev
+    && apt-get remove -y build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # === runtime ===
-FROM python:3.11-alpine
+FROM python:3.11-slim-bookworm
 
-# Install runtime dependencies
-RUN apk add --no-cache libstdc++ libffi openssl ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Copy installed packages and application code
+
 COPY --from=builder /usr/local /usr/local
 COPY . .
 
-# Create non-root user and switch
-RUN addgroup -S chibi && adduser -S chibi -G chibi
+# Create directories first (as root)
+RUN mkdir -p /app/data /app/data/.chibi /app/home
+
+# Create user
+RUN groupadd -r chibi && useradd -r -g chibi -d /app chibi
+
+# Give ownership
+RUN chown -R chibi:chibi /app
+
 USER chibi
 
-# Launch command
 CMD ["python", "main.py"]
