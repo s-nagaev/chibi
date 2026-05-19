@@ -596,3 +596,10 @@ class User(BaseModel):
         if str(self.id) in gpt_settings.image_generations_whitelist:
             return False
         return len(self.images) >= gpt_settings.image_generations_monthly_limit
+
+    def approximate_context_size(self, thread_id: int) -> int:
+        messages = self.thread_messages_map.get(thread_id)
+        if not messages:
+            return 0
+
+        return sum(msg.estimate_tokens for msg in messages)

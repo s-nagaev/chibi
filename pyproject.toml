@@ -65,7 +65,7 @@ mistralai = "1.12.0"
 openai = "2.17.0"
 pydantic = "2.12.5"
 pydantic-settings = "2.12.0"
-python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.5"}
+python-telegram-bot = {extras = ["socks", "job-queue"], version = "22.7"}
 redis = {extras = ["hiredis"], version = "7.1.0"}
 rich = "^14.3.3"
 sqlalchemy = "^2.0"

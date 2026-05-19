@@ -15,8 +15,9 @@ class Minimax(AnthropicFriendlyProvider):
 
     name = "Minimax"
     base_url = "https://api.minimax.io/anthropic"
-    default_model = "MiniMax-M2.1"
-    default_moderation_model = "MiniMax-M2.1-lighting"
+    default_model = "MiniMax-M2.7"
+    default_moderation_model = "MiniMax-M2.7-lighting"
+    model_name_keywords = ["MiniMax"]
 
     base_tts_url = "https://api.minimax.io/v1/"
     default_tts_model = "speech-2.8-turbo"
@@ -52,15 +53,7 @@ class Minimax(AnthropicFriendlyProvider):
                 ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
             ]
 
-        supported_models = [
-            "MiniMax-M2.7",
-            "MiniMax-M2.7-highspeed",
-            "MiniMax-M2.5",
-            "MiniMax-M2.5-highspeed",
-            "MiniMax-M2.1",
-            "MiniMax-M2.1-highspeed",
-            "MiniMax-M2",
-        ]
+        supported_models = ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"]
         return [
             ModelChangeSchema(
                 provider=self.name,

@@ -8,6 +8,7 @@ from asyncio import sleep
 from functools import wraps
 from io import BytesIO
 from typing import Any, Awaitable, Callable, Generic, Literal, Optional, ParamSpec, TypeVar, cast
+from urllib.parse import urljoin
 
 import httpx
 from anthropic import AsyncClient, NotGiven, Omit
@@ -504,35 +505,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
         )
 
-        # tool_context: dict[str, Any] = {
-        #     "user_id": user.id if user else None,
-        #     "interface": interface,
-        #     "model": model,
-        # }
-        #
-        # tool_coroutines = [
-        #     RegisteredChibiTools.call(
-        #         tool_name=tool_call.function.name, tools_args=tool_context | json.loads(tool_call.function.arguments)
-        #     )
-        #     for tool_call in tool_calls
-        # ]
-        # results = await asyncio.gather(*tool_coroutines)
-
         for tool_call, result in zip(tool_calls, results):
-            # tool_call_message = ChatCompletionAssistantMessageParam(
-            #     role="assistant",
-            #     content=answer,
-            #     tool_calls=[
-            #         ChatCompletionMessageToolCallParam(
-            #             id=tool_call.id,
-            #             type="function",
-            #             function=Function(
-            #                 name=tool_call.function.name,
-            #                 arguments=tool_call.function.arguments,
-            #             ),
-            #         )
-            # messages.append(tool_call_message)
-
             # Temporary hotfix: preserve reasoning_content for DeepSeek/Moonshot thinking mode
             message_dict: dict[str, Any] = {
                 "role": "assistant",
@@ -777,6 +750,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | NotGiven = gpt_settings.presence_penalty
     temperature: float | Omit = gpt_settings.temperature
+    base_url: str = "https://api.anthropic.com"
 
     @property
     def tools_list(self) -> list[ToolParam]:
@@ -917,18 +891,6 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         results = await self.call_functions(
             calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
         )
-        #
-        # tool_context: dict[str, Any] = {
-        #     "user_id": user.id if user else None,
-        #     "interface": interface,
-        #     "model": model,
-        # }
-        #
-        # tool_coroutines = [
-        #     RegisteredChibiTools.call(tool_name=tool_call_part.name, tools_args=tool_context | tool_call_part.input)
-        #     for tool_call_part in tool_call_parts
-        # ]
-        # results = await asyncio.gather(*tool_coroutines)
 
         for tool_call_part, result in zip(tool_call_parts, results):
             tool_call_message = MessageParam(
@@ -1010,10 +972,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         if image_generation:
             return []
 
-        url = "https://api.anthropic.com/v1/models"
-
         try:
-            response = await self._request(method="GET", url=url)
+            response = await self._request(method="GET", url=urljoin(self.base_url, "v1/models"))
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return []
@@ -1023,11 +983,11 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             ModelChangeSchema(
                 provider=self.name,
                 name=model.get("id"),
-                display_name=model.get("display_name"),
+                display_name=model.get("display_name") or model.get("id"),
                 image_generation=False,
             )
             for model in response_data
-            if model.get("id") and model.get("type") == "model"
+            if model.get("id") and (model.get("type") == "model" or model.get("object") == "model")
         ]
         all_models.sort(key=lambda model: model.name)
 

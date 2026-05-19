@@ -159,7 +159,7 @@ class SummarizeHistoryTool(ChibiTool):
         function=FunctionDefinition(
             name="summarize_history",
             description=(
-                "Clear the whole chat history, replacing it with summary provided. Don't hesitate to provide "
+                "Clear the whole chat history, replacing it with summary provided. Provide "
                 "EXHAUSTIVE summary. Use this tool fully independently and autonomously."
             ),
             parameters={

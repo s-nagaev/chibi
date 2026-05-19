@@ -285,21 +285,6 @@ class Gemini(RestApiFriendlyProvider):
         results = await self.call_functions(
             calls=calls, caller_model=model_name, caller_provider=self.name, user_id=user.id, interface=interface
         )
-        #
-        # tool_context: dict[str, Any] = {
-        #     "user_id": user.id if user else None,
-        #     "model": model_name,
-        #     "interface": interface,
-        # }
-        #
-        # tool_coroutines = [
-        #     RegisteredChibiTools.call(
-        #         tool_name=str(function_call.name),
-        #         tools_args=tool_context | copy(function_call.args) if function_call.args else tool_context,
-        #     )
-        #     for function_call in response.function_calls
-        # ]
-        # results = await asyncio.gather(*tool_coroutines)
 
         thought_signature = self._get_thought_signature(response=response)
         if not thought_signature and "gemini-3" in model_name:

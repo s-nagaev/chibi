@@ -202,24 +202,6 @@ class MistralAI(RestApiFriendlyProvider):
             calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
         )
 
-        # tool_context: dict[str, Any] = {
-        #     "user_id": user.id if user else None,
-        #     "interface": interface,
-        #     "model": model,
-        # }
-        #
-        # tool_coroutines = []
-        # for tool_call in tool_calls:
-        #     function_args = (
-        #         json.loads(tool_call.function.arguments)
-        #         if isinstance(tool_call.function.arguments, str)
-        #         else tool_call.function.arguments
-        #     )
-        #     tool_coroutines.append(
-        #         RegisteredChibiTools.call(tool_name=tool_call.function.name, tools_args=tool_context | function_args)
-        #     )
-        # results = await asyncio.gather(*tool_coroutines)
-
         for tool_call, result in zip(tool_calls, results):
             tool_call_message = AssistantMessage(
                 content=message_data.content or "",
