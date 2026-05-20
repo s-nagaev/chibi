@@ -97,37 +97,30 @@ class ChromaLongConversationMemory(LongConversationMemory):
         try:
             collections = await asyncio.to_thread(self._client.list_collections)
 
-            for coll in [c for c in collections if c.name.startswith("user_")]:
-                try:
-                    result = await asyncio.to_thread(coll.get)
+            for collection in [c for c in collections if c.name.startswith("user_")]:
+                result = await asyncio.to_thread(collection.get)
+                if not result:
+                    continue
 
-                    if not result or not result.get("ids"):
-                        continue
+                ids = result.get("ids", [])
+                metadatas = result.get("metadatas")
+                to_delete = []
+                if not metadatas:
+                    return
+                for i, meta in enumerate(metadatas):
+                    ts = str(meta.get("timestamp", ""))
+                    try:
+                        if ts and datetime.fromisoformat(ts) < cutoff:
+                            to_delete.append(ids[i])
+                    except (ValueError, TypeError):
+                        pass
 
-                    ids_to_delete = []
-                    metadatas = result.get("metadatas")
-                    ids = result.get("ids")
-                    if metadatas and ids:
-                        for i, metadata in enumerate(metadatas):
-                            timestamp_str = str(metadata.get("timestamp"))
-                            try:
-                                if (
-                                    timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff
-                                ) or not timestamp_str:
-                                    ids_to_delete.append(ids[i])
-                            except (ValueError, TypeError):
-                                ids_to_delete.append(ids[i])
-
-                    if ids_to_delete:
-                        await asyncio.to_thread(coll.delete, ids=ids_to_delete)
-                        logger.info(f"Deleted {len(ids_to_delete)} old messages from {coll.name}")
-
-                except Exception as e:
-                    logger.warning(f"Failed to process collection {coll.name}: {e}")
+                if to_delete:
+                    await asyncio.to_thread(collection.delete, ids=to_delete)
+                    logger.info(f"Deleted {len(to_delete)} messages from {collection.name}")
 
         except Exception as e:
             logger.error(f"Failed to delete old messages: {e}")
-            raise
 
 
 class AsyncChromaLongConversationMemory(LongConversationMemory):
@@ -222,37 +215,30 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             client = await self._get_client()
             collections = await client.list_collections()
 
-            for coll in [c for c in collections if c.name.startswith("user_")]:
-                try:
-                    result = await coll.get()
+            for collection in [c for c in collections if c.name.startswith("user_")]:
+                result = await collection.get()
+                if not result:
+                    continue
 
-                    if not result or not result.get("ids"):
-                        continue
+                ids = result.get("ids", [])
+                metadatas = result.get("metadatas", [])
+                to_delete = []
+                if not metadatas:
+                    return
+                for i, meta in enumerate(metadatas):
+                    ts = str(meta.get("timestamp", ""))
+                    try:
+                        if ts and datetime.fromisoformat(ts) < cutoff:
+                            to_delete.append(ids[i])
+                    except (ValueError, TypeError):
+                        pass
 
-                    ids_to_delete = []
-                    metadatas = result.get("metadatas")
-                    ids = result.get("ids")
-                    if metadatas and ids:
-                        for i, metadata in enumerate(metadatas):
-                            timestamp_str = str(metadata.get("timestamp"))
-                            try:
-                                if (
-                                    timestamp_str and datetime.fromisoformat(timestamp_str) < cutoff
-                                ) or not timestamp_str:
-                                    ids_to_delete.append(ids[i])
-                            except (ValueError, TypeError):
-                                ids_to_delete.append(ids[i])
-
-                    if ids_to_delete:
-                        await coll.delete(ids=ids_to_delete)
-                        logger.info(f"Deleted {len(ids_to_delete)} old messages from {coll.name}")
-
-                except Exception as e:
-                    logger.warning(f"Failed to process collection {coll.name}: {e}")
+                if to_delete:
+                    await collection.delete(ids=to_delete)
+                    logger.info(f"Deleted {len(to_delete)} messages from {collection.name}")
 
         except Exception as e:
             logger.error(f"Failed to delete old messages: {e}")
-            raise
 
 
 def create_memory() -> LongConversationMemory | None:
