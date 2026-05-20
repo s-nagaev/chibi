@@ -14,7 +14,11 @@ from chibi.models import Message
 
 
 class ChromaLongConversationMemory(LongConversationMemory):
-    """ChromaDB implementation using embedded PersistentClient (synchronous)."""
+    """ChromaDB implementation using embedded PersistentClient (synchronous).
+    
+    This class uses ChromaDB's persistent client to store conversation history
+    locally on disk. Suitable for single-instance deployments.
+    """
 
     def __init__(self) -> None:
         """Initialize ChromaDB embedded client."""
@@ -26,11 +30,25 @@ class ChromaLongConversationMemory(LongConversationMemory):
         logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
 
     def _get_collection_name(self, user_id: int) -> str:
-        """Get collection name for user."""
+        """Get collection name for user.
+        
+        Args:
+            user_id: The user ID.
+        
+        Returns:
+            Collection name string.
+        """
         return f"user_{user_id}"
 
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
-        """Get or create collection for user."""
+        """Get or create collection for user.
+        
+        Args:
+            user_id: The user ID.
+        
+        Returns:
+            ChromaDB collection.
+        """
         collection_name = self._get_collection_name(user_id)
         return await asyncio.to_thread(
             self._client.get_or_create_collection,
@@ -39,7 +57,15 @@ class ChromaLongConversationMemory(LongConversationMemory):
         )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
-        """Archive messages to ChromaDB."""
+        """Archive messages to ChromaDB.
+        
+        Args:
+            user_id: The user ID.
+            messages: List of messages to archive.
+        
+        Raises:
+            Exception: If archiving fails.
+        """
         if not messages:
             return
 
@@ -61,7 +87,16 @@ class ChromaLongConversationMemory(LongConversationMemory):
             raise
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
-        """Search archived messages by semantic similarity."""
+        """Search archived messages by semantic similarity.
+        
+        Args:
+            user_id: The user ID.
+            query: Search query string.
+            n_results: Maximum number of results to return.
+        
+        Returns:
+            List of search results.
+        """
         try:
             collection = await self._get_or_create_collection(user_id)
             result = await asyncio.to_thread(
@@ -91,7 +126,11 @@ class ChromaLongConversationMemory(LongConversationMemory):
             return []
 
     async def delete_old(self, retention_days: int) -> None:
-        """Delete archived messages older than retention_days."""
+        """Delete archived messages older than retention_days.
+        
+        Args:
+            retention_days: Number of days to retain messages.
+        """
         cutoff = datetime.now() - timedelta(days=retention_days)
 
         try:
@@ -124,7 +163,11 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
 
 class AsyncChromaLongConversationMemory(LongConversationMemory):
-    """ChromaDB implementation using AsyncHttpClient (asynchronous, for external server)."""
+    """ChromaDB implementation using AsyncHttpClient (asynchronous, for external server).
+    
+    This class uses ChromaDB's async HTTP client to connect to an external
+    ChromaDB server. Suitable for distributed deployments.
+    """
 
     def __init__(self) -> None:
         """Initialize ChromaDB async client for external server."""
@@ -136,7 +179,11 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         )
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
-        """Get or create async client (lazy initialization)."""
+        """Get or create async client (lazy initialization).
+        
+        Returns:
+            ChromaDB async client.
+        """
         if self._client is None:
             self._client = await chromadb.AsyncHttpClient(
                 host=application_settings.chroma_host,
@@ -145,11 +192,25 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         return self._client
 
     def _get_collection_name(self, user_id: int) -> str:
-        """Get collection name for user."""
+        """Get collection name for user.
+        
+        Args:
+            user_id: The user ID.
+        
+        Returns:
+            Collection name string.
+        """
         return f"user_{user_id}"
 
     async def _get_or_create_collection(self, user_id: int) -> AsyncCollection:
-        """Get or create collection for user."""
+        """Get or create collection for user.
+        
+        Args:
+            user_id: The user ID.
+        
+        Returns:
+            ChromaDB async collection.
+        """
         collection_name = self._get_collection_name(user_id)
         client = await self._get_client()
         return await client.get_or_create_collection(
@@ -158,7 +219,15 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
-        """Archive messages to ChromaDB."""
+        """Archive messages to ChromaDB.
+        
+        Args:
+            user_id: The user ID.
+            messages: List of messages to archive.
+        
+        Raises:
+            Exception: If archiving fails.
+        """
         if not messages:
             return
 
@@ -179,7 +248,16 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             raise
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
-        """Search archived messages by semantic similarity."""
+        """Search archived messages by semantic similarity.
+        
+        Args:
+            user_id: The user ID.
+            query: Search query string.
+            n_results: Maximum number of results to return.
+        
+        Returns:
+            List of search results.
+        """
         try:
             collection = await self._get_or_create_collection(user_id)
             result = await collection.query(
@@ -208,7 +286,11 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             return []
 
     async def delete_old(self, retention_days: int) -> None:
-        """Delete archived messages older than retention_days."""
+        """Delete archived messages older than retention_days.
+        
+        Args:
+            retention_days: Number of days to retain messages.
+        """
         cutoff = datetime.now() - timedelta(days=retention_days)
 
         try:
@@ -242,7 +324,10 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
 
 def create_memory() -> LongConversationMemory | None:
-    """Create memory instance based on ChromaDB configuration."""
+    """Create memory instance based on ChromaDB configuration.
+    Returns:
+        LongConversationMemory object.
+    """
 
     if not application_settings.is_chroma_configured:
         logger.info("ChromaDB not configured, semantic memory disabled")

@@ -260,7 +260,16 @@ class UnloadSkillTool(ChibiTool):
 
 
 class SearchInConversationHistoryTool(ChibiTool):
-    """Tool to search through conversation history using semantic search."""
+    """Tool to search through conversation history using semantic search.
+
+    This tool allows the AI agent to search through past conversations
+    using natural language queries. Requires ChromaDB to be configured.
+
+    Attributes:
+        register: Whether to register this tool (requires memory to be configured).
+        name: Tool name.
+        definition: Tool definition for OpenAI API.
+    """
 
     register = bool(memory)
     name = "search_in_conversation_history"
@@ -289,7 +298,20 @@ class SearchInConversationHistoryTool(ChibiTool):
 
     @classmethod
     async def function(cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]) -> dict:
-        """Search through conversation history."""
+        """Search through conversation history.
+
+        Args:
+            query: Natural language search query.
+            limit: Maximum number of results (default from settings).
+            kwargs: Additional options including user_id.
+
+        Returns:
+            Dictionary with search results and count.
+
+        Raises:
+            ToolException: If memory is not configured.
+            ValueError: If user_id is not provided.
+        """
         if memory is None:
             raise ToolException("Semantic memory is not configured.")
 
