@@ -1,23 +1,27 @@
-FROM python:3.11-alpine AS builder
+FROM python:3.11-slim-bookworm AS builder
 
-RUN apk update && apk upgrade && apk add --no-cache ca-certificates gcc build-base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates gcc build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.11-alpine
+FROM python:3.11-slim-bookworm
 
 LABEL org.label-schema.schema-version="1.0"
 LABEL org.label-schema.name="chibi"
 LABEL org.label-schema.vendor="nagaev.sv@gmail.com"
 LABEL org.label-schema.vcs-url="https://github.com/s-nagaev/chibi"
 
-RUN apk update && apk upgrade --no-cache
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js for MCP servers
-RUN apk add --no-cache nodejs npm
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
