@@ -9,7 +9,7 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from loguru import logger
 
 from chibi.config import application_settings
-from chibi.memory.abstract import LongConversationMemory
+from chibi.memory.abstract import LongConversationMemory, MemorySearchResult
 from chibi.models import Message
 
 
@@ -60,7 +60,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to archive messages for user {user_id}: {e}")
             raise
 
-    async def search(self, user_id: int, query: str, n_results: int) -> list[dict]:
+    async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity."""
         try:
             collection = await self._get_or_create_collection(user_id)
@@ -70,12 +70,20 @@ class ChromaLongConversationMemory(LongConversationMemory):
                 n_results=n_results,
             )
 
-            formatted_results = []
+            formatted_results: list[MemorySearchResult] = []
             documents = result.get("documents")
             metadatas = result.get("metadatas")
             if documents and metadatas and documents[0]:
                 for i, doc in enumerate(documents[0]):
-                    formatted_results.append({"content": doc, **metadatas[0][i]})
+                    metadata = metadatas[0][i]
+                    formatted_results.append(
+                        MemorySearchResult(
+                            content=doc,
+                            role=str(metadata.get("role", "")),
+                            timestamp=str(metadata.get("timestamp", "")),
+                            message_id=str(metadata.get("message_id", "")),
+                        )
+                    )
 
             return formatted_results
         except Exception as e:
@@ -177,7 +185,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to archive messages for user {user_id}: {e}")
             raise
 
-    async def search(self, user_id: int, query: str, n_results: int) -> list[dict]:
+    async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity."""
         try:
             collection = await self._get_or_create_collection(user_id)
@@ -186,12 +194,20 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
                 n_results=n_results,
             )
 
-            formatted_results = []
+            formatted_results: list[MemorySearchResult] = []
             documents = result.get("documents")
             metadatas = result.get("metadatas")
             if documents and metadatas and documents[0]:
                 for i, doc in enumerate(documents[0]):
-                    formatted_results.append({"content": doc, **metadatas[0][i]})
+                    metadata = metadatas[0][i]
+                    formatted_results.append(
+                        MemorySearchResult(
+                            content=doc,
+                            role=str(metadata.get("role", "")),
+                            timestamp=str(metadata.get("timestamp", "")),
+                            message_id=str(metadata.get("message_id", "")),
+                        )
+                    )
 
             return formatted_results
         except Exception as e:

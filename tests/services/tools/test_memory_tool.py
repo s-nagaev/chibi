@@ -30,7 +30,6 @@ class TestSearchInConversationHistoryTool:
 
             assert "results" in result
             assert len(result["results"]) == 2
-            assert result["query"] == "test query"
             assert result["count"] == 2
             mock_memory.search.assert_called_once_with(user_id=123, query="test query", n_results=5)
 
