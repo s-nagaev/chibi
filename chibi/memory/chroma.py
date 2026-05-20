@@ -15,7 +15,7 @@ from chibi.models import Message
 
 class ChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using embedded PersistentClient (synchronous).
-    
+
     This class uses ChromaDB's persistent client to store conversation history
     locally on disk. Suitable for single-instance deployments.
     """
@@ -31,10 +31,10 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     def _get_collection_name(self, user_id: int) -> str:
         """Get collection name for user.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             Collection name string.
         """
@@ -42,10 +42,10 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
         """Get or create collection for user.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             ChromaDB collection.
         """
@@ -58,11 +58,11 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB.
-        
+
         Args:
             user_id: The user ID.
             messages: List of messages to archive.
-        
+
         Raises:
             Exception: If archiving fails.
         """
@@ -88,12 +88,12 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
-        
+
         Args:
             user_id: The user ID.
             query: Search query string.
             n_results: Maximum number of results to return.
-        
+
         Returns:
             List of search results.
         """
@@ -127,7 +127,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
-        
+
         Args:
             retention_days: Number of days to retain messages.
         """
@@ -164,7 +164,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
 class AsyncChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using AsyncHttpClient (asynchronous, for external server).
-    
+
     This class uses ChromaDB's async HTTP client to connect to an external
     ChromaDB server. Suitable for distributed deployments.
     """
@@ -180,7 +180,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization).
-        
+
         Returns:
             ChromaDB async client.
         """
@@ -193,10 +193,10 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     def _get_collection_name(self, user_id: int) -> str:
         """Get collection name for user.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             Collection name string.
         """
@@ -204,10 +204,10 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def _get_or_create_collection(self, user_id: int) -> AsyncCollection:
         """Get or create collection for user.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             ChromaDB async collection.
         """
@@ -220,11 +220,11 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB.
-        
+
         Args:
             user_id: The user ID.
             messages: List of messages to archive.
-        
+
         Raises:
             Exception: If archiving fails.
         """
@@ -249,12 +249,12 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
-        
+
         Args:
             user_id: The user ID.
             query: Search query string.
             n_results: Maximum number of results to return.
-        
+
         Returns:
             List of search results.
         """
@@ -287,7 +287,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
-        
+
         Args:
             retention_days: Number of days to retain messages.
         """

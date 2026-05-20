@@ -6,9 +6,9 @@ from chibi.storage.abstract import Database
 
 class ChromaWrappedStorage(Database):
     """Wrapper that adds automatic archival to ChromaDB when messages are added.
-    
+
     Uses __getattr__ to delegate all methods to inner storage except add_message.
-    
+
     Attributes:
         inner: The wrapped database instance.
         memory: Optional ChromaDB memory instance for semantic search.
@@ -16,7 +16,7 @@ class ChromaWrappedStorage(Database):
 
     def __init__(self, inner: Database, memory: LongConversationMemory | None = None):
         """Initialize the wrapper.
-        
+
         Args:
             inner: The database to wrap.
             memory: Optional memory for ChromaDB archival.
@@ -26,7 +26,7 @@ class ChromaWrappedStorage(Database):
 
     async def add_message(self, user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
         """Add message to storage and archive to ChromaDB.
-        
+
         Args:
             user: The user instance.
             message: The message to add.
@@ -43,11 +43,11 @@ class ChromaWrappedStorage(Database):
     # Required abstract methods - delegate via __getattr__
     async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]:
         """Get messages for user.
-        
+
         Args:
             user: The user instance.
             thread_id: Thread ID (default: 0).
-        
+
         Returns:
             List of message dictionaries.
         """
@@ -55,7 +55,7 @@ class ChromaWrappedStorage(Database):
 
     async def drop_messages(self, user: User, thread_id: int = 0) -> None:
         """Drop messages for user.
-        
+
         Args:
             user: The user instance.
             thread_id: Thread ID (default: 0).
@@ -64,10 +64,10 @@ class ChromaWrappedStorage(Database):
 
     async def get_user(self, user_id: int) -> User | None:
         """Get user by ID.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             User instance or None.
         """
@@ -75,10 +75,10 @@ class ChromaWrappedStorage(Database):
 
     async def create_user(self, user_id: int) -> User:
         """Create new user.
-        
+
         Args:
             user_id: The user ID.
-        
+
         Returns:
             Created user instance.
         """
@@ -86,7 +86,7 @@ class ChromaWrappedStorage(Database):
 
     async def save_user(self, user: User) -> None:
         """Save user to storage.
-        
+
         Args:
             user: The user to save.
         """
@@ -94,7 +94,7 @@ class ChromaWrappedStorage(Database):
 
     async def count_image(self, user_id: int) -> None:
         """Count images for user.
-        
+
         Args:
             user_id: The user ID.
         """
@@ -103,10 +103,10 @@ class ChromaWrappedStorage(Database):
     # Additional methods via __getattr__
     def __getattr__(self, name: str) -> object:
         """Delegate all other methods to inner storage.
-        
+
         Args:
             name: Attribute name.
-        
+
         Returns:
             The delegated attribute from inner storage.
         """
