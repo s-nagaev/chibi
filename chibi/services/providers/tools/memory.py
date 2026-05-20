@@ -301,6 +301,6 @@ class SearchInConversationHistoryTool(ChibiTool):
         )
 
         if not results:
-            return {"results": [], "query": query, "count": 0, "message": "No matching conversations found"}
+            return {"results": [], "count": 0, "message": "No matching conversations found"}
 
-        return {"results": results, "query": query, "count": len(results)}
+        return {"results": results, "count": len(results)}

@@ -1,6 +1,14 @@
 from abc import ABC, abstractmethod
+from typing import TypedDict
 
 from chibi.models import Message
+
+
+class MemorySearchResult(TypedDict):
+    content: str
+    role: str
+    timestamp: str
+    message_id: str
 
 
 class LongConversationMemory(ABC):
@@ -17,7 +25,7 @@ class LongConversationMemory(ABC):
         pass
 
     @abstractmethod
-    async def search(self, user_id: int, query: str, n_results: int) -> list[dict]:
+    async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
 
         Args:
@@ -26,7 +34,7 @@ class LongConversationMemory(ABC):
             n_results: Maximum number of results to return.
 
         Returns:
-            List of search results with metadata.
+            List of search results.
         """
         pass
 
