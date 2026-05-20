@@ -62,6 +62,13 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
         "available_builtin_skills": get_builtin_skill_names(),
     }
 
+    if application_settings.is_chroma_configured:
+        prompt["system_prompt"] += (
+            "\n\n# Conversation History\nIf user asks about past discussions or wants to find information from "
+            "previous conversations, "
+        )
+        "use `search_in_conversation_history` tool to search through your conversation history."
+
     if gpt_settings.filesystem_access:
         system_data = {
             "current_working_dir": user.working_dir,

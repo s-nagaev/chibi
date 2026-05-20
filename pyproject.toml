@@ -72,7 +72,7 @@ sqlalchemy = "^2.0"
 telegramify-markdown = "0.5.4"
 tenacity = "9.1.4"
 trafilatura = "2.0.0"
-onnxruntime = "1.23.1"
+onnxruntime = {version = "1.23.1", markers = "sys_platform == 'darwin' and platform_machine == 'x86_64'"}
 chromadb = "^1.5.9"
 
 [tool.poetry.group.dev.dependencies]

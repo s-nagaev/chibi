@@ -269,8 +269,7 @@ class SearchInConversationHistoryTool(ChibiTool):
         type="function",
         function=FunctionDefinition(
             name="search_in_conversation_history",
-            description="Search through your conversation history using semantic search. Use this when user asks "
-            "about past discussions or wants to find information from previous conversations.",
+            description="Search through your conversation history using semantic search.",
             parameters={
                 "type": "object",
                 "properties": {
