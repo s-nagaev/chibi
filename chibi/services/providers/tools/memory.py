@@ -297,7 +297,7 @@ class SearchInConversationHistoryTool(ChibiTool):
     )
 
     @classmethod
-    async def function(cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]) -> dict:
+    async def function(cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]) -> dict[str, Any]:
         """Search through conversation history.
 
         Args:
