@@ -315,7 +315,8 @@ class SearchInConversationHistoryTool(ChibiTool):
         if memory is None:
             raise ToolException("Semantic memory is not configured.")
 
-        if not (user_id := kwargs.get("user_id")):
+        user_id = kwargs.get("user_id")
+        if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
 
         results = await memory.search(
@@ -323,6 +324,6 @@ class SearchInConversationHistoryTool(ChibiTool):
         )
 
         if not results:
-            return {"results": [], "count": 0, "message": "No matching conversations found"}
+            return {"message": "No matching conversations found"}
 
         return {"results": results, "count": len(results)}
