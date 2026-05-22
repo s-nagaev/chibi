@@ -40,7 +40,6 @@ class ChromaWrappedStorage(Database):
         if self.memory:
             task_manager.run_task(self.memory.archive(user.id, [message]), user_id=user.id)
 
-    # Required abstract methods - delegate via __getattr__
     async def get_messages(self, user: User, thread_id: int = 0) -> list[dict[str, str]]:
         """Get messages for user.
 
@@ -100,7 +99,6 @@ class ChromaWrappedStorage(Database):
         """
         return await self.inner.count_image(user_id)
 
-    # Additional methods via __getattr__
     def __getattr__(self, name: str) -> object:
         """Delegate all other methods to inner storage.
 

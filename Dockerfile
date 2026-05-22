@@ -26,10 +26,9 @@ WORKDIR /app
 
 COPY . .
 
-# Create directories and set ownership
-RUN mkdir -p /app/data /app/data/.chibi /app/home && \
-    groupadd -r chibi && useradd -r -g chibi -d /app chibi && \
-    chown -R chibi:chibi /app
+RUN useradd -r -U chibi
+
+RUN chown chibi:chibi /app/data
 
 USER chibi
 

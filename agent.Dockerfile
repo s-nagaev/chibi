@@ -16,7 +16,7 @@ LABEL org.label-schema.name="chibi"
 LABEL org.label-schema.vendor="nagaev.sv@gmail.com"
 LABEL org.label-schema.vcs-url="https://github.com/s-nagaev/chibi"
 
-RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js for MCP servers
