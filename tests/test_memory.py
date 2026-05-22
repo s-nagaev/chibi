@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from chibi.memory.chroma import create_memory
+from chibi.memory.chroma import _get_embedding_function, create_memory
 
 
 class TestCreateMemory:
@@ -78,3 +78,12 @@ class TestCreateMemory:
         from chibi.memory.chroma import create_memory
 
         assert callable(create_memory)
+
+    def test_returns_same_instance(self) -> None:
+        """Should return cached singleton instance."""
+        # Call function twice
+        fn1 = _get_embedding_function()
+        fn2 = _get_embedding_function()
+
+        # Should be the exact same object
+        assert fn1 is fn2

@@ -12,6 +12,21 @@ from chibi.config import application_settings
 from chibi.memory.abstract import LongConversationMemory, MemorySearchResult
 from chibi.models import Message
 
+# Global cache for embedding function to avoid repeated downloads
+_cached_embedding_fn: EmbeddingFunction | None = None
+
+
+def _get_embedding_function() -> EmbeddingFunction:
+    """Get cached embedding function singleton.
+
+    Returns:
+        Cached DefaultEmbeddingFunction instance.
+    """
+    global _cached_embedding_fn
+    if _cached_embedding_fn is None:
+        _cached_embedding_fn = DefaultEmbeddingFunction()
+    return _cached_embedding_fn
+
 
 class ChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using embedded PersistentClient (synchronous).
@@ -22,7 +37,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
 
     def __init__(self) -> None:
         """Initialize ChromaDB embedded client."""
-        self._cached_embedding_fn: EmbeddingFunction = DefaultEmbeddingFunction()
+        self._cached_embedding_fn: EmbeddingFunction = _get_embedding_function()
         self._client = chromadb.PersistentClient(
             path=application_settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
@@ -128,6 +143,10 @@ class ChromaLongConversationMemory(LongConversationMemory):
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
 
+        This method performs cleanup of old conversation records to manage storage
+        and comply with data retention policies. It iterates through all user collections
+        and removes messages that exceed the retention period.
+
         Args:
             retention_days: Number of days to retain messages.
         """
@@ -172,7 +191,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
     def __init__(self) -> None:
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClientAPI | None = None
-        self._cached_embedding_fn: EmbeddingFunction = DefaultEmbeddingFunction()
+        self._cached_embedding_fn: EmbeddingFunction = _get_embedding_function()
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
@@ -287,6 +306,10 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
+
+        This method performs cleanup of old conversation records to manage storage
+        and comply with data retention policies. It iterates through all user collections
+        and removes messages that exceed the retention period.
 
         Args:
             retention_days: Number of days to retain messages.
