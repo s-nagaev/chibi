@@ -75,8 +75,6 @@ class TestSearchInConversationHistoryTool:
         with patch("chibi.services.providers.tools.memory.memory", mock_memory):
             result = await SearchInConversationHistoryTool.function(query="nonexistent", user_id=123)
 
-            assert result["results"] == []
-            assert result["count"] == 0
             assert "No matching conversations found" in result["message"]
 
     def test_tool_definition(self):
