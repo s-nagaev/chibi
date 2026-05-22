@@ -28,7 +28,7 @@ COPY . .
 
 RUN useradd -r -U chibi
 
-RUN chown chibi:chibi /app/data
+RUN chown chibi:chibi /app/data /app/home
 
 USER chibi
 
