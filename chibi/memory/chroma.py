@@ -67,7 +67,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
             Exception: If archiving fails.
         """
         if not messages:
-            return
+            return None
 
         try:
             collection = await self._get_or_create_collection(user_id)
@@ -145,7 +145,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
                 metadatas = result.get("metadatas")
                 to_delete = []
                 if not metadatas:
-                    return
+                    return None
                 for i, meta in enumerate(metadatas):
                     ts = str(meta.get("timestamp", ""))
                     try:
@@ -229,7 +229,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             Exception: If archiving fails.
         """
         if not messages:
-            return
+            return None
 
         try:
             collection = await self._get_or_create_collection(user_id)
@@ -325,6 +325,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
 
 def create_memory() -> LongConversationMemory | None:
     """Create memory instance based on ChromaDB configuration.
+
     Returns:
         LongConversationMemory object.
     """

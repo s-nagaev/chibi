@@ -286,7 +286,7 @@ class SearchInConversationHistoryTool(ChibiTool):
                     "limit": {
                         "type": "integer",
                         "description": (
-                            f"Maximum number of results to return (default: {application_settings.memory_search_limit})"
+                            f"Maximum number of results to return"
                         ),
                         "default": application_settings.memory_search_limit,
                     },
