@@ -1,5 +1,5 @@
 import os
-from typing import Unpack
+from typing import Any, Unpack
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
@@ -285,9 +285,7 @@ class SearchInConversationHistoryTool(ChibiTool):
                     "query": {"type": "string", "description": "Natural language search query"},
                     "limit": {
                         "type": "integer",
-                        "description": (
-                            f"Maximum number of results to return"
-                        ),
+                        "description": ("Maximum number of results to return"),
                         "default": application_settings.memory_search_limit,
                     },
                 },
@@ -297,7 +295,9 @@ class SearchInConversationHistoryTool(ChibiTool):
     )
 
     @classmethod
-    async def function(cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]) -> dict[str, Any]:
+    async def function(
+        cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]
+    ) -> dict[str, Any]:
         """Search through conversation history.
 
         Args:

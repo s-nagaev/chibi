@@ -68,12 +68,10 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
             f"\n\n# Persistent Memory\n"
             f"You can access conversation history from the last {retention_days} days using the "
             f"`search_in_conversation_history` tool.\n\n"
-            
             f"Use memory search when:\n"
             f"- The user refers to past conversations not present in the current context\n"
             f"- The user asks what they said or discussed earlier\n"
             f"- Previous preferences, decisions, or project context may improve the response\n\n"
-            
             f"Guidelines:\n"
             f"- Prefer semantic descriptions over exact quotes when searching\n"
             f"- Do not search memory if the current context already contains the needed information\n"
