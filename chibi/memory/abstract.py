@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import TypedDict
 
 from chibi.models import Message
+from chibi.utils.app import SingletonMeta
 
 
 class MemorySearchResult(TypedDict):
@@ -11,7 +12,7 @@ class MemorySearchResult(TypedDict):
     message_id: str
 
 
-class LongConversationMemory(ABC):
+class LongConversationMemory(ABC, metaclass=SingletonMeta):
     """Abstract base class for long-term conversation memory storage."""
 
     @abstractmethod
@@ -46,3 +47,14 @@ class LongConversationMemory(ABC):
             retention_days: Number of days to retain messages.
         """
         pass
+
+    def _get_collection_name(self, user_id: int) -> str:
+        """Get collection name for user.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            Collection name string.
+        """
+        return f"user_{user_id}"
