@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 import chromadb
-from chromadb import EmbeddingFunction
+from chromadb import EmbeddingFunction, Metadatas
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
@@ -11,52 +11,27 @@ from loguru import logger
 from chibi.config import application_settings
 from chibi.memory.abstract import LongConversationMemory, MemorySearchResult
 from chibi.models import Message
-
-# Global cache for embedding function to avoid repeated downloads
-_cached_embedding_fn: EmbeddingFunction | None = None
+from chibi.services.lock_manager import LockManager
 
 
-def _get_embedding_function() -> EmbeddingFunction:
-    """Get cached embedding function singleton.
-
-    Returns:
-        Cached DefaultEmbeddingFunction instance.
-    """
-    global _cached_embedding_fn
-    if _cached_embedding_fn is None:
-        _cached_embedding_fn = DefaultEmbeddingFunction()
-    return _cached_embedding_fn
-
-
-class ChromaLongConversationMemory(LongConversationMemory):
+class InternalChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using embedded PersistentClient (synchronous).
 
     This class uses ChromaDB's persistent client to store conversation history
     locally on disk. Suitable for single-instance deployments.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
         """Initialize ChromaDB embedded client."""
-        self._cached_embedding_fn: EmbeddingFunction = _get_embedding_function()
+        self.embedding_function = embedding_function
         self._client = chromadb.PersistentClient(
             path=application_settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
 
-    def _get_collection_name(self, user_id: int) -> str:
-        """Get collection name for user.
-
-        Args:
-            user_id: The user ID.
-
-        Returns:
-            Collection name string.
-        """
-        return f"user_{user_id}"
-
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
-        """Get or create collection for user.
+        """Get or create a collection for user.
 
         Args:
             user_id: The user ID.
@@ -68,7 +43,7 @@ class ChromaLongConversationMemory(LongConversationMemory):
         return await asyncio.to_thread(
             self._client.get_or_create_collection,
             name=collection_name,
-            embedding_function=self._cached_embedding_fn,
+            embedding_function=self.embedding_function,
         )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
@@ -77,29 +52,31 @@ class ChromaLongConversationMemory(LongConversationMemory):
         Args:
             user_id: The user ID.
             messages: List of messages to archive.
-
-        Raises:
-            Exception: If archiving fails.
         """
         if not messages:
             return None
 
-        try:
-            collection = await self._get_or_create_collection(user_id)
+        meta: Metadatas = [
+            {"role": msg.role, "timestamp": datetime.now().isoformat(), "message_id": str(msg.id)} for msg in messages
+        ]
+        ids = [str(msg.id) for msg in messages]
+        documents = [msg.content for msg in messages]
 
-            await asyncio.to_thread(
-                collection.add,
-                metadatas=[
-                    {"role": msg.role, "timestamp": datetime.now().isoformat(), "message_id": str(msg.id)}
-                    for msg in messages
-                ],
-                ids=[str(msg.id) for msg in messages],
-                documents=[msg.content for msg in messages],
-            )
-            logger.debug(f"Archived {len(messages)} messages for user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to archive messages for user {user_id}: {e}")
-            raise
+        lock = await LockManager().get_lock(key=str(user_id))
+
+        async with lock:
+            try:
+                collection = await self._get_or_create_collection(user_id)
+
+                await asyncio.to_thread(
+                    collection.add,
+                    metadatas=meta,
+                    ids=ids,
+                    documents=documents,
+                )
+                logger.debug(f"Archived {len(messages)} messages for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to archive messages for user {user_id}: {e}")
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
@@ -181,17 +158,17 @@ class ChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to delete old messages: {e}")
 
 
-class AsyncChromaLongConversationMemory(LongConversationMemory):
+class ExternalChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using AsyncHttpClient (asynchronous, for external server).
 
     This class uses ChromaDB's async HTTP client to connect to an external
     ChromaDB server. Suitable for distributed deployments.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClientAPI | None = None
-        self._cached_embedding_fn: EmbeddingFunction = _get_embedding_function()
+        self.embedding_function = embedding_function
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
@@ -210,17 +187,6 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
             )
         return self._client
 
-    def _get_collection_name(self, user_id: int) -> str:
-        """Get collection name for user.
-
-        Args:
-            user_id: The user ID.
-
-        Returns:
-            Collection name string.
-        """
-        return f"user_{user_id}"
-
     async def _get_or_create_collection(self, user_id: int) -> AsyncCollection:
         """Get or create collection for user.
 
@@ -234,7 +200,7 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         client = await self._get_client()
         return await client.get_or_create_collection(
             name=collection_name,
-            embedding_function=self._cached_embedding_fn,
+            embedding_function=self.embedding_function,
         )
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
@@ -250,21 +216,25 @@ class AsyncChromaLongConversationMemory(LongConversationMemory):
         if not messages:
             return None
 
-        try:
-            collection = await self._get_or_create_collection(user_id)
+        meta: Metadatas = [
+            {"role": msg.role, "timestamp": datetime.now().isoformat(), "message_id": str(msg.id)} for msg in messages
+        ]
+        ids = [str(msg.id) for msg in messages]
+        documents = [msg.content for msg in messages]
 
-            await collection.add(
-                metadatas=[
-                    {"role": msg.role, "timestamp": datetime.now().isoformat(), "message_id": str(msg.id)}
-                    for msg in messages
-                ],
-                ids=[str(msg.id) for msg in messages],
-                documents=[msg.content for msg in messages],
-            )
-            logger.debug(f"Archived {len(messages)} messages for user {user_id}")
-        except Exception as e:
-            logger.error(f"Failed to archive messages for user {user_id}: {e}")
-            raise
+        lock = await LockManager().get_lock(key=str(user_id))
+        async with lock:
+            try:
+                collection = await self._get_or_create_collection(user_id)
+
+                await collection.add(
+                    metadatas=meta,
+                    ids=ids,
+                    documents=documents,
+                )
+                logger.debug(f"Archived {len(messages)} messages for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to archive messages for user {user_id}: {e}")
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
@@ -356,20 +326,22 @@ def create_memory() -> LongConversationMemory | None:
     if not application_settings.is_chroma_configured:
         logger.info("ChromaDB not configured, semantic memory disabled")
         return None
+    conversation_memory: LongConversationMemory
 
     try:
         if application_settings.chroma_host:
             # External mode - use async client
-            memory: LongConversationMemory = AsyncChromaLongConversationMemory()
+            conversation_memory = ExternalChromaLongConversationMemory()
         else:
             # Embedded mode - use sync client
-            memory = ChromaLongConversationMemory()
+            conversation_memory = InternalChromaLongConversationMemory()
 
         logger.info("Semantic memory initialized successfully")
-        return memory
+        return conversation_memory
     except Exception as e:
         logger.error(f"Failed to initialize ChromaDB: {e}")
-        return None
+
+    return None
 
 
 memory: LongConversationMemory | None = create_memory()

@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from chibi.memory.chroma import _get_embedding_function, create_memory
+from chibi.memory.chroma import create_memory
 
 
 class TestCreateMemory:
@@ -23,7 +23,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = None  # Embedded mode
 
-            with patch("chibi.memory.chroma.ChromaLongConversationMemory") as mock_chroma_class:
+            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory") as mock_chroma_class:
                 mock_instance = MagicMock()
                 mock_chroma_class.return_value = mock_instance
 
@@ -38,7 +38,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = "localhost"  # External mode
 
-            with patch("chibi.memory.chroma.AsyncChromaLongConversationMemory") as mock_async_class:
+            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory") as mock_async_class:
                 mock_instance = MagicMock()
                 mock_async_class.return_value = mock_instance
 
@@ -53,7 +53,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = None  # Embedded mode
 
-            with patch("chibi.memory.chroma.ChromaLongConversationMemory", side_effect=Exception("DB error")):
+            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory", side_effect=Exception("DB error")):
                 with patch("chibi.memory.chroma.logger") as mock_logger:
                     result = create_memory()
 
@@ -66,7 +66,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = "localhost"  # External mode
 
-            with patch("chibi.memory.chroma.AsyncChromaLongConversationMemory", side_effect=Exception("DB error")):
+            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory", side_effect=Exception("DB error")):
                 with patch("chibi.memory.chroma.logger") as mock_logger:
                     result = create_memory()
 
@@ -78,12 +78,3 @@ class TestCreateMemory:
         from chibi.memory.chroma import create_memory
 
         assert callable(create_memory)
-
-    def test_returns_same_instance(self) -> None:
-        """Should return cached singleton instance."""
-        # Call function twice
-        fn1 = _get_embedding_function()
-        fn2 = _get_embedding_function()
-
-        # Should be the exact same object
-        assert fn1 is fn2

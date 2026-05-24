@@ -32,8 +32,7 @@ class TestPerformRetentionCleanup:
                 mock_settings.chroma_history_retention_days = 90
 
                 await perform_retention_cleanup()
-
-                mock_memory.delete_old.assert_called_once_with(90)
+                mock_memory.delete_old.assert_awaited_once_with(retention_days=90)
 
     @pytest.mark.asyncio
     async def test_logs_start_and_completion(self):
