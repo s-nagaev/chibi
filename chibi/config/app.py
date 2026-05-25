@@ -71,6 +71,7 @@ class ApplicationSettings(BaseSettings):
     chroma_persist_dir: str = Field(default="")
     chroma_history_retention_days: int = Field(default=90)
     memory_search_limit: int = Field(default=5)
+    embedding_function: Literal["LOCAL", "OPENAI", "GEMINI", "MISTRALAI"] = Field(default="LOCAL")
 
     # Interface
     hide_models: bool = Field(default=False)
