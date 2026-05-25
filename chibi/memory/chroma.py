@@ -5,7 +5,12 @@ import chromadb
 from chromadb import EmbeddingFunction, Metadatas
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+from chromadb.utils.embedding_functions import (
+    DefaultEmbeddingFunction,
+    GoogleGeminiEmbeddingFunction,
+    MistralEmbeddingFunction,
+    OpenAIEmbeddingFunction,
+)
 from loguru import logger
 
 from chibi.config import application_settings
@@ -327,14 +332,24 @@ def create_memory() -> LongConversationMemory | None:
         logger.info("ChromaDB not configured, semantic memory disabled")
         return None
     conversation_memory: LongConversationMemory
+    embedding_function: EmbeddingFunction
+    match application_settings.embedding_function:
+        case "GEMINI":
+            embedding_function = GoogleGeminiEmbeddingFunction()
+        case "OPENAI":
+            embedding_function = OpenAIEmbeddingFunction(api_key_env_var="OPENAI_API_KEY")
+        case "MISTRALAI":
+            embedding_function = MistralEmbeddingFunction(api_key_env_var="MISTRALAI_API_KEY", model="mistral-embed")
+        case _:
+            embedding_function = DefaultEmbeddingFunction()
 
     try:
         if application_settings.chroma_host:
             # External mode - use async client
-            conversation_memory = ExternalChromaLongConversationMemory()
+            conversation_memory = ExternalChromaLongConversationMemory(embedding_function=embedding_function)
         else:
             # Embedded mode - use sync client
-            conversation_memory = InternalChromaLongConversationMemory()
+            conversation_memory = InternalChromaLongConversationMemory(embedding_function=embedding_function)
 
         logger.info("Semantic memory initialized successfully")
         return conversation_memory
