@@ -396,7 +396,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             messages: List of messages to archive.
         """
         if not messages:
-            return
+            return None
 
         batch_manager = self._get_batch_manager(user_id)
 
@@ -405,17 +405,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
 
             if is_full and batch:
                 await self._archive_batch(batch, user_id)
-        
-        remaining = batch_manager.flush()
-        if remaining:
-            await self._archive_batch(remaining, user_id)
-
-        logger.debug(f"Archived messages for user {user_id}")
+                logger.debug(f"Archived messages for user {user_id}")
+        return None
 
     async def _archive_batch(self, batch: Batch, user_id: int) -> None:
         """Archive a single batch to ChromaDB with metadata."""
         if not batch.messages:
-            return
+            return None
 
         metadatas: Metadatas = []
         for i, msg in enumerate(batch.messages):
@@ -570,9 +566,6 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        # Fix: check len() instead of truthiness of first element
-        # (first element is a string that evaluates to True but
-        # iterating it yields characters instead of strings)
         if documents and metadatas and len(documents) > 0:
             for i, doc in enumerate(documents):
                 metadata = metadatas[i]
