@@ -5,11 +5,17 @@ from chibi.models import Message
 from chibi.utils.app import SingletonMeta
 
 
+EDGE_THRESHOLD = 2
+
+
 class MemorySearchResult(TypedDict):
     content: str
     role: str
     timestamp: str
     message_id: str
+    batch_id: str | None
+    msg_pos: int | None
+    prev_batch_id: str | None
 
 
 class LongConversationMemory(ABC, metaclass=SingletonMeta):
