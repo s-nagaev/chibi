@@ -1,9 +1,10 @@
 """Batch manager for accumulating messages before ChromaDB storage."""
 import threading
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TypedDict
+
+import ulid
 
 from chibi.models import Message
 from chibi.config import application_settings
@@ -47,23 +48,24 @@ class BatchManager:
     def __init__(self, batch_size: int | None = None) -> None:
         self._batch_size = batch_size or application_settings.batch_size or 10
         self._lock = threading.Lock()
-        self._current_batch: Batch | None = None
+        self._current_batch: dict[int, Batch] = {}
 
     @property
     def batch_size(self) -> int:
         return self._batch_size
 
     def _generate_batch_id(self) -> str:
-        """Generate globally unique batch ID.
-        
-        Uses UUID for:
+        """Generate chronologically ordered unique batch ID.
+
+        Uses ULID for:
+        - Lexicographically sortable (chronological order)
         - Globally unique
         - No runtime state dependencies
-        
+
         Returns:
-            UUID string.
+            ULID string.
         """
-        return str(uuid.uuid4())
+        return ulid.ulid()
 
     def add_message(self, user_id: int, message: Message) -> tuple[Batch | None, bool]:
         """Add message to batch accumulator.
@@ -80,29 +82,29 @@ class BatchManager:
         """
         with self._lock:
             # Create first batch if needed
-            if self._current_batch is None:
-                self._current_batch = Batch(
+            if self._current_batch.get(user_id) is None:
+                self._current_batch[user_id] = Batch(
                     batch_id=self._generate_batch_id(),
                     prev_batch_id=None,
                     _batch_size=self._batch_size,
                 )
 
             # Add message to current batch
-            self._current_batch.messages.append(message)
+            self._current_batch[user_id].messages.append(message)
             
-            was_full = self._current_batch.is_full
+            was_full = self._current_batch[user_id].is_full
             
-            # If batch just became full, create next batch
+            # If batch just became full, recreate the batch
             if was_full:
-                current = self._current_batch
-                self._current_batch = Batch(
+                current = self._current_batch[user_id]
+                self._current_batch[user_id] = Batch(
                     batch_id=self._generate_batch_id(),
                     prev_batch_id=current.batch_id,
                     _batch_size=self._batch_size,
                 )
                 return current, True
 
-            return self._current_batch, False
+            return self._current_batch[user_id], False
 
     def flush(self) -> Batch | None:
         """Flush current incomplete batch.
