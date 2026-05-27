@@ -82,24 +82,18 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             messages: List of messages to archive.
         """
         if not messages:
-            return
+            return None
 
         batch_manager = self._get_batch_manager(user_id)
 
-        # Process each message through batch manager
         for msg in messages:
             batch, is_full = batch_manager.add_message(user_id, msg)
 
-            # Archive full batch immediately
             if is_full and batch:
                 await self._archive_batch(batch, user_id)
-        
-        # Flush remaining partial batch
-        remaining = batch_manager.flush()
-        if remaining:
-            await self._archive_batch(remaining, user_id)
+                logger.debug(f"Archived messages for user {user_id}")
+        return None
 
-        logger.debug(f"Archived messages for user {user_id}")
 
     async def _archive_batch(self, batch: Batch, user_id: int) -> None:
         """Archive a single batch to ChromaDB with metadata.
@@ -109,17 +103,17 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             user_id: The user ID.
         """
         if not batch.messages:
-            return
+            return None
 
-        # Build metadata for each message in batch
         metadatas: Metadatas = []
+        logger.debug(f"Archived messages for user {batch.messages}")
         for i, msg in enumerate(batch.messages):
             metadatas.append(
                 {
                     "message_id": str(msg.id),
                     "batch_id": batch.batch_id,
                     "msg_pos": i,
-                    "prev_batch_id": batch.prev_batch_id,
+                    "prev_batch_id": batch.prev_batch_id or "",
                     "role": msg.role,
                     "timestamp": datetime.now().isoformat(),
                 }
@@ -174,22 +168,34 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             # Step 3: Get current batch
             context_messages = await self._get_batch_by_id(user_id, hit_batch_id)
 
-            # Step 4: Determine if we need neighboring batches
-            batch_size = self._get_batch_size()
+            # Get actual batch size in database (handles partial batches correctly)
+            current_batch_count = len(context_messages)
 
-            # Near beginning - add previous batch
-            if hit_msg_pos is not None and hit_msg_pos <= EDGE_THRESHOLD and hit_prev_batch_id:
+            # Near beginning: add previous batch (only if valid prev_batch_id exists)
+            if (
+                current_batch_count > 0
+                and hit_msg_pos is not None
+                and hit_msg_pos <= EDGE_THRESHOLD
+                and hit_prev_batch_id
+            ):
                 prev_batch = await self._get_batch_by_prev_id(user_id, hit_prev_batch_id)
                 if prev_batch:
                     context_messages = prev_batch + context_messages
+                    # Update count after adding prev batch for near-end calculation
+                    current_batch_count = len(context_messages)
 
-            # Near end - add next batch
-            if hit_msg_pos is not None and hit_msg_pos >= batch_size - EDGE_THRESHOLD - 1:
+            # Near end: use ACTUAL batch count, not configured batch_size
+            # This handles partial batches correctly (e.g., batch of 3 messages when batch_size=10)
+            if (
+                hit_msg_pos is not None
+                and current_batch_count > 0
+                and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
+            ):
                 next_batch = await self._get_next_batch(user_id, hit_batch_id)
                 if next_batch:
                     context_messages.extend(next_batch)
 
-            # Sort by (batch_id, msg_pos)
+            # Sort by (batch_id, msg_pos) - ULID ensures chronological order
             context_messages.sort(key=lambda x: (x.get("batch_id", ""), x.get("msg_pos", 0)))
 
             return context_messages
@@ -213,7 +219,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             documents = result.get("documents")
             metadatas = result.get("metadatas")
 
-            if documents and metadatas and documents[0]:
+            # Note: collection.query() returns nested lists unlike collection.get()
+            if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
                 metadata = metadatas[0][0]
                 return MemorySearchResult(
                     content=documents[0][0],
@@ -276,9 +283,12 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        if documents and metadatas and documents[0]:
-            for i, doc in enumerate(documents[0]):
-                metadata = metadatas[0][i]
+        # Fix: check len() instead of truthiness of first element
+        # (first element is a string that evaluates to True but
+        # iterating it yields characters instead of strings)
+        if documents and metadatas and len(documents) > 0:
+            for i, doc in enumerate(documents):
+                metadata = metadatas[i]
                 formatted.append(
                     MemorySearchResult(
                         content=doc,
@@ -414,7 +424,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                     "message_id": str(msg.id),
                     "batch_id": batch.batch_id,
                     "msg_pos": i,
-                    "prev_batch_id": batch.prev_batch_id,
+                    "prev_batch_id": batch.prev_batch_id or "",
                     "role": msg.role,
                     "timestamp": datetime.now().isoformat(),
                 }
@@ -452,18 +462,34 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                          "message_id": hit["message_id"], "batch_id": None, "msg_pos": None, "prev_batch_id": None}]
 
             context_messages = await self._get_batch_by_id(user_id, hit_batch_id)
-            batch_size = self._get_batch_size()
 
-            if hit_msg_pos is not None and hit_msg_pos <= EDGE_THRESHOLD and hit_prev_batch_id:
+            # Get actual batch size in database (handles partial batches correctly)
+            current_batch_count = len(context_messages)
+
+            # Near beginning: add previous batch (only if valid prev_batch_id exists)
+            if (
+                current_batch_count > 0
+                and hit_msg_pos is not None
+                and hit_msg_pos <= EDGE_THRESHOLD
+                and hit_prev_batch_id
+            ):
                 prev_batch = await self._get_batch_by_prev_id(user_id, hit_prev_batch_id)
                 if prev_batch:
                     context_messages = prev_batch + context_messages
+                    # Update count after adding prev batch for near-end calculation
+                    current_batch_count = len(context_messages)
 
-            if hit_msg_pos is not None and hit_msg_pos >= batch_size - EDGE_THRESHOLD - 1:
+            # Near end: use ACTUAL batch count, not configured batch_size
+            if (
+                hit_msg_pos is not None
+                and current_batch_count > 0
+                and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
+            ):
                 next_batch = await self._get_next_batch(user_id, hit_batch_id)
                 if next_batch:
                     context_messages.extend(next_batch)
 
+            # Sort by (batch_id, msg_pos) - ULID ensures chronological order
             context_messages.sort(key=lambda x: (x.get("batch_id", ""), x.get("msg_pos", 0)))
 
             return context_messages
@@ -486,7 +512,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             documents = result.get("documents")
             metadatas = result.get("metadatas")
 
-            if documents and metadatas and documents[0]:
+            # Note: collection.query() returns nested lists unlike collection.get()
+            if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
                 metadata = metadatas[0][0]
                 return MemorySearchResult(
                     content=documents[0][0],
@@ -543,9 +570,12 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        if documents and metadatas and documents[0]:
-            for i, doc in enumerate(documents[0]):
-                metadata = metadatas[0][i]
+        # Fix: check len() instead of truthiness of first element
+        # (first element is a string that evaluates to True but
+        # iterating it yields characters instead of strings)
+        if documents and metadatas and len(documents) > 0:
+            for i, doc in enumerate(documents):
+                metadata = metadatas[i]
                 formatted.append(
                     MemorySearchResult(
                         content=doc,
