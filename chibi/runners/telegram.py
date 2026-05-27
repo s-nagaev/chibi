@@ -262,8 +262,11 @@ class ChibiBot:
         return None
 
     @staticmethod
-    def create_model_selection_keyboad(
-        models: list[ModelChangeSchema], context: ContextTypes.DEFAULT_TYPE
+    def _create_model_selection_keyboad(
+        models: list[ModelChangeSchema],
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        add_back_button: bool = False,
     ) -> InlineKeyboardMarkup:
         mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models)}
         set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
@@ -274,8 +277,66 @@ class ChibiBot:
         ]
         for model in models:
             logger.debug(f"{model.provider}: {model.name}")
+        if add_back_button:
+            keyboard.append([InlineKeyboardButton(text="\u2190 Back", callback_data="__back_to_providers__")])
         keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _create_provider_selection_keyboad(
+        models: list[ModelChangeSchema],
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        active_provider: str | None = None,
+    ) -> InlineKeyboardMarkup:
+        grouped: dict[str, list[ModelChangeSchema]] = {}
+        for model in models:
+            if model.provider not in grouped:
+                grouped[model.provider] = []
+            grouped[model.provider].append(model)
+        return ChibiBot._create_provider_selection_keyboad_from_grouped(
+            grouped=grouped, context=context, active_provider=active_provider
+        )
+
+    @staticmethod
+    def _create_provider_selection_keyboad_from_grouped(
+        grouped: dict[str, list[ModelChangeSchema]],
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        active_provider: str | None = None,
+    ) -> InlineKeyboardMarkup:
+        set_user_context(context=context, key=UserContext.MAPPED_MODELS_GROUPED, value=grouped)
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"\u2705 {provider}" if provider == active_provider else provider,
+                    callback_data=provider,
+                )
+            ]
+            for provider in grouped
+        ]
+        keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _find_active_provider_in_models(models: list[ModelChangeSchema]) -> str | None:
+        """Find the provider of the active model by looking for the 🟢-marked model.
+
+        `get_models_available` marks the active model's display_name with '🟢 ' prefix.
+        This is more reliable than checking Telegram context which may not be set.
+        """
+        for m in models:
+            if m.display_name.startswith("\U0001f7e2"):
+                return m.provider
+        return None
+
+    @staticmethod
+    def _find_active_provider_in_grouped(grouped: dict[str, list[ModelChangeSchema]]) -> str | None:
+        for provider, models in grouped.items():
+            for m in models:
+                if m.display_name.startswith("\U0001f7e2"):
+                    return provider
+        return None
 
     @check_user_allowance
     async def show_llm_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -287,13 +348,21 @@ class ChibiBot:
             interface=TelegramInterface(update=update, context=context),
         )
 
-        reply_markup = self.create_model_selection_keyboad(models=available_models, context=context)
+        active_model = get_user_context(context=context, key=UserContext.ACTIVE_MODEL, expected_type=str)
+        prefix = f"Active model: {active_model}. " if active_model else ""
 
-        if active_model := get_user_context(context=context, key=UserContext.ACTIVE_MODEL, expected_type=str):
-            message = f"Active model: {active_model}. You  may select another one from the list below:"
+        if len(available_models) <= 12:
+            reply_markup = self._create_model_selection_keyboad(models=available_models, context=context)
+            message = f"{prefix}You may select another one from the list below:" if prefix else "Please, select model:"
+            set_user_action(context=context, action=UserAction.SELECT_MODEL)
         else:
-            message = "Please, select model:"
-        set_user_action(context=context, action=UserAction.SELECT_MODEL)
+            active_provider = self._find_active_provider_in_models(available_models)
+            reply_markup = self._create_provider_selection_keyboad(
+                models=available_models, context=context, active_provider=active_provider
+            )
+            message = f"{prefix}Select a provider:" if prefix else "Select a provider:"
+            set_user_action(context=context, action=UserAction.SELECT_MODEL_PROVIDER)
+
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
     @check_user_allowance
@@ -305,13 +374,21 @@ class ChibiBot:
             interface=TelegramInterface(update=update, context=context),
         )
 
-        reply_markup = self.create_model_selection_keyboad(models=available_models, context=context)
+        active_model = get_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, expected_type=str)
+        prefix = f"Active model: {active_model}. " if active_model else ""
 
-        if active_model := get_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, expected_type=str):
-            message = f"Active model: {active_model}. You  may select another one from the list below:"
+        if len(available_models) <= 12:
+            reply_markup = self._create_model_selection_keyboad(models=available_models, context=context)
+            message = f"{prefix}You may select another one from the list below:" if prefix else "Please, select model:"
+            set_user_action(context=context, action=UserAction.SELECT_MODEL)
         else:
-            message = "Please, select model:"
-        set_user_action(context=context, action=UserAction.SELECT_MODEL)
+            active_provider = self._find_active_provider_in_models(available_models)
+            reply_markup = self._create_provider_selection_keyboad(
+                models=available_models, context=context, active_provider=active_provider
+            )
+            message = f"{prefix}Select a provider:" if prefix else "Select a provider:"
+            set_user_action(context=context, action=UserAction.SELECT_MODEL_PROVIDER)
+
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
     async def show_api_key_set_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -350,6 +427,23 @@ class ChibiBot:
             await query.delete_message()
             return None
 
+        if query.data == "__back_to_providers__":
+            grouped = get_user_context(
+                context=context,
+                key=UserContext.MAPPED_MODELS_GROUPED,
+                expected_type=dict[str, list[ModelChangeSchema]],
+            )
+            if not grouped:
+                await query.delete_message()
+                return None
+            active_provider = self._find_active_provider_in_grouped(grouped)
+            reply_markup = self._create_provider_selection_keyboad_from_grouped(
+                grouped=grouped, context=context, active_provider=active_provider
+            )
+            set_user_action(context=context, action=UserAction.SELECT_MODEL_PROVIDER)
+            await query.edit_message_text(text="Select a provider:", reply_markup=reply_markup)
+            return None
+
         model = mapped_models.get(query.data)
         if not model:
             await query.delete_message()
@@ -371,6 +465,35 @@ class ChibiBot:
         )
 
         set_user_action(context=context, action=UserAction.NONE)
+
+    async def _compute_model_provider_selection_action(
+        self, query: CallbackQuery, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        grouped = get_user_context(
+            context=context,
+            key=UserContext.MAPPED_MODELS_GROUPED,
+            expected_type=dict[str, list[ModelChangeSchema]],
+        )
+        await query.answer()
+
+        if not grouped or not query.data:
+            await query.delete_message()
+            return None
+
+        if query.data == "-1":
+            await query.delete_message()
+            return None
+
+        provider_models = grouped.get(query.data)
+        if not provider_models:
+            await query.delete_message()
+            return None
+
+        reply_markup = self._create_model_selection_keyboad(
+            models=provider_models, context=context, add_back_button=True
+        )
+        set_user_action(context=context, action=UserAction.SELECT_MODEL)
+        await query.edit_message_text(text=f"{query.data} \u2014 select a model:", reply_markup=reply_markup)
 
     async def _compute_provider_selection_action(
         self, query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE
@@ -397,6 +520,9 @@ class ChibiBot:
 
         if action == UserAction.SELECT_MODEL:
             return await self._compute_model_selection_action(query=query, update=update, context=context)
+
+        if action == UserAction.SELECT_MODEL_PROVIDER:
+            return await self._compute_model_provider_selection_action(query=query, update=update, context=context)
 
         if action == UserAction.SELECT_PROVIDER:
             return await self._compute_provider_selection_action(query=query, context=context)

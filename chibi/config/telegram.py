@@ -15,6 +15,7 @@ class TelegramSettings(BaseSettings):
     telegram_base_file_url: str = Field(default="https://api.telegram.org/file/bot")
     allow_bots: bool = Field(default=False)
     answer_direct_messages_only: bool = Field(default=True)
+    webapp_url: str | None = Field(default=None)
     bot_name: str = Field(default="Chibi")
     message_for_disallowed_users: str = Field(
         default="You're not allowed to interact with me, sorry. Contact my owner first, please.",

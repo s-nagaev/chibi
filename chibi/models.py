@@ -5,7 +5,7 @@ import itertools
 import json
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
 from anthropic.types import (
     MessageParam,
@@ -548,34 +548,41 @@ class User(BaseModel):
             return provider
         raise ValueError("No moderation-provider found.")
 
-    def get_active_llm_provider(self, thread_id: int) -> "Provider":
-        provider_name: str | None = None
-
+    def get_thread_selected_provider_name(self, thread_id: int) -> str | None:
         if selected_llm := self.thread_selected_llm.get(thread_id):
-            provider_name = selected_llm.provider_name
+            return selected_llm.provider_name
+        return None
 
-        elif self.selected_gpt_provider_name:
-            provider_name = self.selected_gpt_provider_name
+    @property
+    def first_chat_ready_provider_name(self) -> str | None:
+        if provider := self.providers.first_chat_ready:
+            return provider.name
+        return None
+
+    def get_active_llm_provider(self, thread_id: int) -> "Provider":
+        provider: Optional["Provider"] = None
+
+        thread_selected_provider_name = self.get_thread_selected_provider_name(thread_id=thread_id)
+        for provider_name in [
+            thread_selected_provider_name,
+            self.selected_gpt_provider_name,
+            gpt_settings.default_provider,
+            self.first_chat_ready_provider_name,
+        ]:
+            if not provider_name:
+                continue
+
+            if provider := self.providers.get(provider_name=provider_name):
+                break
+
+        if not thread_selected_provider_name and self.selected_gpt_provider_name and self.selected_gpt_model_name:
             self.thread_selected_llm[thread_id] = SelectedModel(
-                name=self.selected_gpt_model_name, provider_name=provider_name
+                name=self.selected_gpt_model_name, provider_name=self.selected_gpt_provider_name
             )
-
-        elif gpt_settings.default_provider:
-            provider_name = gpt_settings.default_provider
-
-        elif self.providers.first_chat_ready:
-            provider_name = self.providers.first_chat_ready.name
-
-        else:
+        if not provider:
             raise NoProviderSelectedError
 
-        if not provider_name:
-            raise NoProviderSelectedError
-
-        if provider := self.providers.get(provider_name=provider_name):
-            return provider
-
-        raise NoProviderSelectedError
+        return provider
 
     def get_active_llm_model(self, thread_id: int) -> str | None:
         if selected_model := self.thread_selected_llm.get(thread_id):

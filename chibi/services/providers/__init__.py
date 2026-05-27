@@ -11,6 +11,7 @@ from chibi.services.providers.grok import Grok
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
+from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.suno import Suno
