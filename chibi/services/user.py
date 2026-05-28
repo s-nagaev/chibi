@@ -316,16 +316,14 @@ async def get_models_available(
     available_models = deepcopy(user_models)
 
     if image_generation:
-        active_model = (
-            user.get_active_image_model(thread_id=thread_id)
-            or user.get_active_image_provider(thread_id=thread_id).default_image_model
-        )
+        active_provider = user.get_active_image_provider(thread_id=thread_id)
+        active_model = user.get_active_image_model(thread_id=thread_id) or active_provider.default_image_model
     else:
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
         active_model = user.get_active_llm_model(thread_id=thread_id) or active_provider.default_image_model
 
     for model in available_models:
-        if model.name == active_model:
+        if model.name == active_model and model.provider == active_provider.name:
             model.display_name = f"🟢 {model.display_name}️"
     return available_models
 

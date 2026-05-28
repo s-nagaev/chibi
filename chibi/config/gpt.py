@@ -12,6 +12,7 @@ class GPTSettings(BaseSettings):
 
     alibaba_key: str | None = Field(alias="ALIBABA_API_KEY", default=None)
     anthropic_key: str | None = Field(alias="ANTHROPIC_API_KEY", default=None)
+    open_router_key: str | None = Field(alias="OPENROUTER_API_KEY", default=None)
     cloudflare_account_id: str | None = Field(alias="CLOUDFLARE_ACCOUNT_ID", default=None)
     cloudflare_key: str | None = Field(alias="CLOUDFLARE_API_KEY", default=None)
     customopenai_key: str | None = Field(alias="CUSTOMOPENAI_API_KEY", default=None)

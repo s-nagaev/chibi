@@ -64,12 +64,23 @@ class Gemini(RestApiFriendlyProvider):
 
     name = "Gemini"
     model_name_keywords = ["gemini", "gemma"]
-    model_name_keywords_exclude = ["image", "vision", "tts", "embedding", "2.0", "1.5"]
+    model_name_keywords_exclude = [
+        "robotics",
+        "computer",
+        "audio",
+        "stt",
+        "image",
+        "vision",
+        "tts",
+        "embedding",
+        "2.0",
+        "1.5",
+    ]
 
     default_model = "models/gemini-2.5-pro"
     default_image_model = "models/imagen-4.0-fast-generate-001"
     default_tts_voice = "Kore"
-    default_tts_model = "gemini-2.5-flash-preview-tts"
+    default_tts_model = "gemini-3.1-flash-tts-preview"
     default_stt_model = "gemini-3-flash-preview"
     default_moderation_model = "models/gemini-2.5-flash-lite"
     default_vision_model = "models/gemini-3-flash-preview"
@@ -552,7 +563,7 @@ class Gemini(RestApiFriendlyProvider):
         with wave.open(buf, "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)  # PCM16 = 2 bytes
-            w.setframerate(44100)
+            w.setframerate(24000)
             w.writeframes(data)
 
         return buf.getvalue()
