@@ -7,20 +7,12 @@ from chibi.services.providers.provider import OpenAIFriendlyProvider
 class OpenRouter(OpenAIFriendlyProvider):
     api_key = gpt_settings.open_router_key
     chat_ready = True
-    image_generation_ready = False
-    moderation_ready = False
-    vision_ready = False
+    moderation_ready = True
 
-    base_url = "https://openrouter.ai/api/v1"
     name = "OpenRouter"
-    # model_name_keywords = ["grok"]
-    # model_name_keywords_exclude = ["vision", "imag"]
-    image_quality = NOT_GIVEN
-    image_size = NOT_GIVEN
-    # default_image_model = "ernie-5.0"
-    # default_model = "grok-4-1-fast-reasoning"
-    # default_moderation_model = "grok-4-1-fast-non-reasoning"
-    # default_vision_model = "grok-4-1-fast-reasoning"
+    base_url = "https://openrouter.ai/api/v1"
+    default_model = "google/gemini-3.5-flash"
+    default_moderation_model = "google/gemini-3.1-flash-lite"
     presence_penalty = NOT_GIVEN
     frequency_penalty = omit
     image_n_choices = 1

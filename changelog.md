@@ -3,7 +3,22 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
+
+
+## [1.8.1] - 2026-05-28
+
+### Added
+- **OpenRouter provider**: new provider (`OpenRouter`) with support for chat and moderation endpoints.
+
+### Changed
+- **Model selection UX**: when more than 12 models are available, selection becomes two-level — first pick a provider, then a model from that provider. Model lists now support pagination.
+- **Gemini provider**: expanded model name exclusion keywords (`robotics`, `computer`, `audio`, `stt`), updated default TTS model to `gemini-3.1-flash-tts-preview`, fixed TTS sample rate from 44100 to 24000.
+- **MistralAI provider**: expanded model name exclusion keywords (`transcribe`, `tts`, `voxtral`), added exclusion filter in `get_available_models`.
+
+### Fixed
+- Active model matching now also checks `provider.name`, preventing ambiguous matches when models with identical names exist across different providers.
 
 
 ## [1.8.0] - 2026-05-04
@@ -496,7 +511,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/s-nagaev/chibi/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/s-nagaev/chibi/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/s-nagaev/chibi/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/s-nagaev/chibi/compare/v1.7.0...v1.7.1
