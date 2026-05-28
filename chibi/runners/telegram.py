@@ -261,24 +261,47 @@ class ChibiBot:
         )
         return None
 
+    _MODELS_PER_PAGE = 12
+
     @staticmethod
     def _create_model_selection_keyboad(
         models: list[ModelChangeSchema],
         context: ContextTypes.DEFAULT_TYPE,
         *,
         add_back_button: bool = False,
+        page: int = 0,
+        per_page: int = _MODELS_PER_PAGE,
     ) -> InlineKeyboardMarkup:
-        mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(models)}
+        total = len(models)
+        total_pages = max((total - 1) // per_page + 1, 1) if total > 0 else 1
+        page = max(0, min(page, total_pages - 1))
+        start = page * per_page
+        page_models = models[start : start + per_page]
+
+        mapped_models: dict[str, ModelChangeSchema] = {str(k): model for k, model in enumerate(page_models)}
         set_user_context(context=context, key=UserContext.MAPPED_MODELS, value=mapped_models)
 
         keyboard = [
-            [InlineKeyboardButton(f"{model.display_name} ({model.provider})", callback_data=key)]
-            for key, model in mapped_models.items()
+            [InlineKeyboardButton(f"{model.display_name}", callback_data=key)] for key, model in mapped_models.items()
         ]
-        for model in models:
+        for model in page_models:
             logger.debug(f"{model.provider}: {model.name}")
+
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton(text="\u25c0 Back", callback_data=f"__page_{page - 1}__"))
+            nav_buttons.append(
+                InlineKeyboardButton(text=f"\U0001f4c4 {page + 1}/{total_pages}", callback_data="__noop__")
+            )
+            if page < total_pages - 1:
+                nav_buttons.append(InlineKeyboardButton(text="More \u25b6", callback_data=f"__page_{page + 1}__"))
+            keyboard.append(nav_buttons)
+
         if add_back_button:
-            keyboard.append([InlineKeyboardButton(text="\u2190 Back", callback_data="__back_to_providers__")])
+            keyboard.append(
+                [InlineKeyboardButton(text="\u2190 Back to providers", callback_data="__back_to_providers__")]
+            )
         keyboard.append([InlineKeyboardButton(text="CLOSE (SELECT NOTHING)", callback_data="-1")])
         return InlineKeyboardMarkup(keyboard)
 
@@ -427,6 +450,29 @@ class ChibiBot:
             await query.delete_message()
             return None
 
+        if query.data == "__noop__":
+            return None
+
+        if query.data and query.data.startswith("__page_"):
+            full_models = get_user_context(
+                context=context,
+                key=UserContext.MAPPED_MODELS_FULL,
+                expected_type=list[ModelChangeSchema],
+            )
+            if not full_models:
+                await query.delete_message()
+                return None
+            try:
+                target_page = int(query.data.removeprefix("__page_").removesuffix("__"))
+            except ValueError:
+                return None
+            reply_markup = self._create_model_selection_keyboad(
+                models=full_models, context=context, add_back_button=True, page=target_page
+            )
+            # Preserve existing keyboard text (provider name + "— select a model:")
+            await query.edit_message_reply_markup(reply_markup=reply_markup)
+            return None
+
         if query.data == "__back_to_providers__":
             grouped = get_user_context(
                 context=context,
@@ -489,8 +535,9 @@ class ChibiBot:
             await query.delete_message()
             return None
 
+        set_user_context(context=context, key=UserContext.MAPPED_MODELS_FULL, value=provider_models)
         reply_markup = self._create_model_selection_keyboad(
-            models=provider_models, context=context, add_back_button=True
+            models=provider_models, context=context, add_back_button=True, page=0
         )
         set_user_action(context=context, action=UserAction.SELECT_MODEL)
         await query.edit_message_text(text=f"{query.data} \u2014 select a model:", reply_markup=reply_markup)

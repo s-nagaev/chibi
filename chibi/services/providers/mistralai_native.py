@@ -46,7 +46,7 @@ class MistralAI(RestApiFriendlyProvider):
 
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
-    model_name_keywords_exclude = ["embed", "moderation", "ocr"]
+    model_name_keywords_exclude = ["embed", "moderation", "ocr", "transcribe", "tts", "voxtral"]
     default_model = "mistral-medium-latest"
     default_moderation_model = "mistral-small-latest"
     default_vision_model = "pixtral-12b-2409"
@@ -410,6 +410,7 @@ class MistralAI(RestApiFriendlyProvider):
                 image_generation=False,
             )
             for model in mistral_models
+            if not self._model_name_has_keywords_exclude(model_name=model.id)
         ]
         all_models.sort(key=lambda model: model.name)
 
