@@ -1,4 +1,5 @@
 """Batch manager for accumulating messages before ChromaDB storage."""
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -27,11 +28,18 @@ class Batch:
     prev_batch_id: str | None
     messages: list[Message] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
-    _batch_size: int = 10
+    # _batch_token_limit: int = 30000  # Token limit per batch (not message count)
+    _batch_token_limit: int = 2000  # Token limit per batch (not message count)
+
+    @property
+    def estimated_tokens(self) -> int:
+        """Estimate total tokens in batch using message.estimate_tokens()."""
+        return sum(msg.estimate_tokens for msg in self.messages)
 
     @property
     def is_full(self) -> bool:
-        return len(self.messages) >= self._batch_size
+        logging.error(f"Estimated tokens {self.estimated_tokens}")
+        return self.estimated_tokens >= self._batch_token_limit
 
     @property
     def size(self) -> int:
@@ -43,16 +51,19 @@ class BatchManager:
 
     Accumulates messages in batches and provides batch metadata
     for contextual retrieval. Thread-safe implementation.
+    
+    Batching is based on token count (default 30000 tokens),
+    not message count.
     """
 
-    def __init__(self, batch_size: int | None = None) -> None:
-        self._batch_size = batch_size or application_settings.batch_size or 10
+    def __init__(self, batch_token_limit: int | None = None) -> None:
+        self._batch_token_limit = batch_token_limit or application_settings.batch_token_limit or 30000
         self._lock = threading.Lock()
         self._current_batch: dict[int, Batch] = {}
 
     @property
-    def batch_size(self) -> int:
-        return self._batch_size
+    def batch_token_limit(self) -> int:
+        return self._batch_token_limit
 
     def _generate_batch_id(self) -> str:
         """Generate chronologically ordered unique batch ID.
@@ -86,7 +97,7 @@ class BatchManager:
                 self._current_batch[user_id] = Batch(
                     batch_id=self._generate_batch_id(),
                     prev_batch_id=None,
-                    _batch_size=self._batch_size,
+                    _batch_token_limit=self._batch_token_limit,
                 )
 
             # Add message to current batch
@@ -100,7 +111,7 @@ class BatchManager:
                 self._current_batch[user_id] = Batch(
                     batch_id=self._generate_batch_id(),
                     prev_batch_id=current.batch_id,
-                    _batch_size=self._batch_size,
+                    _batch_token_limit=self._batch_token_limit,
                 )
                 return current, True
 
@@ -133,14 +144,14 @@ class BatchManager:
             return self._current_batch
 
 
-def create_user_batch_manager(user_id: int, batch_size: int | None = None) -> BatchManager:
+def create_user_batch_manager(user_id: int, batch_token_limit: int | None = None) -> BatchManager:
     """Create batch manager for user with thread-safe lock.
 
     Args:
         user_id: The user ID.
-        batch_size: Size of batch.
+        batch_token_limit: Token limit per batch (default 30000).
 
     Returns:
         Configured BatchManager instance.
     """
-    return BatchManager(batch_size=batch_size)
+    return BatchManager(batch_token_limit=batch_token_limit)
