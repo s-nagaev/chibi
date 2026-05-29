@@ -54,13 +54,13 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         if user_id not in self._batch_managers:
             self._batch_managers[user_id] = create_user_batch_manager(
                 user_id,
-                application_settings.batch_size ,
+                application_settings.batch_token_limit ,
             )
         return self._batch_managers[user_id]
 
-    def _get_batch_size(self) -> int:
-        """Get configured batch size."""
-        return application_settings.batch_size 
+    def _get_batch_token_limit(self) -> int:
+        """Get configured batch token limit."""
+        return application_settings.batch_token_limit 
 
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
         """Get or create a collection for user."""
@@ -362,13 +362,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         if user_id not in self._batch_managers:
             self._batch_managers[user_id] = create_user_batch_manager(
                 user_id,
-                application_settings.batch_size ,
+                application_settings.batch_token_limit ,
             )
         return self._batch_managers[user_id]
 
-    def _get_batch_size(self) -> int:
-        """Get configured batch size."""
-        return application_settings.batch_size 
+    def _get_batch_token_limit(self) -> int:
+        """Get configured batch token limit."""
+        return application_settings.batch_token_limit 
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization)."""
