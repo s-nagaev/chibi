@@ -213,7 +213,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                          "message_id": hit["message_id"], "batch_id": None, "msg_pos": None, "prev_batch_id": None}]
 
             # Step 3: Get current batch
-            context_messages = await self._get_batch_by_id(user_id, hit_batch_id)
+            context_messages = await self._get_batch_by_field(user_id, hit_batch_id)
 
             # Get actual batch size in database (handles partial batches correctly)
             current_batch_count = len(context_messages)
@@ -225,7 +225,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 and hit_msg_pos <= EDGE_THRESHOLD
                 and hit_prev_batch_id
             ):
-                prev_batch = await self._get_batch_by_prev_id(user_id, hit_prev_batch_id)
+                prev_batch = await self._get_batch_by_field(user_id, hit_prev_batch_id)
                 if prev_batch:
                     context_messages = prev_batch + context_messages
                     # Update count after adding prev batch for near-end calculation
@@ -238,7 +238,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 and current_batch_count > 0
                 and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
             ):
-                next_batch = await self._get_next_batch(user_id, hit_batch_id)
+                next_batch = await self._get_batch_by_field(user_id=user_id, batch_id=hit_batch_id, field="prev_batch_id")
                 if next_batch:
                     context_messages.extend(next_batch)
 
@@ -284,44 +284,21 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Semantic search failed: {e}")
             return None
 
-    async def _get_batch_by_id(
-        self, user_id: int, batch_id: str
+    async def _get_batch_by_field(
+        self, user_id: int, batch_id: str, field: str = "batch_id"
     ) -> list[MemorySearchResult]:
         """Get all messages in a batch."""
         try:
             collection = await self._get_or_create_collection(user_id)
             result = await asyncio.to_thread(
                 collection.get,
-                where={"batch_id": batch_id},
+                where={field: batch_id},
             )
 
             return self._format_batch_results(result)
 
         except Exception as e:
             logger.error(f"Failed to get batch {batch_id}: {e}")
-            return []
-
-    async def _get_batch_by_prev_id(
-        self, user_id: int, prev_batch_id: str
-    ) -> list[MemorySearchResult]:
-        """Get batch by prev_batch_id reference."""
-        return await self._get_batch_by_id(user_id, prev_batch_id)
-
-    async def _get_next_batch(
-        self, user_id: int, current_batch_id: str
-    ) -> list[MemorySearchResult]:
-        """Get next batch (where prev_batch_id == current_batch_id)."""
-        try:
-            collection = await self._get_or_create_collection(user_id)
-            result = await asyncio.to_thread(
-                collection.get,
-                where={"prev_batch_id": current_batch_id},
-            )
-
-            return self._format_batch_results(result)
-
-        except Exception as e:
-            logger.error(f"Failed to get next batch: {e}")
             return []
 
     def _format_batch_results(self, result) -> list[MemorySearchResult]:
