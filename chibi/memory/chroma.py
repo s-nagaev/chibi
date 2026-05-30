@@ -1,10 +1,10 @@
 """ChromaDB memory implementation with batch metadata and context retrieval."""
 import asyncio
-import uuid
 from datetime import datetime, timedelta
 
 import chromadb
-from chromadb import EmbeddingFunction, Metadatas
+import ulid
+from chromadb import EmbeddingFunction
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import (
@@ -21,7 +21,6 @@ from chibi.memory.abstract import (
     LongConversationMemory,
     MemorySearchResult,
 )
-from chibi.memory.batch import Batch, BatchManager, create_user_batch_manager
 from chibi.models import Message
 from chibi.services.lock_manager import LockManager
 
@@ -33,10 +32,10 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
     locally on disk. Supports batch metadata and context retrieval.
 
     Features:
-        - Batch accumulation with metadata (batch_id, msg_pos, prev_batch_id)
+        - Per-message persistence with batch metadata (batch_id, msg_pos, prev_batch_id)
         - Context retrieval (neighboring batches around semantic search hits)
         - No full scan required
-        - Restart-safe (ULID-based batch IDs)
+        - Restart-safe: prev_batch_id is loaded from DB on first archive call
     """
 
     def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
@@ -46,21 +45,36 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             path=application_settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        self._batch_managers: dict[int, BatchManager] = {}
+        # Per-user archive state: tracks current batch metadata and token counts
+        self._archive_state: dict[int, dict] = {}
+        self._archive_locks: dict[int, asyncio.Lock] = {}
         logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
-
-    def _get_batch_manager(self, user_id: int) -> BatchManager:
-        """Get or create batch manager for user."""
-        if user_id not in self._batch_managers:
-            self._batch_managers[user_id] = create_user_batch_manager(
-                user_id,
-                application_settings.batch_token_limit ,
-            )
-        return self._batch_managers[user_id]
 
     def _get_batch_token_limit(self) -> int:
         """Get configured batch token limit."""
-        return application_settings.batch_token_limit 
+        return application_settings.batch_token_limit
+
+    def _generate_batch_id(self) -> str:
+        """Generate chronologically ordered unique batch ID via ULID."""
+        return str(ulid.ulid())
+
+    async def _get_last_batch_id(self, user_id: int) -> str | None:
+        """Get batch_id of the most recent message for this user in ChromaDB.
+
+        Used on first archive call to chain prev_batch_id from existing data.
+        """
+        try:
+            collection = await self._get_or_create_collection(user_id)
+            result = await asyncio.to_thread(collection.get)
+            metadatas = result.get("metadatas")
+            if not metadatas:
+                return None
+            latest = max(metadatas, key=lambda m: str(m.get("timestamp", "")))
+            bid = str(latest.get("batch_id", ""))
+            return bid if bid else None
+        except Exception as e:
+            logger.error(f"Failed to get last batch_id for user {user_id}: {e}")
+            return None
 
     async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
         """Get or create a collection for user."""
@@ -74,8 +88,10 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB with batch metadata.
 
-        Messages are accumulated in batches. When batch is full, it's archived
-        with metadata for context retrieval.
+        Each message is saved immediately. Token counting and batch_id rotation
+        happen inline: msg_pos increments while total tokens stay under limit;
+        on overflow the next message starts a new batch with prev_batch_id
+        pointing to the previous one.
 
         Args:
             user_id: The user ID.
@@ -84,43 +100,74 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         if not messages:
             return None
 
-        batch_manager = self._get_batch_manager(user_id)
+        # Per-user lock to serialize archive calls for the same user
+        if user_id not in self._archive_locks:
+            self._archive_locks[user_id] = asyncio.Lock()
 
-        for msg in messages:
-            batch, is_full = batch_manager.add_message(user_id, msg)
+        async with self._archive_locks[user_id]:
+            # Initialize state on first call: query DB for last batch_id
+            if user_id not in self._archive_state:
+                last_batch_id = await self._get_last_batch_id(user_id)
+                self._archive_state[user_id] = {
+                    "batch_id": self._generate_batch_id(),
+                    "prev_batch_id": last_batch_id,
+                    "next_msg_pos": 0,
+                    "token_count": 0,
+                }
 
-            if is_full and batch:
-                await self._archive_batch(batch, user_id)
-                logger.debug(f"Archived messages for user {user_id}")
-        return None
+            state = self._archive_state[user_id]
+            batch_limit = self._get_batch_token_limit()
 
+            for msg in messages:
+                msg_tokens = msg.estimate_tokens
 
-    async def _archive_batch(self, batch: Batch, user_id: int) -> None:
-        """Archive a single batch to ChromaDB with metadata.
+                # Save message first with current batch metadata
+                pos = state["next_msg_pos"]
+                await self._archive_message(
+                    msg=msg,
+                    batch_id=state["batch_id"],
+                    msg_pos=pos,
+                    prev_batch_id=state["prev_batch_id"],
+                    user_id=user_id,
+                    token_count=state["token_count"]
+                )
+                state["token_count"] += msg_tokens
+                state["next_msg_pos"] += 1
+
+                # After saving, check if total tokens from pos 0 to current > limit
+                if state["token_count"] > batch_limit:
+                    # Rotate for the next message
+                    state["prev_batch_id"] = state["batch_id"]
+                    state["batch_id"] = self._generate_batch_id()
+                    state["next_msg_pos"] = 0
+                    state["token_count"] = 0
+
+    async def _archive_message(
+        self,
+        msg: Message,
+        batch_id: str,
+        msg_pos: int,
+        prev_batch_id: str | None,
+        user_id: int,
+        token_count: int,
+    ) -> None:
+        """Archive a single message to ChromaDB with batch metadata.
 
         Args:
-            batch: Batch object with messages.
+            msg: Message to archive.
+            batch_id: Current batch ID.
+            msg_pos: Position of message within the batch.
+            prev_batch_id: Previous batch ID (for context retrieval).
             user_id: The user ID.
         """
-        if not batch.messages:
-            return None
-
-        metadatas: Metadatas = []
-        logger.debug(f"Archived messages for user {batch.messages}")
-        for i, msg in enumerate(batch.messages):
-            metadatas.append(
-                {
-                    "message_id": str(msg.id),
-                    "batch_id": batch.batch_id,
-                    "msg_pos": i,
-                    "prev_batch_id": batch.prev_batch_id or "",
-                    "role": msg.role,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-
-        ids = [str(msg.id) for msg in batch.messages]
-        documents = [msg.content for msg in batch.messages]
+        metadata = {
+            "message_id": str(msg.id),
+            "batch_id": batch_id,
+            "msg_pos": msg_pos,
+            "prev_batch_id": prev_batch_id or "",
+            "role": msg.role,
+            "timestamp": datetime.now().isoformat(),
+        }
 
         lock = await LockManager().get_lock(key=str(user_id))
         async with lock:
@@ -128,13 +175,13 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 collection = await self._get_or_create_collection(user_id)
                 await asyncio.to_thread(
                     collection.add,
-                    metadatas=metadatas,
-                    ids=ids,
-                    documents=documents,
+                    metadatas=[metadata],
+                    ids=[str(msg.id)],
+                    documents=[msg.content],
                 )
-                logger.debug(f"Archived batch {batch.batch_id} ({len(batch.messages)} messages)")
+                logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos} with avr_tokens {token_count}")
             except Exception as e:
-                logger.error(f"Failed to archive batch {batch.batch_id}: {e}")
+                logger.error(f"Failed to archive message {msg.id}: {e}")
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
@@ -283,9 +330,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        # Fix: check len() instead of truthiness of first element
-        # (first element is a string that evaluates to True but
-        # iterating it yields characters instead of strings)
         if documents and metadatas and len(documents) > 0:
             for i, doc in enumerate(documents):
                 metadata = metadatas[i]
@@ -351,24 +395,36 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClientAPI | None = None
         self.embedding_function = embedding_function
-        self._batch_managers: dict[int, BatchManager] = {}
+        # Per-user archive state: tracks current batch metadata and token counts
+        self._archive_state: dict[int, dict] = {}
+        self._archive_locks: dict[int, asyncio.Lock] = {}
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
         )
 
-    def _get_batch_manager(self, user_id: int) -> BatchManager:
-        """Get or create batch manager for user."""
-        if user_id not in self._batch_managers:
-            self._batch_managers[user_id] = create_user_batch_manager(
-                user_id,
-                application_settings.batch_token_limit ,
-            )
-        return self._batch_managers[user_id]
-
     def _get_batch_token_limit(self) -> int:
         """Get configured batch token limit."""
-        return application_settings.batch_token_limit 
+        return application_settings.batch_token_limit
+
+    def _generate_batch_id(self) -> str:
+        """Generate chronologically ordered unique batch ID via ULID."""
+        return str(ulid.ulid())
+
+    async def _get_last_batch_id(self, user_id: int) -> str | None:
+        """Get batch_id of the most recent message for this user in ChromaDB."""
+        try:
+            collection = await self._get_or_create_collection(user_id)
+            result = await collection.get()
+            metadatas = result.get("metadatas")
+            if not metadatas:
+                return None
+            latest = max(metadatas, key=lambda m: str(m.get("timestamp", "")))
+            bid = str(latest.get("batch_id", ""))
+            return bid if bid else None
+        except Exception as e:
+            logger.error(f"Failed to get last batch_id for user {user_id}: {e}")
+            return None
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization)."""
@@ -391,6 +447,11 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB with batch metadata.
 
+        Each message is saved immediately. Token counting and batch_id rotation
+        happen inline: msg_pos increments while total tokens stay under limit;
+        on overflow the next message starts a new batch with prev_batch_id
+        pointing to the previous one.
+
         Args:
             user_id: The user ID.
             messages: List of messages to archive.
@@ -398,49 +459,77 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         if not messages:
             return None
 
-        batch_manager = self._get_batch_manager(user_id)
+        # Per-user lock to serialize archive calls for the same user
+        if user_id not in self._archive_locks:
+            self._archive_locks[user_id] = asyncio.Lock()
 
-        for msg in messages:
-            batch, is_full = batch_manager.add_message(user_id, msg)
-
-            if is_full and batch:
-                await self._archive_batch(batch, user_id)
-                logger.debug(f"Archived messages for user {user_id}")
-        return None
-
-    async def _archive_batch(self, batch: Batch, user_id: int) -> None:
-        """Archive a single batch to ChromaDB with metadata."""
-        if not batch.messages:
-            return None
-
-        metadatas: Metadatas = []
-        for i, msg in enumerate(batch.messages):
-            metadatas.append(
-                {
-                    "message_id": str(msg.id),
-                    "batch_id": batch.batch_id,
-                    "msg_pos": i,
-                    "prev_batch_id": batch.prev_batch_id or "",
-                    "role": msg.role,
-                    "timestamp": datetime.now().isoformat(),
+        async with self._archive_locks[user_id]:
+            # Initialize state on first call: query DB for last batch_id
+            if user_id not in self._archive_state:
+                last_batch_id = await self._get_last_batch_id(user_id)
+                self._archive_state[user_id] = {
+                    "batch_id": self._generate_batch_id(),
+                    "prev_batch_id": last_batch_id,
+                    "next_msg_pos": 0,
+                    "token_count": 0,
                 }
-            )
 
-        ids = [str(msg.id) for msg in batch.messages]
-        documents = [msg.content for msg in batch.messages]
+            state = self._archive_state[user_id]
+            batch_limit = self._get_batch_token_limit()
+
+            for msg in messages:
+                msg_tokens = msg.estimate_tokens
+
+                # Save message first with current batch metadata
+                pos = state["next_msg_pos"]
+                await self._archive_message(
+                    msg=msg,
+                    batch_id=state["batch_id"],
+                    msg_pos=pos,
+                    prev_batch_id=state["prev_batch_id"],
+                    user_id=user_id,
+                )
+                state["token_count"] += msg_tokens
+                state["next_msg_pos"] += 1
+
+                # After saving, check if total tokens from pos 0 to current > limit
+                if state["token_count"] > batch_limit:
+                    # Rotate for the next message
+                    state["prev_batch_id"] = state["batch_id"]
+                    state["batch_id"] = self._generate_batch_id()
+                    state["next_msg_pos"] = 0
+                    state["token_count"] = 0
+
+    async def _archive_message(
+        self,
+        msg: Message,
+        batch_id: str,
+        msg_pos: int,
+        prev_batch_id: str | None,
+        user_id: int,
+    ) -> None:
+        """Archive a single message to ChromaDB with batch metadata."""
+        metadata = {
+            "message_id": str(msg.id),
+            "batch_id": batch_id,
+            "msg_pos": msg_pos,
+            "prev_batch_id": prev_batch_id or "",
+            "role": msg.role,
+            "timestamp": datetime.now().isoformat(),
+        }
 
         lock = await LockManager().get_lock(key=str(user_id))
         async with lock:
             try:
                 collection = await self._get_or_create_collection(user_id)
                 await collection.add(
-                    metadatas=metadatas,
-                    ids=ids,
-                    documents=documents,
+                    metadatas=[metadata],
+                    ids=[str(msg.id)],
+                    documents=[msg.content],
                 )
-                logger.debug(f"Archived batch {batch.batch_id} ({len(batch.messages)} messages)")
+                logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
             except Exception as e:
-                logger.error(f"Failed to archive batch {batch.batch_id}: {e}")
+                logger.error(f"Failed to archive message {msg.id}: {e}")
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages with context retrieval."""
