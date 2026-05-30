@@ -56,3 +56,47 @@ class RecursionLimitExceeded(GptException):
         self.provider = provider
         self.detail = detail
         self.exceeded_limit = exceeded_limit
+
+
+class MemoryException(Exception):
+    """Base exception for long-term memory operations."""
+
+    def __init__(self, detail: str = "Memory operation failed") -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}(detail={self.detail!r})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+class ChromaConnectionError(MemoryException):
+    """Failed to connect to ChromaDB."""
+    ...
+
+
+class ChromaCollectionError(MemoryException):
+    """Error accessing or creating a ChromaDB collection."""
+    ...
+
+
+class ChromaArchiveError(MemoryException):
+    """Failed to archive messages to ChromaDB."""
+    ...
+
+
+class ChromaSearchError(MemoryException):
+    """Failed to perform semantic search in ChromaDB."""
+    ...
+
+
+class ChromaDeleteError(MemoryException):
+    """Failed to delete messages from ChromaDB."""
+    ...
+
+
+class ChromaBatchRetrievalError(MemoryException):
+    """Failed to retrieve batch from ChromaDB."""
+    ...
