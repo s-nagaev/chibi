@@ -5,8 +5,7 @@ from datetime import datetime, timedelta
 from typing import cast
 
 import chromadb
-import ulid
-from chromadb import Collection, EmbeddingFunction, GetResult, Metadata, Where
+from chromadb import Collection, EmbeddingFunction, Metadata, Where
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import (
@@ -58,16 +57,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         # Per-(user, thread) archive state: tracks current batch metadata and token counts
         self._archive_state: dict[tuple[int, int], ArchiveState] = {}
         logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
-
-    @staticmethod
-    def _get_batch_token_limit() -> int:
-        """Get configured batch token limit."""
-        return application_settings.batch_token_limit
-
-    @staticmethod
-    def _generate_batch_id() -> str:
-        """Generate chronologically ordered unique batch ID via ULID."""
-        return str(ulid.ulid())
 
     async def _get_last_batch_id(self, user_id: int, thread_id: int = 0) -> str | None:
         """Get batch_id of the most recent message for this user+thread in ChromaDB.
@@ -413,37 +402,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get batch {batch_id}: {e}")
             return []
 
-    @staticmethod
-    def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
-        """Format raw ChromaDB collection.get() result into search results.
-
-        Args:
-            result: Raw result from ChromaDB (GetResult / QueryResult TypedDict).
-
-        Returns:
-            List of formatted MemorySearchResult dicts; empty list if no data.
-        """
-        formatted: list[MemorySearchResult] = []
-        documents = result.get("documents")
-        metadatas = result.get("metadatas")
-
-        if documents and metadatas:
-            for doc, metadata in zip(documents, metadatas):
-                formatted.append(
-                    MemorySearchResult(
-                        content=doc,
-                        role=str(metadata.get("role", "")),
-                        timestamp=str(metadata.get("timestamp", "")),
-                        message_id=str(metadata.get("message_id", "")),
-                        batch_id=str(metadata.get("batch_id", "")),
-                        msg_pos=int(str(metadata.get("msg_pos", -1))),
-                        prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
-                        thread_id=int(str(metadata.get("thread_id", 0))),
-                    )
-                )
-
-        return formatted
-
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
 
@@ -508,16 +466,6 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
         )
-
-    @staticmethod
-    def _get_batch_token_limit() -> int:
-        """Get configured batch token limit."""
-        return application_settings.batch_token_limit
-
-    @staticmethod
-    def _generate_batch_id() -> str:
-        """Generate chronologically ordered unique batch ID via ULID."""
-        return str(ulid.ulid())
 
     async def _get_last_batch_id(self, user_id: int, thread_id: int = 0) -> str | None:
         """Get batch_id of the most recent message for this user+thread in ChromaDB.
@@ -834,30 +782,6 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         except Exception as e:
             logger.error(f"Failed to get next batch: {e}")
             return []
-
-    @staticmethod
-    def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
-        """Format raw ChromaDB collection.get() result into search results."""
-        formatted: list[MemorySearchResult] = []
-        documents = result.get("documents")
-        metadatas = result.get("metadatas")
-
-        if documents and metadatas:
-            for doc, metadata in zip(documents, metadatas):
-                formatted.append(
-                    MemorySearchResult(
-                        content=doc,
-                        role=str(metadata.get("role", "")),
-                        timestamp=str(metadata.get("timestamp", "")),
-                        message_id=str(metadata.get("message_id", "")),
-                        batch_id=str(metadata.get("batch_id", "")),
-                        msg_pos=int(str(metadata.get("msg_pos", -1))),
-                        prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
-                        thread_id=int(str(metadata.get("thread_id", 0))),
-                    )
-                )
-
-        return formatted
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
