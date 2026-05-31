@@ -4,7 +4,6 @@ from typing import TypedDict
 from chibi.models import Message
 from chibi.utils.app import SingletonMeta
 
-
 EDGE_THRESHOLD = 2
 
 
