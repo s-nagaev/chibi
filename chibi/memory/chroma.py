@@ -199,14 +199,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 msg_tokens = msg.estimate_tokens
 
                 # Save message first with current batch metadata
-                pos = state["next_msg_pos"]
+                pos = state.next_msg_pos
                 await self._archive_message(
                     msg=msg,
-                    batch_id=state["batch_id"],
+                    batch_id=state.batch_id,
                     msg_pos=pos,
-                    prev_batch_id=state["prev_batch_id"],
+                    prev_batch_id=state.prev_batch_id,
                     user_id=user_id,
-                    token_count=state["token_count"],
+                    token_count=state.token_count,
                 )
                 await self.update_archive_state(user_id=user_id, tokens_to_add=msg_tokens)
         return None
@@ -493,7 +493,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         self._client: chromadb.AsyncClientAPI | None = None
         self.embedding_function = embedding_function
         # Per-user archive state: tracks current batch metadata and token counts
-        self._archive_state: dict[int, dict] = {}
+        self._archive_state: dict[int, ArchiveState] = {}
         self._archive_locks: dict[int, asyncio.Lock] = {}
         logger.info(
             f"ChromaDB: using async external mode ("
@@ -608,12 +608,12 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             # Initialize state on first call: query DB for last batch_id
             if user_id not in self._archive_state:
                 last_batch_id = await self._get_last_batch_id(user_id)
-                self._archive_state[user_id] = {
-                    "batch_id": self._generate_batch_id(),
-                    "prev_batch_id": last_batch_id,
-                    "next_msg_pos": 0,
-                    "token_count": 0,
-                }
+                self._archive_state[user_id] = ArchiveState(
+                    batch_id=self._generate_batch_id(),
+                    prev_batch_id=last_batch_id,
+                    next_msg_pos=0,
+                    token_count=0,
+                )
 
             state = self._archive_state[user_id]
             batch_limit = self._get_batch_token_limit()
@@ -622,24 +622,24 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 msg_tokens = msg.estimate_tokens
 
                 # Save message first with current batch metadata
-                pos = state["next_msg_pos"]
+                pos = state.next_msg_pos
                 await self._archive_message(
                     msg=msg,
-                    batch_id=state["batch_id"],
+                    batch_id=state.batch_id,
                     msg_pos=pos,
-                    prev_batch_id=state["prev_batch_id"],
+                    prev_batch_id=state.prev_batch_id,
                     user_id=user_id,
                 )
-                state["token_count"] += msg_tokens
-                state["next_msg_pos"] += 1
+                state.token_count += msg_tokens
+                state.next_msg_pos += 1
 
                 # After saving, check if total tokens from pos 0 to current > limit
-                if state["token_count"] > batch_limit:
+                if state.token_count > batch_limit:
                     # Rotate for the next message
-                    state["prev_batch_id"] = state["batch_id"]
-                    state["batch_id"] = self._generate_batch_id()
-                    state["next_msg_pos"] = 0
-                    state["token_count"] = 0
+                    state.prev_batch_id = state.batch_id
+                    state.batch_id = self._generate_batch_id()
+                    state.next_msg_pos = 0
+                    state.token_count = 0
 
     async def _archive_message(
         self,
