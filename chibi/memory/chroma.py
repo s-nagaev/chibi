@@ -16,7 +16,6 @@ from chromadb.utils.embedding_functions import (
     OpenAIEmbeddingFunction,
 )
 from loguru import logger
-from pydantic import BaseModel
 
 from chibi.config import application_settings
 from chibi.exceptions import (
@@ -27,18 +26,12 @@ from chibi.exceptions import (
 )
 from chibi.memory.abstract import (
     EDGE_THRESHOLD,
+    ArchiveState,
     LongConversationMemory,
     MemorySearchResult,
 )
 from chibi.models import Message
 from chibi.services.lock_manager import LockManager
-
-
-class ArchiveState(BaseModel):
-    batch_id: str
-    prev_batch_id: str | None = None
-    next_msg_pos: int
-    token_count: int
 
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
@@ -291,22 +284,22 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 return []
 
             # Step 2: Get batch of found message
-            hit_batch_id = hit.get("batch_id")
-            hit_msg_pos = hit.get("msg_pos")
-            hit_prev_batch_id = hit.get("prev_batch_id")
+            hit_batch_id = hit.batch_id
+            hit_msg_pos = hit.msg_pos
+            hit_prev_batch_id = hit.prev_batch_id
 
             if not hit_batch_id:
                 return [
-                    {
-                        "content": hit["content"],
-                        "role": hit["role"],
-                        "timestamp": hit["timestamp"],
-                        "message_id": hit["message_id"],
-                        "batch_id": None,
-                        "msg_pos": None,
-                        "prev_batch_id": None,
-                        "thread_id": thread_id,
-                    }
+                    MemorySearchResult(
+                        content=hit.content,
+                        role=hit.role,
+                        timestamp=hit.timestamp,
+                        message_id=hit.message_id,
+                        batch_id=None,
+                        msg_pos=None,
+                        prev_batch_id=None,
+                        thread_id=thread_id,
+                    )
                 ]
 
             # Step 3: Get current batch
@@ -343,7 +336,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                     context_messages.extend(next_batch)
 
             # Sort by (batch_id, msg_pos) - ULID ensures chronological order
-            context_messages.sort(key=lambda x: (x.get("batch_id", ""), x.get("msg_pos", 0)))
+            context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
 
             return context_messages
 
@@ -661,22 +654,22 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             if not hit:
                 return []
 
-            hit_batch_id = hit.get("batch_id")
-            hit_msg_pos = hit.get("msg_pos")
-            hit_prev_batch_id = hit.get("prev_batch_id")
+            hit_batch_id = hit.batch_id
+            hit_msg_pos = hit.msg_pos
+            hit_prev_batch_id = hit.prev_batch_id
 
             if not hit_batch_id:
                 return [
-                    {
-                        "content": hit["content"],
-                        "role": hit["role"],
-                        "timestamp": hit["timestamp"],
-                        "message_id": hit["message_id"],
-                        "batch_id": None,
-                        "msg_pos": None,
-                        "prev_batch_id": None,
-                        "thread_id": thread_id,
-                    }
+                    MemorySearchResult(
+                        content=hit.content,
+                        role=hit.role,
+                        timestamp=hit.timestamp,
+                        message_id=hit.message_id,
+                        batch_id=None,
+                        msg_pos=None,
+                        prev_batch_id=None,
+                        thread_id=thread_id,
+                    )
                 ]
 
             context_messages = await self._get_batch_by_id(user_id, hit_batch_id, thread_id)
@@ -702,7 +695,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 if next_batch:
                     context_messages.extend(next_batch)
 
-            context_messages.sort(key=lambda x: (x.get("batch_id", ""), x.get("msg_pos", 0)))
+            context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
             return context_messages
 
         except ChromaSearchError:
