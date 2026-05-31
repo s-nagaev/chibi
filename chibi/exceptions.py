@@ -74,29 +74,23 @@ class MemoryException(Exception):
 
 class ChromaConnectionError(MemoryException):
     """Failed to connect to ChromaDB."""
+
     ...
 
 
 class ChromaCollectionError(MemoryException):
     """Error accessing or creating a ChromaDB collection."""
+
     ...
 
 
 class ChromaArchiveError(MemoryException):
     """Failed to archive messages to ChromaDB."""
+
     ...
 
 
 class ChromaSearchError(MemoryException):
     """Failed to perform semantic search in ChromaDB."""
-    ...
 
-
-class ChromaDeleteError(MemoryException):
-    """Failed to delete messages from ChromaDB."""
-    ...
-
-
-class ChromaBatchRetrievalError(MemoryException):
-    """Failed to retrieve batch from ChromaDB."""
     ...

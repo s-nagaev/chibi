@@ -1,10 +1,12 @@
 """ChromaDB memory implementation with batch metadata and context retrieval."""
+
 import asyncio
 from datetime import datetime, timedelta
+from typing import cast
 
 import chromadb
 import ulid
-from chromadb import EmbeddingFunction
+from chromadb import EmbeddingFunction, GetResult, Metadata, Where
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import (
@@ -18,10 +20,8 @@ from loguru import logger
 from chibi.config import application_settings
 from chibi.exceptions import (
     ChromaArchiveError,
-    ChromaBatchRetrievalError,
     ChromaCollectionError,
     ChromaConnectionError,
-    ChromaDeleteError,
     ChromaSearchError,
 )
 from chibi.memory.abstract import (
@@ -81,15 +81,21 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         try:
             collection = await self._get_or_create_collection(user_id)
             one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+
+            where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
+
             result = await asyncio.to_thread(
                 collection.get,
-                where={"timestamp_unix": {"$gte": one_week_ago}},
+                where=where_filter,
                 include=["metadatas"],
             )
             metadatas = result.get("metadatas")
             if not metadatas:
                 return None
-            latest = max(metadatas, key=lambda m: float(m.get("timestamp_unix", 0)))
+            latest = max(
+                metadatas,
+                key=lambda m: float(str(m.get("timestamp_unix", 0))),
+            )
             bid = str(latest.get("batch_id", ""))
             return bid if bid else None
         except Exception as e:
@@ -116,9 +122,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 embedding_function=self.embedding_function,
             )
         except Exception as e:
-            raise ChromaCollectionError(
-                f"Failed to get or create collection '{collection_name}': {e}"
-            ) from e
+            raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def get_or_create_archive_state(self, user_id: int) -> dict:
         """Get or create per-user archive state.
@@ -197,7 +201,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                     msg_pos=pos,
                     prev_batch_id=state["prev_batch_id"],
                     user_id=user_id,
-                    token_count=state["token_count"]
+                    token_count=state["token_count"],
                 )
                 await self.update_archive_state(user_id=user_id, tokens_to_add=msg_tokens)
         return None
@@ -225,7 +229,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             ChromaArchiveError: If the ChromaDB add operation fails.
         """
         now = datetime.now()
-        metadata = {
+        metadata: Metadata = {
             "message_id": str(msg.id),
             "batch_id": batch_id,
             "msg_pos": msg_pos,
@@ -244,11 +248,11 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 documents=[msg.content],
             )
             logger.debug(
-                f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos} with avr_tokens {token_count}")
+                f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos} with avr_tokens {token_count}"
+            )
         except Exception as e:
             logger.error(f"Failed to archive message {msg.id}: {e}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
-
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages by semantic similarity.
@@ -276,8 +280,17 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             hit_prev_batch_id = hit.get("prev_batch_id")
 
             if not hit_batch_id:
-                return [{"content": hit["content"], "role": hit["role"], "timestamp": hit["timestamp"],
-                         "message_id": hit["message_id"], "batch_id": None, "msg_pos": None, "prev_batch_id": None}]
+                return [
+                    {
+                        "content": hit["content"],
+                        "role": hit["role"],
+                        "timestamp": hit["timestamp"],
+                        "message_id": hit["message_id"],
+                        "batch_id": None,
+                        "msg_pos": None,
+                        "prev_batch_id": None,
+                    }
+                ]
 
             # Step 3: Get current batch
             context_messages = await self._get_batch_by_field(user_id, hit_batch_id)
@@ -305,7 +318,9 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 and current_batch_count > 0
                 and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
             ):
-                next_batch = await self._get_batch_by_field(user_id=user_id, batch_id=hit_batch_id, field="prev_batch_id")
+                next_batch = await self._get_batch_by_field(
+                    user_id=user_id, batch_id=hit_batch_id, field="prev_batch_id"
+                )
                 if next_batch:
                     context_messages.extend(next_batch)
 
@@ -320,9 +335,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to search messages for user {user_id}: {e}")
             return []
 
-    async def _semantic_search(
-        self, user_id: int, query: str, n_results: int
-    ) -> MemorySearchResult | None:
+    async def _semantic_search(self, user_id: int, query: str, n_results: int) -> MemorySearchResult | None:
         """Perform semantic search.
 
         Args:
@@ -356,7 +369,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                     timestamp=str(metadata.get("timestamp", "")),
                     message_id=str(metadata.get("message_id", "")),
                     batch_id=str(metadata.get("batch_id", "")),
-                    msg_pos=int(metadata.get("msg_pos", -1)),
+                    msg_pos=int(str(metadata.get("msg_pos", -1))),
                     prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
                 )
             return None
@@ -394,11 +407,11 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get batch {batch_id}: {e}")
             return []
 
-    def _format_batch_results(self, result: dict) -> list[MemorySearchResult]:
+    def _format_batch_results(self, result: GetResult) -> list[MemorySearchResult]:
         """Format raw ChromaDB collection.get() result into search results.
 
         Args:
-            result: Raw dict from ChromaDB with "documents" and "metadatas" keys.
+            result: Raw result from ChromaDB (GetResult / QueryResult TypedDict).
 
         Returns:
             List of formatted MemorySearchResult dicts; empty list if no data.
@@ -407,9 +420,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        if documents and metadatas and len(documents) > 0:
-            for i, doc in enumerate(documents):
-                metadata = metadatas[i]
+        if documents and metadatas:
+            for doc, metadata in zip(documents, metadatas):
                 formatted.append(
                     MemorySearchResult(
                         content=doc,
@@ -417,7 +429,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                         timestamp=str(metadata.get("timestamp", "")),
                         message_id=str(metadata.get("message_id", "")),
                         batch_id=str(metadata.get("batch_id", "")),
-                        msg_pos=int(metadata.get("msg_pos", -1)),
+                        msg_pos=int(str(metadata.get("msg_pos", -1))),
                         prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
                     )
                 )
@@ -501,14 +513,20 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         try:
             collection = await self._get_or_create_collection(user_id)
             one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+
+            where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
+
             result = await collection.get(
-                where={"timestamp_unix": {"$gte": one_week_ago}},
+                where=where_filter,
                 include=["metadatas"],
             )
             metadatas = result.get("metadatas")
             if not metadatas:
                 return None
-            latest = max(metadatas, key=lambda m: float(m.get("timestamp_unix", 0)))
+            latest = max(
+                metadatas,
+                key=lambda m: float(str(m.get("timestamp_unix", 0))),
+            )
             bid = str(latest.get("batch_id", ""))
             return bid if bid else None
         except Exception as e:
@@ -557,9 +575,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 embedding_function=self.embedding_function,
             )
         except Exception as e:
-            raise ChromaCollectionError(
-                f"Failed to get or create collection '{collection_name}': {e}"
-            ) from e
+            raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
         """Archive messages to ChromaDB with batch metadata.
@@ -641,7 +657,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             ChromaArchiveError: If the ChromaDB add operation fails.
         """
         now = datetime.now()
-        metadata = {
+        metadata: Metadata = {
             "message_id": str(msg.id),
             "batch_id": batch_id,
             "msg_pos": msg_pos,
@@ -689,8 +705,17 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             hit_prev_batch_id = hit.get("prev_batch_id")
 
             if not hit_batch_id:
-                return [{"content": hit["content"], "role": hit["role"], "timestamp": hit["timestamp"],
-                         "message_id": hit["message_id"], "batch_id": None, "msg_pos": None, "prev_batch_id": None}]
+                return [
+                    {
+                        "content": hit["content"],
+                        "role": hit["role"],
+                        "timestamp": hit["timestamp"],
+                        "message_id": hit["message_id"],
+                        "batch_id": None,
+                        "msg_pos": None,
+                        "prev_batch_id": None,
+                    }
+                ]
 
             context_messages = await self._get_batch_by_id(user_id, hit_batch_id)
 
@@ -731,9 +756,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to search messages for user {user_id}: {e}")
             return []
 
-    async def _semantic_search(
-        self, user_id: int, query: str, n_results: int
-    ) -> MemorySearchResult | None:
+    async def _semantic_search(self, user_id: int, query: str, n_results: int) -> MemorySearchResult | None:
         """Perform semantic search.
 
         Args:
@@ -766,7 +789,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                     timestamp=str(metadata.get("timestamp", "")),
                     message_id=str(metadata.get("message_id", "")),
                     batch_id=str(metadata.get("batch_id", "")),
-                    msg_pos=int(metadata.get("msg_pos", -1)),
+                    msg_pos=int(str(metadata.get("msg_pos", -1))),
                     prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
                 )
             return None
@@ -775,9 +798,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Semantic search failed: {e}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
-    async def _get_batch_by_id(
-        self, user_id: int, batch_id: str
-    ) -> list[MemorySearchResult]:
+    async def _get_batch_by_id(self, user_id: int, batch_id: str) -> list[MemorySearchResult]:
         """Get all messages in a batch by batch_id.
 
         Args:
@@ -797,9 +818,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get batch {batch_id}: {e}")
             return []
 
-    async def _get_batch_by_prev_id(
-        self, user_id: int, prev_batch_id: str
-    ) -> list[MemorySearchResult]:
+    async def _get_batch_by_prev_id(self, user_id: int, prev_batch_id: str) -> list[MemorySearchResult]:
         """Get a batch by its ID (alias for _get_batch_by_id for previous batch).
 
         Args:
@@ -811,9 +830,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         """
         return await self._get_batch_by_id(user_id, prev_batch_id)
 
-    async def _get_next_batch(
-        self, user_id: int, current_batch_id: str
-    ) -> list[MemorySearchResult]:
+    async def _get_next_batch(self, user_id: int, current_batch_id: str) -> list[MemorySearchResult]:
         """Get the batch that follows the current one (by prev_batch_id reference).
 
         Args:
@@ -833,11 +850,11 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get next batch: {e}")
             return []
 
-    def _format_batch_results(self, result: dict) -> list[MemorySearchResult]:
+    def _format_batch_results(self, result: GetResult) -> list[MemorySearchResult]:
         """Format raw ChromaDB collection.get() result into search results.
 
         Args:
-            result: Raw dict from ChromaDB with "documents" and "metadatas" keys.
+            result: Raw result from ChromaDB (GetResult / QueryResult TypedDict).
 
         Returns:
             List of formatted MemorySearchResult dicts; empty list if no data.
@@ -846,9 +863,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         documents = result.get("documents")
         metadatas = result.get("metadatas")
 
-        if documents and metadatas and len(documents) > 0:
-            for i, doc in enumerate(documents):
-                metadata = metadatas[i]
+        if documents and metadatas:
+            for doc, metadata in zip(documents, metadatas):
                 formatted.append(
                     MemorySearchResult(
                         content=doc,
@@ -856,7 +872,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                         timestamp=str(metadata.get("timestamp", "")),
                         message_id=str(metadata.get("message_id", "")),
                         batch_id=str(metadata.get("batch_id", "")),
-                        msg_pos=int(metadata.get("msg_pos", -1)),
+                        msg_pos=int(str(metadata.get("msg_pos", -1))),
                         prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
                     )
                 )
@@ -929,14 +945,11 @@ def create_memory() -> LongConversationMemory | None:
             embedding_function = DefaultEmbeddingFunction()
 
     try:
+        conversation_memory: LongConversationMemory
         if application_settings.chroma_host:
-            conversation_memory = ExternalChromaLongConversationMemory(
-                embedding_function=embedding_function
-            )
+            conversation_memory = ExternalChromaLongConversationMemory(embedding_function=embedding_function)
         else:
-            conversation_memory = InternalChromaLongConversationMemory(
-                embedding_function=embedding_function
-            )
+            conversation_memory = InternalChromaLongConversationMemory(embedding_function=embedding_function)
 
         logger.info("Semantic memory initialized successfully")
         return conversation_memory
