@@ -136,6 +136,9 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         Returns:
             ArchiveState.
+
+        Raises:
+            ChromaCollectionError: If collection access fails.
         """
         key = (user_id, thread_id)
         if key not in self._archive_state:
@@ -517,7 +520,17 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         return str(ulid.ulid())
 
     async def _get_last_batch_id(self, user_id: int, thread_id: int = 0) -> str | None:
-        """Get batch_id of the most recent message for this user+thread in ChromaDB."""
+        """Get batch_id of the most recent message for this user+thread in ChromaDB.
+
+        Filters to the last 7 days using the numeric timestamp_unix field.
+
+        Args:
+            user_id: The user ID.
+            thread_id: The thread ID.
+
+        Returns:
+            The most recent batch_id, or None if no recent messages or on error.
+        """
         try:
             collection = await self._get_or_create_collection(user_id, thread_id)
             one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
@@ -556,7 +569,18 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         return self._client
 
     async def _get_or_create_collection(self, user_id: int, thread_id: int = 0) -> AsyncCollection:
-        """Get or create collection for user+thread."""
+        """Get or create collection for user+thread.
+
+        Args:
+            user_id: The user ID.
+            thread_id: The thread ID.
+
+        Returns:
+            ChromaDB async collection instance.
+
+        Raises:
+            ChromaCollectionError: If collection access fails.
+        """
         collection_name = self._get_collection_name(user_id, thread_id)
         client = await self._get_client()
         try:
@@ -617,7 +641,19 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         user_id: int,
         thread_id: int = 0,
     ) -> None:
-        """Archive a single message to ChromaDB with batch metadata."""
+        """Archive a single message to ChromaDB with batch metadata.
+
+        Args:
+            msg: Message to archive.
+            batch_id: Current batch ID.
+            msg_pos: Position of message within the batch.
+            prev_batch_id: Previous batch ID (for context retrieval).
+            user_id: The user ID.
+            thread_id: Thread ID.
+
+        Raises:
+            ChromaArchiveError: If the ChromaDB add operation fails.
+        """
         now = datetime.now()
         metadata: Metadata = {
             "message_id": str(msg.id),
@@ -702,7 +738,20 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
     async def _semantic_search(
         self, user_id: int, query: str, n_results: int, thread_id: int = 0
     ) -> MemorySearchResult | None:
-        """Perform semantic search."""
+        """Perform semantic search against archived messages.
+
+        Args:
+            user_id: The user ID.
+            query: Search query string.
+            n_results: Max results (only top hit used).
+            thread_id: Thread ID.
+
+        Returns:
+            Best matching MemorySearchResult or None if no hits.
+
+        Raises:
+            ChromaSearchError: If the search query fails.
+        """
         try:
             collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.query(
@@ -732,7 +781,16 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
     async def _get_batch_by_id(self, user_id: int, batch_id: str, thread_id: int = 0) -> list[MemorySearchResult]:
-        """Get all messages in a batch by batch_id."""
+        """Get all messages in a batch by batch_id.
+
+        Args:
+            user_id: The user ID.
+            batch_id: Batch ID to retrieve.
+            thread_id: Thread ID.
+
+        Returns:
+            List of MemorySearchResult objects; empty list on error or no matches.
+        """
         try:
             collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.get(where={"batch_id": batch_id})
@@ -744,13 +802,31 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
     async def _get_batch_by_prev_id(
         self, user_id: int, prev_batch_id: str, thread_id: int = 0
     ) -> list[MemorySearchResult]:
-        """Get a batch by its ID."""
+        """Get a batch by its prev_batch_id.
+
+        Args:
+            user_id: The user ID.
+            prev_batch_id: Previous batch ID to search for.
+            thread_id: Thread ID.
+
+        Returns:
+            List of MemorySearchResult objects; empty list if not found.
+        """
         return await self._get_batch_by_id(user_id, prev_batch_id, thread_id)
 
     async def _get_next_batch(
         self, user_id: int, current_batch_id: str, thread_id: int = 0
     ) -> list[MemorySearchResult]:
-        """Get the batch that follows the current one."""
+        """Get the batch that follows the current one.
+
+        Args:
+            user_id: The user ID.
+            current_batch_id: Current batch ID to find successor for.
+            thread_id: Thread ID.
+
+        Returns:
+            List of MemorySearchResult objects; empty list if not found.
+        """
         try:
             collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.get(where={"prev_batch_id": current_batch_id})
@@ -784,7 +860,14 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         return formatted
 
     async def delete_old(self, retention_days: int) -> None:
-        """Delete archived messages older than retention_days."""
+        """Delete archived messages older than retention_days.
+
+        Args:
+            retention_days: Number of days to retain messages.
+
+        Raises:
+            ChromaDeleteError: If cleanup fails.
+        """
         cutoff = datetime.now() - timedelta(days=retention_days)
 
         try:
