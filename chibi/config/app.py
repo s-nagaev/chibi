@@ -72,6 +72,9 @@ class ApplicationSettings(BaseSettings):
     chroma_history_retention_days: int = Field(default=90)
     memory_search_limit: int = Field(default=5)
     embedding_function: Literal["LOCAL", "OPENAI", "GEMINI", "MISTRALAI"] = Field(default="LOCAL")
+    # Batch settings for context retrieval (by token count)
+    # batch_token_limit: int = Field(default=30000)
+    batch_token_limit: int = Field(default=2000)
 
     # Interface
     hide_models: bool = Field(default=False)
