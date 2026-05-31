@@ -68,21 +68,28 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
     async def _get_last_batch_id(self, user_id: int) -> str | None:
         """Get batch_id of the most recent message for this user in ChromaDB.
 
-        Used on first archive call to chain prev_batch_id from existing data.
+        Filters to the last 7 days using the numeric ``timestamp_unix`` field
+        so that ChromaDB's ``$gte`` can be used — no full scan or Python-side
+        filtering needed.  ``include=["metadatas"]`` avoids pulling documents.
 
         Args:
             user_id: The user ID.
 
         Returns:
-            The most recent batch_id, or None if no messages or on error.
+            The most recent batch_id, or None if no recent messages or on error.
         """
         try:
             collection = await self._get_or_create_collection(user_id)
-            result = await asyncio.to_thread(collection.get)
+            one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+            result = await asyncio.to_thread(
+                collection.get,
+                where={"timestamp_unix": {"$gte": one_week_ago}},
+                include=["metadatas"],
+            )
             metadatas = result.get("metadatas")
             if not metadatas:
                 return None
-            latest = max(metadatas, key=lambda m: str(m.get("timestamp", "")))
+            latest = max(metadatas, key=lambda m: float(m.get("timestamp_unix", 0)))
             bid = str(latest.get("batch_id", ""))
             return bid if bid else None
         except Exception as e:
@@ -217,13 +224,15 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaArchiveError: If the ChromaDB add operation fails.
         """
+        now = datetime.now()
         metadata = {
             "message_id": str(msg.id),
             "batch_id": batch_id,
             "msg_pos": msg_pos,
             "prev_batch_id": prev_batch_id or "",
             "role": msg.role,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
+            "timestamp_unix": now.timestamp(),
         }
 
         try:
@@ -483,14 +492,23 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         return str(ulid.ulid())
 
     async def _get_last_batch_id(self, user_id: int) -> str | None:
-        """Get batch_id of the most recent message for this user in ChromaDB."""
+        """Get batch_id of the most recent message for this user in ChromaDB.
+
+        Filters to the last 7 days using the numeric ``timestamp_unix`` field
+        so that ChromaDB's ``$gte`` can be used — no full scan or Python-side
+        filtering needed.  ``include=["metadatas"]`` avoids pulling documents.
+        """
         try:
             collection = await self._get_or_create_collection(user_id)
-            result = await collection.get()
+            one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+            result = await collection.get(
+                where={"timestamp_unix": {"$gte": one_week_ago}},
+                include=["metadatas"],
+            )
             metadatas = result.get("metadatas")
             if not metadatas:
                 return None
-            latest = max(metadatas, key=lambda m: str(m.get("timestamp", "")))
+            latest = max(metadatas, key=lambda m: float(m.get("timestamp_unix", 0)))
             bid = str(latest.get("batch_id", ""))
             return bid if bid else None
         except Exception as e:
@@ -622,13 +640,15 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaArchiveError: If the ChromaDB add operation fails.
         """
+        now = datetime.now()
         metadata = {
             "message_id": str(msg.id),
             "batch_id": batch_id,
             "msg_pos": msg_pos,
             "prev_batch_id": prev_batch_id or "",
             "role": msg.role,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
+            "timestamp_unix": now.timestamp(),
         }
 
         lock = await LockManager().get_lock(key=str(user_id))
