@@ -76,7 +76,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         Args:
             user_id: The user ID.
-            thread_id: The thread ID (default: 0).
+            thread_id: The thread ID.
 
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
@@ -106,7 +106,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         Args:
             user_id: The user ID.
-            thread_id: The thread ID (default: 0).
+            thread_id: The thread ID.
 
         Returns:
             ChromaDB collection instance.
@@ -132,7 +132,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         Args:
             user_id: The user ID.
-            thread_id: The thread ID (default: 0).
+            thread_id: The thread ID.
 
         Returns:
             ArchiveState.
@@ -174,15 +174,10 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
         """Archive messages to ChromaDB with batch metadata.
 
-        Each message is saved immediately. Token counting and batch_id rotation
-        happen inline: msg_pos increments while total tokens stay under limit;
-        on overflow the next message starts a new batch with prev_batch_id
-        pointing to the previous one.
-
         Args:
             user_id: The user ID.
             messages: List of messages to archive.
-            thread_id: Thread ID (default: 0).
+            thread_id: Thread ID.
 
         Raises:
             ChromaArchiveError: If any message fails to archive.
@@ -197,7 +192,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             for msg in messages:
                 msg_tokens = msg.estimate_tokens
 
-                # Save message first with current batch metadata
                 pos = state.next_msg_pos
                 await self._archive_message(
                     msg=msg,
@@ -206,7 +200,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                     prev_batch_id=state.prev_batch_id,
                     user_id=user_id,
                     thread_id=thread_id,
-                    token_count=state.token_count,
                 )
                 await self.update_archive_state(user_id, thread_id, msg_tokens)
         return None
@@ -219,7 +212,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         prev_batch_id: str | None,
         user_id: int,
         thread_id: int = 0,
-        token_count: int = 0,
     ) -> None:
         """Archive a single message to ChromaDB with batch metadata.
 
@@ -227,10 +219,9 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             msg: Message to archive.
             batch_id: Current batch ID.
             msg_pos: Position of message within the batch.
-            prev_batch_id: Previous batch ID (for context retrieval).
+            prev_batch_id: Previous batch ID.
             user_id: The user ID.
-            thread_id: Thread ID (default: 0).
-            token_count: Current accumulated token count for logging.
+            thread_id: Thread ID.
 
         Raises:
             ChromaArchiveError: If the ChromaDB add operation fails.
@@ -255,9 +246,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 ids=[str(msg.id)],
                 documents=[msg.content],
             )
-            logger.debug(
-                f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos} with avr_tokens {token_count}"
-            )
+            return None
         except Exception as e:
             logger.error(f"Failed to archive message {msg.id}: {e}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
@@ -271,8 +260,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Args:
             user_id: The user ID.
             query: Search query string.
-            n_results: Max results for semantic search (top hit used for context).
-            thread_id: Thread ID (default: 0).
+            n_results: Max results for semantic search.
+            thread_id: Thread ID.
 
         Returns:
             List of search results with context; empty list on error or no matches.
@@ -304,8 +293,6 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
             # Step 3: Get current batch
             context_messages = await self._get_batch_by_field(user_id, hit_batch_id, thread_id=thread_id)
-
-            # Get actual batch size in database (handles partial batches correctly)
             current_batch_count = len(context_messages)
 
             # Near beginning: add previous batch (only if valid prev_batch_id exists)
@@ -347,15 +334,15 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             return []
 
     async def _semantic_search(
-        self, user_id: int, query: str, n_results: int, thread_id: int = 0
+        self, user_id: int, query: str, n_results: int = 1, thread_id: int = 0
     ) -> MemorySearchResult | None:
         """Perform semantic search.
 
         Args:
             user_id: The user ID.
             query: Search query string.
-            n_results: Max results (only top hit used).
-            thread_id: Thread ID (default: 0).
+            n_results: Max results.
+            thread_id: Thread ID.
 
         Returns:
             Best matching MemorySearchResult or None if no hits.
@@ -368,7 +355,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             result = await asyncio.to_thread(
                 collection.query,
                 query_texts=[query],
-                n_results=1,
+                n_results=n_results,
             )
 
             documents = result.get("documents")
@@ -401,14 +388,11 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
     ) -> list[MemorySearchResult]:
         """Get all messages matching a batch-related metadata field.
 
-        Used both for direct batch lookup (field="batch_id") and reverse
-        lookup (field="prev_batch_id") to find the next batch.
-
         Args:
             user_id: The user ID.
             batch_id: Value to match against the metadata field.
-            field: Metadata field name to filter by ("batch_id" or "prev_batch_id").
-            thread_id: Thread ID (default: 0).
+            field: Metadata field name to filter by.
+            thread_id: Thread ID.
 
         Returns:
             List of formatted search results; empty list on error or no matches.
@@ -426,7 +410,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get batch {batch_id}: {e}")
             return []
 
-    def _format_batch_results(self, result: GetResult) -> list[MemorySearchResult]:
+    @staticmethod
+    def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
         """Format raw ChromaDB collection.get() result into search results.
 
         Args:
@@ -501,6 +486,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
 
     Same features as InternalChromaLongConversationMemory but uses
     async HTTP client for external ChromaDB server.
+
+    Features:
+        - Per-message persistence with batch metadata (batch_id, msg_pos, prev_batch_id)
+        - Context retrieval (neighboring batches around semantic search hits)
+        - No full scan required
+        - Restart-safe: prev_batch_id is loaded from DB on first archive call
+        - Per-thread batch: each thread_id has separate batch tracking
     """
 
     def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
@@ -514,11 +506,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
         )
 
-    def _get_batch_token_limit(self) -> int:
+    @staticmethod
+    def _get_batch_token_limit() -> int:
         """Get configured batch token limit."""
         return application_settings.batch_token_limit
 
-    def _generate_batch_id(self) -> str:
+    @staticmethod
+    def _generate_batch_id() -> str:
         """Generate chronologically ordered unique batch ID via ULID."""
         return str(ulid.ulid())
 
@@ -612,6 +606,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                     state.batch_id = self._generate_batch_id()
                     state.next_msg_pos = 0
                     state.token_count = 0
+        return None
 
     async def _archive_message(
         self,
@@ -764,7 +759,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             logger.error(f"Failed to get next batch: {e}")
             return []
 
-    def _format_batch_results(self, result: GetResult) -> list[MemorySearchResult]:
+    @staticmethod
+    def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
         """Format raw ChromaDB collection.get() result into search results."""
         formatted: list[MemorySearchResult] = []
         documents = result.get("documents")
