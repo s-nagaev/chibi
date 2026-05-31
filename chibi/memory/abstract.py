@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 
+import ulid
+from chromadb import GetResult
 from pydantic import BaseModel
 
+from chibi.config import application_settings
 from chibi.models import Message
 from chibi.utils.app import SingletonMeta
 
@@ -28,6 +31,48 @@ class ArchiveState(BaseModel):
 
 class LongConversationMemory(ABC, metaclass=SingletonMeta):
     """Abstract base class for long-term conversation memory storage."""
+
+    @staticmethod
+    def _get_batch_token_limit() -> int:
+        """Get configured batch token limit."""
+        return application_settings.batch_token_limit
+
+    @staticmethod
+    def _generate_batch_id() -> str:
+        """Generate chronologically ordered unique batch ID via ULID."""
+        return str(ulid.ulid())
+
+    @staticmethod
+    def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
+        """Format raw ChromaDB collection.get() result into search results.
+
+        Args:
+            result: Raw result from ChromaDB (dict with 'documents', 'metadatas').
+
+        Returns:
+            List of formatted MemorySearchResult dicts; empty list if no data.
+        """
+
+        formatted: list[MemorySearchResult] = []
+        documents = result.get("documents")
+        metadatas = result.get("metadatas")
+
+        if documents and metadatas:
+            for doc, metadata in zip(documents, metadatas):
+                formatted.append(
+                    MemorySearchResult(
+                        content=doc,
+                        role=str(metadata.get("role", "")),
+                        timestamp=str(metadata.get("timestamp", "")),
+                        message_id=str(metadata.get("message_id", "")),
+                        batch_id=str(metadata.get("batch_id", "")),
+                        msg_pos=int(str(metadata.get("msg_pos", -1))),
+                        prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
+                        thread_id=int(str(metadata.get("thread_id", 0))),
+                    )
+                )
+
+        return formatted
 
     @abstractmethod
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
