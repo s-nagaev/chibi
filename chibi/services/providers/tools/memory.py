@@ -316,11 +316,16 @@ class SearchInConversationHistoryTool(ChibiTool):
             raise ToolException("Semantic memory is not configured.")
 
         user_id = kwargs.get("user_id")
+        interface = cls.get_interface(kwargs=kwargs)
+        thread_id = interface.thread_id
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
 
         results = await memory.search(
-            user_id=user_id, query=query, n_results=limit or application_settings.memory_search_limit
+            user_id=user_id,
+            query=query,
+            n_results=limit or application_settings.memory_search_limit,
+            thread_id=thread_id,
         )
 
         if not results:
