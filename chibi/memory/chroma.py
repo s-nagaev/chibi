@@ -6,7 +6,7 @@ from typing import cast
 
 import chromadb
 import ulid
-from chromadb import EmbeddingFunction, GetResult, Metadata, Where
+from chromadb import Collection, EmbeddingFunction, GetResult, Metadata, Where
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.utils.embedding_functions import (
@@ -16,6 +16,7 @@ from chromadb.utils.embedding_functions import (
     OpenAIEmbeddingFunction,
 )
 from loguru import logger
+from pydantic import BaseModel
 
 from chibi.config import application_settings
 from chibi.exceptions import (
@@ -33,11 +34,18 @@ from chibi.models import Message
 from chibi.services.lock_manager import LockManager
 
 
+class ArchiveState(BaseModel):
+    batch_id: str
+    prev_batch_id: str | None = None
+    next_msg_pos: int
+    token_count: int
+
+
 class InternalChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using embedded PersistentClient.
 
     This class uses ChromaDB's persistent client to store conversation history
-    locally on disk. Supports batch metadata and context retrieval.
+    locally on disk. Supports context retrieval.
 
     Features:
         - Per-message persistence with batch metadata (batch_id, msg_pos, prev_batch_id)
@@ -54,23 +62,23 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         # Per-user archive state: tracks current batch metadata and token counts
-        self._archive_state: dict[int, dict] = {}
+        self._archive_state: dict[int, ArchiveState] = {}
         logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
 
-    def _get_batch_token_limit(self) -> int:
+    @staticmethod
+    def _get_batch_token_limit() -> int:
         """Get configured batch token limit."""
         return application_settings.batch_token_limit
 
-    def _generate_batch_id(self) -> str:
+    @staticmethod
+    def _generate_batch_id() -> str:
         """Generate chronologically ordered unique batch ID via ULID."""
         return str(ulid.ulid())
 
     async def _get_last_batch_id(self, user_id: int) -> str | None:
         """Get batch_id of the most recent message for this user in ChromaDB.
 
-        Filters to the last 7 days using the numeric ``timestamp_unix`` field
-        so that ChromaDB's ``$gte`` can be used — no full scan or Python-side
-        filtering needed.  ``include=["metadatas"]`` avoids pulling documents.
+        Filters to the last 7 days using the numeric, include=["metadatas"] to avoid pulling documents.
 
         Args:
             user_id: The user ID.
@@ -92,17 +100,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             metadatas = result.get("metadatas")
             if not metadatas:
                 return None
-            latest = max(
-                metadatas,
-                key=lambda m: float(str(m.get("timestamp_unix", 0))),
-            )
-            bid = str(latest.get("batch_id", ""))
+            latest = max(metadatas, key=lambda m: float(str(m.get("timestamp_unix", 0))))
+            bid = str(latest.get("batch_id"))
             return bid if bid else None
         except Exception as e:
             logger.error(f"Failed to get last batch_id for user {user_id}: {e}")
             return None
 
-    async def _get_or_create_collection(self, user_id: int) -> "chromadb.Collection":
+    async def _get_or_create_collection(self, user_id: int) -> Collection:
         """Get or create a collection for user.
 
         Args:
@@ -124,7 +129,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         except Exception as e:
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
-    async def get_or_create_archive_state(self, user_id: int) -> dict:
+    async def get_or_create_archive_state(self, user_id: int) -> ArchiveState:
         """Get or create per-user archive state.
 
         On first call for a user, queries ChromaDB for the last batch_id
@@ -134,16 +139,16 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             user_id: The user ID.
 
         Returns:
-            Dict with keys: batch_id, prev_batch_id, next_msg_pos, token_count.
+            ArchiveState.
         """
         if user_id not in self._archive_state:
             last_batch_id = await self._get_last_batch_id(user_id)
-            self._archive_state[user_id] = {
-                "batch_id": self._generate_batch_id(),
-                "prev_batch_id": last_batch_id,
-                "next_msg_pos": 0,
-                "token_count": 0,
-            }
+            self._archive_state[user_id] = ArchiveState(
+                batch_id=self._generate_batch_id(),
+                prev_batch_id=last_batch_id,
+                next_msg_pos=0,
+                token_count=0,
+            )
         return self._archive_state[user_id]
 
     async def update_archive_state(self, user_id: int, tokens_to_add: int) -> None:
@@ -158,14 +163,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             tokens_to_add: Number of tokens to add to the current batch count.
         """
         state = await self.get_or_create_archive_state(user_id=user_id)
-        state["token_count"] += tokens_to_add
-        state["next_msg_pos"] += 1
+        state.token_count += tokens_to_add
+        state.next_msg_pos += 1
 
-        if state["token_count"] > self._get_batch_token_limit():
-            state["prev_batch_id"] = state["batch_id"]
-            state["batch_id"] = self._generate_batch_id()
-            state["next_msg_pos"] = 0
-            state["token_count"] = 0
+        if state.token_count > self._get_batch_token_limit():
+            state.prev_batch_id = state.batch_id
+            state.batch_id = self._generate_batch_id()
+            state.next_msg_pos = 0
+            state.token_count = 0
         return None
 
     async def archive(self, user_id: int, messages: list[Message]) -> None:
