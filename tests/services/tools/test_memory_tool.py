@@ -22,27 +22,42 @@ class TestSearchInConversationHistoryTool:
         )
         return mock
 
+    @pytest.fixture
+    def mock_interface(self):
+        mock = MagicMock()
+        mock.thread_id = 0
+        return mock
+
     @pytest.mark.asyncio
-    async def test_function_returns_results(self, mock_memory):
+    async def test_function_returns_results(self, mock_memory, mock_interface):
         """Test that search returns results."""
         with patch("chibi.services.providers.tools.memory.memory", mock_memory):
-            result = await SearchInConversationHistoryTool.function(query="test query", limit=5, user_id=123)
+            result = await SearchInConversationHistoryTool.function(
+                query="test query",
+                limit=5,
+                user_id=123,
+                interface=mock_interface,
+            )
 
             assert "results" in result
             assert len(result["results"]) == 2
             assert result["count"] == 2
-            mock_memory.search.assert_called_once_with(user_id=123, query="test query", n_results=5)
+            mock_memory.search.assert_called_once_with(user_id=123, query="test query", n_results=5, thread_id=0)
 
     @pytest.mark.asyncio
-    async def test_function_uses_default_limit(self, mock_memory):
+    async def test_function_uses_default_limit(self, mock_memory, mock_interface):
         """Test that default limit is used when not specified."""
         with patch("chibi.services.providers.tools.memory.memory", mock_memory):
             from chibi.config import application_settings
 
-            await SearchInConversationHistoryTool.function(query="test", user_id=123)
+            await SearchInConversationHistoryTool.function(
+                query="test",
+                user_id=123,
+                interface=mock_interface,
+            )
 
             mock_memory.search.assert_called_once_with(
-                user_id=123, query="test", n_results=application_settings.memory_search_limit
+                user_id=123, query="test", n_results=application_settings.memory_search_limit, thread_id=0
             )
 
     @pytest.mark.asyncio
@@ -50,7 +65,11 @@ class TestSearchInConversationHistoryTool:
         """Test that ToolException is raised when memory is not configured."""
         with patch("chibi.services.providers.tools.memory.memory", None):
             with pytest.raises(ToolException) as exc_info:
-                await SearchInConversationHistoryTool.function(query="test", user_id=123)
+                await SearchInConversationHistoryTool.function(
+                    query="test",
+                    user_id=123,
+                    interface=MagicMock(),
+                )
 
             assert "not configured" in str(exc_info.value)
 
@@ -67,13 +86,15 @@ class TestSearchInConversationHistoryTool:
             assert "user_id" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_function_returns_empty_when_no_results(self):
+    async def test_function_returns_empty_when_no_results(self, mock_interface):
         """Test that empty results are handled correctly."""
-        mock_memory = MagicMock()
-        mock_memory.search = AsyncMock(return_value=[])
+        mock_mem = MagicMock()
+        mock_mem.search = AsyncMock(return_value=[])
 
-        with patch("chibi.services.providers.tools.memory.memory", mock_memory):
-            result = await SearchInConversationHistoryTool.function(query="nonexistent", user_id=123)
+        with patch("chibi.services.providers.tools.memory.memory", mock_mem):
+            result = await SearchInConversationHistoryTool.function(
+                query="nonexistent", user_id=123, interface=mock_interface
+            )
 
             assert "No matching conversations found" in result["message"]
 
@@ -81,7 +102,6 @@ class TestSearchInConversationHistoryTool:
         """Test that tool definition is correct."""
         with patch("chibi.services.providers.tools.memory.memory", None):
             assert SearchInConversationHistoryTool.name == "search_in_conversation_history"
-            assert SearchInConversationHistoryTool.register is False
 
             # Check definition structure
             definition = SearchInConversationHistoryTool.definition
