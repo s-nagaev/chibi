@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import TypedDict
+
+from pydantic import BaseModel
 
 from chibi.models import Message
 from chibi.utils.app import SingletonMeta
@@ -7,7 +8,7 @@ from chibi.utils.app import SingletonMeta
 EDGE_THRESHOLD = 2
 
 
-class MemorySearchResult(TypedDict):
+class MemorySearchResult(BaseModel):
     content: str
     role: str
     timestamp: str
@@ -16,6 +17,13 @@ class MemorySearchResult(TypedDict):
     msg_pos: int | None
     prev_batch_id: str | None
     thread_id: int | None
+
+
+class ArchiveState(BaseModel):
+    batch_id: str
+    prev_batch_id: str | None = None
+    next_msg_pos: int
+    token_count: int
 
 
 class LongConversationMemory(ABC, metaclass=SingletonMeta):
