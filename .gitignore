@@ -149,3 +149,4 @@ data/*
 
 # Project-specific
 .project/
+AGENTS.md

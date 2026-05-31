@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [1.9.0] - 2026-05-31
+
+### Added
+- **Telegram topic commands** for managing threads in private chats:
+  - `/new_thread [name]` — create a new topic with clean LLM context (auto-names "Thread N")
+  - `/new_thread_with_current_context [name]` — create a new topic and clone the current context (messages, model preferences)
+  - `/drop_thread confirm` — delete current thread (requires confirmation; refuses thread 0 or single-thread state)
+- **AI rename tool:** `RenameThreadTool` — assistant can rename the current topic
+- **Topic name sync:** bot tracks topic renames via `forum_topic_edited`/`forum_topic_created` service messages
+- **Feature gate:** commands appear only when topics enabled via @BotFather (`has_topics_enabled`)
+- **User model:** `thread_names` field for persisting thread name mappings
+
+
 ## [1.8.1] - 2026-05-28
 
 ### Added
@@ -511,7 +524,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/s-nagaev/chibi/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/s-nagaev/chibi/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/s-nagaev/chibi/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/s-nagaev/chibi/compare/v1.7.1...v1.7.2

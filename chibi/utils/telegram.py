@@ -199,6 +199,7 @@ async def send_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     reply: bool = True,
+    thread_id: int | None = None,
     **kwargs: Any,
 ) -> TelegramMessage:
     """Send a message via Telegram.
@@ -207,6 +208,7 @@ async def send_message(
         update: The incoming Telegram update.
         context: The update context.
         reply: Whether to reply to the message.
+        thread_id: The message thread ID.
         **kwargs: Additional arguments for send_message.
 
     Returns:
@@ -215,16 +217,16 @@ async def send_message(
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
 
+    target_thread_id = thread_id if thread_id is not None else telegram_message.message_thread_id
+
     if reply:
         return await context.bot.send_message(
             chat_id=telegram_chat.id,
             reply_to_message_id=telegram_message.message_id,
-            message_thread_id=telegram_message.message_thread_id,
+            message_thread_id=target_thread_id,
             **kwargs,
         )
-    return await context.bot.send_message(
-        chat_id=telegram_chat.id, message_thread_id=telegram_message.message_thread_id, **kwargs
-    )
+    return await context.bot.send_message(chat_id=telegram_chat.id, message_thread_id=target_thread_id, **kwargs)
 
 
 async def send_long_message(
@@ -234,6 +236,7 @@ async def send_long_message(
     parse_mode: str | None = None,
     normalize_md: bool = True,
     reply: bool = True,
+    thread_id: int | None = None,
 ) -> None:
     """Send a long message, splitting it if necessary.
 
@@ -244,6 +247,7 @@ async def send_long_message(
         parse_mode: The parse mode for the message.
         normalize_md: Whether to normalize Markdown.
         reply: Whether to reply to the message.
+        thread_id: The message thread ID.
     """
     if normalize_md:
         message = telegramify_markdown.markdownify(message)
@@ -261,6 +265,7 @@ async def send_long_message(
             text=chunk,
             parse_mode=parse_mode,
             reply=chunk_number == 0 if reply else False,
+            thread_id=thread_id,
         )
 
 
@@ -416,6 +421,7 @@ async def send_message_in_plain_text_and_file(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     reply: bool = True,
+    thread_id: int | None = None,
 ) -> None:
     """Send a message as plain text and as a file.
 
@@ -424,11 +430,16 @@ async def send_message_in_plain_text_and_file(
         update: The incoming Telegram update.
         context: The update context.
         reply: Whether to reply to the message.
+        thread_id: The message thread ID.
     """
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
 
-    await send_long_message(message=message, update=update, context=context, normalize_md=False, reply=reply)
+    target_thread_id = thread_id or telegram_message.message_thread_id
+
+    await send_long_message(
+        message=message, update=update, context=context, normalize_md=False, reply=reply, thread_id=target_thread_id
+    )
     file = BytesIO()
     file.write(message.encode())
     file.seek(0)
@@ -437,17 +448,19 @@ async def send_message_in_plain_text_and_file(
         "I'll additionally add your answer to the markdown file. 👇"
     )
 
-    await send_message(update=update, context=context, text=explain_message_text, reply=False)
+    await send_message(
+        update=update, context=context, text=explain_message_text, reply=False, thread_id=target_thread_id
+    )
     await context.bot.send_document(
         chat_id=telegram_chat.id,
         document=file,
         filename="answer.md",
-        message_thread_id=telegram_message.message_thread_id,
+        message_thread_id=target_thread_id,
     )
 
 
 async def send_answer_message(
-    message: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True
+    message: str, update: Update, context: ContextTypes.DEFAULT_TYPE, reply: bool = True, thread_id: int | None = None
 ) -> None:
     """Send an answer message, handling potential Markdown errors.
 
@@ -456,6 +469,7 @@ async def send_answer_message(
         update: The incoming Telegram update.
         context: The update context.
         reply: Whether to reply to the message.
+        thread_id: The message thread ID.
     """
     try:
         await send_long_message(
@@ -464,13 +478,16 @@ async def send_answer_message(
             context=context,
             parse_mode=constants.ParseMode.MARKDOWN_V2,
             reply=reply,
+            thread_id=thread_id,
         )
     except BadRequest as e:
         logger.error(
             f"{user_data(update)} got a Telegram Bad Request error in the {chat_data(update)} "
             f"while receiving GPT answer: {e}. Trying to re-send it in plain text mode."
         )
-        await send_message_in_plain_text_and_file(message=message, update=update, context=context, reply=reply)
+        await send_message_in_plain_text_and_file(
+            message=message, update=update, context=context, reply=reply, thread_id=thread_id
+        )
 
 
 def current_user_action(context: ContextTypes.DEFAULT_TYPE) -> UserAction:

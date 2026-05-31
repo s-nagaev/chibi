@@ -1,5 +1,6 @@
 import datetime
 import json
+import time
 from copy import deepcopy
 from datetime import timezone
 from io import BytesIO
@@ -35,12 +36,8 @@ async def set_active_model(db: Database, interface: UserInterface, model: ModelC
         user.thread_selected_image_model[interface.thread_id] = SelectedModel(
             name=model.name, provider_name=model.provider
         )
-        # user.selected_image_model_name = model.name  # TODO: Legacy
-        # user.selected_image_provider_name = model.provider  # TODO: Legacy
     else:
         user.thread_selected_llm[interface.thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
-        # user.selected_gpt_model_name = model.name  # TODO: Legacy
-        # user.selected_gpt_provider_name = model.provider  # TODO: Legacy
     await db.save_user(user)
 
 
@@ -409,3 +406,71 @@ async def summarize_history(db: Database, user_id: int, thread_id: int) -> None:
     chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
     await reset_chat_history(user_id=user_id, thread_id=thread_id)
     await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl, thread_id=thread_id)
+
+
+@inject_database
+async def save_thread_name(db: Database, user_id: int, thread_id: int, name: str) -> None:
+    """Save the name of a specific thread for the user.
+
+    Args:
+        db: The database instance.
+        user_id: The ID of the user.
+        thread_id: The ID of the thread.
+        name: The name to save for the thread.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    user.thread_names[thread_id] = name
+    await db.save_user(user)
+
+
+@inject_database
+async def delete_thread_from_map(db: Database, user_id: int, thread_id: int) -> None:
+    """Delete a thread mapping from the user's saved thread names.
+
+    Args:
+        db: The database instance.
+        user_id: The ID of the user.
+        thread_id: The ID of the thread to delete.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    user.thread_names.pop(thread_id)
+    await db.save_user(user)
+
+
+@inject_database
+async def clone_thread_messages(
+    db: Database,
+    user_id: int,
+    old_thread_id: int,
+    new_thread_id: int,
+    name: str | None = None,
+) -> int:
+    """Clone messages and settings from an old thread to a new thread.
+
+    Args:
+        db: The database instance.
+        user_id: The ID of the user.
+        old_thread_id: The ID of the thread to clone from.
+        new_thread_id: The ID of the thread to clone to.
+        name: The name of the new thread. Defaults to None.
+
+    Returns:
+        The number of messages that were cloned.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    existing_messages = await db.get_conversation_messages(user=user, thread_id=old_thread_id)
+
+    for i, message in enumerate(existing_messages):
+        cloned = deepcopy(message)
+        cloned.id = time.time_ns() + i
+        await db.add_message(user=user, message=cloned, thread_id=new_thread_id)
+
+    if old_thread_id in user.thread_selected_llm:
+        user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
+    if old_thread_id in user.thread_selected_image_model:
+        user.thread_selected_image_model[new_thread_id] = user.thread_selected_image_model[old_thread_id]
+
+    user.thread_names[new_thread_id] = name or str(new_thread_id)
+
+    await db.save_user(user)
+    return len(existing_messages)

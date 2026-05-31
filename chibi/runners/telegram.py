@@ -3,6 +3,7 @@ from typing import TypeVar
 
 from loguru import logger
 from telegram import (
+    Bot,
     BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
@@ -29,9 +30,12 @@ from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
+    handle_clone_thread,
+    handle_drop_thread,
     handle_image_generation,
     handle_image_understanding,
     handle_model_selection,
+    handle_new_thread,
     handle_provider_api_key_set,
     handle_reset,
     handle_stop,
@@ -119,6 +123,57 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_stop(interface=interface),
             user_id=-1,
+        )
+        return None
+
+    @check_user_allowance
+    async def drop_thread(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Command handler for dropping the current thread.
+
+        Args:
+            update: The Telegram update containing the command.
+            context: The context for this update.
+        """
+        telegram_message = get_telegram_message(update=update)
+        args = telegram_message.text.split()[1:] if telegram_message and telegram_message.text else []
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_drop_thread(interface=interface, args=args),
+            user_id=interface.user_id,
+        )
+        return None
+
+    @check_user_allowance
+    async def new_thread(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Command handler for creating a new thread.
+
+        Args:
+            update: The Telegram update containing the command.
+            context: The context for this update.
+        """
+        telegram_message = get_telegram_message(update=update)
+        args = telegram_message.text.split()[1:] if telegram_message and telegram_message.text else []
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_new_thread(interface=interface, args=args),
+            user_id=interface.user_id,
+        )
+        return None
+
+    @check_user_allowance
+    async def clone_thread(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Command handler for cloning the current thread.
+
+        Args:
+            update: The Telegram update containing the command.
+            context: The context for this update.
+        """
+        telegram_message = get_telegram_message(update=update)
+        args = telegram_message.text.split()[1:] if telegram_message and telegram_message.text else []
+        interface = TelegramInterface(update=update, context=context)
+        task_manager.run_task(
+            coro=handle_clone_thread(interface=interface, args=args),
+            user_id=interface.user_id,
         )
         return None
 
@@ -592,10 +647,69 @@ class ChibiBot:
 
         await inline_query.answer(results)
 
+    async def on_topic_service_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle topic service messages (e.g., topic created, topic edited).
+
+        Args:
+            update: The Telegram update containing the service message.
+            context: The context for this update.
+        """
+        message = update.message
+        if not message:
+            return None
+
+        telegram_user = get_telegram_user(update=update)
+        thread_id = message.message_thread_id or 0
+
+        from chibi.storage.database import inject_database
+
+        @inject_database
+        async def do_sync(db, user_id: int, thread_id: int) -> None:
+            """Synchronize thread name with the database.
+
+            Args:
+                db: The database instance injected by the decorator.
+                user_id: The Telegram user ID.
+                thread_id: The thread ID to sync.
+            """
+            from chibi.models import User
+
+            user: User = await db.get_or_create_user(user_id=user_id)
+            updated = False
+
+            if topic_edited := message.forum_topic_edited:
+                if topic_edited.name:
+                    user.thread_names[thread_id] = topic_edited.name
+                    updated = True
+            elif topic_created := message.forum_topic_created:
+                if topic_created.name:
+                    user.thread_names[thread_id] = topic_created.name
+                    updated = True
+
+            if updated:
+                await db.save_user(user)
+
+        await do_sync(user_id=telegram_user.id, thread_id=thread_id)
+        return None
+
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error occurred while handling an update: {context.error}")
 
     async def post_init(self, application: Application) -> None:
+        # Register topic-specific BotCommands (has_topics_enabled is now set in run())
+        bot = Bot(token=self.telegram_token)
+        me = await bot.get_me()
+        if me.has_topics_enabled:
+            self.commands.extend(
+                [
+                    BotCommand(command="new_thread", description="Create a new topic/thread with a clean LLM context"),
+                    BotCommand(
+                        command="new_thread_with_current_context",
+                        description="Create a new topic/thread and clone current LLM context to it.",
+                    ),
+                    BotCommand(command="drop_thread", description="Delete current thread"),
+                ]
+            )
         await application.bot.set_my_commands(self.commands)
 
     def run(self) -> None:
@@ -623,6 +737,10 @@ class ChibiBot:
         if gpt_settings.public_mode:
             app.add_handler(CommandHandler("set_api_key", self.show_api_key_set_menu))
 
+        app.add_handler(CommandHandler("new_thread", self.new_thread))
+        app.add_handler(CommandHandler("new_thread_with_current_context", self.clone_thread))
+        app.add_handler(CommandHandler("drop_thread", self.drop_thread))
+
         app.add_handler(CommandHandler("ask", self.ask))
         app.add_handler(CommandHandler("help", self.help))
         app.add_handler(CommandHandler("reset", self.reset))
@@ -646,6 +764,14 @@ class ChibiBot:
                 ],
             )
         )
+
+        app.add_handler(
+            MessageHandler(
+                filters.StatusUpdate.FORUM_TOPIC_EDITED | filters.StatusUpdate.FORUM_TOPIC_CREATED,
+                self.on_topic_service_message,
+            )
+        )
+
         # app.add_error_handler(self.error_handler)
         if application_settings.heartbeat_url:
             if not app.job_queue:
