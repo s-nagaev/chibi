@@ -494,7 +494,6 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         self.embedding_function = embedding_function
         # Per-user archive state: tracks current batch metadata and token counts
         self._archive_state: dict[int, ArchiveState] = {}
-        self._archive_locks: dict[int, asyncio.Lock] = {}
         logger.info(
             f"ChromaDB: using async external mode ("
             f"{application_settings.chroma_host}:{application_settings.chroma_port})"
@@ -600,11 +599,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         if not messages:
             return None
 
-        # Per-user lock to serialize archive calls for the same user
-        if user_id not in self._archive_locks:
-            self._archive_locks[user_id] = asyncio.Lock()
-
-        async with self._archive_locks[user_id]:
+        lock = await LockManager().get_lock(key=str(user_id))
+        async with lock:
             # Initialize state on first call: query DB for last batch_id
             if user_id not in self._archive_state:
                 last_batch_id = await self._get_last_batch_id(user_id)
@@ -672,19 +668,17 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
-        lock = await LockManager().get_lock(key=str(user_id))
-        async with lock:
-            try:
-                collection = await self._get_or_create_collection(user_id)
-                await collection.add(
-                    metadatas=[metadata],
-                    ids=[str(msg.id)],
-                    documents=[msg.content],
-                )
-                logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
-            except Exception as e:
-                logger.error(f"Failed to archive message {msg.id}: {e}")
-                raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
+        try:
+            collection = await self._get_or_create_collection(user_id)
+            await collection.add(
+                metadatas=[metadata],
+                ids=[str(msg.id)],
+                documents=[msg.content],
+            )
+            logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
+        except Exception as e:
+            logger.error(f"Failed to archive message {msg.id}: {e}")
+            raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
     async def search(self, user_id: int, query: str, n_results: int) -> list[MemorySearchResult]:
         """Search archived messages with context retrieval.
