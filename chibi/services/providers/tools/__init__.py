@@ -22,5 +22,6 @@ from .ocr_pdf import OcrPdfTool
 from .schemas import ToolResponseSchema
 from .send import SendAudioTool, SendImageTool, SendVideoTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
+from .topic import RenameThreadTool
 from .vision import AnalyzeImageTool, GetFileInfoTool
 from .web import DDGSWebSearchTool, GoogleSearchTool, ReadWebPageTool, SearchNewsTool

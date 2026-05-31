@@ -12,11 +12,15 @@ from chibi.services.providers.utils import get_usage_msg
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     check_history_and_summarize,
+    clone_thread_messages,
+    delete_thread_from_map,
     describe_image,
     generate_image,
+    get_chibi_user,
     get_llm_chat_completion_answer,
     get_models_available,
     reset_chat_history,
+    save_thread_name,
     set_active_model,
     set_api_key,
     user_has_reached_images_generation_limit,
@@ -246,3 +250,92 @@ async def handle_image_understanding(
 ) -> VisionResultSchema:
     file_bytes = await storage.get_bytes(file_id=file_id)
     return await describe_image(user_id=interface.user_id, image=file_bytes, mime_type=mime_type)
+
+
+async def handle_new_thread(interface: UserInterface, args: list[str] | None = None) -> None:
+    """Handle /new_thread command: create a Telegram forum thread and register it for the user.
+
+    Args:
+        interface: The user interface instance.
+        args: Optional list of arguments for the thread name.
+
+    Raises:
+        Exception: If an error occurs during thread creation.
+    """
+
+    try:
+        name = " ".join(args).strip() if args else ""
+        new_thread_id = await interface.create_thread(name=name)
+        if new_thread_id == -1:
+            await interface.send_message(
+                message="❌ Failed to create thread. Make sure the bot has the required permissions."
+            )
+            return None
+
+        await save_thread_name(user_id=interface.user_id, thread_id=new_thread_id, name=name)
+        await interface.send_message(message=f"✅ Thread created: {name} (ID: {new_thread_id})")
+    except Exception as e:
+        logger.error(f"{interface.user_data}: Error in /new_thread: {e}")
+        await interface.send_message(message="❌ An error occurred while creating the thread. Please try again later.")
+
+
+async def handle_clone_thread(interface: UserInterface, args: list[str] | None = None) -> None:
+    """Handle /clone_thread command: clone current thread messages and preferences to a new thread.
+
+    Args:
+        interface: The user interface instance.
+        args: Optional list of arguments for the cloned thread name.
+    """
+    user = await get_chibi_user(user_id=interface.user_id)
+    name = " ".join(args).strip() if args else None
+
+    if not name:
+        n = len(user.thread_messages_map) + 1
+        name = f"Thread {n}"
+
+    new_thread_id = await interface.create_thread(name=name)
+    if new_thread_id == -1:
+        await interface.send_message(
+            message="❌ Failed to create thread. Make sure the bot has the required permissions."
+        )
+        return None
+
+    cloned_messages = await clone_thread_messages(
+        user_id=interface.user_id, old_thread_id=interface.thread_id, new_thread_id=new_thread_id
+    )
+    message = f"✅ Thread cloned: {name} (ID: {new_thread_id}). {cloned_messages} messages copied."
+
+    await interface.send_message(message=message)
+    await interface.send_message(message=message, thread_id=new_thread_id)
+    return None
+
+
+async def handle_drop_thread(interface: UserInterface, args: list[str] | None = None) -> None:
+    """Handle /drop_thread command: permanently delete the current thread and all its messages.
+
+    Args:
+        interface: The user interface instance.
+        args: Optional list of arguments (e.g. for confirmation).
+    """
+
+    if interface.thread_id == 0:
+        await interface.send_message(message="❌ Cannot delete the default thread.")
+        return None
+
+    if not args or "confirm" not in args:
+        await interface.send_message(
+            message="⚠️ This will permanently delete this thread and all its messages. "
+            "Type `/drop_thread confirm` to proceed."
+        )
+        return None
+
+    success = await interface.delete_thread()
+    if not success:
+        await interface.send_message(
+            message="❌ Failed to delete thread. Make sure the bot has the required permissions."
+        )
+        return None
+
+    await reset_chat_history(user_id=interface.user_id, thread_id=interface.thread_id)
+    await delete_thread_from_map(user_id=interface.user_id, thread_id=interface.thread_id)
+    return None

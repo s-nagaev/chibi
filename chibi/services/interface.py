@@ -208,6 +208,36 @@ class UserInterface(ABC):
         """
         raise NotImplementedError
 
+    async def create_thread(self, name: str) -> int:
+        """Create a new thread/topic.
+
+        Args:
+            name: The name of the thread to create.
+
+        Returns:
+            The ID of the created thread.
+        """
+        raise NotImplementedError
+
+    async def rename_thread(self, new_name: str) -> bool:
+        """Rename the current thread/topic.
+
+        Args:
+            new_name: The new name for the thread.
+
+        Returns:
+            True if the thread was successfully renamed, False otherwise.
+        """
+        raise NotImplementedError
+
+    async def delete_thread(self) -> bool:
+        """Delete the current thread/topic.
+
+        Returns:
+            True if the thread was successfully deleted, False otherwise.
+        """
+        raise NotImplementedError
+
 
 class TelegramInterface(UserInterface):
     def __init__(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -369,7 +399,7 @@ class TelegramInterface(UserInterface):
             reply: Whether to reply to the user's message.
             **kwargs: Additional arguments for the message sending function.
         """
-        await send_answer_message(message=message, update=self.update, context=self.context, reply=reply)
+        await send_answer_message(message=message, update=self.update, context=self.context, reply=reply, **kwargs)
 
     async def send_audio(
         self,
@@ -495,3 +525,46 @@ class TelegramInterface(UserInterface):
     def set_caption(self, caption: str) -> None:
         self._caption = caption
         return None
+
+    async def create_thread(self, name: str) -> int:
+        """Create a new Telegram forum topic.
+
+        Args:
+            name: The name of the topic to create.
+
+        Returns:
+            The message thread ID of the created topic.
+        """
+        thread_name = name[:128] or "Untitled"
+        topic = await self.context.bot.create_forum_topic(
+            chat_id=self.chat_id,
+            name=thread_name,
+        )
+        return topic.message_thread_id
+
+    async def rename_thread(self, new_name: str) -> bool:
+        """Rename the current Telegram forum topic.
+
+        Args:
+            new_name: The new name for the topic.
+
+        Returns:
+            True if the topic was successfully renamed.
+        """
+        name = new_name[:128] if new_name else "Untitled"
+        return await self.context.bot.edit_forum_topic(
+            chat_id=self.chat_id,
+            message_thread_id=self.thread_id,
+            name=name,
+        )
+
+    async def delete_thread(self) -> bool:
+        """Delete the current Telegram forum topic.
+
+        Returns:
+            True if the topic was successfully deleted.
+        """
+        return await self.context.bot.delete_forum_topic(
+            chat_id=self.chat_id,
+            message_thread_id=self.thread_id,
+        )
