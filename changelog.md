@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Semantic Memory:** Implemented ChromaDB-backed long-term conversation memory
+  - Messages are automatically archived to vector storage when saved
+  - New `search_in_conversation_history` tool for semantic search through past conversations
+  - Configurable retention period (default 90 days)
+  - Supports both embedded and external ChromaDB deployments
+- Background job for automatic retention cleanup
+
 
 ## [1.9.0] - 2026-05-31
 

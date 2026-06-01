@@ -1,11 +1,12 @@
 import os
-from typing import Unpack
+from typing import Any, Unpack
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
+from chibi.memory.chroma import memory
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
@@ -256,3 +257,79 @@ class UnloadSkillTool(ChibiTool):
         )
         await deactivate_llm_skill(user_id=user_id, skill_name=skill_name)
         return {"status": "ok"}
+
+
+class SearchInConversationHistoryTool(ChibiTool):
+    """Tool to search through conversation history using semantic search.
+
+    This tool allows the AI agent to search through past conversations
+    using natural language queries. Requires ChromaDB to be configured.
+
+    Attributes:
+        register: Whether to register this tool (requires memory to be configured).
+        name: Tool name.
+        definition: Tool definition for OpenAI API.
+    """
+
+    register = bool(memory)
+    name = "search_in_conversation_history"
+
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="search_in_conversation_history",
+            description="Search through your conversation history using semantic search.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language search query"},
+                    "limit": {
+                        "type": "integer",
+                        "description": ("Maximum number of results to return"),
+                        "default": application_settings.memory_search_limit,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+    )
+
+    @classmethod
+    async def function(
+        cls, query: str, limit: int | None = None, **kwargs: Unpack[AdditionalOptions]
+    ) -> dict[str, Any]:
+        """Search through conversation history.
+
+        Args:
+            query: Natural language search query.
+            limit: Maximum number of results (default from settings).
+            kwargs: Additional options including user_id.
+
+        Returns:
+            Dictionary with search results and count.
+
+        Raises:
+            ToolException: If memory is not configured.
+            ValueError: If user_id is not provided.
+        """
+        if memory is None:
+            raise ToolException("Semantic memory is not configured.")
+
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ValueError("This function requires user_id to be automatically provided.")
+
+        interface = cls.get_interface(kwargs=kwargs)
+        thread_id = interface.thread_id
+
+        results = await memory.search(
+            user_id=user_id,
+            query=query,
+            n_results=limit or application_settings.memory_search_limit,
+            thread_id=thread_id,
+        )
+
+        if not results:
+            return {"message": "No matching conversations found"}
+
+        return {"results": results, "count": len(results)}

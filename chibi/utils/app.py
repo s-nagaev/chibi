@@ -1,3 +1,4 @@
+from abc import ABCMeta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
@@ -21,7 +22,7 @@ from chibi.exceptions import (
 from chibi.services.interface import UserInterface
 
 
-class SingletonMeta(type):
+class SingletonMeta(ABCMeta):
     _instances: dict[type, Any] = {}
 
     def __call__(cls, *args: Any, **kwargs: Any) -> Any:
@@ -118,6 +119,8 @@ def log_application_settings() -> None:
         f"Models whitelist: {models_whitelist}",
         "<magenta>Heartbeat:</magenta>",
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
+        "<magenta>ChromaDB:</magenta>",
+        f"Semantic memory: {SETTING_SET if application_settings.is_chroma_configured else SETTING_UNSET}",
     ]
     messages += _provider_statuses()
 

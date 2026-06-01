@@ -65,6 +65,17 @@ class ApplicationSettings(BaseSettings):
     influxdb_org: str | None = Field(default=None)
     influxdb_bucket: str | None = Field(default=None)
 
+    # ChromaDB settings
+    chroma_host: str = Field(default="")
+    chroma_port: int = Field(default=8000)
+    chroma_persist_dir: str = Field(default="")
+    chroma_history_retention_days: int = Field(default=90)
+    memory_search_limit: int = Field(default=5)
+    embedding_function: Literal["LOCAL", "OPENAI", "GEMINI", "MISTRALAI"] = Field(default="LOCAL")
+    # Batch settings for context retrieval (by token count)
+    # batch_token_limit: int = Field(default=30000)
+    batch_token_limit: int = Field(default=2000)
+
     # Interface
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
@@ -98,6 +109,10 @@ class ApplicationSettings(BaseSettings):
         if Path("run/.containerenv").is_file():
             return "podman"
         return "host"
+
+    @property
+    def is_chroma_configured(self) -> bool:
+        return bool(self.chroma_host or self.chroma_persist_dir)
 
     @property
     def running_in_container(self) -> bool:
