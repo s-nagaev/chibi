@@ -49,21 +49,28 @@ class Minimax(AnthropicFriendlyProvider):
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
-            return [
+            image_models = [
                 ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
             ]
 
-        supported_models = ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"]
-        return [
-            ModelChangeSchema(
-                provider=self.name,
-                name=model_name,
-                display_name=model_name,
-                image_generation=False,
-            )
-            for model_name in supported_models
-            if not gpt_settings.models_whitelist or model_name in gpt_settings.models_whitelist
-        ]
+            return self.filter_and_return_list_of_models(models=image_models, image_generation=image_generation)
+
+        models = await super().get_available_models()
+        if not models:
+            # Get models endpoint sometimes returns empty list, so we need a hacky fallback here
+            supported_models = [
+                "MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"
+            ]
+            models = [
+                ModelChangeSchema(
+                    provider=self.name,
+                    name=model_name,
+                    display_name=model_name,
+                    image_generation=False,
+                )
+                for model_name in supported_models
+            ]
+        return self.filter_and_return_list_of_models(models=models, image_generation=image_generation)
 
     async def speech(
         self, text: str, voice: str | None = default_tts_voice, model: str | None = default_tts_model

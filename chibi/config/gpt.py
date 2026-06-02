@@ -39,7 +39,7 @@ class GPTSettings(BaseSettings):
 
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
     image_n_choices: int = Field(default=1, ge=1, le=4)
-    image_quality: Literal["standard", "hd"] = Field(default="standard")
+    image_quality: Literal["standard", "hd", "low", "medium", "high", "auto"] = Field(default="auto")
     image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
     image_size_nano_banana: Literal["1K", "2K", "4K"] = Field(default="2K")
@@ -68,6 +68,7 @@ class GPTSettings(BaseSettings):
 
     image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
     models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
+    models_blacklist_raw: str | None = Field(alias="MODELS_BLACKLIST", default=None)
     proxy: str | None = Field(default=None)
     public_mode: bool = Field(default=False)
     show_llm_thoughts: bool = Field(default=False)
@@ -91,6 +92,10 @@ class GPTSettings(BaseSettings):
     @property
     def models_whitelist(self) -> list[str]:
         return [x.strip() for x in self.models_whitelist_raw.split(",")] if self.models_whitelist_raw else []
+
+    @property
+    def models_blacklist(self) -> list[str]:
+        return [x.strip() for x in self.models_blacklist_raw.split(",")] if self.models_blacklist_raw else []
 
     @property
     def image_generations_whitelist(self) -> list[str]:

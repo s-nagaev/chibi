@@ -15,39 +15,33 @@ SAMPLE_IMAGE_BYTES = (
 TEST_TOKEN = "test-token-for-vision"
 
 
+def _make_vision_mock(result: VisionResultSchema):
+    """Create an async mock for client.responses.create that returns output_text JSON."""
+
+    async def mock_create(*args, **kwargs):
+        mock_response = MagicMock()
+        mock_response.output_text = result.model_dump_json()
+        return mock_response
+
+    return mock_create
+
+
 @pytest.mark.asyncio
 async def test_vision_basic_image_analysis():
     """Test basic image analysis with vision method."""
     provider = OpenAI(token=TEST_TOKEN)
 
-    # Create mock client
     mock_client = MagicMock()
-
-    # Create a real VisionResultSchema for the mock
     mock_result = VisionResultSchema(
         short_description="A test image",
         full_description="This is a test image description",
         text=None,
     )
-
-    # Create mock for parse
-    async def mock_parse(*args, **kwargs):
-        # Use wraps to make mock_message.parsed return our real schema
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        return mock_response
-
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = _make_vision_mock(mock_result)
     provider.__dict__["_mock_client"] = mock_client
 
     result = await provider.vision(image=SAMPLE_IMAGE_BYTES, mime_type="image/png")
 
-    # Verify the result
     assert isinstance(result, VisionResultSchema)
     assert result.short_description == "A test image"
     assert result.full_description == "This is a test image description"
@@ -64,18 +58,7 @@ async def test_vision_with_custom_model():
         full_description="Testing with custom model",
         text=None,
     )
-
-    async def mock_parse(*args, **kwargs):
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        return mock_response
-
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = _make_vision_mock(mock_result)
     provider.__dict__["_mock_client"] = mock_client
 
     result = await provider.vision(
@@ -98,18 +81,7 @@ async def test_vision_with_text_extraction():
         full_description="A document containing important information",
         text="Important information extracted from document",
     )
-
-    async def mock_parse(*args, **kwargs):
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
-        mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
-        return mock_response
-
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = _make_vision_mock(mock_result)
     provider.__dict__["_mock_client"] = mock_client
 
     result = await provider.vision(
@@ -130,13 +102,12 @@ async def test_vision_empty_response_raises_error():
 
     mock_client = MagicMock()
 
-    async def mock_parse(*args, **kwargs):
+    async def mock_create(*args, **kwargs):
         mock_response = MagicMock()
-        mock_response.choices = []
+        mock_response.output_text = None
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     with pytest.raises(ServiceResponseError) as exc_info:
@@ -154,24 +125,18 @@ async def test_vision_no_parsed_content_raises_error():
 
     mock_client = MagicMock()
 
-    async def mock_parse(*args, **kwargs):
-        mock_message = MagicMock()
-        mock_message.parsed = None
-
+    async def mock_create(*args, **kwargs):
         mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
+        mock_response.output_text = "not valid json"
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     with pytest.raises(ServiceResponseError) as exc_info:
         await provider.vision(image=SAMPLE_IMAGE_BYTES, mime_type="image/png")
 
-    assert "empty response" in str(exc_info.value).lower()
+    assert "parse" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -188,19 +153,13 @@ async def test_vision_base64_encoding():
         text=None,
     )
 
-    async def mock_parse(*args, **kwargs):
+    async def mock_create(*args, **kwargs):
         captured_kwargs.update(kwargs)
-
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
         mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
+        mock_response.output_text = mock_result.model_dump_json()
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
-
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     test_image = b"Hello World"
@@ -208,7 +167,7 @@ async def test_vision_base64_encoding():
 
     await provider.vision(image=test_image, mime_type="image/png")
 
-    image_url = captured_kwargs["messages"][0]["content"][1]["image_url"]["url"]
+    image_url = captured_kwargs["input"][0]["content"][1]["image_url"]
 
     assert expected_base64 in image_url
     assert image_url.startswith("data:image/png;base64,")
@@ -228,17 +187,13 @@ async def test_vision_with_custom_prompt():
         text=None,
     )
 
-    async def mock_parse(*args, **kwargs):
+    async def mock_create(*args, **kwargs):
         captured_kwargs.update(kwargs)
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
         mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
+        mock_response.output_text = mock_result.model_dump_json()
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     custom_prompt = "What objects are in this image?"
@@ -249,7 +204,7 @@ async def test_vision_with_custom_prompt():
     )
 
     # Verify custom prompt is passed in the messages
-    text_content = captured_kwargs["messages"][0]["content"][0]["text"]
+    text_content = captured_kwargs["input"][0]["content"][0]["text"]
     assert text_content == custom_prompt
 
 
@@ -267,17 +222,13 @@ async def test_vision_default_prompt():
         text=None,
     )
 
-    async def mock_parse(*args, **kwargs):
+    async def mock_create(*args, **kwargs):
         captured_kwargs.update(kwargs)
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
         mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
+        mock_response.output_text = mock_result.model_dump_json()
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     # Don't pass prompt argument - should use default
@@ -287,7 +238,7 @@ async def test_vision_default_prompt():
     )
 
     # Verify default prompt is used
-    text_content = captured_kwargs["messages"][0]["content"][0]["text"]
+    text_content = captured_kwargs["input"][0]["content"][0]["text"]
     assert text_content == "Describe the image in detail."
 
 
@@ -305,17 +256,13 @@ async def test_vision_with_empty_string_prompt():
         text=None,
     )
 
-    async def mock_parse(*args, **kwargs):
+    async def mock_create(*args, **kwargs):
         captured_kwargs.update(kwargs)
-        mock_message = MagicMock()
-        mock_message.parsed = mock_result
         mock_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_response.choices = [mock_choice]
+        mock_response.output_text = mock_result.model_dump_json()
         return mock_response
 
-    mock_client.chat.completions.parse = mock_parse
+    mock_client.responses.create = mock_create
     provider.__dict__["_mock_client"] = mock_client
 
     # Pass empty string - should still use default (because of "prompt or" logic)
@@ -326,5 +273,5 @@ async def test_vision_with_empty_string_prompt():
     )
 
     # Verify default prompt is used (empty string is falsy)
-    text_content = captured_kwargs["messages"][0]["content"][0]["text"]
+    text_content = captured_kwargs["input"][0]["content"][0]["text"]
     assert text_content == "Describe the image in detail."

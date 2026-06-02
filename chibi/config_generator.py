@@ -168,6 +168,10 @@ ENABLE_MCP_STDIO=false
 # Example: "gpt-5.2,claude-sonnet-4-5-20250929,models/gemini-2.5-pro"
 MODELS_WHITELIST=
 
+# Comma-separated list of disallowed models (ignored if MODELS_WHITELIST is also set)
+# Example: "gpt-5.1,gpt-5.3"
+MODELS_BLACKLIST=
+
 # Comma-separated list of allowed tools
 # Example: "run_command_in_terminal,delegate_task,create_file"
 TOOLS_WHITELIST=

@@ -412,9 +412,4 @@ class MistralAI(RestApiFriendlyProvider):
             for model in mistral_models
             if not self._model_name_has_keywords_exclude(model_name=model.id)
         ]
-        all_models.sort(key=lambda model: model.name)
-
-        if gpt_settings.models_whitelist:
-            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
-
-        return all_models
+        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)

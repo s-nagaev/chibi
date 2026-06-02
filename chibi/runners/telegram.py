@@ -432,7 +432,7 @@ class ChibiBot:
         if len(available_models) <= 12:
             reply_markup = self._create_model_selection_keyboad(models=available_models, context=context)
             message = f"{prefix}You may select another one from the list below:" if prefix else "Please, select model:"
-            set_user_action(context=context, action=UserAction.SELECT_MODEL)
+            set_user_action(context=context, action=UserAction.SELECT_CHAT_MODEL)
         else:
             active_provider = self._find_active_provider_in_models(available_models)
             reply_markup = self._create_provider_selection_keyboad(
@@ -458,7 +458,7 @@ class ChibiBot:
         if len(available_models) <= 12:
             reply_markup = self._create_model_selection_keyboad(models=available_models, context=context)
             message = f"{prefix}You may select another one from the list below:" if prefix else "Please, select model:"
-            set_user_action(context=context, action=UserAction.SELECT_MODEL)
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_MODEL)
         else:
             active_provider = self._find_active_provider_in_models(available_models)
             reply_markup = self._create_provider_selection_keyboad(
@@ -517,13 +517,16 @@ class ChibiBot:
             if not full_models:
                 await query.delete_message()
                 return None
+
             try:
                 target_page = int(query.data.removeprefix("__page_").removesuffix("__"))
             except ValueError:
                 return None
+
             reply_markup = self._create_model_selection_keyboad(
                 models=full_models, context=context, add_back_button=True, page=target_page
             )
+
             # Preserve existing keyboard text (provider name + "— select a model:")
             await query.edit_message_reply_markup(reply_markup=reply_markup)
             return None
@@ -534,9 +537,11 @@ class ChibiBot:
                 key=UserContext.MAPPED_MODELS_GROUPED,
                 expected_type=dict[str, list[ModelChangeSchema]],
             )
+
             if not grouped:
                 await query.delete_message()
                 return None
+
             active_provider = self._find_active_provider_in_grouped(grouped)
             reply_markup = self._create_provider_selection_keyboad_from_grouped(
                 grouped=grouped, context=context, active_provider=active_provider
@@ -546,9 +551,11 @@ class ChibiBot:
             return None
 
         model = mapped_models.get(query.data)
+
         if not model:
             await query.delete_message()
             return None
+        model.image_generation = current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL
 
         if model.image_generation:
             set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, value=model.name)
@@ -594,7 +601,7 @@ class ChibiBot:
         reply_markup = self._create_model_selection_keyboad(
             models=provider_models, context=context, add_back_button=True, page=0
         )
-        set_user_action(context=context, action=UserAction.SELECT_MODEL)
+        set_user_action(context=context, action=UserAction.SELECT_CHAT_MODEL)
         await query.edit_message_text(text=f"{query.data} \u2014 select a model:", reply_markup=reply_markup)
 
     async def _compute_provider_selection_action(
@@ -620,7 +627,7 @@ class ChibiBot:
         if not query:
             return None
 
-        if action == UserAction.SELECT_MODEL:
+        if action in (UserAction.SELECT_CHAT_MODEL, UserAction.SELECT_IMAGE_MODEL):
             return await self._compute_model_selection_action(query=query, update=update, context=context)
 
         if action == UserAction.SELECT_MODEL_PROVIDER:
@@ -628,6 +635,8 @@ class ChibiBot:
 
         if action == UserAction.SELECT_PROVIDER:
             return await self._compute_provider_selection_action(query=query, context=context)
+
+        return None
 
     @check_user_allowance
     async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -696,7 +705,6 @@ class ChibiBot:
         logger.error(f"Error occurred while handling an update: {context.error}")
 
     async def post_init(self, application: Application) -> None:
-        # Register topic-specific BotCommands (has_topics_enabled is now set in run())
         bot = Bot(token=self.telegram_token)
         me = await bot.get_me()
         if me.has_topics_enabled:

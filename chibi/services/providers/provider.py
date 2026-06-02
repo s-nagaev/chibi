@@ -42,6 +42,7 @@ from openai import Omit as OpenAIOmit
 from openai.types import ImagesResponse, ReasoningEffort
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
+    ChatCompletionFunctionToolParam,
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
     ChatCompletionSystemMessageParam,
@@ -325,6 +326,36 @@ class Provider(ABC):
     def is_image_ready_model(cls, model_name: str) -> bool:
         return "image" in model_name
 
+    @staticmethod
+    def adapt_tool_for_responses(tool: dict | ChatCompletionFunctionToolParam) -> dict[str, Any]:
+        """Convert Chat Completions tool to Responses API format.
+
+        Transforms nested function tool definition:
+            {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
+        To flat Responses API format:
+            {"type": "function", "name": ..., "description": ..., "parameters": ..., "strict": False}
+
+        Non-function tools pass through unchanged.
+
+        Args:
+            tool: Tool definition in Chat Completions format.
+
+        Returns:
+            Tool definition in Responses API format.
+        """
+        tool_dict = dict(tool)
+        if tool_dict.get("type") != "function":
+            return tool_dict
+
+        func = tool_dict.get("function", {})
+        return {
+            "type": "function",
+            "name": func.get("name"),
+            "description": func.get("description"),
+            "parameters": func.get("parameters"),
+            "strict": False,
+        }
+
     async def get_images(self, prompt: str, model: str | None) -> list[str] | list[BytesIO]:
         raise NotImplementedError
 
@@ -354,13 +385,31 @@ class Provider(ABC):
         results = await asyncio.gather(*tool_coroutines)
         return results
 
+    def filter_and_return_list_of_models(
+        self, models: list[ModelChangeSchema], image_generation: bool = False
+    ) -> list[ModelChangeSchema]:
+        all_models = sorted(models, key=lambda model: model.name, reverse=True)
+
+        if image_generation:
+            filtered_models = [model for model in all_models if model.image_generation]
+        else:
+            filtered_models = [model for model in all_models if self.is_chat_ready_model(model.name)]
+
+        if gpt_settings.models_whitelist:
+            return [model for model in filtered_models if model.name in gpt_settings.models_whitelist]
+
+        if gpt_settings.models_blacklist:
+            return [model for model in filtered_models if model.name not in gpt_settings.models_blacklist]
+
+        return filtered_models
+
 
 class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     temperature: float | OpenAINotGiven | None = gpt_settings.temperature
     max_tokens: int | OpenAINotGiven | None = gpt_settings.max_tokens
     presence_penalty: float | OpenAINotGiven | None = gpt_settings.presence_penalty
     frequency_penalty: float | OpenAIOmit | None = gpt_settings.frequency_penalty
-    image_quality: Literal["standard", "hd"] | OpenAINotGiven = gpt_settings.image_quality
+    image_quality: Literal["standard", "hd", "low", "medium", "high", "auto"] | OpenAIOmit = gpt_settings.image_quality
     image_size: IMAGE_SIZE_LITERAL | OpenAINotGiven | None = gpt_settings.image_size
     base_url: str
     image_n_choices: int = gpt_settings.image_n_choices
@@ -614,15 +663,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             )
             for model in models.data
         ]
-        all_models.sort(key=lambda model: model.name)
-
-        if image_generation:
-            return [model for model in all_models if model.image_generation]
-
-        if gpt_settings.models_whitelist:
-            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
-
-        return [model for model in all_models if self.is_chat_ready_model(model.name)]
+        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
         return await self.client.images.generate(  # type: ignore
@@ -989,9 +1030,4 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             for model in response_data
             if model.get("id") and (model.get("type") == "model" or model.get("object") == "model")
         ]
-        all_models.sort(key=lambda model: model.name)
-
-        if gpt_settings.models_whitelist:
-            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
-
-        return all_models
+        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)

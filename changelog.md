@@ -6,19 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-
-## [1.9.0] - 2026-05-31
+## [1.9.0] - 2026-06-02
 
 ### Added
+- **Models Blacklist**: New `MODELS_BLACKLIST` / `models_blacklist` configuration to exclude specific models from the available selection
+  - When both whitelist and blacklist are set, whitelist takes priority (blacklist is ignored)
+  - Startup warning logged when both lists are configured
+  - Runtime filtering of models based on blacklist (when whitelist is empty)
 - **Telegram topic commands** for managing threads in private chats:
   - `/new_thread [name]` — create a new topic with clean LLM context (auto-names "Thread N")
   - `/new_thread_with_current_context [name]` — create a new topic and clone the current context (messages, model preferences)
   - `/drop_thread confirm` — delete current thread (requires confirmation; refuses thread 0 or single-thread state)
 - **AI rename tool:** `RenameThreadTool` — assistant can rename the current topic
-- **Topic name sync:** bot tracks topic renames via `forum_topic_edited`/`forum_topic_created` service messages
 - **Feature gate:** commands appear only when topics enabled via @BotFather (`has_topics_enabled`)
-- **User model:** `thread_names` field for persisting thread name mappings
 
+### Changed
+- **OpenAI Provider**: Migrated from Chat Completions API to Responses API as the primary interface
+- **OpenAI Provider**: Added GPT-5 image generation support via Responses API
 
 ## [1.8.1] - 2026-05-28
 

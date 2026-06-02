@@ -356,6 +356,60 @@ class Message(BaseModel):
         # Fallback to user message
         return MistralUserMessage(content=self.content, role="user")
 
+    def to_responses_items(self) -> list[dict]:
+        """Convert Message to Responses API input items.
+
+        Returns a list because assistant messages with tool_calls emit
+        multiple items (message + function_call items).
+
+        Returns:
+            A list of dicts formatted for the OpenAI Responses API.
+        """
+        if self.role == "user":
+            return [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": self.content}],
+                }
+            ]
+
+        if self.role == "assistant":
+            items: list[dict] = []
+            # If there's text content, emit a message item first
+            if self.content:
+                items.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": self.content}],
+                    }
+                )
+            # Emit one function_call item per tool call
+            if self.tool_calls:
+                for tool in self.tool_calls:
+                    items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": tool.id,
+                            "name": tool.function.name,
+                            "arguments": tool.function.arguments or "{}",
+                        }
+                    )
+            return items
+
+        if self.role == "tool":
+            return [
+                {
+                    "type": "function_call_output",
+                    "call_id": self.tool_call_id or "",
+                    "output": self.content,
+                }
+            ]
+
+        # Fallback for unsupported roles
+        return []
+
     @classmethod
     def from_mistral(
         cls,
