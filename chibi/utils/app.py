@@ -93,6 +93,9 @@ def log_application_settings() -> None:
     models_whitelist = (
         f"<cyan>{', '.join(gpt_settings.models_whitelist)}</cyan>" if gpt_settings.models_whitelist else SETTING_UNSET
     )
+    models_blacklist = (
+        f"<cyan>{', '.join(gpt_settings.models_blacklist)}</cyan>" if gpt_settings.models_blacklist else SETTING_UNSET
+    )
     images_whitelist = (
         f"<cyan>{','.join(gpt_settings.image_generations_whitelist)}</cyan>"
         if gpt_settings.image_generations_whitelist
@@ -116,10 +119,16 @@ def log_application_settings() -> None:
         f"Users whitelist: {users_whitelist}",
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
+        f"Models blacklist: {models_blacklist}",
         "<magenta>Heartbeat:</magenta>",
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
     ]
     messages += _provider_statuses()
+
+    if gpt_settings.models_whitelist and gpt_settings.models_blacklist:
+        logger.opt(colors=True).warning(
+            "Both models_whitelist and models_blacklist are set. Blacklist will be ignored; using whitelist instead."
+        )
 
     for message in messages:
         logger.opt(colors=True).info(message)

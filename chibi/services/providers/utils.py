@@ -11,6 +11,7 @@ from google.genai.types import GenerateContentResponse
 from mistralai import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
+from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
 from chibi.schemas.app import UsageSchema
@@ -127,6 +128,26 @@ def get_usage_from_openai_response(response_message: ChatCompletion) -> UsageSch
     if prompt_cache := response_usage.prompt_tokens_details:
         usage.cache_read_input_tokens = prompt_cache.cached_tokens or 0
     return usage
+
+
+def get_usage_from_responses_response(response_message: Response) -> UsageSchema:
+    """Extract usage statistics from an OpenAI Responses API Response object.
+
+    Args:
+        response_message: The Response object returned by the OpenAI Responses API.
+
+    Returns:
+        A UsageSchema populated with token counts from the response.
+    """
+    if response_message.usage is None:
+        return UsageSchema()
+
+    usage = response_message.usage
+    return UsageSchema(
+        prompt_tokens=usage.input_tokens or 0,
+        completion_tokens=usage.output_tokens or 0,
+        total_tokens=usage.total_tokens or 0,
+    )
 
 
 def get_usage_from_google_response(response_message: GenerateContentResponse) -> UsageSchema:

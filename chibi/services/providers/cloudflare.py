@@ -95,4 +95,7 @@ class Cloudflare(RestApiFriendlyProvider):
         if gpt_settings.models_whitelist:
             return [model for model in all_models if model.name in gpt_settings.models_whitelist]
 
+        if gpt_settings.models_blacklist:
+            return [model for model in all_models if model.name not in gpt_settings.models_blacklist]
+
         return all_models

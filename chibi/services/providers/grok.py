@@ -16,7 +16,7 @@ class Grok(OpenAIFriendlyProvider):
     name = "Grok"
     model_name_keywords = ["grok"]
     model_name_keywords_exclude = ["vision", "imag"]
-    image_quality = NOT_GIVEN
+    image_quality = omit
     image_size = NOT_GIVEN
     default_image_model = "grok-2-image-1212"
     default_model = "grok-4-1-fast-reasoning"

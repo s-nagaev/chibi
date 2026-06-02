@@ -500,15 +500,7 @@ class Gemini(RestApiFriendlyProvider):
             async for model in models
             if model.name
         ]
-        all_models.sort(key=lambda model: model.name)
-
-        if image_generation:
-            return [model for model in all_models if model.image_generation]
-
-        if gpt_settings.models_whitelist:
-            return [model for model in all_models if model.name in gpt_settings.models_whitelist]
-
-        return [model for model in all_models if self.is_chat_ready_model(model.name)]
+        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         voice = voice or self.default_tts_voice
