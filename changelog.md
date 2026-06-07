@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Custom agent role/persona (`LLM_ROLE`)**: operator-assignable free-form persona that shapes the assistant's tone, focus, and scope while remaining subordinate to safety, honesty, privacy, and hard-rule invariants.
 - **`AGENTS.md` / `CLAUDE.md` convention**: the assistant now looks for and reads project guidance files before working with code (applies to both the main agent and sub-agents).
+- **Group chat shared context**: in group chats, the bot maintains a single shared conversation context common to all channel members, rather than per-user isolation.
 
 ### Changed
 - **Sub-agent prompt**: filesystem & operations rules are now included only when filesystem access is enabled, reducing prompt size otherwise.
