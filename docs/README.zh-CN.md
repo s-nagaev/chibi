@@ -63,6 +63,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **月之暗面**（Moonshot AI）
 - **MiniMax**
 - **智谱AI**（GLM 系列模型）
+- **OpenRouter**（统一访问多种模型）
 - **Cloudflare Workers AI**（众多开源模型）
 
 ### OpenAI 兼容端点（自托管/本地）
@@ -164,6 +165,7 @@ docker-compose up -d
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **智谱AI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+- **OpenRouter** (统一访问多种模型): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **创意工具：**

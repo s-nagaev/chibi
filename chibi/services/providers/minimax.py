@@ -16,7 +16,7 @@ class Minimax(AnthropicFriendlyProvider):
     name = "Minimax"
     base_url = "https://api.minimax.io/anthropic"
     default_model = "MiniMax-M2.7"
-    default_moderation_model = "MiniMax-M2.7-lighting"
+    default_moderation_model = "MiniMax-M2.5-lighting"
     model_name_keywords = ["MiniMax"]
 
     base_tts_url = "https://api.minimax.io/v1/"
@@ -59,7 +59,11 @@ class Minimax(AnthropicFriendlyProvider):
         if not models:
             # Get models endpoint sometimes returns empty list, so we need a hacky fallback here
             supported_models = [
-                "MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed"
+                "MiniMax-M3",
+                "MiniMax-M2.7",
+                "MiniMax-M2.7-highspeed",
+                "MiniMax-M2.5",
+                "MiniMax-M2.5-highspeed",
             ]
             models = [
                 ModelChangeSchema(

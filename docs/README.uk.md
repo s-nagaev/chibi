@@ -46,6 +46,7 @@ Chibi підтримує кількох провайдерів у межах о�
 - **Moonshot AI**
 - **MiniMax**
 - **ZhipuAI** (моделі GLM)
+- **OpenRouter** (уніфікований доступ до багатьох моделей)
 - **Cloudflare Workers AI** (багато open-source моделей)
 
 ### OpenAI-сумісні ендпоінти (self-host / локально)
@@ -147,6 +148,7 @@ docker-compose up -d
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+- **OpenRouter** (уніфікований доступ до багатьох моделей): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **Креативні інструменти:**

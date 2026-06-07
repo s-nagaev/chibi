@@ -80,6 +80,6 @@ class RenameThreadTool(ChibiTool):
                 "Failed to rename the topic. Make sure the bot has the required permissions (can manage topics)."
             )
 
-        await save_thread_name(user_id=user_id, thread_id=interface.thread_id, name=name)
+        await save_thread_name(storage_id=user_id, thread_id=interface.thread_id, name=name)
 
         return {"status": "ok", "message": f"Thread successfully renamed to '{name}'."}

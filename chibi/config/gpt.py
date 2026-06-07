@@ -75,6 +75,7 @@ class GPTSettings(BaseSettings):
 
     filesystem_access: bool = Field(default=False)
     allow_delegation: bool = Field(default=True)
+    llm_role_raw: str | None = Field(alias="LLM_ROLE", default=None)
     delegate_task_timeout: int | None = Field(default=None)
     tools_whitelist_raw: str | None = Field(alias="TOOLS_WHITELIST", default=None)
 
@@ -86,8 +87,24 @@ class GPTSettings(BaseSettings):
         return bool(self.google_search_api_key) and bool(self.google_search_cx)
 
     @property
+    def llm_role(self) -> str | None:
+        """Return the free-form role/persona text configured via ``LLM_ROLE``.
+
+        The value is arbitrary operator-supplied prose; there is no fixed set of
+        roles. Returns the stripped text, or ``None`` when unset/blank so the
+        default agent behavior is preserved.
+        """
+        if not self.llm_role_raw or not self.llm_role_raw.strip():
+            return None
+        return self.llm_role_raw.strip()
+
+    @property
     def assistant_prompt(self) -> str:
-        return get_llm_prompt(filesystem_access=self.filesystem_access, allow_delegation=self.allow_delegation)
+        return get_llm_prompt(
+            filesystem_access=self.filesystem_access,
+            allow_delegation=self.allow_delegation,
+            role=self.llm_role,
+        )
 
     @property
     def models_whitelist(self) -> list[str]:

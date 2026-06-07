@@ -3,6 +3,7 @@ import base64
 import inspect
 import json
 import random
+import re
 from abc import ABC
 from asyncio import sleep
 from functools import wraps
@@ -960,6 +961,10 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
         moderator_model = model or self.default_moderation_model or self.default_model
         messages = [Message(role="user", content=cmd).to_anthropic()]
+        moderator_prompt = (
+            MODERATOR_PROMPT + "\n**HARD RULE:** call the print_moderator_verdict tool to provide your verdict"
+        )
+
         response_message: AnthropicMessage = await self.client.messages.create(
             model=moderator_model,
             max_tokens=1024,
@@ -967,14 +972,14 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             timeout=self.timeout,
             system=[
                 TextBlockParam(
-                    text=MODERATOR_PROMPT,
+                    text=moderator_prompt,
                     type="text",
                 )
             ],
             tools=[
                 ToolParam(
                     name="print_moderator_verdict",
-                    description="Provide moderator's verdict",
+                    description="Provide moderator's verdict via calling this tool.",
                     input_schema=InputSchemaTyped(
                         type="object",
                         properties={
@@ -996,16 +1001,39 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
         tool_call: ToolUseBlock | None = next(
-            part for part in response_message.content if isinstance(part, ToolUseBlock)
+            (part for part in response_message.content if isinstance(part, ToolUseBlock)), None
         )
-        if not tool_call:
+
+        if tool_call is not None:
+            answer = tool_call.input
+            try:
+                return ModeratorsAnswer.model_validate(answer, extra="ignore")
+            except Exception as e:
+                msg = f"Error parsing moderator's response: {answer}. Error: {e}"
+                logger.error(msg)
+                return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+
+        # Fallback: some models (e.g. MiniMax M2.7/M3 on the Anthropic-compatible API) ignore the
+        # forced tool_choice and reply with plain text instead of a tool_use block. The moderator
+        # prompt already instructs the model to emit a JSON verdict as plain text, so we parse it.
+        text_part: TextBlock | None = next(
+            (part for part in response_message.content if isinstance(part, TextBlock)), None
+        )
+        if text_part is None or not text_part.text.strip():
             return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
-        answer = tool_call.input
+
+        raw_text = text_part.text.strip()
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match is None:
+            msg = f"Moderator returned no tool call and no JSON verdict. Raw: {raw_text[:200]}"
+            logger.error(msg)
+            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 
         try:
-            return ModeratorsAnswer.model_validate(answer, extra="ignore")
+            parsed = json.loads(match.group(0))
+            return ModeratorsAnswer.model_validate(parsed, extra="ignore")
         except Exception as e:
-            msg = f"Error parsing moderator's response: {answer}. Error: {e}"
+            msg = f"Error parsing moderator's text verdict: {raw_text[:200]}. Error: {e}"
             logger.error(msg)
             return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 

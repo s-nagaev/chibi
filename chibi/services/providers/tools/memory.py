@@ -148,7 +148,7 @@ class ClearToolCallHistoryTool(ChibiTool):
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Clearing tool call history")
-        await drop_tool_call_history(user_id=user_id, thread_id=interface.thread_id)
+        await drop_tool_call_history(storage_id=user_id, thread_id=interface.thread_id)
         return {"status": "ok"}
 
 
@@ -184,7 +184,7 @@ class SummarizeHistoryTool(ChibiTool):
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summarizing chat...")
-        await summarize_history(user_id=user_id, thread_id=interface.thread_id)
+        await summarize_history(storage_id=user_id, thread_id=interface.thread_id)
         if application_settings.log_prompt_data:
             logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summary: {summary}")
         return {"status": "ok"}

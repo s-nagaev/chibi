@@ -63,6 +63,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **Moonshot AI**
 - **MiniMax**
 - **ZhipuAI**（GLMモデル）
+- **OpenRouter**（多数のモデルへの統合アクセス）
 - **Cloudflare Workers AI**（多数のオープンソースモデル）
 
 ### OpenAI互換エンドポイント（セルフホスト / ローカル）
@@ -164,6 +165,7 @@ docker-compose up -d
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+- **OpenRouter** (多数のモデルへの統合アクセス): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **クリエイティブツール：**
