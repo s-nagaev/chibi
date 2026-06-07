@@ -99,7 +99,7 @@ class TerminalRunner:
     async def _handle_reset(self) -> None:
         """Reset chat history."""
         console.print("[yellow]Resetting chat history...[/yellow]")
-        await reset_chat_history(user_id=self.user_id, thread_id=0)
+        await reset_chat_history(storage_id=self.user_id, thread_id=0)
         console.print("[green]Chat history has been reset.[/green]")
 
     async def _handle_model_selection(self) -> None:

@@ -61,6 +61,7 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 - **Moonshot AI**
 - **MiniMax**
 - **ZhipuAI** (GLM models)
+- **OpenRouter** (unified access to many models)
 - **Cloudflare Workers AI** (many open-source models)
 
 ### OpenAI-compatible endpoints (self-host / local)
@@ -162,6 +163,7 @@ Each provider requires its own API key. Here are the direct links:
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+- **OpenRouter** (unified access to many models): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **Creative Tools:**

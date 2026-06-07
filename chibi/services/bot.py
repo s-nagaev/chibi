@@ -43,7 +43,7 @@ async def handle_model_selection(
 
 async def handle_tool_response(tool_response: ToolResponseSchema, interface: UserInterface) -> None:
     chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
-        user_id=interface.user_id, tool_message=tool_response, interface=interface
+        storage_id=interface.storage_id, tool_message=tool_response, interface=interface
     )
     usage_message = get_usage_msg(chat_response.usage)
 
@@ -121,7 +121,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
 
     async with indicator(coro_func=interface.send_action_typing):
         chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
-            user_id=interface.user_id,
+            storage_id=interface.storage_id,
             user_text_message=text_prompt,
             user_voice_message=voice_prompt,
             user_caption=caption_prompt,
@@ -153,7 +153,9 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         f"the {interface.chat_data}. {logged_answer} {usage_message}"
     )
     await interface.send_message(message=chat_response.answer)
-    history_is_summarized = await check_history_and_summarize(user_id=interface.user_id, thread_id=interface.thread_id)
+    history_is_summarized = await check_history_and_summarize(
+        storage_id=interface.storage_id, thread_id=interface.thread_id
+    )
     if history_is_summarized:
         logger.info(f"{interface.user_data}: history successfully summarized.")
     return None
@@ -162,7 +164,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
 async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
-    await reset_chat_history(user_id=interface.user_id, thread_id=interface.thread_id)
+    await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
     task_manager.kill_all_user_tasks(user_id=interface.user_id)
     await interface.send_message(message="Done!", reply=False)
 
@@ -272,7 +274,7 @@ async def handle_new_thread(interface: UserInterface, args: list[str] | None = N
             )
             return None
 
-        await save_thread_name(user_id=interface.user_id, thread_id=new_thread_id, name=name)
+        await save_thread_name(storage_id=interface.storage_id, thread_id=new_thread_id, name=name)
         await interface.send_message(message=f"✅ Thread created: {name} (ID: {new_thread_id})")
     except Exception as e:
         logger.error(f"{interface.user_data}: Error in /new_thread: {e}")
@@ -286,7 +288,7 @@ async def handle_clone_thread(interface: UserInterface, args: list[str] | None =
         interface: The user interface instance.
         args: Optional list of arguments for the cloned thread name.
     """
-    user = await get_chibi_user(user_id=interface.user_id)
+    user = await get_chibi_user(user_id=interface.storage_id)
     name = " ".join(args).strip() if args else None
 
     if not name:
@@ -301,7 +303,7 @@ async def handle_clone_thread(interface: UserInterface, args: list[str] | None =
         return None
 
     cloned_messages = await clone_thread_messages(
-        user_id=interface.user_id, old_thread_id=interface.thread_id, new_thread_id=new_thread_id
+        storage_id=interface.storage_id, old_thread_id=interface.thread_id, new_thread_id=new_thread_id
     )
     message = f"✅ Thread cloned: {name} (ID: {new_thread_id}). {cloned_messages} messages copied."
 
@@ -336,6 +338,6 @@ async def handle_drop_thread(interface: UserInterface, args: list[str] | None = 
         )
         return None
 
-    await reset_chat_history(user_id=interface.user_id, thread_id=interface.thread_id)
-    await delete_thread_from_map(user_id=interface.user_id, thread_id=interface.thread_id)
+    await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
+    await delete_thread_from_map(storage_id=interface.storage_id, thread_id=interface.thread_id)
     return None

@@ -63,6 +63,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **Moonshot AI**
 - **MiniMax**
 - **Cloudflare Workers AI** (banyak model open-source)
+- **OpenRouter** (akses terpadu ke banyak model)
 - **ZhipuAI** (model GLM)
 
 ### Endpoint kompatibel OpenAI (self-host / lokal)
@@ -151,6 +152,7 @@ Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **OpenRouter** (akses terpadu ke banyak model): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 
 **Alat Kreatif:**

@@ -11,7 +11,7 @@ from httpx import Response
 from loguru import logger
 
 from chibi.config import gpt_settings
-from chibi.constants import SUB_EXECUTOR_PROMPT
+from chibi.constants import get_sub_executor_prompt
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.interface import UserInterface
@@ -124,7 +124,10 @@ async def get_sub_agent_response(
     ]
 
     chat_response, _ = await provider.get_chat_response(
-        messages=conversation_messages, user=user, model=model_name, system_prompt=SUB_EXECUTOR_PROMPT
+        messages=conversation_messages,
+        user=user,
+        model=model_name,
+        system_prompt=get_sub_executor_prompt(gpt_settings.filesystem_access),
     )
     return chat_response
 

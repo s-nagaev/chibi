@@ -8,7 +8,7 @@ from telegram import File, Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
-from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT
+from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, GROUP_CHAT_TYPES
 from chibi.utils.telegram import send_answer_message, send_images
 
 
@@ -28,6 +28,17 @@ class UserInterface(ABC):
 
         Returns:
             The user identifier.
+        """
+        raise NotImplementedError
+
+    @property
+    def storage_id(self) -> int:
+        """Returns the storage key for persisting conversation/context.
+
+        Private chats -> user_id (== chat_id). Group chats -> chat_id (shared).
+
+        Returns:
+            The storage identifier.
         """
         raise NotImplementedError
 
@@ -281,6 +292,19 @@ class TelegramInterface(UserInterface):
         if user := self.update.effective_user:
             return user.id
         raise ValueError("Telegram incoming update does not contain valid user data.")
+
+    @property
+    def storage_id(self) -> int:
+        """Returns the storage key for persisting conversation/context.
+
+        Private chats -> user_id (== chat_id). Group chats -> chat_id (shared among all participants).
+
+        Returns:
+            The storage identifier.
+        """
+        if self._chat.type in GROUP_CHAT_TYPES:
+            return int(self._chat.id)
+        return self.user_id
 
     @property
     def user_data(self) -> str:

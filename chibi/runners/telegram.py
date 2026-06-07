@@ -139,7 +139,7 @@ class ChibiBot:
         interface = TelegramInterface(update=update, context=context)
         task_manager.run_task(
             coro=handle_drop_thread(interface=interface, args=args),
-            user_id=interface.user_id,
+            user_id=interface.storage_id,
         )
         return None
 
@@ -156,7 +156,7 @@ class ChibiBot:
         interface = TelegramInterface(update=update, context=context)
         task_manager.run_task(
             coro=handle_new_thread(interface=interface, args=args),
-            user_id=interface.user_id,
+            user_id=interface.storage_id,
         )
         return None
 
@@ -173,7 +173,7 @@ class ChibiBot:
         interface = TelegramInterface(update=update, context=context)
         task_manager.run_task(
             coro=handle_clone_thread(interface=interface, args=args),
-            user_id=interface.user_id,
+            user_id=interface.storage_id,
         )
         return None
 
@@ -198,7 +198,7 @@ class ChibiBot:
             interface = TelegramInterface(update=update, context=context)
             task_manager.run_task(
                 coro=handle_image_generation(prompt=prompt, interface=interface),
-                user_id=interface.user_id,
+                user_id=interface.user_id,  # Keep user_id: image quotas are per-user, not per-chat
             )
             return None
 
@@ -256,7 +256,7 @@ class ChibiBot:
         if await interface.get_caption():
             task_manager.run_task(
                 coro=handle_user_prompt(interface=interface),
-                user_id=interface.user_id,
+                user_id=interface.storage_id,
             )
         return None
 
@@ -272,7 +272,7 @@ class ChibiBot:
         if telegram_message.voice:
             task_manager.run_task(
                 coro=handle_user_prompt(interface=interface),
-                user_id=interface.user_id,
+                user_id=interface.storage_id,
             )
             return None
 
@@ -289,7 +289,7 @@ class ChibiBot:
             set_user_action(context=context, action=UserAction.NONE)
             task_manager.run_task(
                 coro=handle_image_generation(prompt=prompt, interface=interface),
-                user_id=interface.user_id,
+                user_id=interface.user_id,  # Keep user_id: image quotas are per-user, not per-chat
             )
             return None
 
@@ -303,7 +303,7 @@ class ChibiBot:
 
         task_manager.run_task(
             coro=handle_user_prompt(interface=interface),
-            user_id=interface.user_id,
+            user_id=interface.storage_id,
         )
         return None
 
@@ -312,7 +312,7 @@ class ChibiBot:
         interface = TelegramInterface(update=update, context=context)
         task_manager.run_task(
             coro=handle_user_prompt(interface=interface),
-            user_id=interface.user_id,
+            user_id=interface.storage_id,
         )
         return None
 
@@ -667,8 +667,9 @@ class ChibiBot:
         if not message:
             return None
 
-        telegram_user = get_telegram_user(update=update)
+        # telegram_user = get_telegram_user(update=update)
         thread_id = message.message_thread_id or 0
+        interface = TelegramInterface(update=update, context=context)
 
         from chibi.storage.database import inject_database
 
@@ -678,7 +679,7 @@ class ChibiBot:
 
             Args:
                 db: The database instance injected by the decorator.
-                user_id: The Telegram user ID.
+                user_id: The storage ID for the chat (user_id for private, chat_id for groups).
                 thread_id: The thread ID to sync.
             """
             from chibi.models import User
@@ -698,7 +699,7 @@ class ChibiBot:
             if updated:
                 await db.save_user(user)
 
-        await do_sync(user_id=telegram_user.id, thread_id=thread_id)
+        await do_sync(user_id=interface.storage_id, thread_id=thread_id)
         return None
 
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

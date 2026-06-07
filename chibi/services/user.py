@@ -31,7 +31,7 @@ async def get_chibi_user(db: Database, user_id: int) -> User:
 
 @inject_database
 async def set_active_model(db: Database, interface: UserInterface, model: ModelChangeSchema) -> None:
-    user = await db.get_or_create_user(user_id=interface.user_id)
+    user = await db.get_or_create_user(user_id=interface.storage_id)
     if model.image_generation:
         user.thread_selected_image_model[interface.thread_id] = SelectedModel(
             name=model.name, provider_name=model.provider
@@ -42,14 +42,14 @@ async def set_active_model(db: Database, interface: UserInterface, model: ModelC
 
 
 @inject_database
-async def reset_chat_history(db: Database, user_id: int, thread_id: int) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def reset_chat_history(db: Database, storage_id: int, thread_id: int) -> None:
+    user = await db.get_or_create_user(user_id=storage_id)
     await db.drop_messages(user=user, thread_id=thread_id)
 
 
 @inject_database
-async def emergency_summarization(db: Database, user_id: int, thread_id: int) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def emergency_summarization(db: Database, storage_id: int, thread_id: int) -> None:
+    user = await db.get_or_create_user(user_id=storage_id)
 
     chat_history = await db.get_messages(user=user, thread_id=thread_id)
     chat_history_string = str(msg for msg in chat_history if not any((msg.get("tool_calls"), msg.get("tool_call_id"))))
@@ -62,7 +62,7 @@ async def emergency_summarization(db: Database, user_id: int, thread_id: int) ->
     )
     initial_message = Message(role="user", content="What we were talking about?")
     answer_message = Message(role="assistant", content=response.answer)
-    await reset_chat_history(user_id=user_id, thread_id=thread_id)
+    await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
     await db.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
@@ -70,14 +70,14 @@ async def emergency_summarization(db: Database, user_id: int, thread_id: int) ->
 @inject_database
 async def send_scheduled_message_to_llm(
     db: Database,
-    user_id: int,
+    storage_id: int,
     interface: UserInterface,
     message: str,
     event_id: UUID,
     thread_id: int = 0,
 ) -> ChatResponseSchema:
-    user = await db.get_or_create_user(user_id=user_id)
-    lock = await LockManager().get_lock(key=f"{user_id}_{thread_id}")
+    user = await db.get_or_create_user(user_id=storage_id)
+    lock = await LockManager().get_lock(key=f"{storage_id}_{thread_id}")
 
     prompt = {
         "type": "scheduled message",
@@ -104,8 +104,8 @@ async def send_scheduled_message_to_llm(
 
 
 @inject_database
-async def save_telegram_document_metadata(db: Database, user_id: int, file_metadata: dict[str, Any]) -> str:
-    user = await db.get_or_create_user(user_id=user_id)
+async def save_telegram_document_metadata(db: Database, storage_id: int, file_metadata: dict[str, Any]) -> str:
+    user = await db.get_or_create_user(user_id=storage_id)
     file_meta = TelegramFileMeta(**file_metadata)
     files_update = {
         file_meta.file_unique_id: file_meta,
@@ -120,8 +120,8 @@ async def save_telegram_document_metadata(db: Database, user_id: int, file_metad
 
 
 @inject_database
-async def get_telegram_documents(db: Database, user_id: int, limit: int = 0) -> dict[str, TelegramFileMeta]:
-    user = await db.get_or_create_user(user_id=user_id)
+async def get_telegram_documents(db: Database, storage_id: int, limit: int = 0) -> dict[str, TelegramFileMeta]:
+    user = await db.get_or_create_user(user_id=storage_id)
     files = user.telegram_files
     if limit == 0:
         return files
@@ -131,24 +131,24 @@ async def get_telegram_documents(db: Database, user_id: int, limit: int = 0) -> 
 
 
 @inject_database
-async def get_telegram_document(db: Database, user_id: int, file_unique_id: str) -> TelegramFileMeta | None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def get_telegram_document(db: Database, storage_id: int, file_unique_id: str) -> TelegramFileMeta | None:
+    user = await db.get_or_create_user(user_id=storage_id)
     return user.telegram_files.get(file_unique_id)
 
 
 @inject_database
 async def get_llm_chat_completion_answer(
     db: Database,
-    user_id: int,
+    storage_id: int,
     interface: UserInterface,
     user_text_message: str | None = None,
     user_voice_message: BytesIO | None = None,
     user_caption: str | None = None,
     tool_message: Optional["ToolResponseSchema"] = None,
 ) -> ChatResponseSchema:
-    user = await db.get_or_create_user(user_id=user_id)
+    user = await db.get_or_create_user(user_id=storage_id)
     thread_id = interface.thread_id
-    lock = await LockManager().get_lock(key=f"{user_id}_{thread_id}")
+    lock = await LockManager().get_lock(key=f"{storage_id}_{thread_id}")
 
     if not user_text_message and not user_voice_message and not tool_message and not user_caption:
         raise ValueError("No prompt data provided")
@@ -179,6 +179,7 @@ async def get_llm_chat_completion_answer(
         )
         assert user_message
         prompt = {
+            "user": interface.user_data,
             "prompt": user_message,
             "datetime_now": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z%z"),
             "type": "user message",
@@ -205,15 +206,15 @@ async def get_llm_chat_completion_answer(
 
 
 @inject_database
-async def check_history_and_summarize(db: Database, user_id: int, thread_id: int) -> bool:
-    user = await db.get_or_create_user(user_id=user_id)
+async def check_history_and_summarize(db: Database, storage_id: int, thread_id: int) -> bool:
+    user = await db.get_or_create_user(user_id=storage_id)
     messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
     # Roughly estimating how many tokens the current conversation history will comprise. It is possible to calculate
     # this accurately, but the modules that can be used for this need to be separately built for armv7, which is
     # difficult to do right now (but will be done further, I hope).
     tokens = sum(msg.estimate_tokens for msg in messages)
     if tokens >= gpt_settings.max_history_tokens:
-        await emergency_summarization(user_id=user_id, thread_id=thread_id)
+        await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
         return True
     return False
 
@@ -388,10 +389,10 @@ async def get_moderation_provider(db: Database, user_id: int) -> "Provider":
 
 
 @inject_database
-async def drop_tool_call_history(db: Database, user_id: int, thread_id: int) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def drop_tool_call_history(db: Database, storage_id: int, thread_id: int) -> None:
+    user = await db.get_or_create_user(user_id=storage_id)
     chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
-    await reset_chat_history(user_id=user_id, thread_id=thread_id)
+    await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
     for message in chat_history:
         if message.role == "tool":
             continue
@@ -401,38 +402,38 @@ async def drop_tool_call_history(db: Database, user_id: int, thread_id: int) -> 
 
 
 @inject_database
-async def summarize_history(db: Database, user_id: int, thread_id: int) -> None:
-    user = await db.get_or_create_user(user_id=user_id)
+async def summarize_history(db: Database, storage_id: int, thread_id: int) -> None:
+    user = await db.get_or_create_user(user_id=storage_id)
     chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
-    await reset_chat_history(user_id=user_id, thread_id=thread_id)
+    await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
     await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
 
 @inject_database
-async def save_thread_name(db: Database, user_id: int, thread_id: int, name: str) -> None:
+async def save_thread_name(db: Database, storage_id: int, thread_id: int, name: str) -> None:
     """Save the name of a specific thread for the user.
 
     Args:
         db: The database instance.
-        user_id: The ID of the user.
+        storage_id: The storage ID (user_id for private, chat_id for groups).
         thread_id: The ID of the thread.
         name: The name to save for the thread.
     """
-    user = await db.get_or_create_user(user_id=user_id)
+    user = await db.get_or_create_user(user_id=storage_id)
     user.thread_names[thread_id] = name
     await db.save_user(user)
 
 
 @inject_database
-async def delete_thread_from_map(db: Database, user_id: int, thread_id: int) -> None:
+async def delete_thread_from_map(db: Database, storage_id: int, thread_id: int) -> None:
     """Delete a thread mapping from the user's saved thread names.
 
     Args:
         db: The database instance.
-        user_id: The ID of the user.
+        storage_id: The storage ID (user_id for private, chat_id for groups).
         thread_id: The ID of the thread to delete.
     """
-    user = await db.get_or_create_user(user_id=user_id)
+    user = await db.get_or_create_user(user_id=storage_id)
     user.thread_names.pop(thread_id)
     await db.save_user(user)
 
@@ -440,7 +441,7 @@ async def delete_thread_from_map(db: Database, user_id: int, thread_id: int) -> 
 @inject_database
 async def clone_thread_messages(
     db: Database,
-    user_id: int,
+    storage_id: int,
     old_thread_id: int,
     new_thread_id: int,
     name: str | None = None,
@@ -449,7 +450,7 @@ async def clone_thread_messages(
 
     Args:
         db: The database instance.
-        user_id: The ID of the user.
+        storage_id: The storage ID (user_id for private, chat_id for groups).
         old_thread_id: The ID of the thread to clone from.
         new_thread_id: The ID of the thread to clone to.
         name: The name of the new thread. Defaults to None.
@@ -457,7 +458,7 @@ async def clone_thread_messages(
     Returns:
         The number of messages that were cloned.
     """
-    user = await db.get_or_create_user(user_id=user_id)
+    user = await db.get_or_create_user(user_id=storage_id)
     existing_messages = await db.get_conversation_messages(user=user, thread_id=old_thread_id)
 
     for i, message in enumerate(existing_messages):

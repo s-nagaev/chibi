@@ -62,8 +62,9 @@ O Chibi suporta múltiplos provedores por trás de uma única conversa. Adicione
 - **Mistral AI**
 - **Moonshot AI**
 - **MiniMax**
-- **Cloudflare Workers AI** (muitos modelos open-source)
 - **ZhipuAI** (modelos GLM)
+- **OpenRouter** (acesso unificado a muitos modelos)
+- **Cloudflare Workers AI** (muitos modelos open-source)
 
 ### Endpoints compatíveis com OpenAI (auto-hospedado / local)
 
@@ -150,8 +151,9 @@ Cada provedor requer sua própria chave de API. Aqui estão os links diretos:
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+- **OpenRouter** (acesso unificado a muitos modelos): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
 **Ferramentas criativas:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)

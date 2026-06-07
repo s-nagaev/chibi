@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-07
+
+### Added
+- **Custom agent role/persona (`LLM_ROLE`)**: operator-assignable free-form persona that shapes the assistant's tone, focus, and scope while remaining subordinate to safety, honesty, privacy, and hard-rule invariants.
+- **`AGENTS.md` / `CLAUDE.md` convention**: the assistant now looks for and reads project guidance files before working with code (applies to both the main agent and sub-agents).
+
+### Changed
+- **Sub-agent prompt**: filesystem & operations rules are now included only when filesystem access is enabled, reducing prompt size otherwise.
+
+### Fixed
+- **Command moderation**: added a plain-text JSON verdict fallback for models that don't honor forced tool calls (e.g. MiniMax M2.7/M3 on the Anthropic-compatible API), and fixed a crash when no tool call was returned.
+
 ## [1.9.0] - 2026-06-02
 
 ### Added
