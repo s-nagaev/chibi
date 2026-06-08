@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import cast
+from typing import Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
@@ -31,6 +31,8 @@ from chibi.memory.abstract import (
 )
 from chibi.models import Message
 from chibi.services.lock_manager import LockManager
+from chibi.services.task_manager import task_manager
+from chibi.storage.abstract import Database
 
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
@@ -858,6 +860,36 @@ def create_memory() -> LongConversationMemory | None:
         logger.error(f"Failed to initialize ChromaDB: {e}")
 
     return None
+
+
+def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Callable:
+    """Decorator: wrap a Database instance so that add_message also archives to ChromaDB.
+
+    Archival is dispatched fire-and-forget via task_manager, so a ChromaDB
+    failure never breaks the primary write path. The original add_message is
+    bound once at decoration time (not looked up on self.inner per call) to
+    avoid recursion and keep the closure cheap.
+
+    Args:
+        long_conv_memory: The ChromaDB memory backend, or None to return the storage unchanged.
+
+    Returns:
+        A function that takes a Database and returns the (possibly wrapped) Database.
+    """
+    if long_conv_memory is None:
+        return lambda storage: storage
+
+    def wrap(storage: Database) -> Database:
+        original_add_message = storage.add_message
+
+        async def add_message(user, message, ttl=None, thread_id: int = 0) -> None:
+            await original_add_message(user, message, ttl, thread_id)
+            task_manager.run_task(long_conv_memory.archive(user.id, [message], thread_id=thread_id), user_id=user.id)
+
+        setattr(storage, "add_message", add_message)
+        return storage
+
+    return wrap
 
 
 memory: LongConversationMemory | None = create_memory()
