@@ -1,3 +1,4 @@
+from chromadb.errors import ChromaError
 from loguru import logger
 
 from chibi.config import application_settings
@@ -15,7 +16,7 @@ async def perform_retention_cleanup() -> None:
     try:
         await memory.delete_old(retention_days=application_settings.chroma_history_retention_days)
         logger.info("Retention cleanup completed")
-    except Exception as e:
-        logger.error(f"Retention cleanup failed: {e}")
+    except ChromaError:
+        logger.exception("Retention cleanup failed")
 
     return None

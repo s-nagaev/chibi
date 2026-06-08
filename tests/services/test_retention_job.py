@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from chromadb.errors import ChromaError
 
 from chibi.services.jobs.archive import perform_retention_cleanup
 
@@ -54,9 +55,9 @@ class TestPerformRetentionCleanup:
 
     @pytest.mark.asyncio
     async def test_handles_exception(self):
-        """Test that exceptions are caught and logged."""
+        """Test that exceptions are caught and logged with traceback."""
         mock_memory = MagicMock()
-        mock_memory.delete_old = AsyncMock(side_effect=Exception("Database error"))
+        mock_memory.delete_old = AsyncMock(side_effect=ChromaError)
 
         with patch("chibi.services.jobs.archive.memory", mock_memory):
             with patch("chibi.services.jobs.archive.application_settings") as mock_settings:
@@ -66,6 +67,6 @@ class TestPerformRetentionCleanup:
                     # Should not raise
                     await perform_retention_cleanup()
 
-                    # Check error was logged
-                    mock_logger.error.assert_called()
-                    assert "failed" in mock_logger.error.call_args[0][0].lower()
+                    # Check error was logged via logger.exception (so the traceback is preserved)
+                    mock_logger.exception.assert_called()
+                    assert "failed" in mock_logger.exception.call_args[0][0].lower()

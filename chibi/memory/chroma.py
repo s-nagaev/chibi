@@ -525,7 +525,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaCollectionError: If collection access fails.
         """
-        collection_name = self._get_collection_name(user_id, thread_id)
+        collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         client = await self._get_client()
         try:
             return await client.get_or_create_collection(
