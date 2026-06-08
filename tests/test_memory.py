@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+from chromadb.errors import ChromaError
+
 from chibi.memory.chroma import create_memory
 
 
@@ -53,7 +55,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = None  # Embedded mode
 
-            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory", side_effect=Exception("DB error")):
+            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory", side_effect=ChromaError):
                 with patch("chibi.memory.chroma.logger") as mock_logger:
                     result = create_memory()
 
@@ -66,7 +68,7 @@ class TestCreateMemory:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = "localhost"  # External mode
 
-            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory", side_effect=Exception("DB error")):
+            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory", side_effect=ChromaError):
                 with patch("chibi.memory.chroma.logger") as mock_logger:
                     result = create_memory()
 

@@ -8,6 +8,7 @@ import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
+from chromadb.errors import ChromaError
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
     GoogleGeminiEmbeddingFunction,
@@ -72,25 +73,26 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
-            one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
+        one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+        where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
-            where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
+        try:
             result = await asyncio.to_thread(
                 collection.get,
                 where=where_filter,
                 include=["metadatas"],
             )
-            metadatas = result.get("metadatas")
-            if not metadatas:
-                return None
-            latest = max(metadatas, key=lambda m: float(str(m.get("timestamp_unix", 0))))
-            bid = str(latest.get("batch_id"))
-            return bid if bid else None
-        except Exception as e:
-            logger.error(f"Failed to get last batch_id for user {user_id}, thread {thread_id}: {e}")
+        except ChromaError:
+            logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
+
+        metadatas = result.get("metadatas")
+        if not metadatas:
+            return None
+        latest = max(metadatas, key=lambda m: float(str(m.get("timestamp_unix", 0))))
+        bid = str(latest.get("batch_id"))
+        return bid if bid else None
 
     async def _get_or_create_collection(self, user_id: int, thread_id: int = 0) -> Collection:
         """Get or create a collection for user+thread.
@@ -105,14 +107,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaCollectionError: If collection access fails.
         """
-        collection_name = self._get_collection_name(user_id, thread_id)
+        collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         try:
             return await asyncio.to_thread(
                 self._client.get_or_create_collection,
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except Exception as e:
+        except ChromaError as e:
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
@@ -133,7 +135,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         """
         key = (user_id, thread_id)
         if key not in self._archive_state:
-            last_batch_id = await self._get_last_batch_id(user_id, thread_id)
+            last_batch_id = await self._get_last_batch_id(user_id=user_id, thread_id=thread_id)
             self._archive_state[key] = ArchiveState(
                 batch_id=self._generate_batch_id(),
                 prev_batch_id=last_batch_id,
@@ -154,7 +156,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             thread_id: The thread ID.
             tokens_to_add: Number of tokens to add to the current batch count.
         """
-        state = await self.get_or_create_archive_state(user_id, thread_id)
+        state = await self.get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
         state.token_count += tokens_to_add
         state.next_msg_pos += 1
 
@@ -181,11 +183,10 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         lock = await LockManager().get_lock(key=f"{user_id}:{thread_id}")
         async with lock:
-            state = await self.get_or_create_archive_state(user_id, thread_id)
+            state = await self.get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
 
             for msg in messages:
                 msg_tokens = msg.estimate_tokens
-
                 pos = state.next_msg_pos
                 await self._archive_message(
                     msg=msg,
@@ -195,7 +196,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                     user_id=user_id,
                     thread_id=thread_id,
                 )
-                await self.update_archive_state(user_id, thread_id, msg_tokens)
+                await self.update_archive_state(user_id=user_id, thread_id=thread_id, tokens_to_add=msg_tokens)
         return None
 
     async def _archive_message(
@@ -232,8 +233,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             await asyncio.to_thread(
                 collection.add,
                 metadatas=[metadata],
@@ -241,8 +242,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 documents=[msg.content],
             )
             return None
-        except Exception as e:
-            logger.error(f"Failed to archive message {msg.id}: {e}")
+        except ChromaError as e:
+            logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
     async def search(self, user_id: int, query: str, n_results: int, thread_id: int = 0) -> list[MemorySearchResult]:
@@ -260,72 +261,60 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of search results with context; empty list on error or no matches.
         """
-        try:
-            # Step 1: Semantic search
-            hit = await self._semantic_search(user_id, query, n_results, thread_id)
-            if not hit:
-                return []
+        # Step 1: Semantic search (ChromaSearchError is treated as "no results", not a crash)
+        hit = await self._semantic_search(user_id=user_id, query=query, n_results=n_results, thread_id=thread_id)
+        if not hit:
+            return []
 
-            # Step 2: Get batch of found message
-            hit_batch_id = hit.batch_id
-            hit_msg_pos = hit.msg_pos
-            hit_prev_batch_id = hit.prev_batch_id
+        hit_batch_id = hit.batch_id
+        hit_msg_pos = hit.msg_pos
+        hit_prev_batch_id = hit.prev_batch_id
 
-            if not hit_batch_id:
-                return [
-                    MemorySearchResult(
-                        content=hit.content,
-                        role=hit.role,
-                        timestamp=hit.timestamp,
-                        message_id=hit.message_id,
-                        batch_id=None,
-                        msg_pos=None,
-                        prev_batch_id=None,
-                        thread_id=thread_id,
-                    )
-                ]
-
-            # Step 3: Get current batch
-            context_messages = await self._get_batch_by_field(user_id, hit_batch_id, thread_id=thread_id)
-            current_batch_count = len(context_messages)
-
-            # Near beginning: add previous batch (only if valid prev_batch_id exists)
-            if (
-                current_batch_count > 0
-                and hit_msg_pos is not None
-                and hit_msg_pos <= EDGE_THRESHOLD
-                and hit_prev_batch_id
-            ):
-                prev_batch = await self._get_batch_by_field(user_id, hit_prev_batch_id, thread_id=thread_id)
-                if prev_batch:
-                    context_messages = prev_batch + context_messages
-                    current_batch_count = len(context_messages)
-
-            # Near end: use ACTUAL batch count
-            if (
-                hit_msg_pos is not None
-                and current_batch_count > 0
-                and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
-            ):
-                next_batch = await self._get_batch_by_field(
-                    user_id=user_id,
-                    batch_id=hit_batch_id,
-                    field="prev_batch_id",
+        if not hit_batch_id:
+            return [
+                MemorySearchResult(
+                    content=hit.content,
+                    role=hit.role,
+                    timestamp=hit.timestamp,
+                    message_id=hit.message_id,
+                    batch_id=None,
+                    msg_pos=None,
+                    prev_batch_id=None,
                     thread_id=thread_id,
                 )
-                if next_batch:
-                    context_messages.extend(next_batch)
+            ]
 
-            # Sort by (batch_id, msg_pos) - ULID ensures chronological order
-            context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
+        # Step 2: Get current batch
+        context_messages = await self._get_batch_by_field(user_id=user_id, batch_id=hit_batch_id, thread_id=thread_id)
+        current_batch_count = len(context_messages)
 
-            return context_messages
+        # Near beginning: add previous batch (only if valid prev_batch_id exists)
+        if current_batch_count > 0 and hit_msg_pos is not None and hit_msg_pos <= EDGE_THRESHOLD and hit_prev_batch_id:
+            prev_batch = await self._get_batch_by_field(
+                user_id=user_id, batch_id=hit_prev_batch_id, thread_id=thread_id
+            )
+            if prev_batch:
+                context_messages = prev_batch + context_messages
+                current_batch_count = len(context_messages)
 
-        except ChromaSearchError:
-            return []
-        except Exception as e:
-            logger.error(f"Failed to search messages for user {user_id}: {e}")
-            return []
+        # Near end: use ACTUAL batch count
+        if (
+            hit_msg_pos is not None
+            and current_batch_count > 0
+            and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
+        ):
+            next_batch = await self._get_batch_by_field(
+                user_id=user_id,
+                batch_id=hit_batch_id,
+                field="prev_batch_id",
+                thread_id=thread_id,
+            )
+            if next_batch:
+                context_messages.extend(next_batch)
+
+        # Sort by (batch_id, msg_pos) - ULID ensures chronological order
+        context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
+        return context_messages
 
     async def _semantic_search(
         self, user_id: int, query: str, n_results: int = 1, thread_id: int = 0
@@ -344,34 +333,33 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             result = await asyncio.to_thread(
                 collection.query,
                 query_texts=[query],
                 n_results=n_results,
             )
-
-            documents = result.get("documents")
-            metadatas = result.get("metadatas")
-
-            if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
-                metadata = metadatas[0][0]
-                return MemorySearchResult(
-                    content=documents[0][0],
-                    role=str(metadata.get("role", "")),
-                    timestamp=str(metadata.get("timestamp", "")),
-                    message_id=str(metadata.get("message_id", "")),
-                    batch_id=str(metadata.get("batch_id", "")),
-                    msg_pos=int(str(metadata.get("msg_pos", -1))),
-                    prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
-                    thread_id=int(str(metadata.get("thread_id", 0))),
-                )
-            return None
-
-        except Exception as e:
-            logger.error(f"Semantic search failed: {e}")
+        except ChromaError as e:
+            logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
+
+        documents = result.get("documents")
+        metadatas = result.get("metadatas")
+
+        if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
+            metadata = metadatas[0][0]
+            return MemorySearchResult(
+                content=documents[0][0],
+                role=str(metadata.get("role", "")),
+                timestamp=str(metadata.get("timestamp", "")),
+                message_id=str(metadata.get("message_id", "")),
+                batch_id=str(metadata.get("batch_id", "")),
+                msg_pos=int(str(metadata.get("msg_pos", -1))),
+                prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
+                thread_id=int(str(metadata.get("thread_id", 0))),
+            )
+        return None
 
     async def _get_batch_by_field(
         self,
@@ -391,18 +379,17 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of formatted search results; empty list on error or no matches.
         """
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             result = await asyncio.to_thread(
                 collection.get,
                 where={field: batch_id},
             )
-
-            return self._format_batch_results(result)
-
-        except Exception as e:
-            logger.error(f"Failed to get batch {batch_id}: {e}")
+        except ChromaError:
+            logger.exception(f"Failed to get batch {batch_id} (field={field}) for user {user_id}")
             return []
+
+        return self._format_batch_results(result)
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
@@ -415,10 +402,16 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         """
         cutoff = datetime.now() - timedelta(days=retention_days)
 
+        # Outer guard: a failure listing collections must not crash the whole job.
         try:
             collections = await asyncio.to_thread(self._client.list_collections)
+        except ChromaError:
+            logger.exception("Failed to list ChromaDB collections during retention cleanup")
+            return
 
-            for collection in [c for c in collections if c.name.startswith("user_")]:
+        for collection in [c for c in collections if c.name.startswith("user_")]:
+            # Per-collection failure is isolated: one bad collection must not skip others.
+            try:
                 result = await asyncio.to_thread(collection.get)
                 if not result:
                     continue
@@ -439,9 +432,9 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 if to_delete:
                     await asyncio.to_thread(collection.delete, ids=to_delete)
                     logger.info(f"Deleted {len(to_delete)} messages from {collection.name}")
-
-        except Exception as e:
-            logger.error(f"Failed to delete old messages: {e}")
+            except ChromaError:
+                logger.exception(f"Failed to clean up collection {collection.name}")
+                continue
 
 
 class ExternalChromaLongConversationMemory(LongConversationMemory):
@@ -481,27 +474,28 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
-            one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
+        one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
+        where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
-            where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
+        try:
             result = await collection.get(
                 where=where_filter,
                 include=["metadatas"],
             )
-            metadatas = result.get("metadatas")
-            if not metadatas:
-                return None
-            latest = max(
-                metadatas,
-                key=lambda m: float(str(m.get("timestamp_unix", 0))),
-            )
-            bid = str(latest.get("batch_id", ""))
-            return bid if bid else None
-        except Exception as e:
-            logger.error(f"Failed to get last batch_id for user {user_id}, thread {thread_id}: {e}")
+        except ChromaError:
+            logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
+
+        metadatas = result.get("metadatas")
+        if not metadatas:
+            return None
+        latest = max(
+            metadatas,
+            key=lambda m: float(str(m.get("timestamp_unix", 0))),
+        )
+        bid = str(latest.get("batch_id", ""))
+        return bid if bid else None
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization)."""
@@ -511,7 +505,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                     host=application_settings.chroma_host,
                     port=application_settings.chroma_port,
                 )
-            except Exception as e:
+            except ChromaError as e:
                 raise ChromaConnectionError(
                     f"Failed to connect to ChromaDB at "
                     f"{application_settings.chroma_host}:{application_settings.chroma_port}: {e}"
@@ -538,7 +532,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except Exception as e:
+        except ChromaError as e:
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
@@ -550,7 +544,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         async with lock:
             key = (user_id, thread_id)
             if key not in self._archive_state:
-                last_batch_id = await self._get_last_batch_id(user_id, thread_id)
+                last_batch_id = await self._get_last_batch_id(user_id=user_id, thread_id=thread_id)
                 self._archive_state[key] = ArchiveState(
                     batch_id=self._generate_batch_id(),
                     prev_batch_id=last_batch_id,
@@ -616,77 +610,71 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             await collection.add(
                 metadatas=[metadata],
                 ids=[str(msg.id)],
                 documents=[msg.content],
             )
             logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
-        except Exception as e:
-            logger.error(f"Failed to archive message {msg.id}: {e}")
+        except ChromaError as e:
+            logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
     async def search(self, user_id: int, query: str, n_results: int, thread_id: int = 0) -> list[MemorySearchResult]:
         """Search archived messages with context retrieval."""
         try:
-            hit = await self._semantic_search(user_id, query, n_results, thread_id)
-            if not hit:
-                return []
-
-            hit_batch_id = hit.batch_id
-            hit_msg_pos = hit.msg_pos
-            hit_prev_batch_id = hit.prev_batch_id
-
-            if not hit_batch_id:
-                return [
-                    MemorySearchResult(
-                        content=hit.content,
-                        role=hit.role,
-                        timestamp=hit.timestamp,
-                        message_id=hit.message_id,
-                        batch_id=None,
-                        msg_pos=None,
-                        prev_batch_id=None,
-                        thread_id=thread_id,
-                    )
-                ]
-
-            context_messages = await self._get_batch_by_id(user_id, hit_batch_id, thread_id)
-            current_batch_count = len(context_messages)
-
-            if (
-                current_batch_count > 0
-                and hit_msg_pos is not None
-                and hit_msg_pos <= EDGE_THRESHOLD
-                and hit_prev_batch_id
-            ):
-                prev_batch = await self._get_batch_by_prev_id(user_id, hit_prev_batch_id, thread_id)
-                if prev_batch:
-                    context_messages = prev_batch + context_messages
-                    current_batch_count = len(context_messages)
-
-            if (
-                hit_msg_pos is not None
-                and current_batch_count > 0
-                and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
-            ):
-                next_batch = await self._get_next_batch(user_id, hit_batch_id, thread_id)
-                if next_batch:
-                    context_messages.extend(next_batch)
-
-            context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
-            return context_messages
-
+            hit = await self._semantic_search(user_id=user_id, query=query, n_results=n_results, thread_id=thread_id)
         except ChromaSearchError:
             return []
-        except Exception as e:
-            logger.error(f"Failed to search messages for user {user_id}: {e}")
+
+        if not hit:
             return []
 
+        hit_batch_id = hit.batch_id
+        hit_msg_pos = hit.msg_pos
+        hit_prev_batch_id = hit.prev_batch_id
+
+        if not hit_batch_id:
+            return [
+                MemorySearchResult(
+                    content=hit.content,
+                    role=hit.role,
+                    timestamp=hit.timestamp,
+                    message_id=hit.message_id,
+                    batch_id=None,
+                    msg_pos=None,
+                    prev_batch_id=None,
+                    thread_id=thread_id,
+                )
+            ]
+
+        context_messages = await self._get_batch_by_id(user_id=user_id, batch_id=hit_batch_id, thread_id=thread_id)
+        current_batch_count = len(context_messages)
+
+        if current_batch_count > 0 and hit_msg_pos is not None and hit_msg_pos <= EDGE_THRESHOLD and hit_prev_batch_id:
+            prev_batch = await self._get_batch_by_prev_id(
+                user_id=user_id, prev_batch_id=hit_prev_batch_id, thread_id=thread_id
+            )
+            if prev_batch:
+                context_messages = prev_batch + context_messages
+                current_batch_count = len(context_messages)
+
+        if (
+            hit_msg_pos is not None
+            and current_batch_count > 0
+            and hit_msg_pos >= current_batch_count - EDGE_THRESHOLD - 1
+        ):
+            next_batch = await self._get_next_batch(user_id=user_id, current_batch_id=hit_batch_id, thread_id=thread_id)
+            if next_batch:
+                context_messages.extend(next_batch)
+
+        context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
+        return context_messages
+
     async def _semantic_search(
-        self, user_id: int, query: str, n_results: int, thread_id: int = 0
+        self, user_id: int, query: str, n_results: int = 1, thread_id: int = 0
     ) -> MemorySearchResult | None:
         """Perform semantic search against archived messages.
 
@@ -702,33 +690,32 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.query(
                 query_texts=[query],
                 n_results=1,
             )
-
-            documents = result.get("documents")
-            metadatas = result.get("metadatas")
-
-            if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
-                metadata = metadatas[0][0]
-                return MemorySearchResult(
-                    content=documents[0][0],
-                    role=str(metadata.get("role", "")),
-                    timestamp=str(metadata.get("timestamp", "")),
-                    message_id=str(metadata.get("message_id", "")),
-                    batch_id=str(metadata.get("batch_id", "")),
-                    msg_pos=int(str(metadata.get("msg_pos", -1))),
-                    prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
-                    thread_id=int(str(metadata.get("thread_id", 0))),
-                )
-            return None
-
-        except Exception as e:
-            logger.error(f"Semantic search failed: {e}")
+        except ChromaError as e:
+            logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
+
+        documents = result.get("documents")
+        metadatas = result.get("metadatas")
+
+        if documents and metadatas and len(documents) > 0 and len(documents[0]) > 0:
+            metadata = metadatas[0][0]
+            return MemorySearchResult(
+                content=documents[0][0],
+                role=str(metadata.get("role", "")),
+                timestamp=str(metadata.get("timestamp", "")),
+                message_id=str(metadata.get("message_id", "")),
+                batch_id=str(metadata.get("batch_id", "")),
+                msg_pos=int(str(metadata.get("msg_pos", -1))),
+                prev_batch_id=str(metadata.get("prev_batch_id", "")) or None,
+                thread_id=int(str(metadata.get("thread_id", 0))),
+            )
+        return None
 
     async def _get_batch_by_id(self, user_id: int, batch_id: str, thread_id: int = 0) -> list[MemorySearchResult]:
         """Get all messages in a batch by batch_id.
@@ -741,13 +728,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list on error or no matches.
         """
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.get(where={"batch_id": batch_id})
-            return self._format_batch_results(result)
-        except Exception as e:
-            logger.error(f"Failed to get batch {batch_id}: {e}")
+        except ChromaError:
+            logger.exception(f"Failed to get batch {batch_id} for user {user_id}")
             return []
+        return self._format_batch_results(result)
 
     async def _get_batch_by_prev_id(
         self, user_id: int, prev_batch_id: str, thread_id: int = 0
@@ -762,7 +749,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list if not found.
         """
-        return await self._get_batch_by_id(user_id, prev_batch_id, thread_id)
+        return await self._get_batch_by_id(user_id=user_id, batch_id=prev_batch_id, thread_id=thread_id)
 
     async def _get_next_batch(
         self, user_id: int, current_batch_id: str, thread_id: int = 0
@@ -777,13 +764,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list if not found.
         """
+        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
-            collection = await self._get_or_create_collection(user_id, thread_id)
             result = await collection.get(where={"prev_batch_id": current_batch_id})
-            return self._format_batch_results(result)
-        except Exception as e:
-            logger.error(f"Failed to get next batch: {e}")
+        except ChromaError:
+            logger.exception(f"Failed to get next batch after {current_batch_id} for user {user_id}")
             return []
+        return self._format_batch_results(result)
 
     async def delete_old(self, retention_days: int) -> None:
         """Delete archived messages older than retention_days.
@@ -796,11 +783,17 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         """
         cutoff = datetime.now() - timedelta(days=retention_days)
 
+        # Outer guard: a failure listing collections must not crash the whole job.
         try:
             client = await self._get_client()
             collections = await client.list_collections()
+        except ChromaError:
+            logger.exception("Failed to list ChromaDB collections during retention cleanup")
+            return
 
-            for collection in [c for c in collections if c.name.startswith("user_")]:
+        for collection in [c for c in collections if c.name.startswith("user_")]:
+            # Per-collection failure is isolated: one bad collection must not skip others.
+            try:
                 result = await collection.get()
                 if not result:
                     continue
@@ -821,9 +814,9 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 if to_delete:
                     await collection.delete(ids=to_delete)
                     logger.info(f"Deleted {len(to_delete)} messages from {collection.name}")
-
-        except Exception as e:
-            logger.error(f"Failed to delete old messages: {e}")
+            except ChromaError:
+                logger.exception(f"Failed to clean up collection {collection.name}")
+                continue
 
 
 def create_memory() -> LongConversationMemory | None:
@@ -856,7 +849,7 @@ def create_memory() -> LongConversationMemory | None:
         logger.info("Semantic memory initialized successfully")
         return conversation_memory
 
-    except Exception as e:
+    except ChromaError as e:
         logger.error(f"Failed to initialize ChromaDB: {e}")
 
     return None
