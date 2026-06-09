@@ -6,6 +6,7 @@ from typing import Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
+from chromadb.api.types import Documents, Embeddings
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import Settings as ChromaSettings
 from chromadb.errors import ChromaError
@@ -819,6 +820,30 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 continue
 
 
+class FastEmbedEmbeddingFunction(EmbeddingFunction):
+    """ChromaDB-compatible EmbeddingFunction backed by qdrant/fastembed.
+
+    fastembed ships pure-Python wheels (``py3-none-any``) and bundles its own
+    onnxruntime, so it works across platforms without extra system deps.
+    We use it as a drop-in replacement for chromadb's ``DefaultEmbeddingFunction``
+    on platforms where the latter is not available.
+
+    ``fastembed`` is an optional dependency. We import it lazily so the package
+    can be installed on platforms that don't need it (e.g. macOS x86_64 with its
+    own onnxruntime pin). When the import fails, callers should treat ChromaDB
+    as unsupported on that machine.
+    """
+
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+        from fastembed import TextEmbedding  # fastembed is an optional dep
+        self._model = TextEmbedding(model_name=model_name)
+        self._model_name = model_name
+
+    def __call__(self, input: Documents) -> Embeddings:
+        # fastembed.embed() returns a generator of numpy arrays; ChromaDB expects lists
+        return [vec.tolist() for vec in self._model.embed(input)]
+
+
 def create_memory() -> LongConversationMemory | None:
     """Create memory instance based on ChromaDB configuration."""
     if not application_settings.is_chroma_configured:
@@ -836,6 +861,15 @@ def create_memory() -> LongConversationMemory | None:
                 api_key_env_var="MISTRALAI_API_KEY",
                 model="mistral-embed",
             )
+        case "LOCAL":
+            try:
+                embedding_function = FastEmbedEmbeddingFunction()
+            except Exception as e:
+                logger.warning(
+                    f"ChromaDB is not supported on the current machine: "
+                    f"fastembed is unavailable ({e}). Semantic memory will be disabled."
+                )
+                return None
         case _:
             embedding_function = DefaultEmbeddingFunction()
 
