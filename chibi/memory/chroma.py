@@ -312,7 +312,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             if next_batch:
                 context_messages.extend(next_batch)
 
-        # Sort by (batch_id, msg_pos) - ULID ensures chronological order
+        # Sort by (batch_id, msg_pos) - UUID7 ensures chronological order
         context_messages.sort(key=lambda x: (x.batch_id or "", x.msg_pos or 0))
         return context_messages
 

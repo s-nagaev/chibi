@@ -45,7 +45,7 @@ tasks:
       - task test
 
   update:
-    desc: "Update dependencies and export deps to the requirements.txt/reuirements-dev.txt files"
+    desc: "Update dependencies and export deps to the requirements.txt/requirements-dev.txt files"
     cmds:
       - poetry update
       - poetry export -f requirements.txt --output requirements.txt --without-hashes

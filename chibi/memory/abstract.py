@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 
-import ulid
 from chromadb import GetResult
 from pydantic import BaseModel
+from uuid_utils import uuid7
 
 from chibi.config import application_settings
 from chibi.models import Message
@@ -39,8 +39,8 @@ class LongConversationMemory(ABC, metaclass=SingletonMeta):
 
     @staticmethod
     def _generate_batch_id() -> str:
-        """Generate chronologically ordered unique batch ID via ULID."""
-        return str(ulid.ulid())
+        """Generate chronologically ordered unique batch ID via UUID7."""
+        return str(uuid7())
 
     @staticmethod
     def _format_batch_results(result: GetResult) -> list[MemorySearchResult]:
