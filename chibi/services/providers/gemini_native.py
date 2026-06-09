@@ -6,7 +6,7 @@ import wave
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from google.genai.client import Client
@@ -257,7 +257,7 @@ class Gemini(RestApiFriendlyProvider):
 
         response: GenerateContentResponse = await self._generate_content(
             model=model_name,
-            contents=messages,
+            contents=cast(ContentListUnionDict, messages),
             config=generation_config,
         )
         answer = self._get_text(response)
@@ -376,7 +376,7 @@ class Gemini(RestApiFriendlyProvider):
         async with Client(api_key=gpt_settings.gemini_key, http_options=http_options).aio as client:
             response: GenerateContentResponse = await client.models.generate_content(
                 model=model,
-                contents=[prompt],
+                contents=cast(ContentListUnion, [prompt]),
                 config=generation_config,
             )
         if not response.parts:
@@ -431,7 +431,7 @@ class Gemini(RestApiFriendlyProvider):
         ]
         response: GenerateContentResponse = await self._generate_content(
             model=moderator_model,
-            contents=messages,
+            contents=cast(ContentListUnionDict, messages),
             config=generation_config,
         )
         answer = self._get_text(response)
@@ -571,13 +571,16 @@ class Gemini(RestApiFriendlyProvider):
 
         response = await self._generate_content(
             model=model,
-            contents=[
-                "STT this audio clip",
-                Part.from_bytes(
-                    data=audio.read(),
-                    mime_type="audio/ogg",  # Telegram format
-                ),
-            ],
+            contents=cast(
+                ContentListUnion,
+                [
+                    "STT this audio clip",
+                    Part.from_bytes(
+                        data=audio.read(),
+                        mime_type="audio/ogg",  # Telegram format
+                    ),
+                ],
+            ),
             config=generation_config,
         )
 
@@ -608,13 +611,16 @@ class Gemini(RestApiFriendlyProvider):
 
         response = await self._generate_content(
             model=model,
-            contents=[
-                Part.from_bytes(
-                    data=image,
-                    mime_type=mime_type,
-                ),
-                prompt,
-            ],
+            contents=cast(
+                ContentListUnion,
+                [
+                    Part.from_bytes(
+                        data=image,
+                        mime_type=mime_type,
+                    ),
+                    prompt,
+                ],
+            ),
             config=generation_config,
         )
 
@@ -659,13 +665,16 @@ class Gemini(RestApiFriendlyProvider):
         )
         response = await self._generate_content(
             model=model,
-            contents=[
-                Part.from_bytes(
-                    data=pdf,
-                    mime_type="application/pdf",
-                ),
-                "Extract all text from this PDF document.",
-            ],
+            contents=cast(
+                ContentListUnion,
+                [
+                    Part.from_bytes(
+                        data=pdf,
+                        mime_type="application/pdf",
+                    ),
+                    "Extract all text from this PDF document.",
+                ],
+            ),
             config=generation_config,
         )
 

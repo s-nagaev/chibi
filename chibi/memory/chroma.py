@@ -6,8 +6,8 @@ from typing import Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
-from chromadb.api.types import Documents, Embeddings
 from chromadb.api.models.AsyncCollection import AsyncCollection
+from chromadb.api.types import Documents, Embeddings
 from chromadb.config import Settings as ChromaSettings
 from chromadb.errors import ChromaError
 from chromadb.utils.embedding_functions import (
@@ -836,6 +836,7 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         from fastembed import TextEmbedding  # fastembed is an optional dep
+
         self._model = TextEmbedding(model_name=model_name)
         self._model_name = model_name
 
