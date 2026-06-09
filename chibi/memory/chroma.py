@@ -91,8 +91,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         if not metadatas:
             return None
         latest = max(metadatas, key=lambda m: float(str(m.get("timestamp_unix", 0))))
-        bid = str(latest.get("batch_id"))
-        return bid if bid else None
+        bid = latest.get("batch_id")
+        return str(bid) if bid else None
 
     async def _get_or_create_collection(self, user_id: int, thread_id: int = 0) -> Collection:
         """Get or create a collection for user+thread.
@@ -494,8 +494,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             metadatas,
             key=lambda m: float(str(m.get("timestamp_unix", 0))),
         )
-        bid = str(latest.get("batch_id", ""))
-        return bid if bid else None
+        bid = latest.get("batch_id")
+        return str(bid) if bid else None
 
     async def _get_client(self) -> chromadb.AsyncClientAPI:
         """Get or create async client (lazy initialization)."""
