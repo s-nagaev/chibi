@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-10
+
+### Fixed
+-  The `/reset` and `/stop` commands now terminate not all user-related processes, but only those launched from the same thread where the command is applied.
+-  A bug where changing the model in a group chat would change it not for the group chat, but for the user's private chat.
+
+
 ## [1.10.0] - 2026-06-07
 
 ### Added

@@ -527,7 +527,6 @@ def user_interacts_with_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         True if the user is interacting with the bot, False otherwise.
     """
     telegram_message = get_telegram_message(update=update)
-    print(telegram_message.text)
     # Check entities for mentions (e.g. @botname in Telegram UI)
     if telegram_message.entities:
         for entity in telegram_message.entities:

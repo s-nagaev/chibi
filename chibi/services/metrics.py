@@ -52,3 +52,4 @@ class MetricsService:
             model=model,
         )
         task_manager.run_task(coro=cls._send_to_influx(metric=metric, tags=tags), user_id=-1)
+        return None

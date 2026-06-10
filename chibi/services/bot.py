@@ -1,3 +1,5 @@
+import time
+
 from loguru import logger
 from telegram import (
     CallbackQuery,
@@ -100,6 +102,7 @@ async def handle_tool_response(tool_response: ToolResponseSchema, interface: Use
 
 @handle_gpt_exceptions
 async def handle_user_prompt(interface: UserInterface) -> None:
+    time_start = time.time()
     text_prompt = await interface.get_text_prompt()
     voice_prompt = await interface.get_voice_prompt()
     caption_prompt = await interface.get_caption()
@@ -147,10 +150,11 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         except Exception as e:
             logger.error(f"{interface.user_data}: Couldn't set message reaction due to exception: {e}")
         return None
-
+    time_end = time.time()
+    completion_time = time_end - time_start
     logger.info(
         f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer in "
-        f"the {interface.chat_data}. {logged_answer} {usage_message}"
+        f"the {interface.chat_data}. {logged_answer} {usage_message} [{'%.2f' % completion_time}s]"
     )
     await interface.send_message(message=chat_response.answer)
     history_is_summarized = await check_history_and_summarize(
@@ -165,14 +169,14 @@ async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
     await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
-    task_manager.kill_all_user_tasks(user_id=interface.user_id)
+    task_manager.kill_all_user_tasks(user_id=interface.storage_id, thread_id=interface.thread_id)
     await interface.send_message(message="Done!", reply=False)
 
 
 async def handle_stop(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: stopping everything...")
 
-    task_manager.kill_all_user_tasks(user_id=interface.user_id)
+    task_manager.kill_all_user_tasks(user_id=interface.storage_id, thread_id=interface.thread_id)
     await interface.send_message(message="Everything stopped.", reply=False)
 
 
