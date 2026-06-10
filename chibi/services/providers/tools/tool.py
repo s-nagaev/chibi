@@ -117,7 +117,7 @@ class ChibiTool:
 
         coro = cls._get_and_send_tool_call_result(*args, **kwargs)
         user_id = kwargs.get("user_id", -1)
-        task_manager.run_task(coro=coro, user_id=user_id)
+        task_manager.run_task(coro=coro, user_id=user_id, thread_id=interface.thread_id if interface else 0)
         return ToolResponseSchema(
             tool_name=cls.name,
             status="tool is running in background",
