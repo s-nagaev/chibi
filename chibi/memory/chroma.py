@@ -13,6 +13,7 @@ from chromadb.errors import ChromaError
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
     GoogleGeminiEmbeddingFunction,
+    JinaEmbeddingFunction,
     MistralEmbeddingFunction,
     OpenAIEmbeddingFunction,
 )
@@ -31,7 +32,7 @@ from chibi.memory.abstract import (
     LongConversationMemory,
     MemorySearchResult,
 )
-from chibi.models import Message
+from chibi.models import Message, User
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
@@ -118,7 +119,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         except ChromaError as e:
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
-    async def get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
+    async def _get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
         """Get or create per-(user, thread) archive state.
 
         On first call for a user+thread, queries ChromaDB for the last batch_id
@@ -157,7 +158,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             thread_id: The thread ID.
             tokens_to_add: Number of tokens to add to the current batch count.
         """
-        state = await self.get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
+        state = await self._get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
         state.token_count += tokens_to_add
         state.next_msg_pos += 1
 
@@ -184,7 +185,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
 
         lock = await LockManager().get_lock(key=f"{user_id}:{thread_id}")
         async with lock:
-            state = await self.get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
+            state = await self._get_or_create_archive_state(user_id=user_id, thread_id=thread_id)
 
             for msg in messages:
                 msg_tokens = msg.estimate_tokens
@@ -852,25 +853,33 @@ def create_memory() -> LongConversationMemory | None:
         return None
 
     embedding_function: EmbeddingFunction
+    model = application_settings.embedding_model
     match application_settings.embedding_function:
         case "GEMINI":
-            embedding_function = GoogleGeminiEmbeddingFunction()
+            embedding_function = (
+                GoogleGeminiEmbeddingFunction(model_name=model) if model else GoogleGeminiEmbeddingFunction()
+            )
         case "OPENAI":
-            embedding_function = OpenAIEmbeddingFunction(api_key_env_var="OPENAI_API_KEY")
+            embedding_function = OpenAIEmbeddingFunction(
+                api_key_env_var="OPENAI_API_KEY", model_name=model or "text-embedding-3-small"
+            )
         case "MISTRALAI":
             embedding_function = MistralEmbeddingFunction(
                 api_key_env_var="MISTRALAI_API_KEY",
-                model="mistral-embed",
+                model=model or "mistral-embed",
+            )
+        case "JINA":
+            embedding_function = JinaEmbeddingFunction(
+                api_key_env_var="JINA_API_KEY", model_name=model or "jina-embeddings-v5-omni-small"
             )
         case "LOCAL":
             try:
-                embedding_function = FastEmbedEmbeddingFunction()
-            except Exception as e:
-                logger.warning(
-                    f"ChromaDB is not supported on the current machine: "
-                    f"fastembed is unavailable ({e}). Semantic memory will be disabled."
+                embedding_function = FastEmbedEmbeddingFunction(
+                    model_name=model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
                 )
-                return None
+            except Exception:
+                logger.warning("Fastebmed is unavailable. Loading default ChromaDB embedding function...")
+                embedding_function = DefaultEmbeddingFunction()
         case _:
             embedding_function = DefaultEmbeddingFunction()
 
@@ -910,9 +919,11 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
     def wrap(storage: Database) -> Database:
         original_add_message = storage.add_message
 
-        async def add_message(user, message, ttl=None, thread_id: int = 0) -> None:
-            await original_add_message(user, message, ttl, thread_id)
-            task_manager.run_task(long_conv_memory.archive(user.id, [message], thread_id=thread_id), user_id=user.id)
+        async def add_message(user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
+            await original_add_message(user=user, message=message, ttl=ttl, thread_id=thread_id)
+            task_manager.run_task(
+                long_conv_memory.archive(user_id=user.id, messages=[message], thread_id=thread_id), user_id=user.id
+            )
 
         setattr(storage, "add_message", add_message)
         return storage

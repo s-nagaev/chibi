@@ -82,6 +82,7 @@ def _provider_statuses() -> list[str]:
 def log_application_settings() -> None:
     mode = "<yellow>PUBLIC</yellow>" if gpt_settings.public_mode else "<cyan>PRIVATE</cyan>"
     storage = "<red>REDIS</red>" if application_settings.redis else "<yellow>LOCAL</yellow>"
+    chromadb_storage = "<cyan>REMOTE</cyan>" if application_settings.chroma_host else "<yellow>LOCAL</yellow>"
     proxy = f"<cyan>{telegram_settings.proxy}</cyan>" if telegram_settings.proxy else SETTING_UNSET
     users_whitelist = (
         f"<cyan>{','.join(telegram_settings.users_whitelist)}</cyan>"
@@ -102,6 +103,14 @@ def log_application_settings() -> None:
         if gpt_settings.image_generations_whitelist
         else SETTING_UNSET
     )
+    embedding_provider = (
+        application_settings.embedding_function.upper() if application_settings.is_chroma_configured else SETTING_UNSET
+    )
+    embedding_model = (
+        application_settings.embedding_model
+        if application_settings.is_chroma_configured and application_settings.embedding_model
+        else SETTING_UNSET
+    )
 
     messages = [
         "<magenta>General Settings:</magenta>",
@@ -109,7 +118,6 @@ def log_application_settings() -> None:
         f"Proxy is {proxy}",
         "<magenta>LLM Settings:</magenta>",
         f"Bot name is <cyan>{telegram_settings.bot_name}</cyan>",
-        # f"Initial assistant prompt: <cyan>{gpt_settings.assistant_prompt}</cyan>",
         f"Messages TTL: <cyan>{gpt_settings.max_conversation_age_minutes} minutes</cyan>",
         f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
         f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
@@ -123,8 +131,11 @@ def log_application_settings() -> None:
         f"Models blacklist: {models_blacklist}",
         "<magenta>Heartbeat:</magenta>",
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
-        "<magenta>ChromaDB:</magenta>",
-        f"Semantic memory: {SETTING_SET if application_settings.is_chroma_configured else SETTING_UNSET}",
+        "<magenta>Infinite Context:</magenta>",
+        f"ChromaDB configuration: {SETTING_SET if application_settings.is_chroma_configured else SETTING_UNSET}",
+        f"ChromaDB storage: {chromadb_storage}",
+        f"Embedding provider: {embedding_provider}",
+        f"Embedding model: {embedding_model}",
     ]
     messages += _provider_statuses()
 
