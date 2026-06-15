@@ -29,14 +29,14 @@ async def test_run_task_adds_task(manager):
     manager.run_task(dummy_task(), user_id=1)
 
     assert len(manager._tasks) == 1
-    assert 1 in manager._tasks
-    assert len(manager._tasks[1]) == 1
+    assert "1-0" in manager._tasks
+    assert len(manager._tasks["1-0"]) == 1
 
     # Wait for task to complete
     await asyncio.sleep(0.02)
 
     # Task should be removed from set
-    assert len(manager._tasks[1]) == 0
+    assert len(manager._tasks["1-0"]) == 0
 
 
 @pytest.mark.asyncio
@@ -46,8 +46,8 @@ async def test_run_task_creates_user_set(manager):
 
     manager.run_task(dummy_task(), user_id=42)
 
-    assert 42 in manager._tasks
-    assert isinstance(manager._tasks[42], set)
+    assert "42-0" in manager._tasks
+    assert isinstance(manager._tasks["42-0"], set)
 
 
 @pytest.mark.asyncio
@@ -57,7 +57,7 @@ async def test_run_task_maps_task_to_user_id(manager):
 
     task = manager.run_task(dummy_task(), user_id=123)
 
-    assert manager._task_to_user_id[task] == 123
+    assert manager._task_to_user_id[task] == "123-0"
 
     await asyncio.sleep(0.02)
 
@@ -72,8 +72,8 @@ async def test_multiple_users(manager):
     manager.run_task(dummy_task(), user_id=2)
 
     assert len(manager._tasks) == 2
-    assert len(manager._tasks[1]) == 2
-    assert len(manager._tasks[2]) == 1
+    assert len(manager._tasks["1-0"]) == 2
+    assert len(manager._tasks["2-0"]) == 1
 
     await asyncio.sleep(0.02)
 
@@ -90,7 +90,7 @@ async def test_task_exception_handling(manager):
     await asyncio.sleep(0.01)
 
     # Task should be removed even if failed
-    assert len(manager._tasks[1]) == 0
+    assert len(manager._tasks["1-0"]) == 0
 
 
 @pytest.mark.asyncio

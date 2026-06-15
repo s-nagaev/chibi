@@ -55,7 +55,6 @@ from chibi.utils.telegram import (
     current_user_action,
     get_telegram_chat,
     get_telegram_message,
-    get_telegram_user,
     get_user_context,
     set_user_action,
     set_user_context,
@@ -144,6 +143,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_drop_thread(interface=interface, args=args),
             user_id=interface.storage_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -161,6 +161,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_new_thread(interface=interface, args=args),
             user_id=interface.storage_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -178,6 +179,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_clone_thread(interface=interface, args=args),
             user_id=interface.storage_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -189,6 +191,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_provider_api_key_set(provider_name=provider_name, interface=interface),
             user_id=interface.user_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -202,7 +205,8 @@ class ChibiBot:
             interface = TelegramInterface(update=update, context=context)
             task_manager.run_task(
                 coro=handle_image_generation(prompt=prompt, interface=interface),
-                user_id=interface.user_id,  # Keep user_id: image quotas are per-user, not per-chat
+                user_id=interface.storage_id,
+                thread_id=interface.thread_id,
             )
             return None
 
@@ -261,6 +265,7 @@ class ChibiBot:
             task_manager.run_task(
                 coro=handle_user_prompt(interface=interface),
                 user_id=interface.storage_id,
+                thread_id=interface.thread_id,
             )
         return None
 
@@ -277,6 +282,7 @@ class ChibiBot:
             task_manager.run_task(
                 coro=handle_user_prompt(interface=interface),
                 user_id=interface.storage_id,
+                thread_id=interface.thread_id,
             )
             return None
 
@@ -293,7 +299,8 @@ class ChibiBot:
             set_user_action(context=context, action=UserAction.NONE)
             task_manager.run_task(
                 coro=handle_image_generation(prompt=prompt, interface=interface),
-                user_id=interface.user_id,  # Keep user_id: image quotas are per-user, not per-chat
+                user_id=interface.storage_id,
+                thread_id=interface.thread_id,
             )
             return None
 
@@ -308,6 +315,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_user_prompt(interface=interface),
             user_id=interface.storage_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -317,6 +325,7 @@ class ChibiBot:
         task_manager.run_task(
             coro=handle_user_prompt(interface=interface),
             user_id=interface.storage_id,
+            thread_id=interface.thread_id,
         )
         return None
 
@@ -423,11 +432,12 @@ class ChibiBot:
     @check_user_allowance
     async def show_llm_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
+        telegram_interface = TelegramInterface(update=update, context=context)
 
         available_models = await handle_available_model_options(
-            user_id=get_telegram_user(update=update).id,
+            user_id=telegram_interface.storage_id,
             image_generation=False,
-            interface=TelegramInterface(update=update, context=context),
+            interface=telegram_interface,
         )
 
         active_model = get_user_context(context=context, key=UserContext.ACTIVE_MODEL, expected_type=str)
@@ -450,10 +460,9 @@ class ChibiBot:
     @check_user_allowance
     async def show_image_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
+        telegram_interface = TelegramInterface(update=update, context=context)
         available_models = await handle_available_model_options(
-            user_id=get_telegram_user(update=update).id,
-            image_generation=True,
-            interface=TelegramInterface(update=update, context=context),
+            user_id=telegram_interface.storage_id, image_generation=True, interface=telegram_interface
         )
 
         active_model = get_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, expected_type=str)
@@ -573,7 +582,8 @@ class ChibiBot:
                 model=model,
                 query=query,
             ),
-            user_id=telegram_interface.user_id,
+            user_id=telegram_interface.storage_id,
+            thread_id=telegram_interface.thread_id,
         )
 
         set_user_action(context=context, action=UserAction.NONE)
@@ -799,7 +809,7 @@ class ChibiBot:
             )
         )
 
-        # app.add_error_handler(self.error_handler)
+        app.add_error_handler(self.error_handler)
         if application_settings.heartbeat_url:
             if not app.job_queue:
                 logger.error("Could not launch heartbeat beacon: application job queue was shut down or never started.")

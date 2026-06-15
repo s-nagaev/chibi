@@ -156,7 +156,7 @@ class TerminalRunner:
             await handle_image_generation(prompt=prompt, interface=self.interface)
         except (KeyboardInterrupt, asyncio.CancelledError):
             console.print("\n[yellow]Image generation interrupted.[/yellow]")
-            task_manager.kill_all_user_tasks(user_id=self.user_id)
+            task_manager.kill_all_user_tasks(user_id=self.user_id, thread_id=0)
         except BaseException as e:
             console.print(f"\n[red]Error generating image: {e}[/red]")
             logger.exception("Image generation error")
@@ -240,7 +240,7 @@ class TerminalRunner:
             await handle_user_prompt(interface=self.interface)
         except (KeyboardInterrupt, asyncio.CancelledError):
             console.print("\n[yellow]Operation interrupted.[/yellow]")
-            task_manager.kill_all_user_tasks(user_id=self.user_id)
+            task_manager.kill_all_user_tasks(user_id=self.user_id, thread_id=0)
         except BaseException as e:
             console.print(f"\n[red]Error: {e}[/red]")
             logger.exception("Error processing message")
