@@ -93,7 +93,9 @@ async def _get_url(url: str) -> Response:
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-User": "?1",
     }
-    async with httpx.AsyncClient(transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy) as client:
+    async with httpx.AsyncClient(
+        transport=transport, timeout=gpt_settings.timeout, proxy=gpt_settings.proxy, follow_redirects=True
+    ) as client:
         return await client.get(url=url, headers=headers)
 
 

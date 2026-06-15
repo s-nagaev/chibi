@@ -63,6 +63,22 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
         "available_builtin_skills": get_builtin_skill_names(),
     }
 
+    if application_settings.is_chroma_configured:
+        retention_days = application_settings.chroma_history_retention_days
+        prompt["system_prompt"] += f"""\n\n# Persistent Memory\n
+            You can access conversation history from the last {retention_days} days using the
+            `search_in_conversation_history` tool.\n\n
+            Use memory search when:\n
+            - The user refers to past conversations not present in the current context\n
+            - The user asks what they said or discussed earlier\n
+            - Previous preferences, decisions, or project context may improve the response\n\n
+            Guidelines:\n
+            - Prefer semantic descriptions over exact quotes when searching\n
+            - Do not search memory if the current context already contains the needed information\n
+            - Never fabricate recalled information\n
+            - If memory results are ambiguous or empty, state that clearly\n
+            - Distinguish recalled facts from inferred assumptions\n"""
+
     if gpt_settings.filesystem_access:
         system_data = {
             "current_working_dir": user.working_dir,

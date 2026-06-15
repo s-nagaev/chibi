@@ -3,6 +3,7 @@ from functools import wraps
 from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar, cast
 
 from chibi.config.app import application_settings
+from chibi.memory.chroma import memory, with_chroma_archival
 from chibi.storage.abstract import Database
 from chibi.storage.dynamodb import DynamoDBStorage
 from chibi.storage.local import LocalStorage
@@ -35,13 +36,13 @@ class DatabaseCache:
             backend = application_settings.storage_backend.lower()
             if backend == "redis":
                 # RedisStorage.create expects URL and password
-                self._cache = await RedisStorage.create(
+                inner: RedisStorage | DynamoDBStorage | LocalStorage = await RedisStorage.create(
                     url=cast(str, application_settings.redis),
                     password=application_settings.redis_password,
                 )
             elif backend == "dynamodb":
                 # DynamoDBStorage.create expects region, access_key, secret_key, tables
-                self._cache = await DynamoDBStorage.create(
+                inner = await DynamoDBStorage.create(
                     region=application_settings.aws_region or "",
                     access_key=application_settings.aws_access_key_id,
                     secret_access_key=application_settings.aws_secret_access_key,
@@ -50,7 +51,10 @@ class DatabaseCache:
                 )
             else:
                 # default to local storage
-                self._cache = LocalStorage(application_settings.local_data_path)
+                inner = LocalStorage(application_settings.local_data_path)
+
+            # Attach ChromaDB archival (fire-and-forget) if memory is configured
+            self._cache = with_chroma_archival(memory)(inner)
 
             return self._cache
 
