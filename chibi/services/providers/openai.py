@@ -11,7 +11,6 @@ from openai.types.chat.chat_completion_content_part_param import File, FileFile
 from openai.types.chat.parsed_chat_completion import ParsedChatCompletion
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import OPENAI_TTS_INSTRUCTIONS
 from chibi.exceptions import NoModelSelectedError, ServiceResponseError
 from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchema
@@ -41,13 +40,13 @@ class OpenAI(OpenAIFriendlyProvider):
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
     default_model = "gpt-5.2"
-    default_image_model = "dall-e-3"
+    default_image_model = "gpt-image-2"
     default_moderation_model = "gpt-5-mini"
-    default_stt_model = "whisper-1"
+    default_stt_model = "gpt-4o-transcribe"
     default_tts_model = "gpt-4o-mini-tts"
     default_tts_voice = "nova"
-    default_vision_model = "gpt-4.1-mini"
-    default_ocr_model = "gpt-4.1-mini"
+    default_vision_model = "gpt-5-mini"
+    default_ocr_model = "gpt-5-mini"
 
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         model = model or self.default_stt_model
@@ -112,30 +111,28 @@ class OpenAI(OpenAIFriendlyProvider):
             )
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
-        voice = voice or self.default_tts_voice
-        model = model or self.default_tts_model
+        voice = voice or self.tts_voice
+        model = model or self.tts_model
         logger.info(f"Recording a voice message with model {model}...")
         response = await self.client.audio.speech.create(
             model=model,
             voice=voice,
             input=text,
-            instructions=OPENAI_TTS_INSTRUCTIONS,
         )
         return await response.aread()
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
-        return "dall-e" in model_name
+        return "image" in model_name.lower()
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
-        return await self.client.images.generate(  # type: ignore
+        return await self.client.images.generate(
             model=model,
             prompt=prompt,
-            n=gpt_settings.image_n_choices if "dall-e-2" in model else 1,
+            n=gpt_settings.image_n_choices,
             quality=self.image_quality,
-            size=self.image_size if "dall-e-3" in model else NOT_GIVEN,
+            size=self.image_size,
             timeout=gpt_settings.timeout,
-            response_format="url",
         )
 
     def get_model_display_name(self, model_name: str) -> str:

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class TextToSpeechTool(ChibiTool):
-    register = bool(gpt_settings.openai_key)
+    register = True
     run_in_background_by_default = True
     definition = ChatCompletionToolParam(
         type="function",
@@ -170,8 +170,8 @@ class GenerateMusicViaSunoTool(ChibiTool):
                     },
                     "suno_model": {
                         "type": "string",
-                        "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5",
-                        "default": "V5",
+                        "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5, V5_5",
+                        "default": "V5_5",
                     },
                 },
                 "required": ["prompt"],
@@ -185,7 +185,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
     async def function(
         cls,
         prompt: str,
-        suno_model: str = "V5",
+        suno_model: str = "V5_5",
         instrumental: bool = False,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
@@ -291,7 +291,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
                         "description": (
                             "Description of the music or lyrics. If contains lyrics, must contain"
                             "only lyrics. Limits: for V4 model - 3000 chars, for V4_5, V4_5PLUS, "
-                            "V4_5ALL and V5 - 5000 chars."
+                            "V4_5ALL, V5 and V5_5 - 5000 chars."
                         ),
                     },
                     "style": {
@@ -299,14 +299,14 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
                         "description": (
                             "Music style, i.e. 'Uplifting trance, Techno, Eurodance'"
                             "Limits: for V4 model - 200 chars, for V4_5, V4_5PLUS, "
-                            "V4_5ALL and V5 - 1000 chars"
+                            "V4_5ALL, V5 and V5_5 - 1000 chars"
                         ),
                     },
                     "title": {
                         "type": "string",
                         "description": (
                             "Music title. Limits: for V4 and V4_5ALL model - 80 chars, "
-                            "for V4_5, V4_5PLUS and V5 - 100 chars"
+                            "for V4_5, V4_5PLUS, V5 and V5_5 - 100 chars"
                         ),
                     },
                     "negative_tags": {
@@ -338,8 +338,8 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
                     },
                     "suno_model": {
                         "type": "string",
-                        "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5",
-                        "default": "V5",
+                        "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5, V5_5",
+                        "default": "V5_5",
                     },
                 },
                 "required": ["prompt", "style", "title"],
@@ -354,7 +354,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         prompt: str,
         style: str | None = None,
         title: str | None = None,
-        suno_model: str = "V5",
+        suno_model: str = "V5_5",
         instrumental: bool = False,
         negative_tags: str | None = None,
         vocal_gender: str | None = None,

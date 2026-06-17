@@ -40,7 +40,7 @@ from openai import (
 )
 from openai import NotGiven as OpenAINotGiven
 from openai import Omit as OpenAIOmit
-from openai.types import ImagesResponse, ReasoningEffort
+from openai.types import Image, ImagesResponse, ReasoningEffort
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionFunctionToolParam,
@@ -52,7 +52,7 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import IMAGE_SIZE_LITERAL
+from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
 from chibi.exceptions import (
     NoApiKeyProvidedError,
     NoModelSelectedError,
@@ -246,6 +246,18 @@ class Provider(ABC):
         if cls.api_key:
             RegisteredProviders.register_as_available(cls)
 
+    @property
+    def tts_model(self) -> str:
+        if model := (gpt_settings.tts_model or self.default_tts_model):
+            return model
+        raise ValueError("No default TTS model set")
+
+    @property
+    def tts_voice(self) -> str:
+        if voice := (gpt_settings.tts_voice or self.default_tts_voice):
+            return voice
+        raise ValueError("No default TTS voice set")
+
     async def get_chat_response(
         self,
         messages: list[Message],
@@ -411,7 +423,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     presence_penalty: float | OpenAINotGiven | None = gpt_settings.presence_penalty
     frequency_penalty: float | OpenAIOmit | None = gpt_settings.frequency_penalty
     image_quality: Literal["standard", "hd", "low", "medium", "high", "auto"] | OpenAIOmit = gpt_settings.image_quality
-    image_size: IMAGE_SIZE_LITERAL | OpenAINotGiven | None = gpt_settings.image_size
+    image_size: IMAGE_SIZE_OPENAI_LITERAL | None = gpt_settings.image_size_openai
     base_url: str
     image_n_choices: int = gpt_settings.image_n_choices
 
@@ -667,7 +679,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
-        return await self.client.images.generate(  # type: ignore
+        return await self.client.images.generate(
             model=model,
             prompt=prompt,
             n=gpt_settings.image_n_choices,
@@ -684,7 +696,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         response = await self._get_image_generation_response(prompt=prompt, model=model)
         if not response.data:
             raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
-        return [image.url for image in response.data if image.url]
+
+        images: list[Image] = response.data
+
+        if response.data[0].url:
+            return [image.url for image in images if image.url]
+
+        return [BytesIO(base64.b64decode(image.b64_json)) for image in images if image.b64_json]
 
     async def vision(
         self,

@@ -1,4 +1,3 @@
-from openai import NOT_GIVEN, omit
 
 from chibi.config import gpt_settings
 from chibi.services.providers.provider import OpenAIFriendlyProvider
@@ -14,9 +13,7 @@ class MoonshotAI(OpenAIFriendlyProvider):
     name = "MoonshotAI"
     model_name_keywords = ["moonshot", "kimi"]
     model_name_keywords_exclude = ["vision"]
-    image_quality = omit
-    image_size = NOT_GIVEN
-    default_model = "kimi-latest"
-    default_moderation_model = "kimi-k2-turbo-preview"
-    default_vision_model = "kimi-k2.5"
+    default_model = "kimi-k2.6"
+    default_moderation_model = "kimi-k2.6"
+    default_vision_model = "kimi-k2.6"
     temperature = 1

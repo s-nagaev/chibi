@@ -1,6 +1,9 @@
 version: '3'
+
 vars:
   TAG: dev
+  IMAGE: pysergio/chibi
+
 tasks:
   build:base:
     desc: "Build base amd64 and arm64 images in cloud with specified tag"
@@ -8,9 +11,9 @@ tasks:
       - docker buildx build
           --builder cloud-builder
           --platform linux/amd64,linux/arm64
-          --cache-to type=registry,ref=pysergio/chibi:buildcache,mode=max
-          --cache-from type=registry,ref=pysergio/chibi:buildcache
-          -t pysergio/chibi:{{.TAG}}
+          --cache-to type=registry,ref={{.IMAGE}}:buildcache,mode=max
+          --cache-from type=registry,ref={{.IMAGE}}:buildcache
+          -t {{.IMAGE}}:{{.TAG}}
           -f Dockerfile
           --push .
 
@@ -20,9 +23,27 @@ tasks:
       - docker buildx build
           --builder cloud-builder
           --platform linux/amd64,linux/arm64
-          --cache-to type=registry,ref=pysergio/chibi:buildcache,mode=max
-          --cache-from type=registry,ref=pysergio/chibi:buildcache
-          -t pysergio/chibi:agent-{{.TAG}}
+          --cache-to type=registry,ref={{.IMAGE}}:buildcache,mode=max
+          --cache-from type=registry,ref={{.IMAGE}}:buildcache
+          -t {{.IMAGE}}:agent-{{.TAG}}
+          -f agent.Dockerfile
+          --push .
+
+  build:lbase:
+    desc: "Build base amd64 and arm64 images locally with specified tag"
+    cmds:
+      - docker buildx build
+          --platform linux/amd64,linux/arm64
+          -t {{.IMAGE}}:{{.TAG}}
+          -f Dockerfile
+          --push .
+
+  build:lagent:
+    desc: "Build agent amd64 and arm64 images locally with specified tag"
+    cmds:
+      - docker buildx build
+          --platform linux/amd64,linux/arm64
+          -t {{.IMAGE}}:agent-{{.TAG}}
           -f agent.Dockerfile
           --push .
 

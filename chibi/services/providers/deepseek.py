@@ -10,6 +10,5 @@ class DeepSeek(OpenAIFriendlyProvider):
     name = "DeepSeek"
     model_name_keywords = ["deepseek"]
     base_url = "https://api.deepseek.com"
-    default_model = "deepseek-chat"
-    default_moderation_model = "deepseek-chat"
-    max_tokens: int = 8192
+    default_model = "deepseek-v4-pro"
+    default_moderation_model = "deepseek-v4-flash"

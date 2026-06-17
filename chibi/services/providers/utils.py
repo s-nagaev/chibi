@@ -116,6 +116,9 @@ async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = Non
     if not interface:
         return None
 
+    if thoughts == "No content":
+        return None
+
     message = f"💡💭 {thoughts}"
 
     await interface.send_message(message=message, reply=False)

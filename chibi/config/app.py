@@ -66,12 +66,12 @@ class ApplicationSettings(BaseSettings):
     influxdb_bucket: str | None = Field(default=None)
 
     # ChromaDB settings
+    enable_infinite_context: bool = Field(default=False)
     chroma_host: str = Field(default="")
     chroma_port: int = Field(default=8000)
-    chroma_persist_dir: str = Field(default="")
-    chroma_history_retention_days: int = Field(default=90)
+    chroma_history_retention_days: int = Field(default=180)
     memory_search_limit: int = Field(default=5)
-    embedding_function: Literal["LOCAL", "OPENAI", "GEMINI", "MISTRALAI"] = Field(default="LOCAL")
+    embedding_function: Literal["LOCAL", "OPENAI", "GEMINI", "MISTRALAI", "JINA"] = Field(default="LOCAL")
     embedding_model: str | None = Field(default=None)
     # Batch settings for context retrieval (by token count)
     batch_token_limit: int = Field(default=30000)
@@ -112,7 +112,7 @@ class ApplicationSettings(BaseSettings):
 
     @property
     def is_chroma_configured(self) -> bool:
-        return bool(self.chroma_host or self.chroma_persist_dir)
+        return self.enable_infinite_context
 
     @property
     def running_in_container(self) -> bool:

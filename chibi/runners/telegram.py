@@ -65,44 +65,43 @@ from chibi.utils.telegram import (
 
 _T = TypeVar("_T")
 
+base_commands = [
+    BotCommand(command="help", description="Show this help message"),
+    BotCommand(
+        command="reset",
+        description="Stop LLM and reset your conversation history (will reduce prompt and save some tokens)",
+    ),
+    BotCommand(
+        command="stop",
+        description="Stop LLM and all the processes it runs.",
+    ),
+]
+imagine_commands = [
+    BotCommand(command="imagine", description="Generate image from prompt"),
+    BotCommand(command="image_models", description="Select image generation model"),
+]
+select_model_commands = [
+    BotCommand(command="llm_models", description="Select LLM"),
+]
+public_mode_commands = [
+    BotCommand(command="set_api_key", description="Set an API key (token) for any of supported providers"),
+]
+thread_commands = [
+    BotCommand(command="new_thread", description="Create a new topic/thread with a clean LLM context"),
+    BotCommand(
+        command="new_thread_with_current_context",
+        description="Create a new topic/thread and clone current LLM context to it.",
+    ),
+    BotCommand(command="drop_thread", description="Delete current thread"),
+]
+
 
 class ChibiBot:
     def __init__(self, telegram_token: str | None) -> None:
         if not telegram_token:
             raise RuntimeError("No telegram token provider")
         self.telegram_token = telegram_token
-        self.commands = [
-            BotCommand(command="help", description="Show this help message"),
-            BotCommand(
-                command="ask",
-                description=(
-                    "Ask me any question (in group chat, for example) (e.g. /ask which program language is the best?)"
-                ),
-            ),
-            BotCommand(
-                command="reset",
-                description="Stop LLM and reset your conversation history (will reduce prompt and save some tokens)",
-            ),
-            BotCommand(
-                command="stop",
-                description="Stop LLM and all the processes it runs.",
-            ),
-        ]
-        if not application_settings.hide_imagine:
-            self.commands.append(
-                BotCommand(command="imagine", description="Generate image from prompt"),
-            )
-            self.commands.append(BotCommand(command="image_models", description="Select image generation model"))
-        if not application_settings.hide_models:
-            self.commands.append(BotCommand(command="llm_models", description="Select LLM"))
-
-        if gpt_settings.public_mode:
-            self.commands.append(
-                BotCommand(
-                    command="set_api_key",
-                    description="Set an API key (token) for any of supported providers",
-                )
-            )
+        self.commands: list[BotCommand] = []
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
@@ -218,6 +217,14 @@ class ChibiBot:
     async def file_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = update.effective_message
         if not message:
+            return None
+
+        telegram_chat = get_telegram_chat(update=update)
+        if (
+            telegram_chat.type in GROUP_CHAT_TYPES
+            and "/ask" not in str(message.caption)
+            and not user_interacts_with_bot(update=update, context=context)
+        ):
             return None
 
         interface = TelegramInterface(update=update, context=context)
@@ -478,7 +485,7 @@ class ChibiBot:
                 models=available_models, context=context, active_provider=active_provider
             )
             message = f"{prefix}Select a provider:" if prefix else "Select a provider:"
-            set_user_action(context=context, action=UserAction.SELECT_MODEL_PROVIDER)
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_MODEL_PROVIDER)
 
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
@@ -510,11 +517,7 @@ class ChibiBot:
         )
         await query.answer()
 
-        if not mapped_models or not query.data:
-            await query.delete_message()
-            return None
-
-        if query.data == "-1":
+        if not mapped_models or not query.data or query.data == "-1":
             await query.delete_message()
             return None
 
@@ -568,6 +571,7 @@ class ChibiBot:
         if not model:
             await query.delete_message()
             return None
+
         model.image_generation = current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL
 
         if model.image_generation:
@@ -615,7 +619,12 @@ class ChibiBot:
         reply_markup = self._create_model_selection_keyboad(
             models=provider_models, context=context, add_back_button=True, page=0
         )
-        set_user_action(context=context, action=UserAction.SELECT_CHAT_MODEL)
+
+        if current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL_PROVIDER:
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_MODEL)
+        else:
+            set_user_action(context=context, action=UserAction.SELECT_CHAT_MODEL)
+
         await query.edit_message_text(text=f"{query.data} \u2014 select a model:", reply_markup=reply_markup)
 
     async def _compute_provider_selection_action(
@@ -644,7 +653,7 @@ class ChibiBot:
         if action in (UserAction.SELECT_CHAT_MODEL, UserAction.SELECT_IMAGE_MODEL):
             return await self._compute_model_selection_action(query=query, update=update, context=context)
 
-        if action == UserAction.SELECT_MODEL_PROVIDER:
+        if action in (UserAction.SELECT_MODEL_PROVIDER, UserAction.SELECT_IMAGE_MODEL_PROVIDER):
             return await self._compute_model_provider_selection_action(query=query, update=update, context=context)
 
         if action == UserAction.SELECT_PROVIDER:
@@ -722,18 +731,22 @@ class ChibiBot:
     async def post_init(self, application: Application) -> None:
         bot = Bot(token=self.telegram_token)
         me = await bot.get_me()
+        bot_commands = base_commands.copy()
+
         if me.has_topics_enabled:
-            self.commands.extend(
-                [
-                    BotCommand(command="new_thread", description="Create a new topic/thread with a clean LLM context"),
-                    BotCommand(
-                        command="new_thread_with_current_context",
-                        description="Create a new topic/thread and clone current LLM context to it.",
-                    ),
-                    BotCommand(command="drop_thread", description="Delete current thread"),
-                ]
-            )
-        await application.bot.set_my_commands(self.commands)
+            bot_commands.extend(thread_commands)
+
+        if not application_settings.hide_imagine:
+            bot_commands.extend(imagine_commands)
+
+        if not application_settings.hide_models:
+            bot_commands.extend(select_model_commands)
+
+        if gpt_settings.public_mode:
+            bot_commands.extend(public_mode_commands)
+        self.commands = bot_commands
+
+        await application.bot.set_my_commands(bot_commands)
 
         if memory:
             # Register retention cleanup job if memory is configured
