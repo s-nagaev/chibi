@@ -1,6 +1,5 @@
 import base64
 import json
-from io import BytesIO
 from typing import Any
 
 from loguru import logger
@@ -47,18 +46,6 @@ class OpenAI(OpenAIFriendlyProvider):
     default_tts_voice = "nova"
     default_vision_model = "gpt-5-mini"
     default_ocr_model = "gpt-5-mini"
-
-    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
-        model = model or self.default_stt_model
-        logger.info(f"Transcribing audio with model {model}...")
-        response = await self.client.audio.transcriptions.create(
-            model=model,
-            file=("voice.ogg", audio.getvalue()),
-        )
-        if response:
-            logger.info(f"Transcribed text: {response.text}")
-            return response.text
-        raise ValueError("Could not transcribe audio message")
 
     async def get_chat_response(
         self,
@@ -109,17 +96,6 @@ class OpenAI(OpenAIFriendlyProvider):
                 system_prompt=system_prompt,
                 interface=interface,
             )
-
-    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
-        voice = voice or self.tts_voice
-        model = model or self.tts_model
-        logger.info(f"Recording a voice message with model {model}...")
-        response = await self.client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=text,
-        )
-        return await response.aread()
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:

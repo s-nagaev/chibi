@@ -247,6 +247,12 @@ class Provider(ABC):
             RegisteredProviders.register_as_available(cls)
 
     @property
+    def stt_model(self) -> str:
+        if model := (gpt_settings.stt_model or self.default_stt_model):
+            return model
+        raise ValueError("No default STT model set")
+
+    @property
     def tts_model(self) -> str:
         if model := (gpt_settings.tts_model or self.default_tts_model):
             return model
@@ -757,6 +763,29 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         logger.info(f"[{self.name}] Image analyzed successfully: {result.parsed.short_description}...")
         return result.parsed
+
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        model = model or self.stt_model
+        logger.info(f"[{self.name}] Transcribing audio with model {model}...")
+        response = await self.client.audio.transcriptions.create(
+            model=model,
+            file=("voice.ogg", audio.getvalue()),
+        )
+        if response:
+            logger.info(f"[{self.name}] Transcribed text: {response.text}")
+            return response.text
+        raise ValueError("Could not transcribe audio message")
+
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        voice = voice or self.tts_voice
+        model = model or self.tts_model
+        logger.info(f"[{self.name}] Recording a voice message with model {model}...")
+        response = await self.client.audio.speech.create(
+            model=model,
+            voice=voice,
+            input=text,
+        )
+        return await response.aread()
 
 
 class RestApiFriendlyProvider(Provider):

@@ -841,8 +841,8 @@ class ChibiBot:
 
 
 def run_chibi():
-    telegram_setting_pre_start_check()
     log_application_settings()
+    telegram_setting_pre_start_check()
     telegram_security_pre_start_check()
     telegram_bot = ChibiBot(telegram_settings.token)
     telegram_bot.run()

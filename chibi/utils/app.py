@@ -71,11 +71,12 @@ def _provider_statuses() -> list[str]:
     from chibi.services.providers import RegisteredProviders
 
     statuses = [
-        "<magenta>Provider clients:</magenta>",
+        "<magenta> Provider clients </magenta>".center(90, "="),
     ]
     for provider_name in RegisteredProviders.all.keys():
         status = SETTING_SET if provider_name in RegisteredProviders.available else SETTING_UNSET
         statuses.append(f"{provider_name.capitalize()} client: {status}")
+    statuses.append("=" * 71)
     return statuses
 
 
@@ -113,25 +114,25 @@ def log_application_settings() -> None:
     )
 
     messages = [
-        "<magenta>General Settings:</magenta>",
+        "<magenta> General Settings </magenta>".center(90, "="),
         f"Application is initialized in the {mode} mode using {storage} storage.",
         f"Proxy is {proxy}",
-        "<magenta>LLM Settings:</magenta>",
+        "<magenta> LLM Settings </magenta>".center(90, "="),
         f"Bot name is <cyan>{telegram_settings.bot_name}</cyan>",
         f"Messages TTL: <cyan>{gpt_settings.max_conversation_age_minutes} minutes</cyan>",
         f"Maximum conversation history size: <cyan>{gpt_settings.max_history_tokens}</cyan> tokens",
         f"Maximum answer size: <cyan>{gpt_settings.max_tokens}</cyan> tokens",
         f"Images generation limit: <cyan>{gpt_settings.image_generations_monthly_limit}</cyan>",
         f"Filesystem access: {SETTING_ENABLED if gpt_settings.filesystem_access else SETTING_DISABLED}",
-        "<magenta>Whitelists:</magenta>",
+        "<magenta> Whitelists </magenta>".center(90, "="),
         f"Images limit whitelist: {images_whitelist}",
         f"Users whitelist: {users_whitelist}",
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
         f"Models blacklist: {models_blacklist}",
-        "<magenta>Heartbeat:</magenta>",
+        "<magenta> Heartbeat: </magenta>".center(90, "="),
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
-        "<magenta>Infinite Context:</magenta>",
+        "<magenta> Infinite Context </magenta>".center(90, "="),
         f"ChromaDB configuration: {SETTING_SET if application_settings.is_chroma_configured else SETTING_UNSET}",
         f"ChromaDB storage: {chromadb_storage}",
         f"Embedding provider: {embedding_provider}",

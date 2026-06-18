@@ -1,4 +1,3 @@
-
 from chibi.config import gpt_settings
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 

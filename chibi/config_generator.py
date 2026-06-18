@@ -82,13 +82,16 @@ MOONSHOTAI_API_KEY=
 # Zhipu AI, GLM models. https://z.ai/manage-apikey/apikey-list
 ZHIPUAI_API_KEY=
 
+# OpenRouter models. https://openrouter.ai/keys
+OPENROUTER_API_KEY=
+
 # Open-source models from Cloudflare. Chat-only. https://dash.cloudflare.com/profile/api-tokens
 CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.
 CLOUDFLARE_ACCOUNT_ID=
 
 # Custom OpenAI API key (for local/self-hosted models)
-#CUSTOMOPENAI_API_KEY=""
+CUSTOMOPENAI_API_KEY=
 # Custom OpenAI URL (default: http://localhost:1234/v1)
 CUSTOMOPENAI_URL=http://localhost:1234/v1
 
@@ -115,6 +118,12 @@ LOCAL_DATA_PATH={DATA_DIR.absolute()}
 # Format: redis://[:password@]host[:port][/db][?option=value]
 # REDIS=
 
+# Password for Redis (optional, use if your Redis requires separate auth)
+# REDIS_PASSWORD=
+
+# File storage backend for uploaded files: local or telegram (default: telegram)
+FILE_STORAGE=telegram
+
 # AWS DYNAMODB STORAGE (if set, the local storage and redis setting will be ignored)
 AWS_REGION=
 AWS_ACCESS_KEY_ID=
@@ -124,6 +133,35 @@ AWS_SECRET_ACCESS_KEY=
 DDB_USERS_TABLE=
 # DynamoDB table name for messages
 DDB_MESSAGES_TABLE=
+
+
+# ============================================================================
+# 4.1 INFINITE CONTEXT (ChromaDB)
+# ============================================================================
+
+# Enable infinite context via ChromaDB vector storage (default: false)
+ENABLE_INFINITE_CONTEXT=false
+
+# ChromaDB host (leave empty for embedded mode)
+CHROMA_HOST=
+
+# ChromaDB port (default: 8000)
+CHROMA_PORT=8000
+
+# ChromaDB history retention in days (default: 180)
+CHROMA_HISTORY_RETENTION_DAYS=180
+
+# Number of memories to retrieve per search (default: 5)
+MEMORY_SEARCH_LIMIT=5
+
+# Embedding function provider: LOCAL, OPENAI, GEMINI, MISTRALAI, or JINA (default: LOCAL)
+EMBEDDING_FUNCTION=LOCAL
+
+# Embedding model (optional, provider-specific)
+# EMBEDDING_MODEL=
+
+# Batch token limit for context retrieval (default: 30000)
+BATCH_TOKEN_LIMIT=30000
 
 
 # ============================================================================
@@ -191,6 +229,9 @@ HIDE_IMAGINE=false
 # 8. BEHAVIOR SETTINGS
 # ============================================================================
 
+# Custom LLM role/persona text (injected into the master agent's prompt)
+# LLM_ROLE=
+
 # Default LLM model to use when not specified
 # Example: "gpt-5.2,claude-sonnet-4-5-20250929,models/gemini-2.5-pro"
 DEFAULT_MODEL=
@@ -220,25 +261,28 @@ BACKOFF_FACTOR=0.5
 # Number of retry attempts for failed API calls (default: 3)
 RETRIES=3
 
-# Timeout in seconds for API calls (default: 600)
-TIMEOUT=600
+# Timeout in seconds for API calls (default: 180)
+TIMEOUT=180
 
 
 # ============================================================================
 # 9. IMAGE GENERATION SETTINGS
 # ============================================================================
 
+# Monthly image generation limit per user (0 = unlimited, default: 0)
+IMAGE_GENERATIONS_LIMIT=0
+
 # Number of image choices to generate (1-4, default: 1)
 IMAGE_N_CHOICES=1
 
-# Image quality: standard or hd (default: standard)
-IMAGE_QUALITY=standard
-
-# Image size for general image generation (default: 1024x1024)
-IMAGE_SIZE=1024x1024
+# Image quality: standard, hd, low, medium, high, or auto (default: auto)
+IMAGE_QUALITY=auto
 
 # Image aspect ratio for generation (default: 16:9)
 IMAGE_ASPECT_RATIO=16:9
+
+# Image size for OpenAI DALL-E provider (default: 1536x1024)
+IMAGE_SIZE_OPENAI=1536x1024
 
 # Image size for Nano Banana provider: 1K, 2K, or 4K (default: 2K)
 IMAGE_SIZE_NANO_BANANA=2K
@@ -269,6 +313,21 @@ IMAGE_SIZE_ALIBABA=1664*928
 # Default text-to-speech model
 # Example: "eleven_multilingual_v2"
 # TTS_MODEL=
+
+# Default text-to-speech voice
+# TTS_VOICE=
+
+# Default vision provider
+# Example: "OpenAI"
+# VISION_PROVIDER=
+
+# Default vision model
+# Example: "gpt-5-mini"
+# VISION_MODEL=
+
+# Default OCR provider
+# Example: "Gemini"
+# OCR_PROVIDER=
 
 # Default content moderation provider
 # Example: "Gemini"
@@ -315,6 +374,9 @@ TELEGRAM_BASE_FILE_URL=https://api.telegram.org/file/bot
 
 # Allow other bots to interact with this bot (default: false)
 ALLOW_BOTS=false
+
+# Webapp URL for Telegram Mini App (optional)
+# WEBAPP_URL=
 
 # Only answer direct messages (not group messages) (default: true)
 ANSWER_DIRECT_MESSAGES_ONLY=true
