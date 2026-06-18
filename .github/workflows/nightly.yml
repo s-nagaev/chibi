@@ -25,20 +25,20 @@ jobs:
       - name: Check if build needed
         id: check
         run: |
-          # Find latest stable release tag (exclude dev/pre-release tags)
-          LATEST_TAG=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          # Find latest nightly (dev) tag to avoid duplicate identical nightly releases
+          LATEST_NIGHTLY=$(git tag -l 'v*.dev*' | sort -V | tail -1)
 
-          if [ -n "$LATEST_TAG" ]; then
-            COMMITS=$(git rev-list --count "$LATEST_TAG..HEAD" 2>/dev/null || echo "1")
+          if [ -n "$LATEST_NIGHTLY" ]; then
+            COMMITS=$(git rev-list --count "$LATEST_NIGHTLY..HEAD" 2>/dev/null || echo "1")
           else
             COMMITS=1
           fi
 
           if [ "$COMMITS" -eq 0 ]; then
-            echo "No changes since last release ($LATEST_TAG), skipping build"
+            echo "No changes since last nightly release ($LATEST_NIGHTLY), skipping build"
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Found $COMMITS commit(s) since ${LATEST_TAG:-'(no tags)'}, building..."
+            echo "Found $COMMITS commit(s) since ${LATEST_NIGHTLY:-'(no nightly tags)'}, building..."
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 

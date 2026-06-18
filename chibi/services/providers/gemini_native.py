@@ -464,17 +464,16 @@ class Gemini(RestApiFriendlyProvider):
         return "image" in model_name
 
     def get_model_display_name(self, model_name: str) -> str:
-        if "gemini-3-pro-image" in model_name:
-            display_name = "Nano Banana Pro"
-            return super().get_model_display_name(model_name=display_name)
-
-        if "gemini-3.1-flash-image" in model_name:
-            display_name = "Nano Banana 2"
-            return super().get_model_display_name(model_name=display_name)
-
-        if "gemini-2.5-flash-image" in model_name:
-            display_name = "Nano Banana"
-            return super().get_model_display_name(model_name=display_name)
+        model_name_model_market_name_mapping = {
+            "models/gemini-3-pro-image": "Nano Banana Pro",
+            "models/gemini-3.1-flash-image": "Nano Banana 2",
+            "models/gemini-2.5-flash-image": "Nano Banana",
+        }
+        if "gemini" in model_name.lower():
+            for k, v in model_name_model_market_name_mapping.items():
+                if k in model_name:
+                    display_name = model_name.replace(k, v)
+                    return super().get_model_display_name(model_name=display_name)
 
         if "imagen" in model_name:
             display_name = model_name.removeprefix("models/").rsplit("-generate-", 1)[0].replace("-", " ").title()
@@ -503,8 +502,8 @@ class Gemini(RestApiFriendlyProvider):
         return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
-        voice = voice or self.default_tts_voice
-        model = model or self.default_tts_model
+        voice = voice or self.tts_voice
+        model = model or self.tts_model
         logger.info(f"Recording a voice message with model {model}...")
 
         http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())

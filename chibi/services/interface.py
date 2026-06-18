@@ -5,7 +5,7 @@ from typing import Any
 from loguru import logger
 from telegram import Chat as TelegramChat
 from telegram import File, Update
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ChatType
 from telegram.ext import ContextTypes
 
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, GROUP_CHAT_TYPES
@@ -270,7 +270,10 @@ class TelegramInterface(UserInterface):
     @property
     def thread_id(self) -> int:
         if message := self.update.effective_message:
+            if message.chat.type == ChatType.SUPERGROUP and not message.chat.is_forum:
+                return 0
             return message.message_thread_id or 0
+
         return 0
 
     @property

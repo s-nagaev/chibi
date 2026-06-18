@@ -31,9 +31,9 @@ class Anthropic(AnthropicFriendlyProvider):
 
     name = "Anthropic"
     model_name_keywords = ["claude"]
-    default_model = "claude-sonnet-4-5-20250929"
+    default_model = "claude-sonnet-4-6"
     default_moderation_model = "claude-haiku-4-5-20251001"
-    default_vision_model = "claude-sonnet-4-5-20250929"
+    default_vision_model = "claude-sonnet-4-6"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None

@@ -32,12 +32,11 @@ async def get_chibi_user(db: Database, user_id: int) -> User:
 @inject_database
 async def set_active_model(db: Database, interface: UserInterface, model: ModelChangeSchema) -> None:
     user = await db.get_or_create_user(user_id=interface.storage_id)
+    thread_id = interface.thread_id
     if model.image_generation:
-        user.thread_selected_image_model[interface.thread_id] = SelectedModel(
-            name=model.name, provider_name=model.provider
-        )
+        user.thread_selected_image_model[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
     else:
-        user.thread_selected_llm[interface.thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
+        user.thread_selected_llm[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
     await db.save_user(user)
 
 
@@ -192,11 +191,12 @@ async def get_llm_chat_completion_answer(
         conversation_messages.append(new_message_to_llm)
 
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
+        active_model = user.get_active_llm_model(thread_id=thread_id)
 
         chat_response, new_messages = await active_provider.get_chat_response(
             messages=conversation_messages,
             user=user,
-            model=user.get_active_llm_model(thread_id=thread_id),
+            model=active_model,
             interface=interface,
         )
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)

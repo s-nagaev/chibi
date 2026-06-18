@@ -76,9 +76,10 @@ class Minimax(AnthropicFriendlyProvider):
             ]
         return self.filter_and_return_list_of_models(models=models, image_generation=image_generation)
 
-    async def speech(
-        self, text: str, voice: str | None = default_tts_voice, model: str | None = default_tts_model
-    ) -> bytes:
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        voice = voice or self.tts_voice
+        model = model or self.tts_model
+
         logger.info(f"Recording a voice message with model {model}...")
 
         url = f"{self.base_tts_url}t2a_v2"

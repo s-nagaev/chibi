@@ -17,17 +17,17 @@ class Grok(OpenAIFriendlyProvider):
     model_name_keywords = ["grok"]
     model_name_keywords_exclude = ["vision", "imag"]
     image_quality = omit
-    image_size = NOT_GIVEN
-    default_image_model = "grok-2-image-1212"
-    default_model = "grok-4-1-fast-reasoning"
-    default_moderation_model = "grok-4-1-fast-non-reasoning"
-    default_vision_model = "grok-4-1-fast-reasoning"
+    image_size = None
+    default_image_model = "grok-imagine-image-quality"
+    default_model = "grok-4.20-0309-reasoning"
+    default_moderation_model = "grok-4.20-0309-non-reasoning"
+    default_vision_model = "grok-4.20-multi-agent-0309"
     presence_penalty = NOT_GIVEN
     frequency_penalty = omit
     image_n_choices = 1
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
-        return await self.client.images.generate(  # type: ignore
+        return await self.client.images.generate(
             model=model,
             prompt=prompt,
             n=gpt_settings.image_n_choices,

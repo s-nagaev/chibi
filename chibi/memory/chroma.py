@@ -56,12 +56,12 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         """Initialize ChromaDB embedded client."""
         self.embedding_function = embedding_function
         self._client = chromadb.PersistentClient(
-            path=application_settings.chroma_persist_dir,
+            path=application_settings.local_data_path,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         # Per-(user, thread) archive state: tracks current batch metadata and token counts
         self._archive_state: dict[tuple[int, int], ArchiveState] = {}
-        logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.chroma_persist_dir})")
+        logger.info(f"ChromaDB: using embedded mode (persist: {application_settings.local_data_path})")
 
     async def _get_last_batch_id(self, user_id: int, thread_id: int = 0) -> str | None:
         """Get batch_id of the most recent message for this user+thread in ChromaDB.

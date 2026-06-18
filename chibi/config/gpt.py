@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, IMAGE_SIZE_LITERAL, get_llm_prompt
+from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, get_llm_prompt
 
 
 class GPTSettings(BaseSettings):
@@ -40,11 +40,11 @@ class GPTSettings(BaseSettings):
     image_generations_monthly_limit: int = Field(alias="IMAGE_GENERATIONS_LIMIT", default=0)
     image_n_choices: int = Field(default=1, ge=1, le=4)
     image_quality: Literal["standard", "hd", "low", "medium", "high", "auto"] = Field(default="auto")
-    image_size: IMAGE_SIZE_LITERAL = Field(default="1024x1024")
     image_aspect_ratio: IMAGE_ASPECT_RATIO_LITERAL = Field(default="16:9")
     image_size_nano_banana: Literal["1K", "2K", "4K"] = Field(default="2K")
     image_size_imagen: Literal["1K", "2K"] = Field(default="2K")
     image_size_alibaba: str = "1664*928"
+    image_size_openai: Literal["1024x1024", "1536x1024", "1024x1536", "auto"] = "1536x1024"
 
     default_model: str | None = Field(default=None)
     default_provider: str | None = Field(default=None)
@@ -54,6 +54,7 @@ class GPTSettings(BaseSettings):
 
     tts_provider: str | None = Field(default=None)
     tts_model: str | None = Field(default=None)
+    tts_voice: str | None = Field(default=None)
 
     vision_provider: str | None = Field(default=None)
     vision_model: str | None = Field(default=None)

@@ -7,7 +7,7 @@ from chibi.config.telegram import telegram_settings
 
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
-IMAGE_SIZE_LITERAL = Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"]
+IMAGE_SIZE_OPENAI_LITERAL = Literal["1024x1024", "1536x1024", "1024x1536", "auto"]
 IMAGE_ASPECT_RATIO_LITERAL = Literal["1:1", "3:4", "4:3", "9:16", "16:9"]
 SETTING_SET = "<green>SET</green>"
 SETTING_UNSET = "<red>UNSET</red>"
@@ -32,8 +32,9 @@ class UserContext(Enum):
 class UserAction(Enum):
     SELECT_CHAT_MODEL = "SELECT_CHAT_MODEL"
     SELECT_IMAGE_MODEL = "SELECT_IMAGE_MODEL"
-    SELECT_MODEL_PROVIDER = "SELECT_MODEL_PROVIDER"
+    SELECT_IMAGE_MODEL_PROVIDER = "SELECT_IMAGE_MODEL_PROVIDER"
     SELECT_PROVIDER = "SELECT_PROVIDER"
+    SELECT_MODEL_PROVIDER = "SELECT_MODEL_PROVIDER"
     SET_API_KEY = "SET_API_KEY"
     IMAGINE = "IMAGINE"
     NONE = None
@@ -348,16 +349,6 @@ You are strictly prohibited from saving the following without a direct, explicit
         return base_prompt + FILESYSTEM_ACCESS_PROMPT
     return base_prompt
 
-
-OPENAI_TTS_INSTRUCTIONS = """
-Voice Affect: Bright, youthful, gently enthusiastic.
-Tone: Warm, sincere, very friendly, a hint of playful curiosity.
-Pacing: Medium-fast in upbeat lines.
-Emphasis: Smile through key positive phrases, add light rising intonation at sentence ends.
-Additional: native Russian when reading text in Russian. Rare sounds of inhaling and exhaling,
-especially when reading a long sentence. Lively, not always even reading of the text.
-Sometimes a slightly prolonged pause. More vivid sentence endings.
-"""
 
 SUB_EXECUTOR_PART1 = """
 You are a sub-agent spawned to execute a delegated task. You communicate with a parent AI agent, not a human user. Your

@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: "0 0 * * *"
   push:
+    branches:
+      - "main"
     tags:
       - "v*.*.*"
       - "v*.*.*-rc"
@@ -39,13 +41,14 @@ jobs:
           images: |
             ${{ matrix.image_name }}
           flavor: |
-            latest=${{ matrix.tag_prefix == '' }}
+            latest=false
           tags: |
-            type=schedule,prefix=${{ matrix.tag_prefix }}
+            type=schedule,prefix=${{ matrix.tag_prefix }},pattern=nightly
             type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
             type=ref,event=pr,prefix=${{ matrix.tag_prefix }}
             type=semver,pattern={{version}},prefix=${{ matrix.tag_prefix }}
             type=semver,pattern={{major}}.{{minor}},prefix=${{ matrix.tag_prefix }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && matrix.tag_prefix == '' }}
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3
