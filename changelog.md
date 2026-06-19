@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.12.0] - 2026-06-19
 
 ### Added
 - **Semantic Memory:** Implemented ChromaDB-backed long-term conversation memory
@@ -13,6 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable retention period (default 90 days)
   - Supports both embedded and external ChromaDB deployments
 - Background job for automatic retention cleanup
+
+### Changed
+- **Group Chat Behavior:** bot now ignores file uploads in groups unless user explicitly uses `/ask` or is in private chat; thread ID handling fixed for non-forum supergroups; dynamic command list based on bot capabilities
+- **TTS:** All providers now use `tts_voice` and `tts_model` from settings with provider defaults as fallback; new `tts_voice` configuration option per provider
+- **Provider Model Updates:**
+  - **Anthropic:** `claude-sonnet-4-5-20250929` → `claude-sonnet-4-6`
+  - **DeepSeek:** `deepseek-chat` → `deepseek-v4-pro`; moderation → `deepseek-v4-flash`
+  - **Grok:** new image model `grok-imagine-image-quality`; reasoning → `grok-4.20-0309-reasoning`
+  - **MoonshotAI:** `kimi-latest` → `kimi-k2.6`
+  - **OpenAI:** default image → `gpt-image-2`; STT → `gpt-4o-transcribe`; vision/OCR → `gpt-5-mini`
+- **Suno Music Tool:** Added `V5_5` model, default changed from `V5` to `V5_5`
+- **CI/CD:** `build.yml` and `nightly.yml` workflow improvements; new local build tasks in `Taskfile.yml`
+
+### Fixed
+- `send_llm_thoughts` now skips sending when thoughts content is "No content"
+- Thread ID captured before model selection to avoid stale references
 
 
 ## [1.11.0] - 2026-06-10
@@ -557,7 +573,10 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/s-nagaev/chibi/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/s-nagaev/chibi/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/s-nagaev/chibi/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/s-nagaev/chibi/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/s-nagaev/chibi/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/s-nagaev/chibi/compare/v1.7.2...v1.8.0
