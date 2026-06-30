@@ -138,6 +138,10 @@ class RegisteredProviders:
         return {name: provider for name, provider in self.available.items() if provider.image_generation_ready}
 
     @property
+    def image_to_image_ready(self) -> dict[str, type["Provider"]]:
+        return {name: provider for name, provider in self.available.items() if provider.image_to_image_ready}
+
+    @property
     def stt_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.stt_ready}
 
@@ -184,6 +188,12 @@ class RegisteredProviders:
         return None
 
     @property
+    def first_image_to_image_ready(self) -> Optional["Provider"]:
+        if provider := next(iter(self.image_to_image_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
+    @property
     def first_chat_ready(self) -> Optional["Provider"]:
         if provider := next(iter(self.chat_ready.values()), None):
             return self.get_instance(provider=provider)
@@ -217,6 +227,7 @@ class Provider(ABC):
     vision_ready: bool = False
     moderation_ready: bool = False
     image_generation_ready: bool = False
+    image_to_image_ready: bool = False
 
     name: str
     model_name_keywords: list[str] = []
@@ -225,6 +236,7 @@ class Provider(ABC):
 
     default_model: str
     default_image_model: str | None = None
+    default_image_to_image_model: str | None = None
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
@@ -274,7 +286,9 @@ class Provider(ABC):
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         raise NotImplementedError
 
     def get_model_display_name(self, model_name: str) -> str:
@@ -378,6 +392,26 @@ class Provider(ABC):
     async def get_images(self, prompt: str, model: str | None) -> list[str] | list[BytesIO]:
         raise NotImplementedError
 
+    async def image_to_image(
+        self,
+        prompt: str,
+        input_image: bytes,
+        mime_type: str,
+        model: str | None = None,
+    ) -> list[str] | list[BytesIO]:
+        """Generate/edit an image based on the input image and a text prompt.
+
+        Args:
+            prompt: Edit instruction.
+            input_image: Bytes of the source image.
+            mime_type: MIME type of the source image (e.g. "image/jpeg").
+            model: Model name. Falls back to ``default_image_to_image_model`` if None.
+
+        Returns:
+            List of image URLs (``list[str]``) or in-memory image bytes (``list[BytesIO]``).
+        """
+        raise NotImplementedError
+
     def _get_max_tokens_value(self, model_name: str) -> int:
         return getattr(self, "max_tokens", gpt_settings.max_tokens)
 
@@ -405,11 +439,13 @@ class Provider(ABC):
         return results
 
     def filter_and_return_list_of_models(
-        self, models: list[ModelChangeSchema], image_generation: bool = False
+        self, models: list[ModelChangeSchema], image_generation: bool = False, image_to_image: bool = False
     ) -> list[ModelChangeSchema]:
         all_models = sorted(models, key=lambda model: model.name, reverse=True)
 
-        if image_generation:
+        if image_to_image:
+            filtered_models = [model for model in all_models if model.image_to_image]
+        elif image_generation:
             filtered_models = [model for model in all_models if model.image_generation]
         else:
             filtered_models = [model for model in all_models if self.is_chat_ready_model(model.name)]

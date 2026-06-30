@@ -1,3 +1,5 @@
+import base64
+
 from anthropic import AsyncClient
 from loguru import logger
 
@@ -12,6 +14,7 @@ class Minimax(AnthropicFriendlyProvider):
     chat_ready = True
     tts_ready = True
     moderation_ready = True
+    image_to_image_ready = True
 
     name = "Minimax"
     base_url = "https://api.minimax.io/anthropic"
@@ -23,6 +26,7 @@ class Minimax(AnthropicFriendlyProvider):
     default_tts_model = "speech-2.8-turbo"
     default_tts_voice = "Korean_HaughtyLady"
     default_image_model = "image-01"
+    default_image_to_image_model = "image-01"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None
@@ -47,7 +51,22 @@ class Minimax(AnthropicFriendlyProvider):
         self._client = AsyncClient(api_key=self.token, base_url=self.base_url)
         return self._client
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
+        if image_to_image:
+            # MiniMax i2i supports only by image-01.
+            i2i_models = [
+                ModelChangeSchema(
+                    provider=self.name,
+                    name="image-01",
+                    display_name="Image-01 (i2i)",
+                    image_generation=False,
+                    image_to_image=True,
+                )
+            ]
+            return self.filter_and_return_list_of_models(models=i2i_models, image_to_image=image_to_image)
+
         if image_generation:
             image_models = [
                 ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
@@ -75,6 +94,37 @@ class Minimax(AnthropicFriendlyProvider):
                 for model_name in supported_models
             ]
         return self.filter_and_return_list_of_models(models=models, image_generation=image_generation)
+
+    async def image_to_image(
+        self,
+        prompt: str,
+        input_image: bytes,
+        mime_type: str,
+        model: str | None = None,
+    ) -> list[str]:
+        selected_model = model or self.default_image_to_image_model
+        image_b64 = base64.b64encode(input_image).decode("ascii")
+        data_uri = f"data:{mime_type};base64,{image_b64}"
+
+        url = "https://api.minimax.io/v1/image_generation"
+        logger.info(f"Generating image-to-image with model {selected_model}...")
+
+        response = await self._request(
+            method="POST",
+            url=url,
+            data={
+                "model": selected_model,
+                "prompt": prompt,
+                "aspect_ratio": gpt_settings.image_aspect_ratio,
+                "response_format": "url",
+                "n": gpt_settings.image_n_choices,
+                "prompt_optimizer": True,
+                "reference_image": data_uri,
+            },
+        )
+        response_data = response.json()
+        images_urls = response_data.get("data", {}).get("image_urls", [])
+        return images_urls
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         voice = voice or self.tts_voice

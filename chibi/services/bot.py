@@ -18,6 +18,7 @@ from chibi.services.user import (
     delete_thread_from_map,
     describe_image,
     generate_image,
+    generate_image_to_image,
     get_chibi_user,
     get_llm_chat_completion_answer,
     get_models_available,
@@ -209,6 +210,50 @@ async def handle_image_generation(prompt: str, interface: UserInterface) -> None
     return None
 
 
+async def handle_image_to_image(
+    prompt: str,
+    interface: UserInterface,
+    storage: FileStorage,
+    file_id: str,
+    mime_type: str | None = None,
+) -> None:
+    if await user_has_reached_images_generation_limit(user_id=interface.user_id):
+        await interface.send_message(
+            message=(
+                f"Sorry, you have reached your monthly images generation limit "
+                f"({gpt_settings.image_generations_monthly_limit}). Please, try again later."
+            )
+        )
+        return None
+
+    logger.info(
+        f"{interface.user_data} sent image-to-image request in the {interface.chat_data}"
+        f"{': ' + prompt if application_settings.log_prompt_data else ''}"
+    )
+
+    if mime_type is None:
+        try:
+            info = await storage.get_file_info(file_id=file_id)
+            mime_type = info.get("mime_type", "image/jpeg") if isinstance(info, dict) else "image/jpeg"
+        except Exception as e:
+            logger.warning(f"Could not resolve mime_type for file_id={file_id}: {e}. Falling back to image/jpeg.")
+            mime_type = "image/jpeg"
+
+    image_bytes = await storage.get_bytes(file_id=file_id)
+
+    async with indicator(coro_func=interface.send_action_uploading_photo):
+        images = await generate_image_to_image(
+            interface=interface,
+            prompt=prompt,
+            input_image=image_bytes,
+            mime_type=mime_type,
+        )
+        await interface.send_images(images=images)
+
+    logger.info(f"{interface.user_data} got a successfully generated image-to-image")
+    return None
+
+
 async def handle_provider_api_key_set(provider_name: str, interface: UserInterface) -> None:
     logger.info(f"{interface.user_data} provides API Key for provider '{provider_name}'.")
 
@@ -244,8 +289,14 @@ async def handle_available_model_options(
     user_id: int,
     interface: UserInterface,
     image_generation: bool = False,
+    image_to_image: bool = False,
 ) -> list[ModelChangeSchema]:
-    return await get_models_available(user_id=user_id, image_generation=image_generation, thread_id=interface.thread_id)
+    return await get_models_available(
+        user_id=user_id,
+        image_generation=image_generation,
+        image_to_image=image_to_image,
+        thread_id=interface.thread_id,
+    )
 
 
 async def handle_image_understanding(

@@ -35,6 +35,7 @@ from chibi.services.bot import (
     handle_clone_thread,
     handle_drop_thread,
     handle_image_generation,
+    handle_image_to_image,
     handle_image_understanding,
     handle_model_selection,
     handle_new_thread,
@@ -79,6 +80,8 @@ base_commands = [
 imagine_commands = [
     BotCommand(command="imagine", description="Generate image from prompt"),
     BotCommand(command="image_models", description="Select image generation model"),
+    BotCommand(command="imagine_image", description="Edit a photo: send photo with caption afterwards"),
+    BotCommand(command="image_to_image_models", description="Select image-to-image model"),
 ]
 select_model_commands = [
     BotCommand(command="llm_models", description="Select LLM"),
@@ -214,6 +217,17 @@ class ChibiBot:
         return None
 
     @check_user_allowance
+    async def imagine_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Enter IMAGINE_FROM_IMAGE mode: the next photo's caption will be used as i2i prompt."""
+        telegram_message = get_telegram_message(update=update)
+        set_user_action(context=context, action=UserAction.IMAGINE_FROM_IMAGE)
+        await telegram_message.reply_text(
+            "Ok, send me a photo with an instruction in the caption "
+            "(e.g. 'turn this into a watercolor')."
+        )
+        return None
+
+    @check_user_allowance
     async def file_upload(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = update.effective_message
         if not message:
@@ -248,6 +262,34 @@ class ChibiBot:
             photo_meta_dict["file_name"] = file_name
             photo_meta_dict["mime_type"] = "image/jpeg"
             file_id = await storage.save(file_metadata=photo_meta_dict)
+
+            # If user is in IMAGINE_FROM_IMAGE mode, treat the caption as an i2i prompt
+            # and skip the regular vision flow.
+            if current_user_action(context=context) == UserAction.IMAGINE_FROM_IMAGE:
+                caption_text = (message.caption or "").strip()
+                if not caption_text:
+                    await get_telegram_message(update=update).reply_text(
+                        "Please, add a text instruction (caption) to the photo describing the edit you want."
+                    )
+                    return None
+                set_user_action(context=context, action=UserAction.NONE)
+                task_manager.run_task(
+                    coro=handle_image_to_image(
+                        prompt=caption_text,
+                        interface=interface,
+                        storage=storage,
+                        file_id=file_id,
+                        mime_type="image/jpeg",
+                    ),
+                    user_id=interface.storage_id,
+                    thread_id=interface.thread_id,
+                )
+                logger.info(
+                    f"{interface.user_data}-{interface.chat_data}: Photo '{file_name}' "
+                    f"received for image-to-image generation."
+                )
+                return None
+
             if vision_result := await handle_image_understanding(
                 interface=interface,
                 storage=storage,
@@ -489,6 +531,38 @@ class ChibiBot:
 
         await telegram_message.reply_text(text=message, reply_markup=reply_markup)
 
+    async def show_image_to_image_models_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        telegram_message = get_telegram_message(update=update)
+        telegram_interface = TelegramInterface(update=update, context=context)
+        available_models = await handle_available_model_options(
+            user_id=telegram_interface.storage_id, image_to_image=True, interface=telegram_interface
+        )
+
+        if not available_models:
+            await telegram_message.reply_text(
+                "Sorry, no image-to-image models are available. Ask admin to enable a provider that supports i2i."
+            )
+            return None
+
+        active_model = get_user_context(
+            context=context, key=UserContext.ACTIVE_IMAGE_TO_IMAGE_MODEL, expected_type=str
+        )
+        prefix = f"Active i2i model: {active_model}. " if active_model else ""
+
+        if len(available_models) <= 12:
+            reply_markup = self._create_model_selection_keyboad(models=available_models, context=context)
+            message = f"{prefix}Select image-to-image model:" if prefix else "Please, select i2i model:"
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_TO_IMAGE_MODEL)
+        else:
+            active_provider = self._find_active_provider_in_models(available_models)
+            reply_markup = self._create_provider_selection_keyboad(
+                models=available_models, context=context, active_provider=active_provider
+            )
+            message = f"{prefix}Select provider:" if prefix else "Select provider:"
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_TO_IMAGE_MODEL_PROVIDER)
+
+        await telegram_message.reply_text(text=message, reply_markup=reply_markup)
+
     async def show_api_key_set_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         telegram_message = get_telegram_message(update=update)
         keyboard = [
@@ -572,9 +646,13 @@ class ChibiBot:
             await query.delete_message()
             return None
 
-        model.image_generation = current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL
+        action = current_user_action(context=context)
+        model.image_generation = action == UserAction.SELECT_IMAGE_MODEL
+        model.image_to_image = action == UserAction.SELECT_IMAGE_TO_IMAGE_MODEL
 
-        if model.image_generation:
+        if model.image_to_image:
+            set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_TO_IMAGE_MODEL, value=model.name)
+        elif model.image_generation:
             set_user_context(context=context, key=UserContext.ACTIVE_IMAGE_MODEL, value=model.name)
         else:
             set_user_context(context=context, key=UserContext.ACTIVE_MODEL, value=model.name)
@@ -620,8 +698,11 @@ class ChibiBot:
             models=provider_models, context=context, add_back_button=True, page=0
         )
 
-        if current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL_PROVIDER:
+        current_action = current_user_action(context=context)
+        if current_action == UserAction.SELECT_IMAGE_MODEL_PROVIDER:
             set_user_action(context=context, action=UserAction.SELECT_IMAGE_MODEL)
+        elif current_action == UserAction.SELECT_IMAGE_TO_IMAGE_MODEL_PROVIDER:
+            set_user_action(context=context, action=UserAction.SELECT_IMAGE_TO_IMAGE_MODEL)
         else:
             set_user_action(context=context, action=UserAction.SELECT_CHAT_MODEL)
 
@@ -778,10 +859,12 @@ class ChibiBot:
 
         if not application_settings.hide_imagine:
             app.add_handler(CommandHandler(command="imagine", callback=self.imagine))
+            app.add_handler(CommandHandler(command="imagine_image", callback=self.imagine_image))
 
         if not application_settings.hide_models:
             app.add_handler(CommandHandler("llm_models", self.show_llm_models_menu))
             app.add_handler(CommandHandler("image_models", self.show_image_models_menu))
+            app.add_handler(CommandHandler("image_to_image_models", self.show_image_to_image_models_menu))
         app.add_handler(CallbackQueryHandler(self.handle_selection))
 
         if gpt_settings.public_mode:

@@ -16,7 +16,13 @@ from .file_editor import (
 )
 from .mcp_management import DeinitializeMCPServer, InitializeSseMCPServer, InitializeStdioMCPServer
 from .mcp_simple import McpEchoTool
-from .media import TextToSpeechTool
+from .media import (
+    GenerateImageTool,
+    GetAvailableImageModelsTool,
+    GetAvailableImageToImageModelsTool,
+    ImageToImageTool,
+    TextToSpeechTool,
+)
 from .memory import SearchInConversationHistoryTool, SetUserInfoTool
 from .ocr_pdf import OcrPdfTool
 from .schemas import ToolResponseSchema
