@@ -332,9 +332,11 @@ async def ocr_pdf(
 
 @cached(ttl=3600)
 @inject_database
-async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+async def get_user_cached_models(
+    db: Database, user_id: int, image_generation: bool = False, image_to_image: bool = False
+) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    return await user.get_available_models(image_generation=image_generation)
+    return await user.get_available_models(image_generation=image_generation, image_to_image=image_to_image)
 
 
 @inject_database
@@ -342,19 +344,27 @@ async def get_models_available(
     db: Database, user_id: int, image_generation: bool = False, thread_id: int = 0, image_to_image: bool = False
 ) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    user_models = await get_user_cached_models(user_id=user_id, image_generation=image_generation)
+    user_models = await get_user_cached_models(
+        user_id=user_id, image_generation=image_generation, image_to_image=image_to_image
+    )
 
     if not user_models:
         return []
 
     available_models = deepcopy(user_models)
 
-    if image_generation:
+    if image_to_image:
+        # Make sure only models flagged as image-to-image capable are returned, even if a
+        # previous cached list contained LLMs (e.g. when switching selection modes).
+        available_models = [m for m in available_models if m.image_to_image]
+        active_provider = user.get_active_image_to_image_provider(thread_id=thread_id)
+        active_model = user.get_active_image_to_image_model(
+            thread_id=thread_id
+        ) or getattr(active_provider, "default_image_to_image_model", None) or active_provider.default_image_model
+    elif image_generation:
+        available_models = [m for m in available_models if m.image_generation]
         active_provider = user.get_active_image_provider(thread_id=thread_id)
         active_model = user.get_active_image_model(thread_id=thread_id) or active_provider.default_image_model
-    elif image_to_image:
-        active_provider = user.get_active_image_to_image_provider(thread_id=thread_id)
-        active_model = user.get_active_image_to_image_model(thread_id=thread_id) or active_provider.default_image_model
     else:
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
         active_model = user.get_active_llm_model(thread_id=thread_id) or active_provider.default_image_model

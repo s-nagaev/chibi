@@ -118,8 +118,13 @@ class Minimax(AnthropicFriendlyProvider):
                 "aspect_ratio": gpt_settings.image_aspect_ratio,
                 "response_format": "url",
                 "n": gpt_settings.image_n_choices,
-                "prompt_optimizer": True,
-                "reference_image": data_uri,
+                "prompt_optimizer": False,
+                "subject_reference": [
+                    {
+                        "type": "character",
+                        "image_file": data_uri,
+                    }
+                ]
             },
         )
         response_data = response.json()

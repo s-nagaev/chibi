@@ -204,7 +204,12 @@ class ImageToImageTool(ChibiTool):
                 "get_file_info. Check available providers and models first via "
                 "get_available_image_to_image_models. "
                 f"The aspect ratio ({gpt_settings.image_aspect_ratio}) and size are set globally "
-                "and cannot be changed via the prompt."
+                "and cannot be changed via the prompt. "
+                "IMPORTANT: DO NOT call analyze_image (or any other vision/description tool) on the "
+                "same photo before or alongside this call — this tool sends the raw image bytes + "
+                "the edit prompt directly to the image-to-image provider, so any extra vision step "
+                "is unnecessary, costs extra tokens, and may fail when no vision-ready provider is "
+                "configured. Just call this tool with the prompt describing the desired edit."
             ),
             parameters={
                 "type": "object",
