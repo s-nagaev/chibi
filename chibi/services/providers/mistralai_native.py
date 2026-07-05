@@ -23,7 +23,7 @@ from pydantic.fields import PydanticUndefined
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
-from chibi.models import Message, User
+from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import (
     ChatResponseSchema,
     ModelChangeSchema,
@@ -144,7 +144,12 @@ class MistralAI(RestApiFriendlyProvider):
         model = model or self.default_model
         initial_messages = [msg.to_mistral() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -157,6 +162,7 @@ class MistralAI(RestApiFriendlyProvider):
         messages: list[MistralMessageParam],
         model: str,
         user: User,
+        original_messages: list[Message],
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
@@ -183,6 +189,7 @@ class MistralAI(RestApiFriendlyProvider):
                     content=message_data.content or "",
                 )
             )
+            original_messages.append(Message(role="assistant", content=message_data.content or ""))
             return ChatResponseSchema(
                 answer=message_data.content or "no data",
                 provider=self.name,
@@ -211,7 +218,13 @@ class MistralAI(RestApiFriendlyProvider):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         for tool_call, result in zip(tool_calls, results):
@@ -235,9 +248,39 @@ class MistralAI(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
+            tool_call_arguments = (
+                tool_call.function.arguments
+                if isinstance(tool_call.function.arguments, str)
+                else json.dumps(tool_call.function.arguments)
+            )
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=message_data.content or "",
+                    tool_calls=[
+                        ToolSchema(
+                            id=tool_call.id,
+                            function=FunctionSchema(
+                                name=tool_call.function.name,
+                                arguments=tool_call_arguments,
+                            ),
+                        )
+                    ],
+                )
+            )
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.function.name,
+                )
+            )
+
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
             messages=messages,
+            original_messages=original_messages,
             model=model,
             user=user,
             system_prompt=system_prompt,

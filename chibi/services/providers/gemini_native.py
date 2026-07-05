@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import math
 import random
 import wave
@@ -37,7 +38,7 @@ from pydantic import BaseModel
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
-from chibi.models import Message, User
+from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import (
     ChatResponseSchema,
     ModelChangeSchema,
@@ -238,6 +239,7 @@ class Gemini(RestApiFriendlyProvider):
         self,
         messages: list[ContentDict],
         user: User,
+        original_messages: list[Message],
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
@@ -287,6 +289,7 @@ class Gemini(RestApiFriendlyProvider):
                     ],
                 )
             )
+            original_messages.append(Message(role="assistant", content=answer))
             return ChatResponseSchema(answer=answer, provider=self.name, model=model_name, usage=usage), messages
 
         # Tool calls handling
@@ -304,7 +307,13 @@ class Gemini(RestApiFriendlyProvider):
             for function_call in response.function_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model_name, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model_name,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         thought_signature = self._get_thought_signature(response=response)
@@ -342,9 +351,39 @@ class Gemini(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=answer,
+                    tool_calls=[
+                        ToolSchema(
+                            id=function_call_id,
+                            function=FunctionSchema(
+                                name=function_call.name,
+                                arguments=json.dumps(function_call.args),
+                            ),
+                            thought_signature=thought_signature,
+                        )
+                    ],
+                )
+            )
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=json.dumps(result.model_dump()),
+                    tool_call_id=function_call_id,
+                    tool_name=function_call.name,
+                )
+            )
+
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model_name, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            original_messages=original_messages,
+            model=model_name,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
     async def get_chat_response(
@@ -359,7 +398,12 @@ class Gemini(RestApiFriendlyProvider):
         initial_messages = [msg.to_google() for msg in messages]
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]

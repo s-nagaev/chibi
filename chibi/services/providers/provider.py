@@ -63,7 +63,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.models import Message, User
+from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import (
     ChatResponseSchema,
     ModelChangeSchema,
@@ -78,6 +78,8 @@ from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT, SUPERVISOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
 from chibi.services.providers.utils import (
+    SupervisorToolCallAction,
+    build_supervisor_context,
     get_usage_from_anthropic_response,
     get_usage_from_openai_response,
     get_usage_msg,
@@ -430,15 +432,99 @@ class Provider(ABC):
         calls: list[ToolCallSchema],
         caller_model: str,
         caller_provider: str,
+        messages: list[Message],
+        system_prompt: str,
         user_id: int | None = None,
         interface: UserInterface | None = None,
     ) -> list[ToolResponseSchema]:
+        """Execute a batch of tool calls with optional supervisor pre-check.
+
+        When ``gpt_settings.supervisor_enabled`` is True, each requested tool
+        call is evaluated by the Supervisor before the real tool is invoked.
+        Calls that receive an ``intervene`` verdict are skipped and produce a
+        ``ToolResponseSchema(status="error", result=reason)``. Calls that
+        receive ``ok`` are executed normally. Supervisor checks for parallel
+        tool calls run concurrently via ``asyncio.gather``.
+
+        Args:
+            calls: Tool calls requested by the model.
+            caller_model: Name of the model that requested the tools.
+            caller_provider: Name of the provider that hosts the caller model.
+            messages: Canonical conversation history visible to the caller
+                model (used as Supervisor context).
+            system_prompt: Already-prepared system prompt that was sent to the
+                caller model (used as Supervisor context).
+            user_id: Optional ID of the user who triggered the request.
+            interface: Optional interface for sending progress/thoughts.
+
+        Returns:
+            A list of ``ToolResponseSchema`` results, one per requested call,
+            in the same order as ``calls``.
+        """
         tool_context: dict[str, Any] = {
             "user_id": user_id,
             "interface": interface,
             "caller_model": caller_model,
             "caller_provider": caller_provider,
         }
+
+        supervisor = None
+        if gpt_settings.supervisor_enabled:
+            supervisor = RegisteredProviders().first_supervisor_ready
+            if supervisor is None:
+                logger.warning(
+                    "Supervisor is enabled but no supervisor provider could be resolved; running without it."
+                )
+
+        if supervisor is not None:
+            supervise_coroutines = [
+                supervisor.supervise(
+                    context=build_supervisor_context(
+                        system_prompt=system_prompt,
+                        messages=messages,
+                        tool_call=SupervisorToolCallAction(tool_name=call.tool_name, args=call.args),
+                    )
+                )
+                for call in calls
+            ]
+            supervise_results: list[SupervisorAnswer] = await asyncio.gather(*supervise_coroutines)
+
+            allowed_calls: list[ToolCallSchema] = []
+            allowed_indices: list[int] = []
+            blocked_responses: dict[int, ToolResponseSchema] = {}
+
+            for index, (call, supervise_result) in enumerate(zip(calls, supervise_results)):
+                if supervise_result.verdict == SupervisorVerdict.INTERVENE:
+                    reason = supervise_result.reason or "Supervisor intervened."
+                    blocked_responses[index] = ToolResponseSchema(
+                        tool_name=call.tool_name,
+                        status="error",
+                        result=reason,
+                    )
+                    logger.warning(f"Supervisor intervened on {call.tool_name}: {reason}")
+                else:
+                    allowed_calls.append(call)
+                    allowed_indices.append(index)
+
+            if allowed_calls:
+                tool_coroutines = [
+                    RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args)
+                    for call in allowed_calls
+                ]
+                allowed_results = await asyncio.gather(*tool_coroutines)
+            else:
+                allowed_results = []
+
+            results: list[ToolResponseSchema] = [
+                ToolResponseSchema(tool_name=call.tool_name, status="pending", result="") for call in calls
+            ]
+            for allowed_index, result in zip(allowed_indices, allowed_results):
+                results[allowed_index] = result
+            for blocked_index, blocked_response in blocked_responses.items():
+                results[blocked_index] = blocked_response
+
+            return results
+
         tool_coroutines = [
             RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args) for call in calls
         ]
@@ -538,7 +624,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         initial_messages = [msg.to_openai() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), model=model, system_prompt=system_prompt, user=user, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            model=model,
+            system_prompt=system_prompt,
+            user=user,
+            interface=interface,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -551,10 +642,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         messages: list[ChatCompletionMessageParam],
         model: str,
         user: User,
+        original_messages: list[Message],
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
+        prepared_system_prompt = ""
         if not system_prompt:
             dialog = messages
         else:
@@ -593,6 +686,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         if not tool_calls:
             messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
+            original_messages.append(Message(role="assistant", content=answer))
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
@@ -611,7 +705,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         for tool_call, result in zip(tool_calls, results):
@@ -636,16 +736,45 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 message_dict["reasoning_content"] = data.message.reasoning_content
 
             messages.append(message_dict)  # type: ignore
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=answer,
+                    tool_calls=[
+                        ToolSchema(
+                            id=tool_call.id,
+                            type="function",
+                            function=FunctionSchema(
+                                name=tool_call.function.name,
+                                arguments=tool_call.function.arguments,
+                            ),
+                        )
+                    ],
+                )
+            )
             tool_result_message = ChatCompletionToolMessageParam(
                 tool_call_id=tool_call.id,
                 role="tool",
                 content=result.model_dump_json(),
             )
             messages.append(tool_result_message)
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.function.name,
+                )
+            )
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            original_messages=original_messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -1022,7 +1151,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -1035,6 +1169,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         messages: list[MessageParam],
         model: str,
         user: User,
+        original_messages: list[Message],
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
@@ -1064,6 +1199,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 if answer := getattr(block, "text", None):
                     break
 
+            original_messages.append(Message(role="assistant", content=answer or "no data"))
             return ChatResponseSchema(
                 answer=answer or "no data",
                 provider=self.name,
@@ -1092,7 +1228,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             for tool_call_part in tool_call_parts
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         for tool_call_part, result in zip(tool_call_parts, results):
@@ -1114,9 +1256,39 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=thoughts_part.text if thoughts_part else "",
+                    tool_calls=[
+                        ToolSchema(
+                            id=tool_call_part.id,
+                            type="tool_use",
+                            function=FunctionSchema(
+                                name=tool_call_part.name,
+                                arguments=json.dumps(tool_call_part.input),
+                            ),
+                        )
+                    ],
+                )
+            )
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=tool_call_part.id,
+                    tool_name=tool_call_part.name,
+                )
+            )
+
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            original_messages=original_messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
     async def _classify_with_forced_tool(

@@ -238,8 +238,15 @@ class OpenAI(OpenAIFriendlyProvider):
             )
             for item in tool_call_items
         ]
+        prepared_instructions = instructions if isinstance(instructions, str) else ""
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=messages,
+            system_prompt=prepared_instructions,
+            user_id=user.id,
+            interface=interface,
         )
 
         assistant_message = Message(
