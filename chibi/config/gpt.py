@@ -64,6 +64,33 @@ class GPTSettings(BaseSettings):
     moderation_provider: str | None = Field(default=None)
     moderation_model: str | None = Field(default=None)
 
+    supervisor_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the Supervisor workflow guard for agent scenarios. When False (default), "
+            "the Supervisor is not invoked at all. When True, every tool call (pre-execution) "
+            "and every final LLM response is checked against the configured Supervisor model; "
+            "on Intervene, execution is blocked or the response is regenerated, up to "
+            "max_supervisor_retries. Independent from the Moderator (safety)."
+        ),
+    )
+    supervisor_provider: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit provider name for the Supervisor (e.g. 'openai', 'anthropic'). "
+            "Falls back to moderation_provider when unset, and to the default "
+            "RegisteredProviders.first_moderation_ready mechanism at runtime."
+        ),
+    )
+    supervisor_model: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit model id for the Supervisor (e.g. 'gpt-5-mini'). "
+            "Falls back to moderation_model when unset, and to the provider's "
+            "default_moderation_model at runtime."
+        ),
+    )
+
     max_conversation_age_minutes: int = Field(default=360)
     max_history_tokens: int = Field(default=64000)
 
@@ -130,6 +157,44 @@ class GPTSettings(BaseSettings):
     @property
     def messages_ttl(self) -> int:
         return self.max_conversation_age_minutes * 60
+
+    @property
+    def supervisor_provider_resolved(self) -> str | None:
+        """Return the Supervisor provider name resolved at the config level.
+
+        Resolution order: explicit ``supervisor_provider`` if set, otherwise fall
+        back to ``moderation_provider``, otherwise ``None``. Further resolution
+        (e.g. via ``RegisteredProviders.first_moderation_ready``) is performed
+        at runtime by the Supervisor-resolution layer and is not handled here.
+
+        Returns:
+            The resolved provider identifier, or ``None`` when neither
+            ``supervisor_provider`` nor ``moderation_provider`` is configured.
+        """
+        if self.supervisor_provider:
+            return self.supervisor_provider
+        if self.moderation_provider:
+            return self.moderation_provider
+        return None
+
+    @property
+    def supervisor_model_resolved(self) -> str | None:
+        """Return the Supervisor model id resolved at the config level.
+
+        Resolution order: explicit ``supervisor_model`` if set, otherwise fall
+        back to ``moderation_model``, otherwise ``None``. Further resolution
+        (e.g. via the provider's ``default_moderation_model``) is performed at
+        runtime by the Supervisor-resolution layer and is not handled here.
+
+        Returns:
+            The resolved model identifier, or ``None`` when neither
+            ``supervisor_model`` nor ``moderation_model`` is configured.
+        """
+        if self.supervisor_model:
+            return self.supervisor_model
+        if self.moderation_model:
+            return self.moderation_model
+        return None
 
 
 @lru_cache()
