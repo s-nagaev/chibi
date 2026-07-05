@@ -1,13 +1,15 @@
 """Unit tests for OpenAI provider OCR method."""
 
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from chibi.exceptions import NoModelSelectedError, ServiceResponseError
-from chibi.schemas.app import VisionResultSchema
+from chibi.schemas.app import ModeratorsAnswer, VisionResultSchema
 from chibi.services.providers.openai import OpenAI
 
 # Sample PDF bytes for testing
@@ -446,3 +448,175 @@ async def test_ocr_includes_filename_in_file_block():
     assert "file" in file_block
     assert "filename" in file_block["file"]
     assert file_block["file"]["filename"] == "document.pdf"
+
+
+# ==============================================================================
+
+# ==============================================================================
+# moderate_command Characterization Tests
+# ==============================================================================
+
+
+def create_moderation_completion(content: str, model: str = "gpt-5-mini") -> ChatCompletion:
+    """Create a ChatCompletion response for the moderator."""
+    message = ChatCompletionMessage(
+        role="assistant",
+        content=content,
+    )
+    choice = Choice(
+        index=0,
+        message=message,
+        finish_reason="stop",
+    )
+    return ChatCompletion(
+        id="test-moderation-id",
+        choices=[choice],
+        created=1234567890,
+        model=model,
+        object="chat.completion",
+    )
+
+
+def create_mock_openai_client(response: ChatCompletion) -> SimpleNamespace:
+    """Create a non-callable mock client for OpenAI provider tests.
+
+    OpenAIFriendlyProvider.__getattribute__ wraps any callable attribute,
+    so MagicMock cannot be returned directly from the ``client`` property.
+    SimpleNamespace is not callable and lets nested attributes pass through.
+    """
+
+    async def mock_create(*args: object, **kwargs: object) -> ChatCompletion:
+        return response
+
+    return SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=mock_create),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_accepted():
+    """Test happy path: moderator returns accepted verdict."""
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        response = create_moderation_completion('{"verdict": "accepted"}')
+        mock_async_openai_class.return_value = create_mock_openai_client(response)
+        provider = OpenAI(token=TEST_TOKEN)
+
+        result = await provider.moderate_command(cmd="ls -la")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "accepted"
+    assert result.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_declined_with_reason():
+    """Test happy path: moderator returns declined verdict with reason."""
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        response = create_moderation_completion('{"verdict": "declined", "reason": "potentially unsafe"}')
+        mock_async_openai_class.return_value = create_mock_openai_client(response)
+        provider = OpenAI(token=TEST_TOKEN)
+
+        result = await provider.moderate_command(cmd="rm -rf /")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "declined"
+    assert result.reason == "potentially unsafe"
+    assert result.status == "operation aborted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_strips_json_markdown_wrapper():
+    """Test that markdown JSON wrapper is stripped before parsing."""
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        response = create_moderation_completion('```json\n{"verdict": "accepted"}\n```')
+        mock_async_openai_class.return_value = create_mock_openai_client(response)
+        provider = OpenAI(token=TEST_TOKEN)
+
+        result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_temperature_for_mini_model():
+    """Test temperature=1 heuristic for models with 'mini' in name."""
+    captured_kwargs: dict[str, object] = {}
+
+    async def tracking_create(*args: object, **kwargs: object) -> ChatCompletion:
+        captured_kwargs.update(kwargs)
+        model_name = cast(str, kwargs.get("model", "unknown"))
+        return create_moderation_completion('{"verdict": "accepted"}', model=model_name)
+
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        mock_async_openai_class.return_value = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=tracking_create),
+            ),
+        )
+        provider = OpenAI(token=TEST_TOKEN)
+
+        await provider.moderate_command(cmd="ls", model="gpt-5-mini")
+
+    assert captured_kwargs.get("temperature") == 1
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_temperature_for_reasoning_model():
+    """Test temperature=1 heuristic for models starting with 'o'."""
+    captured_kwargs: dict[str, object] = {}
+
+    async def tracking_create(*args: object, **kwargs: object) -> ChatCompletion:
+        captured_kwargs.update(kwargs)
+        model_name = cast(str, kwargs.get("model", "unknown"))
+        return create_moderation_completion('{"verdict": "accepted"}', model=model_name)
+
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        mock_async_openai_class.return_value = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=tracking_create),
+            ),
+        )
+        provider = OpenAI(token=TEST_TOKEN)
+
+        await provider.moderate_command(cmd="ls", model="o3-mini")
+
+    assert captured_kwargs.get("temperature") == 1
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_temperature_zero_for_regular_model():
+    """Test temperature=0 for regular models without mini/o/nano prefix."""
+    captured_kwargs: dict[str, object] = {}
+
+    async def tracking_create(*args: object, **kwargs: object) -> ChatCompletion:
+        captured_kwargs.update(kwargs)
+        model_name = cast(str, kwargs.get("model", "unknown"))
+        return create_moderation_completion('{"verdict": "accepted"}', model=model_name)
+
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        mock_async_openai_class.return_value = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=tracking_create),
+            ),
+        )
+        provider = OpenAI(token=TEST_TOKEN)
+
+        await provider.moderate_command(cmd="ls", model="gpt-4")
+
+    assert captured_kwargs.get("temperature") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_invalid_json_returns_declined():
+    """Test invalid JSON response returns declined with error status."""
+    with patch("chibi.services.providers.provider.AsyncOpenAI") as mock_async_openai_class:
+        response = create_moderation_completion("this is not valid json")
+        mock_async_openai_class.return_value = create_mock_openai_client(response)
+        provider = OpenAI(token=TEST_TOKEN)
+
+        result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
