@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Supervisor (agent workflow guard):** second-stage LLM classifier that runs alongside the existing moderator in agent and multi-agent scenarios. While the moderator enforces *command safety* (fail-closed, blocking unsafe tool calls), the Supervisor enforces *role / flow compliance* — verifying that tool calls and final answers stay within the assistant's assigned role, scope, and workflow (e.g. PM → Executor → Reviewer, sub-agent delegation via `delegate_task`).
+  - Two hooks, both centralized at the `Provider` base class so every chat provider family is covered uniformly:
+    - **Pre-execution tool hook** in `Provider.call_functions()` — runs before each tool call; on `intervene` the tool is not executed and a `ToolResponseSchema(status="error", result=reason)` is returned. Parallel tool calls are supervised concurrently via `asyncio.gather`.
+    - **Final-answer hook** in `Provider.get_chat_response()` template method — runs on the assistant's final text response; on `intervene` a synthetic feedback message is appended and generation is retried up to `MAX_SUPERVISOR_RETRIES` (default `2`), then fail-opens by returning the last answer.
+  - Five verdict categories: `ROLE_VIOLATION` (includes identity drift), `SCOPE_CREEP`, `PROTOCOL_SKIP`, `CONTEXT_POLLUTION`, `OUT_OF_BOUNDS_TOOL`. Every `intervene` verdict carries a non-empty `category` and `reason`; `ok` verdicts carry no explanation noise.
+  - **Fail-OPEN policy** (deliberately different from the moderator): any Supervisor internal failure — exception, malformed JSON, timeout, missing supervisor provider — is logged and the action is allowed to proceed with `verdict=ok, status="error"`. Blocking only happens on a deliberate, validated `intervene` verdict. The main LLM is never told the Supervisor exists unless it actually intervenes.
+  - **Scope:** applies only to agent / multi-agent scenarios (PM workflow, sub-agent delegation, skill-driven workflows). Disabled by default for ordinary chat.
+  - Supervisor reuses the existing moderator provider/model infrastructure (no per-provider `supervisor_ready` flag) — a lightweight classification model is exactly what the moderator already uses.
+  - Configuration (opt-in, defaults preserve existing behaviour):
+    - `SUPERVISOR_ENABLED` (bool, default `false`) — master switch for the feature.
+    - `SUPERVISOR_PROVIDER` (str, optional) — provider for the Supervisor LLM; falls back to `MODERATION_PROVIDER` if not set.
+    - `SUPERVISOR_MODEL` (str, optional) — model for the Supervisor LLM; falls back to `MODERATION_MODEL` if not set.
+    - `MAX_SUPERVISOR_RETRIES` (int, default `2`) — retry limit for the final-answer hook before fail-open.
+  - When `SUPERVISOR_ENABLED=true` but no supervisor provider can be resolved (e.g. public mode with no moderation-ready provider keys), a warning is logged and the request proceeds without supervision, preserving the fail-OPEN contract.
+  - Cloudflare provider is intentionally excluded from the Supervisor pattern (it does not implement the underlying chat-response interface); calling `Cloudflare.get_chat_response()` continues to raise `NotImplementedError`.
+
+
 ## [1.12.0] - 2026-06-19
 
 ### Added
