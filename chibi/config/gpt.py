@@ -90,6 +90,14 @@ class GPTSettings(BaseSettings):
             "default_moderation_model at runtime."
         ),
     )
+    max_supervisor_retries: int = Field(
+        default=2,
+        description=(
+            "Maximum number of times the Supervisor may ask the model to "
+            "regenerate a final answer after an 'intervene' verdict. After "
+            "this many retries the last answer is returned as-is (fail-open)."
+        ),
+    )
 
     max_conversation_age_minutes: int = Field(default=360)
     max_history_tokens: int = Field(default=64000)

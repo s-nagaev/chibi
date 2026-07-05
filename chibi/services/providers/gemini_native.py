@@ -386,7 +386,7 @@ class Gemini(RestApiFriendlyProvider):
             interface=interface,
         )
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -394,6 +394,19 @@ class Gemini(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Gemini-native chat completion implementation.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+
+        Returns:
+            A tuple of the chat response and the list of new messages
+            produced by this call.
+        """
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]
 

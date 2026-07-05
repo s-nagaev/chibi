@@ -304,7 +304,7 @@ class Provider(ABC):
             return voice
         raise ValueError("No default TTS voice set")
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -313,6 +313,99 @@ class Provider(ABC):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
+
+    async def get_chat_response(
+        self,
+        messages: list[Message],
+        user: User,
+        model: str | None = None,
+        system_prompt: str = gpt_settings.assistant_prompt,
+        interface: UserInterface | None = None,
+        supervisor_retry_count: int = 0,
+    ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Get a chat response with optional Supervisor review of the final answer.
+
+        This is the public entry point for chat completion. Concrete provider
+        families implement :meth:`_get_chat_response_impl`; this method wraps
+        the result with the final-answer Supervisor hook when
+        ``gpt_settings.supervisor_enabled`` is True.
+
+        When the Supervisor returns an ``intervene`` verdict, a synthetic
+        feedback message is appended and generation is retried recursively up
+        to ``gpt_settings.max_supervisor_retries`` times. Rejected drafts and
+        synthetic feedback messages are part of the retry context but are NOT
+        returned in ``new_messages``, so they are not persisted to storage.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+            supervisor_retry_count: Internal retry counter for Supervisor
+                interventions. Callers should leave this at the default.
+
+        Returns:
+            A tuple of the final chat response and the list of new messages
+            produced by this call (suitable for persistence).
+
+        Raises:
+            NotImplementedError: If the provider family does not implement
+                :meth:`_get_chat_response_impl` (e.g. Cloudflare).
+        """
+        response, new_messages = await self._get_chat_response_impl(
+            messages=messages,
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+        )
+
+        if not gpt_settings.supervisor_enabled:
+            return response, new_messages
+
+        supervisor = RegisteredProviders().first_supervisor_ready
+        if supervisor is None:
+            logger.warning("Supervisor is enabled but no supervisor provider could be resolved; running without it.")
+            return response, new_messages
+
+        prepared_system_prompt = ""
+        if system_prompt:
+            prepared_system_prompt = await prepare_system_prompt(
+                base_system_prompt=system_prompt, user_id=user.id, interface=interface
+            )
+
+        full_history = list(messages) + list(new_messages)
+        supervisor_history = full_history[:-1] if new_messages else full_history
+        context = build_supervisor_context(
+            system_prompt=prepared_system_prompt,
+            messages=supervisor_history,
+            final_answer=response.answer,
+        )
+        verdict = await supervisor.supervise(context=context)
+
+        if verdict.verdict != SupervisorVerdict.INTERVENE:
+            return response, new_messages
+
+        reason = verdict.reason or "Supervisor intervened."
+        logger.warning(f"Supervisor intervened on final answer: {reason}")
+
+        if supervisor_retry_count >= gpt_settings.max_supervisor_retries:
+            logger.warning(
+                f"Supervisor max retries ({gpt_settings.max_supervisor_retries}) exceeded; returning last answer."
+            )
+            return response, new_messages
+
+        feedback_message = Message(role="user", content=f"Please correct your previous response: {reason}")
+        retry_messages = full_history + [feedback_message]
+        return await self.get_chat_response(
+            messages=retry_messages,
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+            supervisor_retry_count=supervisor_retry_count + 1,
+        )
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         raise NotImplementedError
@@ -612,7 +705,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -620,6 +713,19 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """OpenAI-friendly chat completion implementation.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+
+        Returns:
+            A tuple of the chat response and the list of new messages
+            produced by this call.
+        """
         model = model or self.default_model
 
         initial_messages = [msg.to_openai() for msg in messages]
@@ -1136,7 +1242,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -1144,6 +1250,19 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Anthropic-friendly chat completion implementation.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+
+        Returns:
+            A tuple of the chat response and the list of new messages
+            produced by this call.
+        """
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
 
