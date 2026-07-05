@@ -24,12 +24,19 @@ from pydantic.fields import PydanticUndefined
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.schemas.app import (
+    ChatResponseSchema,
+    ModelChangeSchema,
+    ModeratorsAnswer,
+    SupervisorAnswer,
+    SupervisorVerdict,
+    VisionResultSchema,
+)
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.tools import RegisteredChibiTools
-from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT, SUPERVISOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import (
     get_usage_from_mistral_response,
@@ -366,6 +373,38 @@ class MistralAI(RestApiFriendlyProvider):
         except Exception as e:
             logger.error(str(e))
             return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
+        """Evaluate an agent action for role/flow compliance (Mistral JSON-schema path).
+
+        Uses the same JSON-schema classification helper as ``moderate_command``
+        but with the ``SUPERVISOR_PROMPT`` and ``SupervisorAnswer`` schema.
+
+        Args:
+            context: Full serialized context for the supervisor to evaluate.
+            model: Optional supervisor model override.
+
+        Returns:
+            A ``SupervisorAnswer`` with the compliance verdict. On any failure
+            the method returns ``SupervisorAnswer(verdict=OK, status="error")``
+            (fail-open policy).
+
+        Raises:
+            Does NOT raise exceptions -- all failures are caught and surfaced
+            via the returned ``SupervisorAnswer``.
+        """
+        try:
+            resolved_model = model or gpt_settings.supervisor_model_resolved
+            return await self._classify_with_json_schema(
+                system_prompt=SUPERVISOR_PROMPT,
+                response_model=SupervisorAnswer,
+                user_content=context,
+                schema_name="supervisor_verdict",
+                model=resolved_model,
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error in {self.name}: {e}")
+            return SupervisorAnswer(verdict=SupervisorVerdict.OK, status="error")
 
     async def vision(
         self,

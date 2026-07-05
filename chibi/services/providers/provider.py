@@ -64,11 +64,18 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.schemas.app import (
+    ChatResponseSchema,
+    ModelChangeSchema,
+    ModeratorsAnswer,
+    SupervisorAnswer,
+    SupervisorVerdict,
+    VisionResultSchema,
+)
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
-from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT, SUPERVISOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
 from chibi.services.providers.utils import (
     get_usage_from_anthropic_response,
@@ -198,6 +205,35 @@ class RegisteredProviders:
         return None
 
     @property
+    def first_supervisor_ready(self) -> Optional["Provider"]:
+        """Resolve the supervisor provider instance using the full fallback chain.
+
+        Resolution order:
+
+        1. Explicit ``supervisor_provider`` from config (or its fallback
+           to ``moderation_provider`` via ``supervisor_provider_resolved``)
+           -- instantiate that provider class.
+        2. Fallback to ``first_moderation_ready`` (existing default picker
+           among moderation-ready providers).
+
+        This property complements the config-level resolution in
+        ``GPTSettings`` by verifying that the resolved provider is actually
+        available at runtime (has an API key, is registered, etc.).
+
+        Returns:
+            A ``Provider`` instance ready to call ``supervise()``, or
+            ``None`` if no eligible provider could be resolved.
+        """
+        supervisor_provider_name = gpt_settings.supervisor_provider_resolved
+        if supervisor_provider_name:
+            provider_class = self.available.get(supervisor_provider_name.lower())
+            if provider_class is not None:
+                instance = self.get_instance(provider=provider_class)
+                if instance is not None:
+                    return instance
+        return self.first_moderation_ready
+
+    @property
     def first_vision_ready(self) -> Optional["Provider"]:
         if provider := next(iter(self.vision_ready.values()), None):
             return self.get_instance(provider=provider)
@@ -289,6 +325,9 @@ class Provider(ABC):
         raise NotImplementedError
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        raise NotImplementedError
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
         raise NotImplementedError
 
     async def vision(
@@ -709,6 +748,37 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             logger.error(f"Moderator did not provide reason properly: {cmd}")
 
         return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
+        """Evaluate an agent action for role/flow compliance (OpenAI-text path).
+
+        Uses the same text-based classification helper as ``moderate_command``
+        but with the ``SUPERVISOR_PROMPT`` and ``SupervisorAnswer`` schema.
+
+        Args:
+            context: Full serialized context for the supervisor to evaluate.
+            model: Optional supervisor model override.
+
+        Returns:
+            A ``SupervisorAnswer`` with the compliance verdict. On any failure
+            the method returns ``SupervisorAnswer(verdict=OK, status="error")``
+            (fail-open policy).
+
+        Raises:
+            Does NOT raise exceptions -- all failures are caught and surfaced
+            via the returned ``SupervisorAnswer``.
+        """
+        try:
+            resolved_model = model or gpt_settings.supervisor_model_resolved
+            return await self._classify_with_text(
+                system_prompt=SUPERVISOR_PROMPT,
+                response_model=SupervisorAnswer,
+                user_content=context,
+                model=resolved_model,
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error in {self.name}: {e}")
+            return SupervisorAnswer(verdict=SupervisorVerdict.OK, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:
@@ -1160,6 +1230,38 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         if result.verdict == "accepted":
             return ModeratorsAnswer(verdict="accepted", status="ok")
         return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
+        """Evaluate an agent action for role/flow compliance (Anthropic-tool path).
+
+        Uses the same forced-tool classification helper as ``moderate_command``
+        but with the ``SUPERVISOR_PROMPT`` and ``SupervisorAnswer`` schema.
+
+        Args:
+            context: Full serialized context for the supervisor to evaluate.
+            model: Optional supervisor model override.
+
+        Returns:
+            A ``SupervisorAnswer`` with the compliance verdict. On any failure
+            the method returns ``SupervisorAnswer(verdict=OK, status="error")``
+            (fail-open policy).
+
+        Raises:
+            Does NOT raise exceptions -- all failures are caught and surfaced
+            via the returned ``SupervisorAnswer``.
+        """
+        try:
+            resolved_model = model or gpt_settings.supervisor_model_resolved
+            return await self._classify_with_forced_tool(
+                system_prompt=SUPERVISOR_PROMPT,
+                response_model=SupervisorAnswer,
+                user_content=context,
+                tool_name="print_supervisor_verdict",
+                model=resolved_model,
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error in {self.name}: {e}")
+            return SupervisorAnswer(verdict=SupervisorVerdict.OK, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:
