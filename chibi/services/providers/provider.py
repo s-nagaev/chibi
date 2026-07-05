@@ -50,6 +50,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
+from pydantic import BaseModel
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -79,6 +80,7 @@ from chibi.services.providers.utils import (
 
 P = ParamSpec("P")
 R = TypeVar("R")
+T = TypeVar("T", bound=BaseModel)
 
 
 class RegisteredProviders:
@@ -610,15 +612,36 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
         return omit
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+    async def _classify_with_text(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        model: str | None = None,
+    ) -> T:
+        """Run a structured classification via an OpenAI chat completion.
+
+        The LLM is asked to emit a JSON object matching ``response_model``.
+        The raw text is stripped of markdown/JSON wrappers before parsing.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used to validate the JSON response.
+            user_content: User message content to classify.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ServiceResponseError: If the LLM returns an empty choices list.
+            ValueError: If the response cannot be parsed or validated.
+        """
         moderator_model = model or self.default_moderation_model or self.default_model
-        system_message = ChatCompletionSystemMessageParam(role="system", content=MODERATOR_PROMPT)
-
-        messages = [
-            Message(role="user", content=cmd).to_openai(),
-        ]
-
+        system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+        messages = [Message(role="user", content=user_content).to_openai()]
         dialog: list[ChatCompletionMessageParam] = [system_message] + messages
+
         temperature = (
             1 if moderator_model.startswith("o") or "mini" in moderator_model or "nano" in moderator_model else 0.0
         )
@@ -627,44 +650,65 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             messages=dialog,
             temperature=temperature,
             max_completion_tokens=1024,
-            presence_penalty=self.presence_penalty,  # type: ignore
+            presence_penalty=cast(float | OpenAIOmit | None, self.presence_penalty),
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
             reasoning_effort=self.get_reasoning_effort_value(model_name=moderator_model),
         )
 
         choices: list[Choice] = response.choices
-
         if len(choices) == 0:
             raise ServiceResponseError(
                 provider=self.name, model=moderator_model, detail="Unexpected (empty) response received"
             )
 
-        data = choices[0]
-        answer: str = data.message.content or ""
+        answer: str = choices[0].message.content or ""
 
         usage = get_usage_from_openai_response(response_message=response)
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
-        # usage_message = get_usage_msg(usage=usage)
-        answer = answer.strip("```")
-        answer = answer.strip("json")
-        answer = answer.strip()
+
+        answer = answer.strip("`").strip("json").strip()
         try:
             result_data = json.loads(answer)
-        except Exception:
-            logger.error(f"Error parsing moderator's response: {answer}")
-            return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
+        except Exception as e:
+            raise ValueError(answer) from e
 
-        verdict = result_data.get("verdict", "declined")
-        if verdict == "accepted":
+        try:
+            return response_model.model_validate(result_data)
+        except Exception as e:
+            raise ValueError(f"Error parsing moderator's response: {answer}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using the OpenAI-compatible moderation flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            result = await self._classify_with_text(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                model=model,
+            )
+        except ServiceResponseError:
+            raise
+        except Exception as e:
+            logger.error(f"Error parsing moderator's response: {e}")
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
+
+        if result.verdict == "accepted":
             return ModeratorsAnswer(verdict="accepted", status="ok")
 
-        reason = result_data.get("reason", None)
-        if reason is None:
-            logger.error(f"Moderator did not provide reason properly: {answer}")
+        if result.reason is None:
+            logger.error(f"Moderator did not provide reason properly: {cmd}")
 
-        return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
+        return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:
@@ -1005,84 +1049,117 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
         )
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
-        moderator_model = model or self.default_moderation_model or self.default_model
-        messages = [Message(role="user", content=cmd).to_anthropic()]
-        moderator_prompt = (
-            MODERATOR_PROMPT + "\n**HARD RULE:** call the print_moderator_verdict tool to provide your verdict"
-        )
+    async def _classify_with_forced_tool(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        tool_name: str,
+        model: str | None = None,
+    ) -> T:
+        """Classify content by forcing an Anthropic tool call.
 
+        The model is instructed to call ``tool_name``. If it ignores the forced
+        tool choice and returns plain text, a JSON object is extracted from the
+        text and validated against ``response_model`` as a fallback.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used to validate the tool input.
+            user_content: User message content to classify.
+            tool_name: Name of the forced tool to call.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ValueError: If the response is empty, contains no usable tool input,
+                or the input cannot be parsed/validated.
+        """
+        moderator_model = model or self.default_moderation_model or self.default_model
+        messages = [Message(role="user", content=user_content).to_anthropic()]
+        moderator_prompt = f"{system_prompt}\n**HARD RULE:** call the {tool_name} tool to provide your verdict"
+
+        schema = response_model.model_json_schema()
         response_message: AnthropicMessage = await self.client.messages.create(
             model=moderator_model,
             max_tokens=1024,
             temperature=0.1,
             timeout=self.timeout,
-            system=[
-                TextBlockParam(
-                    text=moderator_prompt,
-                    type="text",
-                )
-            ],
+            system=[TextBlockParam(text=moderator_prompt, type="text")],
             tools=[
                 ToolParam(
-                    name="print_moderator_verdict",
-                    description="Provide moderator's verdict via calling this tool.",
+                    name=tool_name,
+                    description="Provide the classifier verdict via calling this tool.",
                     input_schema=InputSchemaTyped(
                         type="object",
-                        properties={
-                            "verdict": {"type": "string"},
-                            "status": {"type": "string", "default": "ok"},
-                            "reason": {"type": "string"},
-                        },
-                        required=["verdict"],
+                        properties=cast(dict[str, object], schema.get("properties", {})),
+                        required=cast(list[str], schema.get("required", [])),
                     ),
                 )
             ],
-            tool_choice=ToolChoiceToolParam(type="tool", name="print_moderator_verdict"),
+            tool_choice=ToolChoiceToolParam(type="tool", name=tool_name),
             messages=messages,
         )
         if not response_message.content:
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
-        usage = get_usage_from_anthropic_response(response_message=response_message)
+            raise ValueError("no response from moderator received")
 
+        usage = get_usage_from_anthropic_response(response_message=response_message)
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+
         tool_call: ToolUseBlock | None = next(
             (part for part in response_message.content if isinstance(part, ToolUseBlock)), None
         )
-
         if tool_call is not None:
-            answer = tool_call.input
             try:
-                return ModeratorsAnswer.model_validate(answer, extra="ignore")
+                return response_model.model_validate(tool_call.input, extra="ignore")
             except Exception as e:
-                msg = f"Error parsing moderator's response: {answer}. Error: {e}"
-                logger.error(msg)
-                return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+                raise ValueError(f"Error parsing moderator's response: {tool_call.input}. Error: {e}") from e
 
-        # Fallback: some models (e.g. MiniMax M2.7/M3 on the Anthropic-compatible API) ignore the
-        # forced tool_choice and reply with plain text instead of a tool_use block. The moderator
-        # prompt already instructs the model to emit a JSON verdict as plain text, so we parse it.
         text_part: TextBlock | None = next(
             (part for part in response_message.content if isinstance(part, TextBlock)), None
         )
         if text_part is None or not text_part.text.strip():
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+            raise ValueError("no response from moderator received")
 
         raw_text = text_part.text.strip()
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         if match is None:
-            msg = f"Moderator returned no tool call and no JSON verdict. Raw: {raw_text[:200]}"
-            logger.error(msg)
-            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+            raise ValueError(f"Moderator returned no tool call and no JSON verdict. Raw: {raw_text[:200]}")
 
         try:
             parsed = json.loads(match.group(0))
-            return ModeratorsAnswer.model_validate(parsed, extra="ignore")
+            return response_model.model_validate(parsed, extra="ignore")
         except Exception as e:
-            msg = f"Error parsing moderator's text verdict: {raw_text[:200]}. Error: {e}"
-            logger.error(msg)
-            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+            raise ValueError(f"Error parsing moderator's text verdict: {raw_text[:200]}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using the Anthropic-compatible moderation flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            result = await self._classify_with_forced_tool(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                tool_name="print_moderator_verdict",
+                model=model,
+            )
+        except Exception as e:
+            logger.error(str(e))
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
+
+        if result.verdict == "accepted":
+            return ModeratorsAnswer(verdict="accepted", status="ok")
+        return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:

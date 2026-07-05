@@ -1,8 +1,10 @@
 import base64
 import json
 import random
+import types
 from asyncio import sleep
-from typing import Union
+from enum import Enum
+from typing import TypeVar, Union, get_args, get_origin
 
 from loguru import logger
 from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
@@ -16,6 +18,8 @@ from mistralai.models import (
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
+from pydantic import BaseModel
+from pydantic.fields import PydanticUndefined
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
@@ -35,6 +39,7 @@ from chibi.services.providers.utils import (
 )
 
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
+T = TypeVar("T", bound=BaseModel)
 
 
 class MistralAI(RestApiFriendlyProvider):
@@ -232,12 +237,80 @@ class MistralAI(RestApiFriendlyProvider):
             interface=interface,
         )
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+    def _build_mistral_schema_definition(self, response_model: type[BaseModel]) -> dict[str, object]:
+        """Build a Mistral-compatible JSON schema definition from a Pydantic model.
+
+        The generated schema is intentionally simple: all fields are represented as
+        strings (or string enums) and only required fields are listed. This keeps the
+        prompt small and matches the shape the Mistral SDK expects for
+        ``json_schema.schema_definition``.
+
+        Args:
+            response_model: Pydantic model to convert.
+
+        Returns:
+            JSON schema dict with ``type``, ``properties`` and ``required`` keys.
+        """
+        properties: dict[str, dict[str, object]] = {}
+        required: list[str] = []
+
+        for field_name, field_info in response_model.model_fields.items():
+            field_schema: dict[str, object] = {}
+            annotation = field_info.annotation
+
+            origin = get_origin(annotation)
+            args = get_args(annotation)
+            if origin in (Union, types.UnionType) and type(None) in args:
+                annotation = next(arg for arg in args if arg is not type(None))
+
+            if isinstance(annotation, type) and issubclass(annotation, Enum):
+                field_schema["type"] = "string"
+                field_schema["enum"] = [member.value for member in annotation]
+            else:
+                field_schema["type"] = "string"
+
+            if field_info.default not in (None, PydanticUndefined):
+                field_schema["default"] = field_info.default
+
+            properties[field_name] = field_schema
+            if field_info.is_required():
+                required.append(field_name)
+
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
+
+    async def _classify_with_json_schema(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        schema_name: str,
+        model: str | None = None,
+    ) -> T:
+        """Classify content using Mistral's JSON-schema response format.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used to derive the JSON schema.
+            user_content: User message content to classify.
+            schema_name: Name of the JSON schema passed to Mistral.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ValueError: If the response is empty or cannot be parsed/validated.
+        """
         moderator_model = model or self.default_moderation_model or self.default_model
         messages = [
-            SystemMessage(content=MODERATOR_PROMPT, role="system"),
-            Message(role="user", content=cmd).to_mistral(),
+            SystemMessage(content=system_prompt, role="system"),
+            Message(role="user", content=user_content).to_mistral(),
         ]
+        schema_definition = self._build_mistral_schema_definition(response_model=response_model)
         response = await self.client.chat.complete_async(
             model=moderator_model,
             messages=messages,
@@ -246,39 +319,53 @@ class MistralAI(RestApiFriendlyProvider):
             response_format=ResponseFormatTypedDict(
                 type="json_schema",
                 json_schema=JSONSchemaTypedDict(
-                    name="moderator_verdict",
-                    schema_definition={
-                        "type": "object",
-                        "properties": {
-                            "verdict": {"type": "string"},
-                            "reason": {"type": "string"},
-                            "status": {"type": "string", "default": "ok"},
-                        },
-                        "required": ["verdict"],
-                    },
+                    name=schema_name,
+                    schema_definition=schema_definition,
                     strict=True,
                 ),
             ),
         )
         if not response.choices:
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+            raise ValueError("no response from moderator received")
 
         usage = get_usage_from_mistral_response(response_message=response)
-
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
 
         message_data = response.choices[0].message
         answer = message_data.content
         if not answer:
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+            raise ValueError("no response from moderator received")
+
+        if not isinstance(answer, str):
+            raise ValueError(f"unexpected response content type: {type(answer)}")
 
         try:
-            return ModeratorsAnswer.model_validate_json(answer, extra="ignore")  # type: ignore
+            return response_model.model_validate_json(answer, extra="ignore")
         except Exception as e:
-            msg = f"Error parsing moderator's response: {answer}. Error: {e}"
-            logger.error(msg)
-            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+            raise ValueError(f"Error parsing moderator's response: {answer}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using Mistral's JSON-schema structured-output flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            return await self._classify_with_json_schema(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                schema_name="moderator_verdict",
+                model=model,
+            )
+        except Exception as e:
+            logger.error(str(e))
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
 
     async def vision(
         self,

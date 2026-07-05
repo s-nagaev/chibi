@@ -6,7 +6,7 @@ import wave
 from asyncio import sleep
 from copy import copy
 from io import BytesIO
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from uuid import uuid4
 
 from google.genai.client import Client
@@ -33,6 +33,7 @@ from google.genai.types import (
     VoiceConfig,
 )
 from loguru import logger
+from pydantic import BaseModel
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
@@ -50,6 +51,8 @@ from chibi.services.providers.utils import (
     prepare_system_prompt,
     send_llm_thoughts,
 )
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class Gemini(RestApiFriendlyProvider):
@@ -413,22 +416,40 @@ class Gemini(RestApiFriendlyProvider):
 
             return [image for image in images_in_response if image]
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+    async def _classify_with_schema(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        model: str | None = None,
+    ) -> T:
+        """Classify content using Gemini's native response schema.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used as the native response schema.
+            user_content: User message content to classify.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ValueError: If the response is empty or cannot be parsed/validated.
+        """
         moderator_model = model or self.default_moderation_model or self.default_model
 
         http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
-            system_instruction=MODERATOR_PROMPT,
+            system_instruction=system_prompt,
             temperature=0.1,
             max_output_tokens=1024,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             http_options=http_options,
-            response_schema=ModeratorsAnswer,
+            response_schema=response_model,
         )
-        messages = [
-            Message(role="user", content=cmd).to_google(),
-        ]
+        messages = [Message(role="user", content=user_content).to_google()]
         response: GenerateContentResponse = await self._generate_content(
             model=moderator_model,
             contents=cast(ContentListUnionDict, messages),
@@ -436,18 +457,38 @@ class Gemini(RestApiFriendlyProvider):
         )
         answer = self._get_text(response)
         if not answer:
-            return ModeratorsAnswer(verdict="declined", reason="no moderator answer received", status="error")
+            raise ValueError("no moderator answer received")
 
-        answer = answer.strip("```").strip("json").strip()
+        answer = answer.strip("`").strip("json").strip()
         usage = get_usage_from_google_response(response_message=response)
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
 
         try:
-            return ModeratorsAnswer.model_validate_json(answer)
+            return response_model.model_validate_json(answer)
         except Exception as e:
-            logger.error(f"Error parsing moderator's response: {answer}. Error: {e}")
-            return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
+            raise ValueError(f"Error parsing moderator's response: {answer}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using Gemini's native structured-output flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            return await self._classify_with_schema(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                model=model,
+            )
+        except Exception as e:
+            logger.error(str(e))
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
 
     async def get_images(self, prompt: str, model: str | None = None) -> list[BytesIO]:
         selected_model = model or self.default_image_model
