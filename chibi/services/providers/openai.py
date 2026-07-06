@@ -47,7 +47,7 @@ class OpenAI(OpenAIFriendlyProvider):
     default_vision_model = "gpt-5-mini"
     default_ocr_model = "gpt-5-mini"
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -55,7 +55,12 @@ class OpenAI(OpenAIFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
-        """Get a chat response with Responses API fallback to Chat Completions.
+        """OpenAI chat completion with Responses API fallback to Chat Completions.
+
+        This is the concrete implementation used by the base-class template
+        method :meth:`Provider.get_chat_response`. The Supervisor hook lives
+        in the base class, so the fallback path calls the OpenAI-friendly
+        implementation directly to avoid running supervision twice.
 
         Args:
             messages: List of conversation messages.
@@ -65,16 +70,18 @@ class OpenAI(OpenAIFriendlyProvider):
             interface: Optional user interface for sending thoughts.
 
         Returns:
-            A tuple of the chat response schema and updated messages list.
+            A tuple of the chat response schema and the new messages produced
+            by this call.
 
         Raises:
             BadRequestError: If model is responses-only and request is invalid.
             NotFoundError: If model is responses-only and not found.
         """
         model = model or self.default_model
+        initial_message_count = len(messages)
 
         try:
-            return await self._get_response_completion_response(
+            chat_response, updated_messages = await self._get_response_completion_response(
                 messages=messages,
                 model=model,
                 user=user,
@@ -89,13 +96,16 @@ class OpenAI(OpenAIFriendlyProvider):
                     raise
 
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
-            return await super().get_chat_response(
+            return await super()._get_chat_response_impl(
                 messages=messages,
                 user=user,
                 model=model,
                 system_prompt=system_prompt,
                 interface=interface,
             )
+
+        new_messages = updated_messages[initial_message_count:]
+        return chat_response, new_messages
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
@@ -238,8 +248,15 @@ class OpenAI(OpenAIFriendlyProvider):
             )
             for item in tool_call_items
         ]
+        prepared_instructions = instructions if isinstance(instructions, str) else ""
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=messages,
+            system_prompt=prepared_instructions,
+            user_id=user.id,
+            interface=interface,
         )
 
         assistant_message = Message(

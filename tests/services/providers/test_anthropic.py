@@ -3,9 +3,9 @@
 from unittest.mock import MagicMock
 
 import pytest
-from anthropic.types import ToolUseBlock
+from anthropic.types import TextBlock, ToolUseBlock
 
-from chibi.schemas.app import VisionResultSchema
+from chibi.schemas.app import ModeratorsAnswer, VisionResultSchema
 from chibi.services.providers.anthropic import Anthropic
 
 # Sample PDF bytes for testing
@@ -345,3 +345,185 @@ async def test_ocr_mock_called_correctly():
 
     # Verify the mock was called
     assert call_count == 1, "messages.create should be called exactly once"
+
+
+# ==============================================================================
+# moderate_command Characterization Tests
+# ==============================================================================
+
+
+def create_moderator_tool_response(verdict: str, reason: str | None = None) -> MagicMock:
+    """Create a mock Anthropic response with a moderator tool_use block."""
+    tool_input: dict[str, object] = {"verdict": verdict}
+    if reason is not None:
+        tool_input["reason"] = reason
+
+    mock_response = MagicMock()
+    mock_response.content = [
+        ToolUseBlock(
+            type="tool_use",
+            id="test-moderator-tool-id",
+            name="print_moderator_verdict",
+            input=tool_input,
+        )
+    ]
+    return mock_response
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_tool_use_accepted():
+    """Test happy path via forced tool_choice: tool_use returns accepted."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    async def mock_create(*args, **kwargs):
+        return create_moderator_tool_response("accepted")
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="ls -la")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_tool_use_declined_with_reason():
+    """Test forced tool_choice path returning declined verdict with reason."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    async def mock_create(*args, **kwargs):
+        return create_moderator_tool_response("declined", reason="unsafe command")
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="rm -rf /")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "declined"
+    assert result.reason == "unsafe command"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_forces_tool_choice():
+    """Test that the forced print_moderator_verdict tool choice is passed."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    captured_kwargs: dict[str, object] = {}
+
+    async def mock_create(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return create_moderator_tool_response("accepted")
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    await provider.moderate_command(cmd="ls")
+
+    tool_choice = captured_kwargs.get("tool_choice")
+    assert tool_choice is not None
+    assert isinstance(tool_choice, dict)
+    assert tool_choice.get("type") == "tool"
+    assert tool_choice.get("name") == "print_moderator_verdict"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_text_fallback_accepted():
+    """Test text fallback path when model ignores tool_choice and returns JSON text."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = [
+        TextBlock(
+            type="text",
+            text='Here is my verdict: {"verdict": "accepted"}',
+        )
+    ]
+
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="ls")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_text_fallback_declined_with_reason():
+    """Test text fallback path returning declined verdict with reason."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = [
+        TextBlock(
+            type="text",
+            text='{"verdict": "declined", "reason": "unsafe operation"}',
+        )
+    ]
+
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="rm -rf /")
+
+    assert result.verdict == "declined"
+    assert result.reason == "unsafe operation"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_text_fallback_no_json_returns_declined():
+    """Test text fallback returns declined when no JSON object is found."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = [
+        TextBlock(
+            type="text",
+            text="I cannot comply with that request.",
+        )
+    ]
+
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_empty_response_returns_declined():
+    """Test empty response returns declined with error status."""
+    provider = Anthropic(token=TEST_TOKEN)
+    mock_client = MagicMock()
+
+    mock_response = MagicMock()
+    mock_response.content = []
+
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    mock_client.messages.create = mock_create
+    provider.client = mock_client
+
+    result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"

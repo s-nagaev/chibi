@@ -1,11 +1,11 @@
 """Unit tests for MistralAI provider OCR method."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from chibi.schemas.app import VisionResultSchema
+from chibi.schemas.app import ModeratorsAnswer, VisionResultSchema
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.provider import ServiceResponseError
 
@@ -346,3 +346,121 @@ async def test_ocr_short_description_formatting():
     # Verify newlines are replaced with spaces in short_description
     assert "\n" not in result.short_description
     assert "Line one Line two" in result.short_description
+
+
+# ==============================================================================
+# moderate_command Characterization Tests
+# ==============================================================================
+
+
+def create_moderation_mistral_response(content: str) -> MagicMock:
+    """Create a mock Mistral chat completion response for the moderator."""
+    message = MagicMock()
+    message.content = content
+
+    choice = MagicMock()
+    choice.message = message
+
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_accepted():
+    """Test happy path: manual JSON schema parses accepted verdict."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(
+        return_value=create_moderation_mistral_response('{"verdict": "accepted"}')
+    )
+    provider.__dict__["_client"] = mock_client
+
+    result = await provider.moderate_command(cmd="ls -la")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_declined_with_reason():
+    """Test happy path: manual JSON schema parses declined verdict with reason."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(
+        return_value=create_moderation_mistral_response('{"verdict": "declined", "reason": "unsafe"}')
+    )
+    provider.__dict__["_client"] = mock_client
+
+    result = await provider.moderate_command(cmd="rm -rf /")
+
+    assert result.verdict == "declined"
+    assert result.reason == "unsafe"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_empty_response_returns_declined():
+    """Test empty choices list returns declined with error status."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_response = MagicMock()
+    mock_response.choices = []
+
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(return_value=mock_response)
+    provider.__dict__["_client"] = mock_client
+
+    result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_invalid_json_returns_declined():
+    """Test invalid JSON response returns declined with error status."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(return_value=create_moderation_mistral_response("not valid json"))
+    provider.__dict__["_client"] = mock_client
+
+    result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_uses_manual_json_schema():
+    """Test that response_format uses the hand-written JSON schema dict."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    captured_kwargs: dict[str, object] = {}
+
+    async def mock_complete_async(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return create_moderation_mistral_response('{"verdict": "accepted"}')
+
+    mock_client.chat.complete_async = mock_complete_async
+    provider.__dict__["_client"] = mock_client
+
+    await provider.moderate_command(cmd="ls")
+
+    response_format = captured_kwargs.get("response_format")
+    assert response_format is not None
+    assert isinstance(response_format, dict)
+    assert response_format.get("type") == "json_schema"
+
+    json_schema = response_format.get("json_schema")
+    assert json_schema is not None
+    assert isinstance(json_schema, dict)
+    assert json_schema.get("name") == "moderator_verdict"
+    assert json_schema.get("strict") is True
+
+    schema_definition = json_schema.get("schema_definition")
+    assert schema_definition is not None
+    assert isinstance(schema_definition, dict)
+    assert schema_definition.get("type") == "object"
+
+    properties = schema_definition.get("properties", {})
+    assert isinstance(properties, dict)
+    assert "verdict" in properties

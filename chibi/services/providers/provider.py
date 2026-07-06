@@ -50,6 +50,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
+from pydantic import BaseModel
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -62,14 +63,23 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.models import FunctionSchema, Message, ToolSchema, User
+from chibi.schemas.app import (
+    ChatResponseSchema,
+    ModelChangeSchema,
+    ModeratorsAnswer,
+    SupervisorAnswer,
+    SupervisorVerdict,
+    VisionResultSchema,
+)
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.tools import RegisteredChibiTools
-from chibi.services.providers.tools.constants import MODERATOR_PROMPT
+from chibi.services.providers.tools.constants import MODERATOR_PROMPT, SUPERVISOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
 from chibi.services.providers.utils import (
+    SupervisorToolCallAction,
+    build_supervisor_context,
     get_usage_from_anthropic_response,
     get_usage_from_openai_response,
     get_usage_msg,
@@ -79,6 +89,7 @@ from chibi.services.providers.utils import (
 
 P = ParamSpec("P")
 R = TypeVar("R")
+T = TypeVar("T", bound=BaseModel)
 
 
 class RegisteredProviders:
@@ -196,6 +207,35 @@ class RegisteredProviders:
         return None
 
     @property
+    def first_supervisor_ready(self) -> Optional["Provider"]:
+        """Resolve the supervisor provider instance using the full fallback chain.
+
+        Resolution order:
+
+        1. Explicit ``supervisor_provider`` from config (or its fallback
+           to ``moderation_provider`` via ``supervisor_provider_resolved``)
+           -- instantiate that provider class.
+        2. Fallback to ``first_moderation_ready`` (existing default picker
+           among moderation-ready providers).
+
+        This property complements the config-level resolution in
+        ``GPTSettings`` by verifying that the resolved provider is actually
+        available at runtime (has an API key, is registered, etc.).
+
+        Returns:
+            A ``Provider`` instance ready to call ``supervise()``, or
+            ``None`` if no eligible provider could be resolved.
+        """
+        supervisor_provider_name = gpt_settings.supervisor_provider_resolved
+        if supervisor_provider_name:
+            provider_class = self.available.get(supervisor_provider_name.lower())
+            if provider_class is not None:
+                instance = self.get_instance(provider=provider_class)
+                if instance is not None:
+                    return instance
+        return self.first_moderation_ready
+
+    @property
     def first_vision_ready(self) -> Optional["Provider"]:
         if provider := next(iter(self.vision_ready.values()), None):
             return self.get_instance(provider=provider)
@@ -264,7 +304,7 @@ class Provider(ABC):
             return voice
         raise ValueError("No default TTS voice set")
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -273,6 +313,99 @@ class Provider(ABC):
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
+
+    async def get_chat_response(
+        self,
+        messages: list[Message],
+        user: User,
+        model: str | None = None,
+        system_prompt: str = gpt_settings.assistant_prompt,
+        interface: UserInterface | None = None,
+        supervisor_retry_count: int = 0,
+    ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Get a chat response with optional Supervisor review of the final answer.
+
+        This is the public entry point for chat completion. Concrete provider
+        families implement :meth:`_get_chat_response_impl`; this method wraps
+        the result with the final-answer Supervisor hook when
+        ``gpt_settings.supervisor_enabled`` is True.
+
+        When the Supervisor returns an ``intervene`` verdict, a synthetic
+        feedback message is appended and generation is retried recursively up
+        to ``gpt_settings.max_supervisor_retries`` times. Rejected drafts and
+        synthetic feedback messages are part of the retry context but are NOT
+        returned in ``new_messages``, so they are not persisted to storage.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+            supervisor_retry_count: Internal retry counter for Supervisor
+                interventions. Callers should leave this at the default.
+
+        Returns:
+            A tuple of the final chat response and the list of new messages
+            produced by this call (suitable for persistence).
+
+        Raises:
+            NotImplementedError: If the provider family does not implement
+                :meth:`_get_chat_response_impl` (e.g. Cloudflare).
+        """
+        response, new_messages = await self._get_chat_response_impl(
+            messages=messages,
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+        )
+
+        if not gpt_settings.supervisor_enabled:
+            return response, new_messages
+
+        supervisor = RegisteredProviders().first_supervisor_ready
+        if supervisor is None:
+            logger.warning("Supervisor is enabled but no supervisor provider could be resolved; running without it.")
+            return response, new_messages
+
+        prepared_system_prompt = ""
+        if system_prompt:
+            prepared_system_prompt = await prepare_system_prompt(
+                base_system_prompt=system_prompt, user_id=user.id, interface=interface
+            )
+
+        full_history = list(messages) + list(new_messages)
+        supervisor_history = full_history[:-1] if new_messages else full_history
+        context = build_supervisor_context(
+            system_prompt=prepared_system_prompt,
+            messages=supervisor_history,
+            final_answer=response.answer,
+        )
+        verdict = await supervisor.supervise(context=context)
+
+        if verdict.verdict != SupervisorVerdict.INTERVENE:
+            return response, new_messages
+
+        reason = verdict.reason or "Supervisor intervened."
+        logger.warning(f"Supervisor intervened on final answer: {reason}")
+
+        if supervisor_retry_count >= gpt_settings.max_supervisor_retries:
+            logger.warning(
+                f"Supervisor max retries ({gpt_settings.max_supervisor_retries}) exceeded; returning last answer."
+            )
+            return response, new_messages
+
+        feedback_message = Message(role="user", content=f"Please correct your previous response: {reason}")
+        retry_messages = full_history + [feedback_message]
+        return await self.get_chat_response(
+            messages=retry_messages,
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+            supervisor_retry_count=supervisor_retry_count + 1,
+        )
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         raise NotImplementedError
@@ -287,6 +420,9 @@ class Provider(ABC):
         raise NotImplementedError
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        raise NotImplementedError
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
         raise NotImplementedError
 
     async def vision(
@@ -389,15 +525,99 @@ class Provider(ABC):
         calls: list[ToolCallSchema],
         caller_model: str,
         caller_provider: str,
+        messages: list[Message],
+        system_prompt: str,
         user_id: int | None = None,
         interface: UserInterface | None = None,
     ) -> list[ToolResponseSchema]:
+        """Execute a batch of tool calls with optional supervisor pre-check.
+
+        When ``gpt_settings.supervisor_enabled`` is True, each requested tool
+        call is evaluated by the Supervisor before the real tool is invoked.
+        Calls that receive an ``intervene`` verdict are skipped and produce a
+        ``ToolResponseSchema(status="error", result=reason)``. Calls that
+        receive ``ok`` are executed normally. Supervisor checks for parallel
+        tool calls run concurrently via ``asyncio.gather``.
+
+        Args:
+            calls: Tool calls requested by the model.
+            caller_model: Name of the model that requested the tools.
+            caller_provider: Name of the provider that hosts the caller model.
+            messages: Canonical conversation history visible to the caller
+                model (used as Supervisor context).
+            system_prompt: Already-prepared system prompt that was sent to the
+                caller model (used as Supervisor context).
+            user_id: Optional ID of the user who triggered the request.
+            interface: Optional interface for sending progress/thoughts.
+
+        Returns:
+            A list of ``ToolResponseSchema`` results, one per requested call,
+            in the same order as ``calls``.
+        """
         tool_context: dict[str, Any] = {
             "user_id": user_id,
             "interface": interface,
             "caller_model": caller_model,
             "caller_provider": caller_provider,
         }
+
+        supervisor = None
+        if gpt_settings.supervisor_enabled:
+            supervisor = RegisteredProviders().first_supervisor_ready
+            if supervisor is None:
+                logger.warning(
+                    "Supervisor is enabled but no supervisor provider could be resolved; running without it."
+                )
+
+        if supervisor is not None:
+            supervise_coroutines = [
+                supervisor.supervise(
+                    context=build_supervisor_context(
+                        system_prompt=system_prompt,
+                        messages=messages,
+                        tool_call=SupervisorToolCallAction(tool_name=call.tool_name, args=call.args),
+                    )
+                )
+                for call in calls
+            ]
+            supervise_results: list[SupervisorAnswer] = await asyncio.gather(*supervise_coroutines)
+
+            allowed_calls: list[ToolCallSchema] = []
+            allowed_indices: list[int] = []
+            blocked_responses: dict[int, ToolResponseSchema] = {}
+
+            for index, (call, supervise_result) in enumerate(zip(calls, supervise_results)):
+                if supervise_result.verdict == SupervisorVerdict.INTERVENE:
+                    reason = supervise_result.reason or "Supervisor intervened."
+                    blocked_responses[index] = ToolResponseSchema(
+                        tool_name=call.tool_name,
+                        status="error",
+                        result=reason,
+                    )
+                    logger.warning(f"Supervisor intervened on {call.tool_name}: {reason}")
+                else:
+                    allowed_calls.append(call)
+                    allowed_indices.append(index)
+
+            if allowed_calls:
+                tool_coroutines = [
+                    RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args)
+                    for call in allowed_calls
+                ]
+                allowed_results = await asyncio.gather(*tool_coroutines)
+            else:
+                allowed_results = []
+
+            results: list[ToolResponseSchema] = [
+                ToolResponseSchema(tool_name=call.tool_name, status="pending", result="") for call in calls
+            ]
+            for allowed_index, result in zip(allowed_indices, allowed_results):
+                results[allowed_index] = result
+            for blocked_index, blocked_response in blocked_responses.items():
+                results[blocked_index] = blocked_response
+
+            return results
+
         tool_coroutines = [
             RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args) for call in calls
         ]
@@ -485,7 +705,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -493,11 +713,29 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """OpenAI-friendly chat completion implementation.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+
+        Returns:
+            A tuple of the chat response and the list of new messages
+            produced by this call.
+        """
         model = model or self.default_model
 
         initial_messages = [msg.to_openai() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), model=model, system_prompt=system_prompt, user=user, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            model=model,
+            system_prompt=system_prompt,
+            user=user,
+            interface=interface,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -510,10 +748,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         messages: list[ChatCompletionMessageParam],
         model: str,
         user: User,
+        original_messages: list[Message],
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
+        prepared_system_prompt = ""
         if not system_prompt:
             dialog = messages
         else:
@@ -552,6 +792,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         if not tool_calls:
             messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
+            original_messages.append(Message(role="assistant", content=answer))
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
@@ -570,7 +811,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         for tool_call, result in zip(tool_calls, results):
@@ -595,30 +842,80 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 message_dict["reasoning_content"] = data.message.reasoning_content
 
             messages.append(message_dict)  # type: ignore
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=answer,
+                    tool_calls=[
+                        ToolSchema(
+                            id=tool_call.id,
+                            type="function",
+                            function=FunctionSchema(
+                                name=tool_call.function.name,
+                                arguments=tool_call.function.arguments,
+                            ),
+                        )
+                    ],
+                )
+            )
             tool_result_message = ChatCompletionToolMessageParam(
                 tool_call_id=tool_call.id,
                 role="tool",
                 content=result.model_dump_json(),
             )
             messages.append(tool_result_message)
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.function.name,
+                )
+            )
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            original_messages=original_messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
         return omit
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+    async def _classify_with_text(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        model: str | None = None,
+    ) -> T:
+        """Run a structured classification via an OpenAI chat completion.
+
+        The LLM is asked to emit a JSON object matching ``response_model``.
+        The raw text is stripped of markdown/JSON wrappers before parsing.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used to validate the JSON response.
+            user_content: User message content to classify.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ServiceResponseError: If the LLM returns an empty choices list.
+            ValueError: If the response cannot be parsed or validated.
+        """
         moderator_model = model or self.default_moderation_model or self.default_model
-        system_message = ChatCompletionSystemMessageParam(role="system", content=MODERATOR_PROMPT)
-
-        messages = [
-            Message(role="user", content=cmd).to_openai(),
-        ]
-
+        system_message = ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+        messages = [Message(role="user", content=user_content).to_openai()]
         dialog: list[ChatCompletionMessageParam] = [system_message] + messages
+
         temperature = (
             1 if moderator_model.startswith("o") or "mini" in moderator_model or "nano" in moderator_model else 0.0
         )
@@ -627,44 +924,96 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             messages=dialog,
             temperature=temperature,
             max_completion_tokens=1024,
-            presence_penalty=self.presence_penalty,  # type: ignore
+            presence_penalty=cast(float | OpenAIOmit | None, self.presence_penalty),
             frequency_penalty=self.frequency_penalty,
             timeout=self.timeout,
             reasoning_effort=self.get_reasoning_effort_value(model_name=moderator_model),
         )
 
         choices: list[Choice] = response.choices
-
         if len(choices) == 0:
             raise ServiceResponseError(
                 provider=self.name, model=moderator_model, detail="Unexpected (empty) response received"
             )
 
-        data = choices[0]
-        answer: str = data.message.content or ""
+        answer: str = choices[0].message.content or ""
 
         usage = get_usage_from_openai_response(response_message=response)
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
-        # usage_message = get_usage_msg(usage=usage)
-        answer = answer.strip("```")
-        answer = answer.strip("json")
-        answer = answer.strip()
+
+        answer = answer.strip("`").strip("json").strip()
         try:
             result_data = json.loads(answer)
-        except Exception:
-            logger.error(f"Error parsing moderator's response: {answer}")
-            return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
+        except Exception as e:
+            raise ValueError(answer) from e
 
-        verdict = result_data.get("verdict", "declined")
-        if verdict == "accepted":
+        try:
+            return response_model.model_validate(result_data)
+        except Exception as e:
+            raise ValueError(f"Error parsing moderator's response: {answer}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using the OpenAI-compatible moderation flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            result = await self._classify_with_text(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                model=model,
+            )
+        except ServiceResponseError:
+            raise
+        except Exception as e:
+            logger.error(f"Error parsing moderator's response: {e}")
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
+
+        if result.verdict == "accepted":
             return ModeratorsAnswer(verdict="accepted", status="ok")
 
-        reason = result_data.get("reason", None)
-        if reason is None:
-            logger.error(f"Moderator did not provide reason properly: {answer}")
+        if result.reason is None:
+            logger.error(f"Moderator did not provide reason properly: {cmd}")
 
-        return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
+        return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
+        """Evaluate an agent action for role/flow compliance (OpenAI-text path).
+
+        Uses the same text-based classification helper as ``moderate_command``
+        but with the ``SUPERVISOR_PROMPT`` and ``SupervisorAnswer`` schema.
+
+        Args:
+            context: Full serialized context for the supervisor to evaluate.
+            model: Optional supervisor model override.
+
+        Returns:
+            A ``SupervisorAnswer`` with the compliance verdict. On any failure
+            the method returns ``SupervisorAnswer(verdict=OK, status="error")``
+            (fail-open policy).
+
+        Raises:
+            Does NOT raise exceptions -- all failures are caught and surfaced
+            via the returned ``SupervisorAnswer``.
+        """
+        try:
+            resolved_model = model or gpt_settings.supervisor_model_resolved
+            return await self._classify_with_text(
+                system_prompt=SUPERVISOR_PROMPT,
+                response_model=SupervisorAnswer,
+                user_content=context,
+                model=resolved_model,
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error in {self.name}: {e}")
+            return SupervisorAnswer(verdict=SupervisorVerdict.OK, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:
@@ -893,7 +1242,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
 
-    async def get_chat_response(
+    async def _get_chat_response_impl(
         self,
         messages: list[Message],
         user: User,
@@ -901,6 +1250,19 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Anthropic-friendly chat completion implementation.
+
+        Args:
+            messages: Conversation history in canonical format.
+            user: The user requesting the response.
+            model: Optional model override.
+            system_prompt: Base system prompt template.
+            interface: Optional interface for progress/thoughts.
+
+        Returns:
+            A tuple of the chat response and the list of new messages
+            produced by this call.
+        """
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
 
@@ -908,7 +1270,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            original_messages=list(messages),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -921,6 +1288,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         messages: list[MessageParam],
         model: str,
         user: User,
+        original_messages: list[Message],
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
@@ -950,6 +1318,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 if answer := getattr(block, "text", None):
                     break
 
+            original_messages.append(Message(role="assistant", content=answer or "no data"))
             return ChatResponseSchema(
                 answer=answer or "no data",
                 provider=self.name,
@@ -978,7 +1347,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             for tool_call_part in tool_call_parts
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            messages=original_messages,
+            system_prompt=prepared_system_prompt,
+            user_id=user.id,
+            interface=interface,
         )
 
         for tool_call_part, result in zip(tool_call_parts, results):
@@ -1000,89 +1375,184 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             messages.append(tool_call_message)
             messages.append(tool_result_message)
 
+            original_messages.append(
+                Message(
+                    role="assistant",
+                    content=thoughts_part.text if thoughts_part else "",
+                    tool_calls=[
+                        ToolSchema(
+                            id=tool_call_part.id,
+                            type="tool_use",
+                            function=FunctionSchema(
+                                name=tool_call_part.name,
+                                arguments=json.dumps(tool_call_part.input),
+                            ),
+                        )
+                    ],
+                )
+            )
+            original_messages.append(
+                Message(
+                    role="tool",
+                    content=result.model_dump_json(),
+                    tool_call_id=tool_call_part.id,
+                    tool_name=tool_call_part.name,
+                )
+            )
+
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            original_messages=original_messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
         )
 
-    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+    async def _classify_with_forced_tool(
+        self,
+        system_prompt: str,
+        response_model: type[T],
+        user_content: str,
+        tool_name: str,
+        model: str | None = None,
+    ) -> T:
+        """Classify content by forcing an Anthropic tool call.
+
+        The model is instructed to call ``tool_name``. If it ignores the forced
+        tool choice and returns plain text, a JSON object is extracted from the
+        text and validated against ``response_model`` as a fallback.
+
+        Args:
+            system_prompt: System instruction for the classifier.
+            response_model: Pydantic model used to validate the tool input.
+            user_content: User message content to classify.
+            tool_name: Name of the forced tool to call.
+            model: Optional moderator model override.
+
+        Returns:
+            Validated instance of ``response_model``.
+
+        Raises:
+            ValueError: If the response is empty, contains no usable tool input,
+                or the input cannot be parsed/validated.
+        """
         moderator_model = model or self.default_moderation_model or self.default_model
-        messages = [Message(role="user", content=cmd).to_anthropic()]
-        moderator_prompt = (
-            MODERATOR_PROMPT + "\n**HARD RULE:** call the print_moderator_verdict tool to provide your verdict"
-        )
+        messages = [Message(role="user", content=user_content).to_anthropic()]
+        moderator_prompt = f"{system_prompt}\n**HARD RULE:** call the {tool_name} tool to provide your verdict"
 
+        schema = response_model.model_json_schema()
         response_message: AnthropicMessage = await self.client.messages.create(
             model=moderator_model,
             max_tokens=1024,
             temperature=0.1,
             timeout=self.timeout,
-            system=[
-                TextBlockParam(
-                    text=moderator_prompt,
-                    type="text",
-                )
-            ],
+            system=[TextBlockParam(text=moderator_prompt, type="text")],
             tools=[
                 ToolParam(
-                    name="print_moderator_verdict",
-                    description="Provide moderator's verdict via calling this tool.",
+                    name=tool_name,
+                    description="Provide the classifier verdict via calling this tool.",
                     input_schema=InputSchemaTyped(
                         type="object",
-                        properties={
-                            "verdict": {"type": "string"},
-                            "status": {"type": "string", "default": "ok"},
-                            "reason": {"type": "string"},
-                        },
-                        required=["verdict"],
+                        properties=cast(dict[str, object], schema.get("properties", {})),
+                        required=cast(list[str], schema.get("required", [])),
                     ),
                 )
             ],
-            tool_choice=ToolChoiceToolParam(type="tool", name="print_moderator_verdict"),
+            tool_choice=ToolChoiceToolParam(type="tool", name=tool_name),
             messages=messages,
         )
         if not response_message.content:
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
-        usage = get_usage_from_anthropic_response(response_message=response_message)
+            raise ValueError("no response from moderator received")
 
+        usage = get_usage_from_anthropic_response(response_message=response_message)
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
+
         tool_call: ToolUseBlock | None = next(
             (part for part in response_message.content if isinstance(part, ToolUseBlock)), None
         )
-
         if tool_call is not None:
-            answer = tool_call.input
             try:
-                return ModeratorsAnswer.model_validate(answer, extra="ignore")
+                return response_model.model_validate(tool_call.input, extra="ignore")
             except Exception as e:
-                msg = f"Error parsing moderator's response: {answer}. Error: {e}"
-                logger.error(msg)
-                return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+                raise ValueError(f"Error parsing moderator's response: {tool_call.input}. Error: {e}") from e
 
-        # Fallback: some models (e.g. MiniMax M2.7/M3 on the Anthropic-compatible API) ignore the
-        # forced tool_choice and reply with plain text instead of a tool_use block. The moderator
-        # prompt already instructs the model to emit a JSON verdict as plain text, so we parse it.
         text_part: TextBlock | None = next(
             (part for part in response_message.content if isinstance(part, TextBlock)), None
         )
         if text_part is None or not text_part.text.strip():
-            return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
+            raise ValueError("no response from moderator received")
 
         raw_text = text_part.text.strip()
         match = re.search(r"\{.*\}", raw_text, re.DOTALL)
         if match is None:
-            msg = f"Moderator returned no tool call and no JSON verdict. Raw: {raw_text[:200]}"
-            logger.error(msg)
-            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+            raise ValueError(f"Moderator returned no tool call and no JSON verdict. Raw: {raw_text[:200]}")
 
         try:
             parsed = json.loads(match.group(0))
-            return ModeratorsAnswer.model_validate(parsed, extra="ignore")
+            return response_model.model_validate(parsed, extra="ignore")
         except Exception as e:
-            msg = f"Error parsing moderator's text verdict: {raw_text[:200]}. Error: {e}"
-            logger.error(msg)
-            return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
+            raise ValueError(f"Error parsing moderator's text verdict: {raw_text[:200]}. Error: {e}") from e
+
+    async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
+        """Moderate a command using the Anthropic-compatible moderation flow.
+
+        Args:
+            cmd: The command string to evaluate.
+            model: Optional moderator model override.
+
+        Returns:
+            A ``ModeratorsAnswer`` with the moderation verdict.
+        """
+        try:
+            result = await self._classify_with_forced_tool(
+                system_prompt=MODERATOR_PROMPT,
+                response_model=ModeratorsAnswer,
+                user_content=cmd,
+                tool_name="print_moderator_verdict",
+                model=model,
+            )
+        except Exception as e:
+            logger.error(str(e))
+            return ModeratorsAnswer(verdict="declined", reason=str(e), status="error")
+
+        if result.verdict == "accepted":
+            return ModeratorsAnswer(verdict="accepted", status="ok")
+        return ModeratorsAnswer(verdict="declined", reason=result.reason, status="operation aborted")
+
+    async def supervise(self, context: str, model: str | None = None) -> SupervisorAnswer:
+        """Evaluate an agent action for role/flow compliance (Anthropic-tool path).
+
+        Uses the same forced-tool classification helper as ``moderate_command``
+        but with the ``SUPERVISOR_PROMPT`` and ``SupervisorAnswer`` schema.
+
+        Args:
+            context: Full serialized context for the supervisor to evaluate.
+            model: Optional supervisor model override.
+
+        Returns:
+            A ``SupervisorAnswer`` with the compliance verdict. On any failure
+            the method returns ``SupervisorAnswer(verdict=OK, status="error")``
+            (fail-open policy).
+
+        Raises:
+            Does NOT raise exceptions -- all failures are caught and surfaced
+            via the returned ``SupervisorAnswer``.
+        """
+        try:
+            resolved_model = model or gpt_settings.supervisor_model_resolved
+            return await self._classify_with_forced_tool(
+                system_prompt=SUPERVISOR_PROMPT,
+                response_model=SupervisorAnswer,
+                user_content=context,
+                tool_name="print_supervisor_verdict",
+                model=resolved_model,
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error in {self.name}: {e}")
+            return SupervisorAnswer(verdict=SupervisorVerdict.OK, status="error")
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         if image_generation:

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from chibi.schemas.app import VisionResultSchema
+from chibi.schemas.app import ModeratorsAnswer, VisionResultSchema
 from chibi.services.providers.gemini_native import Gemini
 
 # Sample PDF bytes for testing
@@ -307,3 +307,115 @@ async def test_ocr_config_has_response_schema():
     assert captured_config is not None
     assert hasattr(captured_config, "response_schema")
     assert captured_config.response_schema == VisionResultSchema
+
+
+# ==============================================================================
+# moderate_command Characterization Tests
+# ==============================================================================
+
+
+def create_moderation_gemini_response(text: str) -> MagicMock:
+    """Create a mock Gemini response with the given text in candidates."""
+    part = MagicMock()
+    part.text = text
+    part.thought = None
+
+    content = MagicMock()
+    content.parts = [part]
+
+    candidate = MagicMock()
+    candidate.content = content
+
+    response = MagicMock()
+    response.candidates = [candidate]
+    return response
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_accepted():
+    """Test happy path: native response_schema parses accepted verdict."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = create_moderation_gemini_response('{"verdict": "accepted"}')
+
+    with patch.object(provider, "_generate_content", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        result = await provider.moderate_command(cmd="ls -la")
+
+    assert isinstance(result, ModeratorsAnswer)
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_declined_with_reason():
+    """Test happy path: native response_schema parses declined verdict with reason."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = create_moderation_gemini_response('{"verdict": "declined", "reason": "unsafe"}')
+
+    with patch.object(provider, "_generate_content", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        result = await provider.moderate_command(cmd="rm -rf /")
+
+    assert result.verdict == "declined"
+    assert result.reason == "unsafe"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_strips_json_markdown_wrapper():
+    """Test markdown JSON wrapper is stripped before parsing."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = create_moderation_gemini_response('```json\n{"verdict": "accepted"}\n```')
+
+    with patch.object(provider, "_generate_content", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_empty_response_returns_declined():
+    """Test empty response returns declined with error status."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = MagicMock()
+    mock_response.candidates = []
+
+    with patch.object(provider, "_generate_content", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_invalid_json_returns_declined():
+    """Test invalid JSON response returns declined with error status."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = create_moderation_gemini_response("not valid json")
+
+    with patch.object(provider, "_generate_content", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        result = await provider.moderate_command(cmd="ls")
+
+    assert result.verdict == "declined"
+    assert result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_moderate_command_uses_native_response_schema():
+    """Test that native response_schema is set to ModeratorsAnswer."""
+    provider = Gemini(token=TEST_TOKEN)
+    mock_response = create_moderation_gemini_response('{"verdict": "accepted"}')
+    captured_config: MagicMock | None = None
+
+    async def mock_generate_content(self, model, contents, config):
+        nonlocal captured_config
+        captured_config = config
+        return mock_response
+
+    with patch.object(Gemini, "_generate_content", mock_generate_content):
+        await provider.moderate_command(cmd="ls")
+
+    assert captured_config is not None
+    assert hasattr(captured_config, "response_schema")
+    assert captured_config.response_schema == ModeratorsAnswer
