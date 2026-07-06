@@ -133,6 +133,13 @@ SUPERVISOR_ADDITIONAL_CONDITIONS = """
     *   Examples: A PM writes code directly instead of delegating to an Executor via `delegate_task`; an Executor
         performs work without creating the required `[task_name]_report.md` artifact; a Reviewer approves a task
         without reading the executor's report; an agent skips loading a required workflow skill before acting.
+    *   **ACK Rule:** When the agent receives a background task tool result (e.g., from `delegate_task`), the
+        protocol requires a bare acknowledgement marker (`<chibi>ACK</chibi>`) and nothing else. It is a
+        protocol violation if the agent (a) responds with a full message instead of the bare marker,
+        (b) includes any commentary, reasoning, or additional text alongside the marker, or (c) omits the
+        acknowledgement entirely and proceeds without it. Classify such cases as PROTOCOL_SKIP (not
+        CONTEXT_POLLUTION), since the violation is the corruption of a mandatory protocol step rather than
+        general verbosity.
 
 4.  **CONTEXT_POLLUTION** — The agent introduces irrelevant, excessive, or unnecessarily verbose information into
     the conversation context instead of using delegation, summarization, or file artifacts.
