@@ -25,7 +25,9 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
     def get_model_display_name(self, model_name: str) -> str:
         return model_name.upper()
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         if image_generation:
             return [
                 ModelChangeSchema(

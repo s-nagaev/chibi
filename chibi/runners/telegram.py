@@ -80,7 +80,7 @@ base_commands = [
 imagine_commands = [
     BotCommand(command="imagine", description="Generate image from prompt"),
     BotCommand(command="image_models", description="Select image generation model"),
-    BotCommand(command="imagine_image", description="Edit a photo: send photo with caption afterwards"),
+    BotCommand(command="imagine_image", description="Edit an image: send image as a file with caption afterwards"),
     BotCommand(command="image_to_image_models", description="Select image-to-image model"),
 ]
 select_model_commands = [
@@ -218,12 +218,11 @@ class ChibiBot:
 
     @check_user_allowance
     async def imagine_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Enter IMAGINE_FROM_IMAGE mode: the next photo's caption will be used as i2i prompt."""
+        """Enter IMAGINE_FROM_IMAGE mode: the next image's caption will be used as i2i prompt."""
         telegram_message = get_telegram_message(update=update)
         set_user_action(context=context, action=UserAction.IMAGINE_FROM_IMAGE)
         await telegram_message.reply_text(
-            "Ok, send me a photo with an instruction in the caption "
-            "(e.g. 'turn this into a watercolor')."
+            "Ok, send me an image with an instruction in the caption (e.g. 'turn this into a watercolor')."
         )
         return None
 
@@ -269,7 +268,7 @@ class ChibiBot:
                 caption_text = (message.caption or "").strip()
                 if not caption_text:
                     await get_telegram_message(update=update).reply_text(
-                        "Please, add a text instruction (caption) to the photo describing the edit you want."
+                        "Please, add a text instruction (caption) to the image describing the edit you want."
                     )
                     return None
                 set_user_action(context=context, action=UserAction.NONE)
@@ -544,9 +543,7 @@ class ChibiBot:
             )
             return None
 
-        active_model = get_user_context(
-            context=context, key=UserContext.ACTIVE_IMAGE_TO_IMAGE_MODEL, expected_type=str
-        )
+        active_model = get_user_context(context=context, key=UserContext.ACTIVE_IMAGE_TO_IMAGE_MODEL, expected_type=str)
         prefix = f"Active i2i model: {active_model}. " if active_model else ""
 
         if len(available_models) <= 12:

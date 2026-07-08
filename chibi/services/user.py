@@ -358,9 +358,11 @@ async def get_models_available(
         # previous cached list contained LLMs (e.g. when switching selection modes).
         available_models = [m for m in available_models if m.image_to_image]
         active_provider = user.get_active_image_to_image_provider(thread_id=thread_id)
-        active_model = user.get_active_image_to_image_model(
-            thread_id=thread_id
-        ) or getattr(active_provider, "default_image_to_image_model", None) or active_provider.default_image_model
+        active_model = (
+            user.get_active_image_to_image_model(thread_id=thread_id)
+            or getattr(active_provider, "default_image_to_image_model", None)
+            or active_provider.default_image_model
+        )
     elif image_generation:
         available_models = [m for m in available_models if m.image_generation]
         active_provider = user.get_active_image_provider(thread_id=thread_id)

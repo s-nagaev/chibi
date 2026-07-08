@@ -702,7 +702,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         try:
             models = await self.client.models.list()
         except Exception as e:
@@ -1120,7 +1122,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             logger.error(msg)
             return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         if image_generation:
             return []
 

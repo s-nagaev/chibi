@@ -234,9 +234,7 @@ class ImageToImageTool(ChibiTool):
     name = "image_to_image"
 
     @classmethod
-    async def _resolve_input_image(
-        cls, storage: FileStorage, file_id: str
-    ) -> tuple[bytes, str]:
+    async def _resolve_input_image(cls, storage: FileStorage, file_id: str) -> tuple[bytes, str]:
         """Fetch source image bytes and resolve its mime_type from storage metadata."""
         image_bytes = await storage.get_bytes(file_id=file_id)
         mime_type = "image/jpeg"
@@ -245,9 +243,7 @@ class ImageToImageTool(ChibiTool):
             if isinstance(info, dict) and info.get("mime_type"):
                 mime_type = info["mime_type"]
         except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"Could not resolve mime_type for file_id={file_id}: {e}. Falling back to image/jpeg."
-            )
+            logger.warning(f"Could not resolve mime_type for file_id={file_id}: {e}. Falling back to image/jpeg.")
         return image_bytes, mime_type
 
     @classmethod

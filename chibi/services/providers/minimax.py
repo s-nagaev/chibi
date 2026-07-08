@@ -22,7 +22,7 @@ class Minimax(AnthropicFriendlyProvider):
     default_moderation_model = "MiniMax-M2.5-lighting"
     model_name_keywords = ["MiniMax"]
 
-    base_tts_url = "https://api.minimax.io/v1/"
+    base_minimax_specific_url = "https://api.minimax.io/v1/"
     default_tts_model = "speech-2.8-turbo"
     default_tts_voice = "Korean_HaughtyLady"
     default_image_model = "image-01"
@@ -106,7 +106,7 @@ class Minimax(AnthropicFriendlyProvider):
         image_b64 = base64.b64encode(input_image).decode("ascii")
         data_uri = f"data:{mime_type};base64,{image_b64}"
 
-        url = "https://api.minimax.io/v1/image_generation"
+        url = f"{self.base_minimax_specific_url}image_generation"
         logger.info(f"Generating image-to-image with model {selected_model}...")
 
         response = await self._request(
@@ -124,7 +124,7 @@ class Minimax(AnthropicFriendlyProvider):
                         "type": "character",
                         "image_file": data_uri,
                     }
-                ]
+                ],
             },
         )
         response_data = response.json()
@@ -137,7 +137,7 @@ class Minimax(AnthropicFriendlyProvider):
 
         logger.info(f"Recording a voice message with model {model}...")
 
-        url = f"{self.base_tts_url}t2a_v2"
+        url = f"{self.base_minimax_specific_url}t2a_v2"
 
         data = {
             "model": model,
@@ -157,7 +157,7 @@ class Minimax(AnthropicFriendlyProvider):
         return bytes.fromhex(response_data["audio"])
 
     async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
-        url = "https://api.minimax.io/v1/image_generation"
+        url = f"{self.base_minimax_specific_url}image_generation"
         response = await self._request(
             method="POST",
             url=url,
