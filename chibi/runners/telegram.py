@@ -289,23 +289,31 @@ class ChibiBot:
                 )
                 return None
 
-            if vision_result := await handle_image_understanding(
-                interface=interface,
-                storage=storage,
-                file_id=file_id,
-                mime_type="image/jpeg",
-            ):
-                photo_meta_dict["full_description"] = vision_result.full_description
-                photo_meta_dict["short_description"] = vision_result.short_description
-                photo_meta_dict["text"] = vision_result.text
-                await storage.save(file_metadata=photo_meta_dict)
+            caption = {
+                "user_caption": message.caption or "no data",
+                "file_id": file_id,
+            }
 
-                caption = {
-                    "user_caption": message.caption or "no data",
-                    "photo_short_desc": vision_result.short_description,
-                    "file_id": file_id,
-                }
-                interface.set_caption(json.dumps(caption))
+            try:
+                vision_result = await handle_image_understanding(
+                    interface=interface,
+                    storage=storage,
+                    file_id=file_id,
+                    mime_type="image/jpeg",
+                )
+                if vision_result:
+                    photo_meta_dict["full_description"] = vision_result.full_description
+                    photo_meta_dict["short_description"] = vision_result.short_description
+                    photo_meta_dict["text"] = vision_result.text
+                    await storage.save(file_metadata=photo_meta_dict)
+                    caption["photo_short_desc"] = vision_result.short_description
+            except ValueError as e:
+                logger.warning(
+                    f"{interface.user_data}-{interface.chat_data}: "
+                    f"Vision provider unavailable, skipping auto-description: {e}"
+                )
+
+            interface.set_caption(json.dumps(caption))
 
             logger.info(f"{interface.user_data}-{interface.chat_data}: Photo '{file_name}' successfully uploaded.")
 

@@ -11,14 +11,14 @@ from chibi.services.interface import UserInterface
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, download
+from chibi.services.providers.tools.utils import AdditionalOptions, download, resolve_image_input
 from chibi.services.user import (
     generate_image,
     generate_image_to_image,
     get_chibi_user,
     user_has_reached_images_generation_limit,
 )
-from chibi.storage.files import FileStorage, get_file_storage
+from chibi.storage.files import get_file_storage
 
 if TYPE_CHECKING:
     from chibi.services.providers import Suno
@@ -234,19 +234,6 @@ class ImageToImageTool(ChibiTool):
     name = "image_to_image"
 
     @classmethod
-    async def _resolve_input_image(cls, storage: FileStorage, file_id: str) -> tuple[bytes, str]:
-        """Fetch source image bytes and resolve its mime_type from storage metadata."""
-        image_bytes = await storage.get_bytes(file_id=file_id)
-        mime_type = "image/jpeg"
-        try:
-            info = await storage.get_file_info(file_id=file_id)
-            if isinstance(info, dict) and info.get("mime_type"):
-                mime_type = info["mime_type"]
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"Could not resolve mime_type for file_id={file_id}: {e}. Falling back to image/jpeg.")
-        return image_bytes, mime_type
-
-    @classmethod
     async def generate_and_send_image_to_image(
         cls,
         provider: str,
@@ -282,7 +269,7 @@ class ImageToImageTool(ChibiTool):
             raise ToolException("User has reached image generation monthly limit.")
 
         storage = get_file_storage(interface=interface)
-        image_bytes, mime_type = await cls._resolve_input_image(storage=storage, file_id=image_file_id)
+        image_bytes, mime_type = await resolve_image_input(storage=storage, file_id=image_file_id)
 
         await cls.generate_and_send_image_to_image(
             provider=provider,

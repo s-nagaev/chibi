@@ -21,6 +21,7 @@ from chibi.utils.app import SingletonMeta
 
 if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
+    from chibi.storage.files import FileStorage
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -172,3 +173,33 @@ async def get_models_available_to_user(user_id: int, image_generation: bool = Fa
 
     data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=image_generation)
     return data
+
+
+async def resolve_image_input(
+    storage: "FileStorage",
+    file_id: str,
+    default_mime_type: str = "image/jpeg",
+) -> tuple[bytes, str]:
+    """Fetch image bytes and resolve mime_type via storage metadata.
+
+    Args:
+        storage: File storage instance to fetch from.
+        file_id: Identifier of the previously uploaded file.
+        default_mime_type: Fallback mime_type to use if storage metadata
+            is unavailable or does not contain it.
+
+    Returns:
+        A tuple of (image_bytes, mime_type).
+    """
+    image_bytes = await storage.get_bytes(file_id=file_id)
+    mime_type = default_mime_type
+    try:
+        info = await storage.get_file_info(file_id=file_id)
+        if isinstance(info, dict) and info.get("mime_type"):
+            mime_type = info["mime_type"]
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"Could not resolve mime_type for file_id={file_id}: {e}. "
+            f"Falling back to {default_mime_type}."
+        )
+    return image_bytes, mime_type
