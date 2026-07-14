@@ -33,7 +33,11 @@ async def get_chibi_user(db: Database, user_id: int) -> User:
 async def set_active_model(db: Database, interface: UserInterface, model: ModelChangeSchema) -> None:
     user = await db.get_or_create_user(user_id=interface.storage_id)
     thread_id = interface.thread_id
-    if model.image_generation:
+    if model.image_to_image:
+        user.thread_selected_image_to_image_model[thread_id] = SelectedModel(
+            name=model.name, provider_name=model.provider
+        )
+    elif model.image_generation:
         user.thread_selected_image_model[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
     else:
         user.thread_selected_llm[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
@@ -241,6 +245,38 @@ async def generate_image(
 
 
 @inject_database
+async def generate_image_to_image(
+    db: Database,
+    interface: UserInterface,
+    prompt: str,
+    input_image: bytes,
+    mime_type: str,
+    model: str | None = None,
+    provider_name: str | None = None,
+) -> list[str] | list[BytesIO]:
+    user = await db.get_or_create_user(user_id=interface.user_id)
+
+    if provider_name:
+        provider = user.providers.get(provider_name)
+        selected_model = model
+    else:
+        provider = user.get_active_image_to_image_provider(thread_id=interface.thread_id)
+        selected_model = user.get_active_image_to_image_model(thread_id=interface.thread_id)
+
+    if not provider:
+        raise NoProviderSelectedError("No image-to-image provider available")
+    images = await provider.image_to_image(
+        prompt=prompt,
+        input_image=input_image,
+        mime_type=mime_type,
+        model=selected_model,
+    )
+    if interface.user_id not in gpt_settings.image_generations_whitelist:
+        await db.count_image(interface.user_id)
+    return images
+
+
+@inject_database
 async def describe_image(
     db: Database,
     user_id: int,
@@ -296,24 +332,39 @@ async def ocr_pdf(
 
 @cached(ttl=3600)
 @inject_database
-async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+async def get_user_cached_models(
+    db: Database, user_id: int, image_generation: bool = False, image_to_image: bool = False
+) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    return await user.get_available_models(image_generation=image_generation)
+    return await user.get_available_models(image_generation=image_generation, image_to_image=image_to_image)
 
 
 @inject_database
 async def get_models_available(
-    db: Database, user_id: int, image_generation: bool = False, thread_id: int = 0
+    db: Database, user_id: int, image_generation: bool = False, thread_id: int = 0, image_to_image: bool = False
 ) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    user_models = await get_user_cached_models(user_id=user_id, image_generation=image_generation)
+    user_models = await get_user_cached_models(
+        user_id=user_id, image_generation=image_generation, image_to_image=image_to_image
+    )
 
     if not user_models:
         return []
 
     available_models = deepcopy(user_models)
 
-    if image_generation:
+    if image_to_image:
+        # Make sure only models flagged as image-to-image capable are returned, even if a
+        # previous cached list contained LLMs (e.g. when switching selection modes).
+        available_models = [m for m in available_models if m.image_to_image]
+        active_provider = user.get_active_image_to_image_provider(thread_id=thread_id)
+        active_model = (
+            user.get_active_image_to_image_model(thread_id=thread_id)
+            or getattr(active_provider, "default_image_to_image_model", None)
+            or active_provider.default_image_model
+        )
+    elif image_generation:
+        available_models = [m for m in available_models if m.image_generation]
         active_provider = user.get_active_image_provider(thread_id=thread_id)
         active_model = user.get_active_image_model(thread_id=thread_id) or active_provider.default_image_model
     else:

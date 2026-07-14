@@ -62,7 +62,9 @@ class Cloudflare(RestApiFriendlyProvider):
 
         return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage)
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         if image_generation:
             return []
 

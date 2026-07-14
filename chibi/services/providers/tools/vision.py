@@ -11,7 +11,7 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, resolve_image_input
 from chibi.services.user import describe_image
 from chibi.storage.files import get_file_storage
 
@@ -68,7 +68,11 @@ class AnalyzeImageTool(ChibiTool):
             description=(
                 "Analyze an image using the vision model. "
                 "Provide either a file_id (for previously uploaded files) or absolute_path (for local files). "
-                "You must provide exactly one of these, not both."
+                "You must provide exactly one of these, not both. "
+                "Use this tool only when the user asks for a description, explanation, or analysis "
+                "of what's in the image. "
+                "Do NOT use this tool when the user wants to edit, transform, restyle, or regenerate "
+                "the image — use the image_to_image tool instead."
             ),
             parameters={
                 "type": "object",
@@ -143,9 +147,11 @@ class AnalyzeImageTool(ChibiTool):
             # Get file from storage
             assert file_id is not None  # Type narrowing for mypy
             storage = get_file_storage(interface=interface)
-            file_info = await storage.get_file_info(file_id=file_id)
-            image_bytes = await storage.get_bytes(file_id=file_id)
-            mime_type = file_info.get("mime_type", "application/octet-stream")
+            image_bytes, mime_type = await resolve_image_input(
+                storage=storage,
+                file_id=file_id,
+                default_mime_type="application/octet-stream",
+            )
 
         # Call describe_image with the custom prompt
         result = await describe_image(

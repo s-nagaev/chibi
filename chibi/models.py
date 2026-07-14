@@ -514,6 +514,7 @@ class User(BaseModel):
     thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
     thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
+    thread_selected_image_to_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_names: dict[int, str] = Field(default_factory=dict)
 
     def __init__(self, **kwargs: Any) -> None:
@@ -555,6 +556,31 @@ class User(BaseModel):
 
     def get_active_image_model(self, thread_id: int) -> str | None:
         if selected_model := self.thread_selected_image_model.get(thread_id):
+            return selected_model.name
+        return None
+
+    def get_active_image_to_image_provider(self, thread_id: int) -> "Provider":
+        provider_name: str | None = None
+
+        if selected := self.thread_selected_image_to_image_model.get(thread_id):
+            provider_name = selected.provider_name
+
+        elif self.providers.first_image_to_image_ready:
+            provider_name = self.providers.first_image_to_image_ready.name
+
+        else:
+            raise NoProviderSelectedError
+
+        if not provider_name:
+            raise NoProviderSelectedError
+
+        if provider := self.providers.get(provider_name=provider_name):
+            return provider
+
+        raise NoProviderSelectedError
+
+    def get_active_image_to_image_model(self, thread_id: int) -> str | None:
+        if selected_model := self.thread_selected_image_to_image_model.get(thread_id):
             return selected_model.name
         return None
 
@@ -644,9 +670,14 @@ class User(BaseModel):
             return selected_model.name
         return None
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances
-        tasks = [provider.get_available_models(image_generation=image_generation) for provider in providers]
+        tasks = [
+            provider.get_available_models(image_generation=image_generation, image_to_image=image_to_image)
+            for provider in providers
+        ]
         results = await asyncio.gather(*tasks)
 
         return list(itertools.chain.from_iterable(results))

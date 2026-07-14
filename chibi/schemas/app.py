@@ -39,7 +39,8 @@ class ModelChangeSchema(BaseModel):
     provider: str
     name: str
     display_name: str = ""
-    image_generation: bool
+    image_generation: bool = False
+    image_to_image: bool = False
 
     @model_validator(mode="after")
     def set_display_name_if_none(self) -> "ModelChangeSchema":

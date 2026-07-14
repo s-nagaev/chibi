@@ -481,7 +481,9 @@ class Gemini(RestApiFriendlyProvider):
 
         return super().get_model_display_name(model_name=model_name[7:])
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         try:
             async with Client(api_key=gpt_settings.gemini_key).aio as aclient:
                 models = await aclient.models.list()

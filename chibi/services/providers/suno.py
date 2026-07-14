@@ -25,7 +25,9 @@ class Suno(RestApiFriendlyProvider):
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         return []
 
     @retry(

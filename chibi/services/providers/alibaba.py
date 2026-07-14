@@ -64,7 +64,9 @@ class Alibaba(OpenAIFriendlyProvider):
                 image_urls.append(url)
         return image_urls
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, image_to_image: bool = False
+    ) -> list[ModelChangeSchema]:
         models = await super().get_available_models(image_generation=image_generation)
 
         if image_generation:

@@ -11,8 +11,14 @@ from chibi.services.interface import UserInterface
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, download
-from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
+from chibi.services.providers.tools.utils import AdditionalOptions, download, resolve_image_input
+from chibi.services.user import (
+    generate_image,
+    generate_image_to_image,
+    get_chibi_user,
+    user_has_reached_images_generation_limit,
+)
+from chibi.storage.files import get_file_storage
 
 if TYPE_CHECKING:
     from chibi.services.providers import Suno
@@ -143,6 +149,135 @@ class GenerateImageTool(ChibiTool):
             model=image_model,
             prompt=prompt,
             interface=interface,
+        )
+        return {"detail": "Image was successfully generated and sent."}
+
+
+class GetAvailableImageToImageModelsTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="get_available_image_to_image_models",
+            description=(
+                "Get providers and models available for the user for image-to-image "
+                "(edit/transform a previously uploaded image using a text prompt)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+    )
+    name = "get_available_image_to_image_models"
+
+    @classmethod
+    async def function(cls, **kwargs: Unpack[AdditionalOptions]) -> dict[str, Any]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ToolException("This function requires user_id to be automatically provided.")
+
+        logger.log("TOOL", f"Getting available image-to-image models for user {user_id}...")
+
+        from chibi.services.user import get_models_available
+
+        data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_to_image=True)
+
+        return {
+            "available_models": [info.model_dump(include={"provider", "name", "display_name"}) for info in data],
+        }
+
+
+class ImageToImageTool(ChibiTool):
+    register = True
+    run_in_background_by_default = True
+    allow_model_to_change_background_mode = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="image_to_image",
+            description=(
+                "Edit or transform a previously uploaded image using a text prompt. "
+                "Use when the user wants to modify, restyle, repaint or transform an existing image. "
+                "The source image must have been uploaded earlier by the user; obtain its file_id via "
+                "get_file_info. Check available providers and models first via "
+                "get_available_image_to_image_models. "
+                f"The aspect ratio ({gpt_settings.image_aspect_ratio}) and size are set globally "
+                "and cannot be changed via the prompt. "
+                "IMPORTANT: DO NOT call analyze_image (or any other vision/description tool) on the "
+                "same photo before or alongside this call — this tool sends the raw image bytes + "
+                "the edit prompt directly to the image-to-image provider, so any extra vision step "
+                "is unnecessary, costs extra tokens, and may fail when no vision-ready provider is "
+                "configured. Just call this tool with the prompt describing the desired edit."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "description": "Provider name, i.e. 'Minimax'"},
+                    "image_model": {"type": "string", "description": "Image-to-image model name"},
+                    "prompt": {
+                        "type": "string",
+                        "description": "Edit instruction. English recommended.",
+                    },
+                    "image_file_id": {
+                        "type": "string",
+                        "description": (
+                            "file_id of the source image, obtained via get_file_info after the user uploaded it."
+                        ),
+                    },
+                },
+                "required": ["provider", "image_model", "prompt", "image_file_id"],
+            },
+        ),
+    )
+    name = "image_to_image"
+
+    @classmethod
+    async def generate_and_send_image_to_image(
+        cls,
+        provider: str,
+        model: str,
+        prompt: str,
+        interface: UserInterface,
+        input_image: bytes,
+        mime_type: str,
+    ) -> None:
+        images = await generate_image_to_image(
+            interface=interface,
+            provider_name=provider,
+            model=model,
+            prompt=prompt,
+            input_image=input_image,
+            mime_type=mime_type,
+        )
+        await interface.send_images(images=images)
+        return None
+
+    @classmethod
+    async def function(
+        cls,
+        provider: str,
+        image_model: str,
+        prompt: str,
+        image_file_id: str,
+        **kwargs: Unpack[AdditionalOptions],
+    ) -> dict[str, str]:
+        interface = cls.get_interface(kwargs=kwargs)
+
+        if await user_has_reached_images_generation_limit(user_id=interface.user_id):
+            raise ToolException("User has reached image generation monthly limit.")
+
+        storage = get_file_storage(interface=interface)
+        image_bytes, mime_type = await resolve_image_input(storage=storage, file_id=image_file_id)
+
+        await cls.generate_and_send_image_to_image(
+            provider=provider,
+            model=image_model,
+            prompt=prompt,
+            interface=interface,
+            input_image=image_bytes,
+            mime_type=mime_type,
         )
         return {"detail": "Image was successfully generated and sent."}
 
