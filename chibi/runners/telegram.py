@@ -46,6 +46,7 @@ from chibi.services.bot import (
 from chibi.services.interface import TelegramInterface
 from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
+from chibi.services.providers.tools.topic import RenameThreadTool
 from chibi.services.scheduler import ChibiScheduler
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
@@ -64,6 +65,7 @@ from chibi.utils.telegram import (
 )
 
 _T = TypeVar("_T")
+RenameThreadTool.register = True
 
 base_commands = [
     BotCommand(command="help", description="Show this help message"),
