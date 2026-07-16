@@ -17,6 +17,8 @@ MARKDOWN_TOKENS = ("```", "`", "*", "_", "~")
 IMAGE_UPLOAD_TIMEOUT = 60.0
 FILE_UPLOAD_TIMEOUT = 120.0
 AUDIO_UPLOAD_TIMEOUT = 60.0
+# Stable, collision-safe storage identity reserved for the IDE channel.
+IDE_STORAGE_ID = -(10**16)
 
 
 class UserContext(Enum):

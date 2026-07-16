@@ -110,6 +110,24 @@ The bot will run as a background service. Use CLI commands to manage it.
 
 ---
 
+## VS Code IDE client
+
+Chibi can serve the VS Code extension over its versioned local JSONL protocol:
+
+```bash
+chibi ide --stdio
+```
+
+The command is intended to be started by the [Chibi VS Code extension](https://github.com/s-nagaev/chibi-vscode),
+not used interactively. Chibi owns the `v1` IDE protocol and supports compatible clients that negotiate the same
+version. The stdio process writes protocol frames only to stdout and diagnostics to stderr. Existing Chibi command,
+tool, permission and moderation behavior remains authoritative; the IDE adds no tool policy layer.
+
+See the extension repository for installation, VSIX release instructions, client troubleshooting and its supported
+Chibi version range.
+
+---
+
 ## 🚀 Quick start (Docker)
 
 Create `docker-compose.yml`:
