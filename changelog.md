@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1-beta] - 2026-07-20
+
+### Added
+- EditorContextProvider protocol for safe IDE editor-context access
+- IDE editor_context injection into LLM prompt (code-aware chat)
+- Structured `cause` field on `request_failed` errors
+- `_FRONTEND_CODE_MAP` for aligned error code taxonomy
+- `emit_rate_limited()` helper for frontend-compatible rate-limit frames
+- Configurable `chibi.shutdownTimeoutMs` (default 6000ms)
+
+### Changed
+- Selection schema pinned to flat `{start_line, end_line, text}` shape
+- `/quit` and `/exit` now emit deterministic terminal `result` frame
+- Generic exception handler now includes `cause=type(exc).__name__`
+- Client identity (`client.name`, `client.version`) persisted and logged
+
+### Fixed
+- Non-JSON user messages no longer crash Chroma archival
+
 ## [1.13.0] - 2026-07-16
 
 ### Added
