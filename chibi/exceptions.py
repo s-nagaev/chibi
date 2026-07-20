@@ -94,3 +94,19 @@ class ChromaSearchError(MemoryException):
     """Failed to perform semantic search in ChromaDB."""
 
     ...
+
+
+class StorageError(Exception):
+    """Storage is not configured or not accessible."""
+
+    def __init__(self, detail: str = "Storage is not configured. Run /setup or check CHIBI_STORAGE_PATH.") -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+
+class ConfigurationError(Exception):
+    """Chibi is not fully configured."""
+
+    def __init__(self, detail: str = "Chibi is not fully configured. Run /setup, then verify storage and provider settings.") -> None:
+        self.detail = detail
+        super().__init__(detail)

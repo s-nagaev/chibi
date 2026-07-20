@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.exceptions import NoApiKeyProvidedError
+from chibi.exceptions import ConfigurationError, NoApiKeyProvidedError, StorageError
 from chibi.runners.ide_transport import IDEInterface, IDEStdioRunner
 from chibi.storage.local import LocalStorage
 from chibi.utils.app import handle_gpt_exceptions
@@ -196,3 +196,82 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
 
     assert "last_uploaded_files" not in prompt
     get_file_storage.assert_not_called()
+
+
+
+@pytest.mark.asyncio
+async def test_storage_error_emits_tailored_message_and_typed_cause() -> None:
+    """StorageError in _run_request emits a tailored message and cause field."""
+    recorder = OutputRecorder()
+    runner = IDEStdioRunner()
+
+    async def raise_storage_error(interface: IDEInterface) -> None:
+        raise StorageError()
+
+    with (
+        patch.object(runner, "_write", recorder),
+        patch("chibi.runners.ide_transport.handle_user_prompt", raise_storage_error),
+    ):
+        await runner._handle_message({"type": "initialize", "protocol_version": 1})
+        await runner._handle_message(request("storage-error"))
+        for _ in range(100):
+            if any(frame.get("type") == "error" for frame in recorder.frames):
+                break
+            await asyncio.sleep(0.01)
+
+    error = next(frame for frame in recorder.frames if frame.get("type") == "error")
+    assert error["code"] == "request_failed"
+    assert error["cause"] == "StorageError"
+    assert "Storage is not configured" in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_configuration_error_emits_tailored_message_and_typed_cause() -> None:
+    """ConfigurationError in _run_request emits a tailored message and cause field."""
+    recorder = OutputRecorder()
+    runner = IDEStdioRunner()
+
+    async def raise_config_error(interface: IDEInterface) -> None:
+        raise ConfigurationError()
+
+    with (
+        patch.object(runner, "_write", recorder),
+        patch("chibi.runners.ide_transport.handle_user_prompt", raise_config_error),
+    ):
+        await runner._handle_message({"type": "initialize", "protocol_version": 1})
+        await runner._handle_message(request("config-error"))
+        for _ in range(100):
+            if any(frame.get("type") == "error" for frame in recorder.frames):
+                break
+            await asyncio.sleep(0.01)
+
+    error = next(frame for frame in recorder.frames if frame.get("type") == "error")
+    assert error["code"] == "request_failed"
+    assert error["cause"] == "ConfigurationError"
+    assert "not fully configured" in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_generic_exception_emits_cause_with_exception_class_name() -> None:
+    """Generic exceptions in _run_request emit cause with the exception class name."""
+    recorder = OutputRecorder()
+    runner = IDEStdioRunner()
+
+    async def raise_runtime_error(interface: IDEInterface) -> None:
+        raise RuntimeError("something went wrong")
+
+    with (
+        patch.object(runner, "_write", recorder),
+        patch("chibi.runners.ide_transport.handle_user_prompt", raise_runtime_error),
+    ):
+        await runner._handle_message({"type": "initialize", "protocol_version": 1})
+        await runner._handle_message(request("generic-error"))
+        for _ in range(100):
+            if any(frame.get("type") == "error" for frame in recorder.frames):
+                break
+            await asyncio.sleep(0.01)
+
+    error = next(frame for frame in recorder.frames if frame.get("type") == "error")
+    assert error["code"] == "request_failed"
+    assert error["cause"] == "RuntimeError"
+    assert "something went wrong" not in error["message"]
