@@ -271,3 +271,18 @@ def test_real_cli_malformed_input_and_shutdown() -> None:
         client.shutdown()
     finally:
         client.close()
+
+
+def test_real_cli_quit_always_returns_terminal_frame() -> None:
+    """Stress /quit so the terminal result frame is always observed before exit."""
+    for _ in range(20):
+        client = initialized_process()
+        try:
+            client.send(request("quit", 1, "/quit"))
+            assert client.wait_for("status", "quit", "running")["state"] == "running"
+            result = client.wait_for("result", "quit")
+            assert result["content"] == "Bye!"
+            assert client.process is not None
+            assert client.process.wait(timeout=12) == 0, client._stderr()
+        finally:
+            client.close()
