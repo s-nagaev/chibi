@@ -18,6 +18,38 @@ from chibi.services.user import get_info, get_models_available, set_active_model
 PROTOCOL_VERSION = 1
 COMMANDS = ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
 
+# Maps backend-internal error codes to the closest frontend-facing code.
+# Codes without a clean frontend analog (malformed_request, not_initialized,
+# unsupported_protocol_version, unknown_request, unknown_message, cancelled,
+# request_failed) are kept as backend-internal codes and emitted verbatim.
+_FRONTEND_CODE_MAP: dict[str, str] = {
+    # Command / validation failures that map cleanly to the frontend contract.
+    "invalid_argument": "invalid_request",
+    "missing_model": "invalid_request",
+    "missing_provider": "invalid_request",
+    # Provider-side failures surfaced by the shared exception handler.
+    "provider_error": "backend_error",
+    "provider_configuration": "backend_error",
+    "provider_authorization": "backend_error",
+    "runtime_error": "backend_error",
+    "provider_rate_limit": "rate_limited",
+    # Transport-level codes with no clean frontend analog remain backend-internal.
+    "malformed_request": "malformed_request",
+    "unsupported_protocol_version": "unsupported_protocol_version",
+    "not_initialized": "not_initialized",
+    "unknown_request": "unknown_request",
+    "unknown_message": "unknown_message",
+    "request_failed": "request_failed",
+    "cancelled": "cancelled",
+    # Canonical frontend code used for future rate limiters.
+    "rate_limited": "rate_limited",
+}
+
+
+def _frontend_code(code: str) -> str:
+    """Translate a backend-internal error code to its frontend-facing form."""
+    return _FRONTEND_CODE_MAP.get(code, code)
+
 
 class IDEInterface(UserInterface):
     """User-interface adapter that collects Chibi responses for one IDE request."""
@@ -200,7 +232,19 @@ class IDEStdioRunner:
 
     async def _error(self, code: str, message: str, request_id: str | None = None, **extra: Any) -> None:
         """Write a correlated protocol error."""
-        await self._write({"type": "error", "request_id": request_id, "code": code, "message": message, **extra})
+        await self._write(
+            {"type": "error", "request_id": request_id, "code": _frontend_code(code), "message": message, **extra}
+        )
+
+    async def emit_rate_limited(self, message: str, retry_after: int, request_id: str | None = None) -> None:
+        """Emit a canonical rate-limited error frame with a retry hint.
+
+        Args:
+            message: Human-readable reason for the rate limit.
+            retry_after: Seconds the client should wait before retrying.
+            request_id: Correlated request id, if any.
+        """
+        await self._error("rate_limited", message, request_id, retry_after=retry_after)
 
     async def _read_line(self) -> str:
         """Read one stdin line without blocking the event loop."""
