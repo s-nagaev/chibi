@@ -74,7 +74,7 @@ class OpenAI(OpenAIFriendlyProvider):
         model = model or self.default_model
 
         try:
-            return await self._get_response_completion_response(
+            response, updated_messages = await self._get_response_completion_response(
                 messages=messages,
                 model=model,
                 user=user,
@@ -89,13 +89,16 @@ class OpenAI(OpenAIFriendlyProvider):
                     raise
 
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
-            return await super().get_chat_response(
+            response, updated_messages = await super().get_chat_response(
                 messages=messages,
                 user=user,
                 model=model,
                 system_prompt=system_prompt,
                 interface=interface,
             )
+
+        new_messages = [msg for msg in updated_messages if msg not in messages]
+        return response, new_messages
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:

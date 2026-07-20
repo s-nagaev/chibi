@@ -1,6 +1,7 @@
 import os
 import pickle
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -11,6 +12,7 @@ from chibi.storage.abstract import Database
 class LocalStorage(Database):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
+        Path(storage_path).mkdir(parents=True, exist_ok=True)
         logger.info("Local storage initialized.")
 
     def _get_storage_filename(self, user_id: int) -> str:

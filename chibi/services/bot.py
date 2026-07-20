@@ -131,6 +131,8 @@ async def handle_user_prompt(interface: UserInterface) -> None:
             interface=interface,
         )
 
+    setattr(interface, "response_model", chat_response.model)
+    setattr(interface, "response_provider", chat_response.provider)
     usage = chat_response.usage
     usage_message = get_usage_msg(usage)
 

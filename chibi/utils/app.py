@@ -1,7 +1,7 @@
 from abc import ABCMeta
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import httpx
 from loguru import logger
@@ -20,6 +20,27 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.services.interface import UserInterface
+
+
+@runtime_checkable
+class IDEErrorInterface(Protocol):
+    """Optional error-state contract used by the IDE interface."""
+
+    error_code: str | None
+    error_message: str | None
+
+
+def _set_ide_error(interface: UserInterface, code: str, message: str) -> None:
+    """Record a sanitized error only for interfaces that opt into IDE state.
+
+    Args:
+        interface: User interface receiving the fallback response.
+        code: Machine-readable IDE error code.
+        message: Sanitized user-facing IDE error message.
+    """
+    if isinstance(interface, IDEErrorInterface):
+        interface.error_code = code
+        interface.error_message = message
 
 
 class SingletonMeta(ABCMeta):
@@ -187,14 +208,27 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except NoResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_error",
+                "The provider returned no response. Try again or check provider availability.",
+            )
             return None
 
         except NoApiKeyProvidedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface, "provider_configuration", "This provider is not configured. Set its API key, then try again."
+            )
             text = "Oops! It looks like you didn't set the API key for this provider."
 
         except NotAuthorizedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_authorization",
+                f"The {e.provider} provider rejected its credentials. Check the provider API key.",
+            )
             text = (
                 "We encountered an authorization problem when interacting with a remote service.\n"
                 f"Please check your {e.provider} API key."
@@ -202,6 +236,11 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except ServiceResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_error",
+                f"The {e.provider} provider returned an unexpected response. Try again later.",
+            )
             text = (
                 f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
                 f"Please, try again a bit later."
@@ -209,15 +248,20 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface, "provider_rate_limit", f"The {e.provider} provider rate limit was reached. Try again later."
+            )
             text = f"Rate Limit exceeded for {e.provider}. We should back off a bit."
 
         except NoModelSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
 
+            _set_ide_error(interface, "missing_model", "Select a model before sending a request.")
             text = "Please, select your model first."
 
         except NoProviderSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(interface, "missing_provider", "Select a provider before sending a request.")
             text = "Please, select your provider first."
 
         except RecursionLimitExceeded as e:
@@ -231,6 +275,11 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except Exception as e:
             logger.exception(f"{error_msg_prefix}: {e!r}")
+            _set_ide_error(
+                interface,
+                "runtime_error",
+                "Chibi could not complete the provider operation. Check the output channel for details.",
+            )
 
         await interface.send_message(message=text)
 

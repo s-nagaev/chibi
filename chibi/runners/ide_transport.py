@@ -207,6 +207,19 @@ class IDEStdioRunner:
     @staticmethod
     def _valid_request(message: dict[str, Any]) -> bool:
         """Validate required request fields and their basic types."""
+        selection = message.get("selection")
+        if selection is not None:
+            if not isinstance(selection, dict):
+                return False
+            if "start" in selection or "end" in selection:
+                return False
+            if not isinstance(selection.get("start_line"), int) or selection["start_line"] < 0:
+                return False
+            if not isinstance(selection.get("end_line"), int) or selection["end_line"] < 0:
+                return False
+            text = selection.get("text")
+            if text is not None and not isinstance(text, str):
+                return False
         return (
             isinstance(message.get("request_id"), str)
             and bool(message["request_id"])

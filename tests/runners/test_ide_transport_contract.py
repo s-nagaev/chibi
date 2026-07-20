@@ -98,7 +98,7 @@ def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
     """
     instance = IDEStdioRunner()
     recorder = OutputRecorder()
-    instance._write = recorder
+    instance.__dict__["_write"] = recorder
     return instance, recorder.frames
 
 
@@ -191,6 +191,95 @@ async def test_invalid_cases_match_canonical(case: dict[str, Any]) -> None:
         else:
             await instance._handle_message(raw)
         assert output == case["expected_output"]
+    finally:
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_selection_schema_rejects_nested_shape() -> None:
+    """Nested {start:{line,character}, end:{line,character}, text} is rejected."""
+    instance, output = runner()
+    await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+    nested_selection = {
+        "type": "request",
+        "request_id": "nested-sel-test",
+        "thread_id": 1,
+        "prompt": "hello",
+        "workspace_root": "/tmp",
+        "active_file": None,
+        "selection": {"start": {"line": 10, "character": 0}, "end": {"line": 15, "character": 12}, "text": "foo"},
+        "cursor_position": None,
+        "language_id": None,
+    }
+    await instance._handle_message(nested_selection)
+    assert any(
+        frame.get("code") == "malformed_request" and frame.get("request_id") == "nested-sel-test"
+        for frame in output
+    ), f"Expected malformed_request for nested selection, got: {output}"
+
+
+@pytest.mark.asyncio
+async def test_selection_schema_accepts_flat_shape() -> None:
+    """Flat {start_line, end_line, text} is accepted; optional start_character/end_character tolerated."""
+    gate = asyncio.Event()
+    gate.set()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        flat_selection = {
+            "type": "request",
+            "request_id": "flat-sel-test",
+            "thread_id": 1,
+            "prompt": "hello",
+            "workspace_root": "/tmp",
+            "active_file": None,
+            "selection": {"start_line": 10, "end_line": 15, "text": "foo"},
+            "cursor_position": None,
+            "language_id": None,
+        }
+        await instance._handle_message(flat_selection)
+        await wait_for(output, "flat-sel-test", "result")
+        assert any(
+            frame.get("request_id") == "flat-sel-test" and frame["type"] == "result"
+            for frame in output
+        ), f"Expected result for flat selection, got: {output}"
+    finally:
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_selection_schema_accepts_flat_shape_with_optional_chars() -> None:
+    """Flat shape with optional start_character/end_character is accepted."""
+    gate = asyncio.Event()
+    gate.set()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        flat_with_chars = {
+            "type": "request",
+            "request_id": "flat-sel-chars-test",
+            "thread_id": 1,
+            "prompt": "hello",
+            "workspace_root": "/tmp",
+            "active_file": None,
+            "selection": {"start_line": 10, "end_line": 15, "start_character": 4, "end_character": 12, "text": "foo"},
+            "cursor_position": None,
+            "language_id": None,
+        }
+        await instance._handle_message(flat_with_chars)
+        await wait_for(output, "flat-sel-chars-test", "result")
+        assert any(
+            frame.get("request_id") == "flat-sel-chars-test" and frame["type"] == "result"
+            for frame in output
+        ), f"Expected result for flat selection with optional chars, got: {output}"
     finally:
         for item in active:
             item.stop()
