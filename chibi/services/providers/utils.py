@@ -92,8 +92,9 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
         prompt["system"] = system_data
 
     if interface:
-        storage: FileStorage = get_file_storage(interface=interface)
-        prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
+        if getattr(interface, "uses_uploaded_file_storage", True):
+            storage: FileStorage = get_file_storage(interface=interface)
+            prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
         thread_id = interface.thread_id
         context_size = user.approximate_context_size(thread_id=thread_id)

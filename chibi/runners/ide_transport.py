@@ -22,6 +22,8 @@ COMMANDS = ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
 class IDEInterface(UserInterface):
     """User-interface adapter that collects Chibi responses for one IDE request."""
 
+    uses_uploaded_file_storage = False
+
     def __init__(self, thread_id: int, prompt: str, context: dict[str, Any], emit: Callable[[str], Any]) -> None:
         """Initialize an IDE request interface.
 
@@ -37,6 +39,8 @@ class IDEInterface(UserInterface):
         self._emit = emit
         self.response_model: str | None = None
         self.response_provider: str | None = None
+        self.error_code: str | None = None
+        self.error_message: str | None = None
 
     @property
     def chat_id(self) -> int:
@@ -256,9 +260,12 @@ class IDEStdioRunner:
                             (model for model in models if model.name == args or model.display_name == args), None
                         )
                         if selected is None:
-                            raise ValueError("Unknown model selection")
-                        await set_active_model(interface=interface, model=selected)
-                        responses.append(f"Selected model: {selected.display_name} ({selected.provider})")
+                            available_models = ", ".join(model.display_name for model in models) or "none"
+                            interface.error_code = "invalid_argument"
+                            interface.error_message = f"Unknown model selection. Available models: {available_models}."
+                        else:
+                            await set_active_model(interface=interface, model=selected)
+                            responses.append(f"Selected model: {selected.display_name} ({selected.provider})")
                     else:
                         responses.append(
                             "\n".join(
@@ -272,6 +279,9 @@ class IDEStdioRunner:
             else:
                 await handle_user_prompt(interface=interface)
             content = "\n".join(responses)
+            if interface.error_code is not None:
+                await self._error(interface.error_code, interface.error_message or "Request failed.", request_id)
+                return
             result: dict[str, Any] = {"type": "result", "request_id": request_id, "content": content}
             if interface.response_model is not None and interface.response_provider is not None:
                 result["model"] = interface.response_model
@@ -282,7 +292,12 @@ class IDEStdioRunner:
             raise
         except Exception:
             logger.exception("IDE request failed")
-            await self._error("request_failed", "Request failed.", request_id)
+            await self._error(
+                "request_failed",
+                "The backend could not complete this request. Check the Chibi output channel for details, "
+                "then verify storage and provider configuration.",
+                request_id,
+            )
         finally:
             self._tasks.pop(request_id, None)
             remaining = self._thread_requests.get(thread_id, 1) - 1
