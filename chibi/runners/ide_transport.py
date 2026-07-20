@@ -10,6 +10,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from chibi.constants import IDE_STORAGE_ID
+from chibi.exceptions import ConfigurationError, StorageError
 from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
 from chibi.services.interface import UserInterface
 from chibi.services.task_manager import task_manager
@@ -347,13 +348,30 @@ class IDEStdioRunner:
         except asyncio.CancelledError:
             await self._error("cancelled", "Request cancelled.", request_id)
             raise
-        except Exception:
+        except StorageError as exc:
+            logger.exception("IDE request failed")
+            await self._error(
+                "request_failed",
+                exc.detail,
+                request_id,
+                cause="StorageError",
+            )
+        except ConfigurationError as exc:
+            logger.exception("IDE request failed")
+            await self._error(
+                "request_failed",
+                exc.detail,
+                request_id,
+                cause="ConfigurationError",
+            )
+        except Exception as exc:
             logger.exception("IDE request failed")
             await self._error(
                 "request_failed",
                 "The backend could not complete this request. Check the Chibi output channel for details, "
                 "then verify storage and provider configuration.",
                 request_id,
+                cause=type(exc).__name__,
             )
         finally:
             self._tasks.pop(request_id, None)
