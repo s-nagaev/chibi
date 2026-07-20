@@ -1,6 +1,6 @@
 from abc import ABC
 from io import BytesIO
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from telegram import Chat as TelegramChat
@@ -10,6 +10,16 @@ from telegram.ext import ContextTypes
 
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, GROUP_CHAT_TYPES
 from chibi.utils.telegram import send_answer_message, send_images
+
+
+@runtime_checkable
+class EditorContextProvider(Protocol):
+    """Protocol for interfaces that provide IDE editor context."""
+
+    @property
+    def editor_context(self) -> dict[str, Any] | None:
+        """Return editor context supplied by an IDE client, if available."""
+        ...
 
 
 class UserInterface(ABC):
