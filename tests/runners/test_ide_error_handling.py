@@ -81,7 +81,7 @@ async def test_handled_provider_failure_is_sanitized_ide_error() -> None:
 
     error = next(frame for frame in recorder.frames if frame.get("type") == "error")
     assert error["request_id"] == "provider-failure"
-    assert error["code"] == "provider_configuration"
+    assert error["code"] == "backend_error"
     assert "API key" in error["message"]
     assert "secret-token-must-not-reach-the-client" not in error["message"]
 
@@ -146,10 +146,25 @@ async def test_invalid_model_selection_is_actionable_and_lists_available_models(
             await asyncio.sleep(0.01)
 
     error = next(frame for frame in recorder.frames if frame.get("type") == "error")
-    assert error["code"] == "invalid_argument"
+    assert error["code"] == "invalid_request"
     assert error["code"] != "request_failed"
     assert "Unknown model selection" in error["message"]
     assert "GPT Example" in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_helper_emits_canonical_frame() -> None:
+    """The transport-level rate-limit helper emits a frontend-shaped error frame."""
+    recorder = OutputRecorder()
+    runner = IDEStdioRunner()
+    with patch.object(runner, "_write", recorder):
+        await runner.emit_rate_limited("Slow down", 5, request_id="rate-limit-1")
+
+    error = next(frame for frame in recorder.frames if frame.get("type") == "error")
+    assert error["request_id"] == "rate-limit-1"
+    assert error["code"] == "rate_limited"
+    assert error["message"] == "Slow down"
+    assert error["retry_after"] == 5
 
 
 @pytest.mark.asyncio
