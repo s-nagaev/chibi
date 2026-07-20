@@ -14,7 +14,7 @@ from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
-from chibi.services.interface import UserInterface
+from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
@@ -156,6 +156,7 @@ async def get_llm_chat_completion_answer(
         raise ValueError("Can't compute voice message: no STT provide available.")
 
     prompt: dict[str, Any]
+    editor_ctx = interface.editor_context if isinstance(interface, EditorContextProvider) else None
 
     if tool_message:
         prompt = {
@@ -184,6 +185,24 @@ async def get_llm_chat_completion_answer(
             "type": "user message",
             "transcribed_from_voice_message": bool(user_voice_message),
         }
+
+    if editor_ctx:
+        selection = editor_ctx.get("selection")
+        editor_context: dict[str, Any] = {
+            "active_file": editor_ctx.get("active_file"),
+            "language_id": editor_ctx.get("language_id"),
+            "cursor_position": editor_ctx.get("cursor_position"),
+        }
+        workspace_root = editor_ctx.get("workspace_root")
+        if isinstance(workspace_root, str):
+            editor_context["workspace_root"] = workspace_root.rstrip("/\\").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if isinstance(selection, dict) and isinstance(selection.get("text"), str) and selection["text"]:
+            editor_context["selection"] = {
+                "start_line": selection.get("start_line"),
+                "end_line": selection.get("end_line"),
+                "text": selection["text"][:4096],
+            }
+        prompt["editor_context"] = editor_context
 
     async with lock:
         conversation_messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
