@@ -292,11 +292,7 @@ class IDEStdioRunner:
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
                 command, args = parts[0].lower(), parts[1] if len(parts) > 1 else ""
-                if command in ("/quit", "/exit"):
-                    await self._write({"type": "result", "request_id": request_id, "content": "Bye!"})
-                    self._stopping = True
-                    return
-                elif command == "/help":
+                if command == "/help":
                     responses.append("Available commands: " + ", ".join(COMMANDS))
                 elif command == "/reset":
                     await handle_reset(interface=interface)
@@ -412,6 +408,10 @@ class IDEStdioRunner:
                 await self._error("malformed_request", "Missing required request fields.", request_id)
             elif request_id in self._tasks:
                 await self._error("malformed_request", "request_id is already in use.", request_id)
+            elif message["prompt"].strip().split(maxsplit=1)[0].lower() in ("/quit", "/exit"):
+                await self._write({"type": "status", "request_id": request_id, "state": "running"})
+                await self._write({"type": "result", "request_id": request_id, "content": "Bye!"})
+                self._stopping = True
             else:
                 assert request_id is not None
                 thread_id = message["thread_id"]
