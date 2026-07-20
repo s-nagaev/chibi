@@ -175,6 +175,53 @@ async def test_canonical_cancel_and_shutdown_outputs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_initialize_persists_and_logs_client_identity() -> None:
+    """Persist standard client identity and emit the handshake observability event."""
+    instance, output = runner()
+    with patch("chibi.runners.ide_transport.logger.info") as log_info:
+        await instance._handle_message(
+            {
+                "type": "initialize",
+                "protocol_version": PROTOCOL_VERSION,
+                "client": {"name": "chibi-vscode", "version": "0.1.0"},
+            }
+        )
+
+    assert instance.client_name == "chibi-vscode"
+    assert instance.client_version == "0.1.0"
+    assert output[0]["type"] == "ready"
+    log_info.assert_called_once_with(
+        "client_handshake name={} version={} protocol_version={}",
+        "chibi-vscode",
+        "0.1.0",
+        PROTOCOL_VERSION,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("client", [None, "invalid", {"name": 123, "version": []}])
+async def test_initialize_handles_missing_or_malformed_client_identity(client: Any) -> None:
+    """Accept absent or malformed client identity and log unknown values."""
+    instance, output = runner()
+    message: dict[str, Any] = {"type": "initialize", "protocol_version": PROTOCOL_VERSION}
+    if client is not None:
+        message["client"] = client
+
+    with patch("chibi.runners.ide_transport.logger.info") as log_info:
+        await instance._handle_message(message)
+
+    assert instance.client_name is None
+    assert instance.client_version is None
+    assert output[0]["type"] == "ready"
+    log_info.assert_called_once_with(
+        "client_handshake name={} version={} protocol_version={}",
+        "<unknown>",
+        "<unknown>",
+        PROTOCOL_VERSION,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", fixture("invalid_cases.jsonl"), ids=lambda value: value["name"])
 async def test_invalid_cases_match_canonical(case: dict[str, Any]) -> None:
     """Compare each invalid-case output fixture exactly."""

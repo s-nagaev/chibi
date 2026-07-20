@@ -180,6 +180,8 @@ class IDEStdioRunner:
     def __init__(self) -> None:
         """Initialize the transport state."""
         self._initialized = False
+        self.client_name: str | None = None
+        self.client_version: str | None = None
         self._stopping = False
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._thread_requests: dict[int, int] = {}
@@ -247,7 +249,9 @@ class IDEStdioRunner:
                 parts = prompt.split(maxsplit=1)
                 command, args = parts[0].lower(), parts[1] if len(parts) > 1 else ""
                 if command in ("/quit", "/exit"):
+                    await self._write({"type": "result", "request_id": request_id, "content": "Bye!"})
                     self._stopping = True
+                    return
                 elif command == "/help":
                     responses.append("Available commands: " + ", ".join(COMMANDS))
                 elif command == "/reset":
@@ -339,6 +343,15 @@ class IDEStdioRunner:
                 self._stopping = True
                 self.exit_code = 1
             else:
+                client = message.get("client") if isinstance(message.get("client"), dict) else {}
+                self.client_name = client.get("name") if isinstance(client.get("name"), str) else None
+                self.client_version = client.get("version") if isinstance(client.get("version"), str) else None
+                logger.info(
+                    "client_handshake name={} version={} protocol_version={}",
+                    self.client_name or "<unknown>",
+                    self.client_version or "<unknown>",
+                    message["protocol_version"],
+                )
                 self._initialized = True
                 await self._write(
                     {
