@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import sys
+import warnings
 from io import BytesIO
 from typing import Any, Callable
 
@@ -12,7 +13,7 @@ from loguru import logger
 from chibi.constants import IDE_STORAGE_ID
 from chibi.exceptions import ConfigurationError, StorageError
 from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
-from chibi.services.interface import UserInterface
+from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.task_manager import task_manager
 from chibi.services.user import get_info, get_models_available, set_active_model
 
@@ -52,7 +53,7 @@ def _frontend_code(code: str) -> str:
     return _FRONTEND_CODE_MAP.get(code, code)
 
 
-class IDEInterface(UserInterface):
+class IDEInterface(UserInterface, EditorContextProvider):
     """User-interface adapter that collects Chibi responses for one IDE request."""
 
     uses_uploaded_file_storage = False
@@ -68,12 +69,32 @@ class IDEInterface(UserInterface):
         """
         self._thread_id = thread_id
         self._prompt = prompt
-        self.context = context
+        self._context = context
         self._emit = emit
         self.response_model: str | None = None
         self.response_provider: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
+
+    @property
+    def editor_context(self) -> dict[str, Any] | None:
+        """Return editor context supplied with this IDE request."""
+        return self._context
+
+    @property
+    def context(self) -> dict[str, Any] | None:
+        """Return editor context supplied with this IDE request.
+
+        .. deprecated::
+            Use :attr:`editor_context` instead. This property remains for
+            backward compatibility and will be removed in a future release.
+        """
+        warnings.warn(
+            "IDEInterface.context is deprecated; use IDEInterface.editor_context instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.editor_context
 
     @property
     def chat_id(self) -> int:
@@ -401,9 +422,12 @@ class IDEStdioRunner:
                 self._stopping = True
                 self.exit_code = 1
             else:
-                client = message.get("client") if isinstance(message.get("client"), dict) else {}
-                self.client_name = client.get("name") if isinstance(client.get("name"), str) else None
-                self.client_version = client.get("version") if isinstance(client.get("version"), str) else None
+                raw_client = message.get("client")
+                client = raw_client if isinstance(raw_client, dict) else {}
+                raw_name = client.get("name")
+                raw_version = client.get("version")
+                self.client_name = raw_name if isinstance(raw_name, str) else None
+                self.client_version = raw_version if isinstance(raw_version, str) else None
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
