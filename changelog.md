@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1b1] - 2026-07-20
+
+### Fixed
+- `chibi ide --stdio` now reads user settings from `~/chibi-bot/settings` (respects `chibi config`)
+
 ## [1.13.1-beta] - 2026-07-20
 
 ### Added
@@ -598,8 +603,9 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.13.0...HEAD
-[1.13.0]: https://github.com/s-nagaev/chibi/compare/v1.12.0...v1.13.0
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...HEAD
+[1.13.1b1]: https://github.com/s-nagaev/chibi/compare/v1.13.1-beta...v1.13.1b1
+[1.13.1-beta]: https://github.com/s-nagaev/chibi/compare/v1.13.0...v1.13.1-beta
 [1.12.0]: https://github.com/s-nagaev/chibi/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/s-nagaev/chibi/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/s-nagaev/chibi/compare/v1.9.0...v1.10.0
