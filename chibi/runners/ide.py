@@ -1,6 +1,13 @@
 """CLI entrypoint for the IDE stdio runner."""
 
 import asyncio
+import os
+
+# When launched as an IDE stdio server, filesystem access and MCP stdio are
+# expected to be enabled by default. setdefault() keeps explicit env overrides
+# or config file values intact.
+os.environ.setdefault("FILESYSTEM_ACCESS", "true")
+os.environ.setdefault("ENABLE_MCP_STDIO", "true")
 
 
 def run_ide() -> None:
