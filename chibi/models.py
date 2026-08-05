@@ -660,8 +660,15 @@ class User(BaseModel):
         return len(self.images) >= gpt_settings.image_generations_monthly_limit
 
     def approximate_context_size(self, thread_id: int) -> int:
-        messages = self.thread_messages_map.get(thread_id)
-        if not messages:
+        messages_to_count = []
+        if thread_id == 0:
+            messages_to_count.extend(self.messages)
+
+        thread_messages = self.thread_messages_map.get(thread_id)
+        if thread_messages:
+            messages_to_count.extend(thread_messages)
+
+        if not messages_to_count:
             return 0
 
-        return sum(msg.estimate_tokens for msg in messages)
+        return sum(msg.estimate_tokens for msg in messages_to_count)

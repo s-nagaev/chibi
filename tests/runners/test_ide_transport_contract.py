@@ -261,8 +261,7 @@ async def test_selection_schema_rejects_nested_shape() -> None:
     }
     await instance._handle_message(nested_selection)
     assert any(
-        frame.get("code") == "malformed_request" and frame.get("request_id") == "nested-sel-test"
-        for frame in output
+        frame.get("code") == "malformed_request" and frame.get("request_id") == "nested-sel-test" for frame in output
     ), f"Expected malformed_request for nested selection, got: {output}"
 
 
@@ -290,10 +289,9 @@ async def test_selection_schema_accepts_flat_shape() -> None:
         }
         await instance._handle_message(flat_selection)
         await wait_for(output, "flat-sel-test", "result")
-        assert any(
-            frame.get("request_id") == "flat-sel-test" and frame["type"] == "result"
-            for frame in output
-        ), f"Expected result for flat selection, got: {output}"
+        assert any(frame.get("request_id") == "flat-sel-test" and frame["type"] == "result" for frame in output), (
+            f"Expected result for flat selection, got: {output}"
+        )
     finally:
         for item in active:
             item.stop()
@@ -324,8 +322,7 @@ async def test_selection_schema_accepts_flat_shape_with_optional_chars() -> None
         await instance._handle_message(flat_with_chars)
         await wait_for(output, "flat-sel-chars-test", "result")
         assert any(
-            frame.get("request_id") == "flat-sel-chars-test" and frame["type"] == "result"
-            for frame in output
+            frame.get("request_id") == "flat-sel-chars-test" and frame["type"] == "result" for frame in output
         ), f"Expected result for flat selection with optional chars, got: {output}"
     finally:
         for item in active:

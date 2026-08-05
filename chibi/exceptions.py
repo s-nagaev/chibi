@@ -107,6 +107,8 @@ class StorageError(Exception):
 class ConfigurationError(Exception):
     """Chibi is not fully configured."""
 
-    def __init__(self, detail: str = "Chibi is not fully configured. Run /setup, then verify storage and provider settings.") -> None:
+    def __init__(
+        self, detail: str = "Chibi is not fully configured. Run /setup, then verify storage and provider settings."
+    ) -> None:
         self.detail = detail
         super().__init__(detail)

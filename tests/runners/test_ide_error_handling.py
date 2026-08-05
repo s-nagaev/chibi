@@ -198,7 +198,6 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
     get_file_storage.assert_not_called()
 
 
-
 @pytest.mark.asyncio
 async def test_storage_error_emits_tailored_message_and_typed_cause() -> None:
     """StorageError in _run_request emits a tailored message and cause field."""

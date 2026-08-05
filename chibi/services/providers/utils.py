@@ -98,6 +98,8 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
 
         thread_id = interface.thread_id
         context_size = user.approximate_context_size(thread_id=thread_id)
+        if thread_id != 0:
+            context_size += sum(msg.estimate_tokens for msg in user.messages)
         prompt["approximate_context_size"] = context_size
         if context_size > gpt_settings.max_history_tokens * 0.7:
             prompt["context_size_warning"] = (
@@ -212,7 +214,7 @@ def suno_task_still_processing(task_data_response: SunoGetGenerationDetailsSchem
 
 # def limit_recursion(
 #     max_depth: int = application_settings.max_consecutive_tool_calls,
-# ) -> Callable[[AsyncFunc[P, T]], AsyncFunc[P, T]]:
+# ) -> Callable[[AsyncFunc[P], T]], AsyncFunc[P, T]]:
 #     def decorator(func: AsyncFunc[P, T]) -> AsyncFunc[P, T]:
 #         depth_var: ContextVar[int] = ContextVar(f"{func.__name__}_depth", default=0)
 #

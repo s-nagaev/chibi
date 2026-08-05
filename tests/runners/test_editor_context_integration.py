@@ -220,8 +220,7 @@ def test_editor_context_reaches_backend_with_required_fields() -> None:
                 break
 
         assert captured is not None, (
-            f"editor_context was not captured; buffered frames: {client._frames}; "
-            f"stderr={client._stderr()!r}"
+            f"editor_context was not captured; buffered frames: {client._frames}; stderr={client._stderr()!r}"
         )
         assert captured["active_file"] == "src/utils/helper.py", captured
         assert captured["language_id"] == "python", captured
