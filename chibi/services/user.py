@@ -50,7 +50,7 @@ async def reset_chat_history(db: Database, storage_id: int, thread_id: int) -> N
 async def emergency_summarization(db: Database, storage_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=storage_id)
 
-    chat_history = await db.get_messages(user=user, thread_id=thread_id)
+    chat_history = await db.get_conversation_messages(user=user, thread_id=thread_id)
     chat_history_string = "\n".join(msg.content for msg in chat_history if not msg.tool_calls and not msg.tool_call_id)
     user_messages: list[Message] = [Message(role="user", content=chat_history_string)]
 

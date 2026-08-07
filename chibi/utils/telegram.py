@@ -1,3 +1,4 @@
+import re
 import sys
 from collections import deque
 from io import BytesIO
@@ -37,9 +38,13 @@ from chibi.constants import (
     UserAction,
     UserContext,
 )
+from chibi.utils.rich_message import RichMessageBuilder
 
 R = TypeVar("R")
 P = ParamSpec("P")
+
+TABLE_ROW_PATTERN = re.compile(r"^\|.*\|$")
+TABLE_SEP_PATTERN = re.compile(r"^\|[\s\-:]+(\|[\s\-:]+)*\|?$")
 
 
 def get_telegram_user(update: Update) -> TelegramUser:
@@ -229,6 +234,165 @@ async def send_message(
     return await context.bot.send_message(chat_id=telegram_chat.id, message_thread_id=target_thread_id, **kwargs)
 
 
+def detect_markdown_table(text: str) -> list[list[str]] | None:
+    """Detect the first Markdown table in the text.
+
+    Args:
+        text: The message text to scan.
+
+    Returns:
+        A list of rows (each row a list of cell strings) for the first table
+        found, or None if the text contains no Markdown table.
+    """
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if not TABLE_ROW_PATTERN.match(lines[i].strip()):
+            i += 1
+            continue
+        block: list[str] = []
+        while i < len(lines) and TABLE_ROW_PATTERN.match(lines[i].strip()):
+            block.append(lines[i])
+            i += 1
+        if _is_valid_table_block(block):
+            return _parse_table_block(block)
+    return None
+
+
+def _parse_table_block(block: list[str]) -> list[list[str]]:
+    """Parse a contiguous block of pipe-delimited lines into table rows.
+
+    Args:
+        block: Consecutive lines that match the table row pattern.
+
+    Returns:
+        Parsed rows with whitespace-stripped cells; separator rows are skipped.
+    """
+    rows: list[list[str]] = []
+    for line in block:
+        stripped = line.strip()
+        if TABLE_SEP_PATTERN.match(stripped):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        rows.append(cells)
+    return rows
+
+
+def _is_valid_table_block(block: list[str]) -> bool:
+    """Return True if a pipe-delimited block qualifies as a Markdown table.
+
+    Args:
+        block: Consecutive lines that match the table row pattern.
+
+    Returns:
+        True when the block has at least two lines and yields at least one row.
+    """
+    return len(block) >= 2 and bool(_parse_table_block(block))
+
+
+def _split_table_parts(text: str) -> list[tuple[str | None, list[list[str]] | None]]:
+    """Split a message into alternating text and Markdown table parts.
+
+    Args:
+        text: The message text to split.
+
+    Returns:
+        A list of parts, each a ``(text, table)`` tuple where exactly one of the
+        fields is non-None. Tables preserve their original order relative to the
+        surrounding text.
+    """
+    parts: list[tuple[str | None, list[list[str]] | None]] = []
+    lines = text.splitlines()
+    text_buffer: list[str] = []
+    i = 0
+    while i < len(lines):
+        if not TABLE_ROW_PATTERN.match(lines[i].strip()):
+            text_buffer.append(lines[i])
+            i += 1
+            continue
+        block: list[str] = []
+        while i < len(lines) and TABLE_ROW_PATTERN.match(lines[i].strip()):
+            block.append(lines[i])
+            i += 1
+        if _is_valid_table_block(block):
+            if text_buffer:
+                parts.append(("\n".join(text_buffer), None))
+                text_buffer = []
+            parts.append((None, _parse_table_block(block)))
+        else:
+            text_buffer.extend(block)
+    if text_buffer:
+        parts.append(("\n".join(text_buffer), None))
+    return parts
+
+
+def _render_ascii_table(table_rows: list[list[str]]) -> str:
+    """Render table rows as a plain-text ASCII table.
+
+    Args:
+        table_rows: Parsed table rows.
+
+    Returns:
+        A monospace-friendly ASCII representation of the table.
+    """
+    if not table_rows:
+        return ""
+    col_count = max(len(row) for row in table_rows)
+    padded_rows = [list(row) + [""] * (col_count - len(row)) for row in table_rows]
+    widths = [max(len(cell) for cell in col) for col in zip(*padded_rows)]
+    lines: list[str] = []
+    for row_idx, row in enumerate(padded_rows):
+        cells = " | ".join(cell.ljust(widths[col_idx]) for col_idx, cell in enumerate(row))
+        lines.append(f"| {cells} |")
+        if row_idx == 0 and len(padded_rows) > 1 and all(cell for cell in row):
+            lines.append("|" + "|".join("-" * (width + 2) for width in widths) + "|")
+    return "\n".join(lines)
+
+
+async def render_table_rich(
+    table_rows: list[list[str]],
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    thread_id: int | None,
+    reply_to_message_id: int | None = None,
+) -> None:
+    """Send a table as a Telegram Rich Message, falling back to ASCII text.
+
+    Args:
+        table_rows: Parsed table rows.
+        context: The update context.
+        chat_id: The target chat ID.
+        thread_id: The message thread ID, or None.
+        reply_to_message_id: ID of the message to reply to, or None.
+    """
+    headers: list[str] | None = None
+    data = table_rows
+    if table_rows and all(cell for cell in table_rows[0]):
+        headers = table_rows[0]
+        data = table_rows[1:]
+
+    payload = RichMessageBuilder.build_table_message(
+        table_data=data,
+        chat_id=chat_id,
+        thread_id=thread_id,
+        headers=headers,
+    )
+    if reply_to_message_id is not None:
+        payload["reply_parameters"] = {"message_id": reply_to_message_id}
+    try:
+        await context.bot.do_api_request("sendRichMessage", api_kwargs=payload)
+    except Exception as e:
+        logger.warning(f"sendRichMessage failed: {e}, falling back to ASCII table")
+        kwargs: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": _render_ascii_table(table_rows),
+            "message_thread_id": thread_id,
+        }
+        if reply_to_message_id is not None:
+            kwargs["reply_to_message_id"] = reply_to_message_id
+        await context.bot.send_message(**kwargs)
+
+
 async def send_long_message(
     message: str,
     update: Update,
@@ -240,6 +404,9 @@ async def send_long_message(
 ) -> None:
     """Send a long message, splitting it if necessary.
 
+    Markdown tables are rendered as Rich Messages; the surrounding text goes
+    through the regular MarkdownV2 or plain-text pipeline.
+
     Args:
         message: The message text.
         update: The incoming Telegram update.
@@ -249,24 +416,65 @@ async def send_long_message(
         reply: Whether to reply to the message.
         thread_id: The message thread ID.
     """
-    if normalize_md:
-        message = telegramify_markdown.markdownify(message)
-        chunks = split_markdown_v2(message)
-    else:
-        chunks = [
-            message[i : i + constants.MessageLimit.MAX_TEXT_LENGTH]
-            for i in range(0, len(message), constants.MessageLimit.MAX_TEXT_LENGTH)
-        ]
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    target_thread_id = thread_id if thread_id is not None else telegram_message.message_thread_id
+    parts = _split_table_parts(message)
 
-    for chunk_number, chunk in enumerate(chunks):
-        await send_message(
-            update=update,
-            context=context,
-            text=chunk,
-            parse_mode=parse_mode,
-            reply=chunk_number == 0 if reply else False,
-            thread_id=thread_id,
-        )
+    if not any(table is not None for _, table in parts):
+        if normalize_md:
+            message = telegramify_markdown.markdownify(message)
+            chunks = split_markdown_v2(message)
+        else:
+            chunks = [
+                message[i : i + constants.MessageLimit.MAX_TEXT_LENGTH]
+                for i in range(0, len(message), constants.MessageLimit.MAX_TEXT_LENGTH)
+            ]
+
+        for chunk_number, chunk in enumerate(chunks):
+            await send_message(
+                update=update,
+                context=context,
+                text=chunk,
+                parse_mode=parse_mode,
+                reply=chunk_number == 0 if reply else False,
+                thread_id=target_thread_id,
+            )
+        return
+
+    reply_sent = False
+    reply_msg_id = telegram_message.message_id
+    for text_part, table in parts:
+        if table is not None:
+            await render_table_rich(
+                table_rows=table,
+                context=context,
+                chat_id=telegram_chat.id,
+                thread_id=target_thread_id,
+                reply_to_message_id=reply_msg_id if not reply_sent and reply else None,
+            )
+            reply_sent = True
+            continue
+        if not text_part or not text_part.strip():
+            continue
+        if normalize_md:
+            text_part = telegramify_markdown.markdownify(text_part)
+            chunks = split_markdown_v2(text_part)
+        else:
+            chunks = [
+                text_part[i : i + constants.MessageLimit.MAX_TEXT_LENGTH]
+                for i in range(0, len(text_part), constants.MessageLimit.MAX_TEXT_LENGTH)
+            ]
+        for chunk_number, chunk in enumerate(chunks):
+            await send_message(
+                update=update,
+                context=context,
+                text=chunk,
+                parse_mode=parse_mode,
+                reply=reply and not reply_sent and chunk_number == 0,
+                thread_id=target_thread_id,
+            )
+            reply_sent = True
 
 
 async def send_audio(

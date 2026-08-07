@@ -591,6 +591,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             }
             # Add reasoning_content if present (DeepSeek-Reasoner, Moonshot KIMI, etc.)
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
+                await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
                 logger.log("THINK", data.message.reasoning_content)
                 message_dict["reasoning_content"] = data.message.reasoning_content
 
