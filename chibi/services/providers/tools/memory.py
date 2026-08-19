@@ -15,9 +15,9 @@ from chibi.services.user import (
     deactivate_llm_skill,
     drop_tool_call_history,
     get_cwd,
+    reset_chat_history,
     set_info,
     set_working_dir,
-    summarize_history,
 )
 
 
@@ -185,7 +185,8 @@ class SummarizeHistoryTool(ChibiTool):
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summarizing chat...")
-        await summarize_history(storage_id=user_id, thread_id=interface.thread_id)
+        await reset_chat_history(storage_id=user_id, thread_id=interface.thread_id)
+        # await drop_history(storage_id=user_id, thread_id=interface.thread_id)
         if application_settings.log_prompt_data:
             logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summary: {summary}")
         return {"status": "ok"}
@@ -222,7 +223,7 @@ class LoadBuiltinSkillTool(ChibiTool):
         if not os.path.exists(skill_path):
             raise ToolException(f"Skill '{skill_name}' does not exist.")
 
-        with open(skill_path, "rt") as skill_file:
+        with open(skill_path, "rt", encoding="utf-8") as skill_file:
             skill_payload = skill_file.read()
             await activate_llm_skill(user_id=user_id, skill_name=skill_name, skill_payload=skill_payload)
         return {"status": "ok"}

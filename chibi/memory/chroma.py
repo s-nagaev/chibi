@@ -930,12 +930,14 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
             if message.role == "user":
                 try:
                     content = json.loads(message.content)
-                    if content.get("type") == "tool_response":
+                    if isinstance(content, dict) and content.get("type") == "tool_response":
                         return None
 
-                    snippet = content.get("prompt", message.content)[:50]
+                    snippet = (
+                        content.get("prompt", message.content) if isinstance(content, dict) else message.content
+                    )[:50]
                 except (json.JSONDecodeError, TypeError):
-                    return None
+                    snippet = str(message.content)[:50]
             else:
                 snippet = message.content[:50]
             logger.debug(f"Scheduling archival of message {message.id} for user {user.id}. Message: {snippet}")

@@ -182,6 +182,7 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
     user = SimpleNamespace(
         working_dir="/tmp",
         approximate_context_size=lambda thread_id: 0,
+        messages=[],
         id=1,
         info="",
         llm_skills={},

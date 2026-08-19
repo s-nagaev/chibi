@@ -2,12 +2,14 @@
 
 from chibi.services.providers.alibaba import Alibaba
 from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.cheaperinference import Cheaperinference
 from chibi.services.providers.cloudflare import Cloudflare
 from chibi.services.providers.customopenai import CustomOpenAI
 from chibi.services.providers.deepseek import DeepSeek
 from chibi.services.providers.eleven_labs import ElevenLabs
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.grok import Grok
+from chibi.services.providers.melious import Melious
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI

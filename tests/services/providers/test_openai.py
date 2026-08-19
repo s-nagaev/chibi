@@ -2,11 +2,13 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from openai import BadRequestError
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
-from chibi.exceptions import NoModelSelectedError, ServiceResponseError
+from chibi.exceptions import ContextLengthExceededError, NoModelSelectedError, ServiceResponseError
 from chibi.schemas.app import VisionResultSchema
 from chibi.services.providers.openai import OpenAI
 
@@ -446,3 +448,44 @@ async def test_ocr_includes_filename_in_file_block():
     assert "file" in file_block
     assert "filename" in file_block["file"]
     assert file_block["file"]["filename"] == "document.pdf"
+
+
+def _make_bad_request_error(code: str | None) -> BadRequestError:
+    """Build an OpenAI BadRequestError with the given error code."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(
+        status_code=400,
+        request=request,
+        json={"error": {"message": "test", "type": "invalid_request_error", "code": code}},
+    )
+    return BadRequestError(
+        "test",
+        response=response,
+        body={"message": "test", "type": "invalid_request_error", "code": code},
+    )
+
+
+@pytest.mark.asyncio
+async def test_context_length_exceeded_bad_request_raises_typed_error() -> None:
+    """A context_length_exceeded BadRequestError raises ContextLengthExceededError."""
+    provider = OpenAI(token=TEST_TOKEN)
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.parse = AsyncMock(side_effect=_make_bad_request_error("context_length_exceeded"))
+    provider.client = mock_client
+
+    with pytest.raises(ContextLengthExceededError):
+        await provider.ocr(pdf=SAMPLE_PDF_BYTES)
+
+
+@pytest.mark.asyncio
+async def test_other_bad_request_error_raises_service_response_error() -> None:
+    """A non-context BadRequestError still raises ServiceResponseError."""
+    provider = OpenAI(token=TEST_TOKEN)
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.parse = AsyncMock(side_effect=_make_bad_request_error("invalid_image"))
+    provider.client = mock_client
+
+    with pytest.raises(ServiceResponseError):
+        await provider.ocr(pdf=SAMPLE_PDF_BYTES)

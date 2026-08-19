@@ -26,6 +26,9 @@ _BOOTSTRAP = textwrap.dedent(
         interface.response_provider = "fake"
         if value and value.startswith("slow"):
             await asyncio.sleep(0.3)
+        if value and value.startswith("unicode"):
+            await interface.send_message("Привет, мир — ответ 42")
+            return
         await interface.send_message("deterministic response")
 
     async def models(user_id, thread_id=0, **kwargs):
@@ -60,14 +63,23 @@ _BOOTSTRAP = textwrap.dedent(
 class ProtocolProcess:
     """Manage one real CLI process and its unbuffered JSONL stream."""
 
-    def __init__(self) -> None:
-        """Start a deterministic ``chibi ide --stdio`` process."""
+    def __init__(self, io_encoding: str | None = None) -> None:
+        """Start a deterministic ``chibi ide --stdio`` process.
+
+        Args:
+            io_encoding: Optional ``PYTHONIOENCODING`` value used to emulate a
+                narrow console code page such as Windows ``cp1252``.
+        """
+        env = dict(os.environ)
+        if io_encoding is not None:
+            env["PYTHONIOENCODING"] = io_encoding
         self.process = subprocess.Popen(
             [sys.executable, "-c", _BOOTSTRAP],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            env=env,
         )
         assert self.process.stdout is not None
         self._selector = selectors.DefaultSelector()
@@ -182,13 +194,16 @@ def request(request_id: str, thread_id: int, prompt: str) -> dict[str, Any]:
     }
 
 
-def initialized_process() -> ProtocolProcess:
+def initialized_process(io_encoding: str | None = None) -> ProtocolProcess:
     """Start and initialize a protocol process.
+
+    Args:
+        io_encoding: Optional ``PYTHONIOENCODING`` value for the child process.
 
     Returns:
         An initialized real CLI process.
     """
-    client = ProtocolProcess()
+    client = ProtocolProcess(io_encoding=io_encoding)
     client.send({"type": "initialize", "protocol_version": 1})
     assert client.wait_for("ready")["protocol_version"] == 1
     return client
@@ -286,3 +301,16 @@ def test_real_cli_quit_always_returns_terminal_frame() -> None:
             assert client.process.wait(timeout=12) == 0, client._stderr()
         finally:
             client.close()
+
+
+def test_real_cli_non_ascii_result_round_trips_on_narrow_console() -> None:
+    """Non-ASCII answers survive a cp1252 console because the wire stays UTF-8."""
+    client = initialized_process(io_encoding="cp1252")
+    try:
+        client.send(request("unicode", 40, "unicode please"))
+        assert client.wait_for("status", "unicode", "running")["state"] == "running"
+        result = client.wait_for("result", "unicode")
+        assert result["content"] == "Привет, мир — ответ 42"
+        client.shutdown()
+    finally:
+        client.close()

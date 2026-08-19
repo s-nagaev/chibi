@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- System prompt now reports the real provider-reported prompt token count (from `UsageCacheStore`) instead of the heuristic `(len(content)+len(role))//4` estimate, which under-reported by ~4.8x.
+- `approximate_context_size` is now expressed as `"N tokens (P% of M limit)"` where the percentage is of `max_history_tokens`, or `"n/a"` when no provider data is available yet (e.g. first turn after restart).
+- Context-overflow warning threshold is now configurable via `CONTEXT_SIZE_WARNING_THRESHOLD` (default `50`, range 0–100) instead of a hardcoded 70%.
+- The warning is suppressed when the real context size is unknown (`n/a`).
+- Auto-summarization trigger (`check_history_and_summarize`) now compares the real provider-reported prompt size from `UsageCacheStore` (same `(user_id, thread_id)` key as the write/read sides) instead of the history-only `estimate_tokens` heuristic. On cold start (store empty for the key) it falls back to `sum(estimate_tokens)` so summarization still functions.
+
+### Fixed
+- `MAX_HISTORY_TOKENS` default re-based from `64000` to `320000` to prevent aggressive false-positive summarization now that the trigger measures the truthful (entire-request) prompt size (~4.8x larger than the old history-only estimate). Existing deployments that set `MAX_HISTORY_TOKENS` explicitly should re-tune it upward by ~5x (see README migration note).
+
 ## [1.13.1b1] - 2026-07-20
 
 ### Fixed

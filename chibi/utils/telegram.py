@@ -649,7 +649,7 @@ async def send_message_in_plain_text_and_file(
         message=message, update=update, context=context, normalize_md=False, reply=reply, thread_id=target_thread_id
     )
     file = BytesIO()
-    file.write(message.encode())
+    file.write(message.encode("utf-8"))
     file.seek(0)
     explain_message_text = (
         "Oops! 😯It looks like your answer contains some code, but Telegram can't display it properly. "

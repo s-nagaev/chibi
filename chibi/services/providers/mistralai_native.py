@@ -33,6 +33,7 @@ from chibi.services.providers.utils import (
     prepare_system_prompt,
     send_llm_thoughts,
 )
+from chibi.services.usage_cache import UsageCacheStore
 
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
 
@@ -128,11 +129,18 @@ class MistralAI(RestApiFriendlyProvider):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_mistral() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=messages,
+            track_prompt_size=track_prompt_size,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -147,9 +155,14 @@ class MistralAI(RestApiFriendlyProvider):
         user: User,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        conversation_messages: list[Message] | None = None,
+        track_prompt_size: bool = False,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user_id=user.id, interface=interface
+            base_system_prompt=system_prompt,
+            user_id=user.id,
+            interface=interface,
+            conversation_messages=conversation_messages,
         )
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages
@@ -158,6 +171,13 @@ class MistralAI(RestApiFriendlyProvider):
 
         response: ChatCompletionResponse = await self._generate_content(model=model, messages=messages)
         usage = get_usage_from_mistral_response(response_message=response)
+        if track_prompt_size:
+            UsageCacheStore().store(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+            )
 
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, user=user, model=model, provider=self.name)
@@ -222,6 +242,9 @@ class MistralAI(RestApiFriendlyProvider):
             )
             messages.append(tool_call_message)
             messages.append(tool_result_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_mistral(tool_call_message))
+                conversation_messages.append(Message.from_mistral(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
@@ -230,6 +253,8 @@ class MistralAI(RestApiFriendlyProvider):
             user=user,
             system_prompt=system_prompt,
             interface=interface,
+            conversation_messages=conversation_messages,
+            track_prompt_size=track_prompt_size,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

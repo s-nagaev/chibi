@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import io
 import sys
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 from prompt_toolkit import PromptSession
@@ -17,6 +19,7 @@ from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
 from chibi.services.terminal_interface import TerminalInterface
 from chibi.services.user import get_info, get_models_available, reset_chat_history, set_active_model
+from chibi.utils.encoding import reconfigure_stream_utf8
 
 console = Console()
 
@@ -150,7 +153,7 @@ class TerminalRunner:
             return
 
         console.print(f"[cyan]Generating image: {prompt}[/cyan]")
-        print("⏳ ", end="", flush=True)
+        print("... ", end="", flush=True)
 
         try:
             await handle_image_generation(prompt=prompt, interface=self.interface)
@@ -234,7 +237,7 @@ class TerminalRunner:
         self.interface.set_last_message(text)
 
         # Show spinner
-        print("⏳ ", end="", flush=True)
+        print("... ", end="", flush=True)
 
         try:
             await handle_user_prompt(interface=self.interface)
@@ -287,6 +290,9 @@ def setup_logging() -> None:
     """Setup logging for the terminal runner."""
     # Remove default logger
     logger.remove()
+
+    # Ensure stderr can emit UTF-8 before attaching the loguru sink
+    reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
 
     # Add console logger
     logger.add(

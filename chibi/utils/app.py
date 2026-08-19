@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import SETTING_DISABLED, SETTING_ENABLED, SETTING_SET, SETTING_UNSET
 from chibi.exceptions import (
+    ContextLengthExceededError,
     NoApiKeyProvidedError,
     NoModelSelectedError,
     NoProviderSelectedError,
@@ -19,6 +20,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.interface import UserInterface
 
 
@@ -176,6 +178,35 @@ def log_application_settings() -> None:
         )
 
 
+async def _try_reactive_context_recovery(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    storage_id: int,
+    thread_id: int,
+) -> Any:
+    """Summarize history and retry the wrapped function once after context overflow.
+
+    Args:
+        func: The wrapped function to retry.
+        args: Positional arguments for the function.
+        kwargs: Keyword arguments for the function.
+        storage_id: User/chat storage identifier to summarize.
+        thread_id: Thread identifier to summarize.
+
+    Returns:
+        The result of the retried function call.
+
+    Raises:
+        ContextLengthExceededError: If the retry also overflows.
+        Exception: Any exception raised by emergency_summarization or the retry.
+    """
+    from chibi.services.user import emergency_summarization  # Circular import avoidance
+
+    await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
+    return await func(*args, **kwargs)
+
+
 def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator handling openai module's exceptions.
 
@@ -244,6 +275,36 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             text = (
                 f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
                 f"Please, try again a bit later."
+            )
+
+        except ContextLengthExceededError as e:
+            if gpt_settings.reactive_context_recovery:
+                try:
+                    result = await _try_reactive_context_recovery(
+                        func=func,
+                        args=args,
+                        kwargs=kwargs,
+                        storage_id=interface.storage_id,
+                        thread_id=interface.thread_id,
+                    )
+                    if isinstance(result, ChatResponseSchema):
+                        result = result.model_copy(
+                            update={"answer": result.answer + "\n\n_(Context was compressed to stay within limits.)_"}
+                        )
+                    return result
+                except ContextLengthExceededError:
+                    logger.warning(f"{error_msg_prefix}: context still too large after reactive summarization")
+                except Exception as recovery_error:
+                    logger.exception(f"{error_msg_prefix}: reactive context recovery failed: {recovery_error!r}")
+            logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "context_length_exceeded",
+                "The conversation context is too large for the model. Start a new thread or reset history.",
+            )
+            text = (
+                "I'm sorry, but this conversation has grown too large for the model's context window. "
+                "Please start a new thread or reset the chat history with /reset."
             )
 
         except ServiceRateLimitError as e:

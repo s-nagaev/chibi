@@ -1,7 +1,10 @@
 """CLI entrypoint for the IDE stdio runner."""
 
 import asyncio
+import io
 import os
+import sys
+from typing import cast
 
 # When launched as an IDE stdio server, filesystem access and MCP stdio are
 # expected to be enabled by default. setdefault() keeps explicit env overrides
@@ -12,6 +15,11 @@ os.environ.setdefault("ENABLE_MCP_STDIO", "true")
 
 def run_ide() -> None:
     """Start the IDE JSONL runner using the project's async entrypoint convention."""
+    from chibi.utils.encoding import reconfigure_stream_utf8
+
+    reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stdout))
+    reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
+
     import chibi.config  # noqa: F401
     from chibi.runners.ide_transport import IDEStdioRunner
 

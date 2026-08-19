@@ -278,6 +278,20 @@ Chibi: *analyzes changes, suggests improvements, updates docs via MCP*
 
 ---
 
+### `MAX_HISTORY_TOKENS` — context summarization threshold (breaking default change)
+
+`MAX_HISTORY_TOKENS` is the threshold at which Chibi auto-summarizes a conversation to keep context manageable. Its **semantics changed**: it now compares against the **real, provider-reported prompt token count** (the entire outgoing request: system prompt + activated skills + tool schemas + tool-call arguments + per-message structural overhead + conversation content) instead of the old heuristic that measured only conversation `content` + `role`. The real figure is **~4.8x larger** than the old estimate for an identical conversation (see `fix_context_size/context_size_accounting_analysis.md` for the measured breakdown).
+
+- **Default re-based:** `64000` -> `100000`. The new value protects the smallest commonly-supported context window (128k tokens): `100000` is ~78% of a 128k window (so summarization fires *before* a 128k model overflows) and ~50% of a 200k window (leaving comfortable headroom). The old `64000` was a history-only estimate that was never hit before a real overflow, because the estimate under-counts Cyrillic ~2x and excludes the fixed per-turn overhead (system prompt ~3.7k, tool schemas ~6.8k, activated skills ~5.9k, `user_info` ~0.75–3k) — so a 128k model overflowed at ~128k real tokens while the heuristic still reported well under 64k.
+- **Migration:** if you set `MAX_HISTORY_TOKENS` explicitly in your `.env`, your old value was tuned against the old history-only estimate and now compares against a truthful figure that is ~4.8x larger for the same conversation. Re-tune it to the **~100k scale** (e.g. `64000` -> `100000`) so summarization fires before your smallest model's context window overflows, not after. If you never set it, the new default applies automatically.
+- The cold-start fallback (first turn after a process restart, when no provider data is cached yet) still uses the old heuristic so summarization remains functional.
+
+### `REACTIVE_CONTEXT_RECOVERY` — one-shot retry after context overflow
+
+`REACTIVE_CONTEXT_RECOVERY` (default: `true`) is the reactive safety net that complements the proactive `MAX_HISTORY_TOKENS` threshold. When a provider rejects a request with a typed `context_length_exceeded` error, Chibi automatically summarizes the conversation history and retries the turn **exactly once**. If the retry succeeds, the user receives a normal answer (with a short note that context was compressed). If the retry overflows again or recovery fails for any reason, the turn falls back to the existing apology path — the summarization+retry loop can never run more than once per original turn. Set to `false` to disable reactive recovery and keep the pre-existing behavior (log + apology, no retry).
+
+---
+
 ## Documentation
 
 - **Start here:** https://chibi.bot

@@ -2,6 +2,7 @@
 
 import json
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 import chibi.config  # noqa: F401
 from chibi.runners.ide_transport import IDEInterface
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
+from chibi.services.interface import UserInterface
 from chibi.services.user import get_llm_chat_completion_answer
 
 
@@ -44,7 +46,9 @@ async def test_non_ide_prompt_has_unchanged_shape(fake_user: SimpleNamespace) ->
     db.get_or_create_user.return_value = fake_user
     db.get_conversation_messages.return_value = []
 
-    await get_llm_chat_completion_answer.__wrapped__(db, 1, PlainInterface(), user_text_message="hello")
+    await get_llm_chat_completion_answer.__wrapped__(
+        db, 1, cast(UserInterface, PlainInterface()), user_text_message="hello"
+    )
 
     message = fake_user.provider.get_chat_response.await_args.kwargs["messages"][-1]
     prompt = json.loads(message.content)

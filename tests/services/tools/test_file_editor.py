@@ -675,7 +675,10 @@ async def test_read_file_success():
     mock_moderator.name = "test_moderator"
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
-    with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
+    with patch(
+        "chibi.services.providers.tools.file_editor.get_moderation_provider",
+        new=AsyncMock(return_value=mock_moderator),
+    ):
         result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "ok"
@@ -693,7 +696,10 @@ async def test_read_file_not_found():
     mock_moderator.name = "test_moderator"
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
-    with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
+    with patch(
+        "chibi.services.providers.tools.file_editor.get_moderation_provider",
+        new=AsyncMock(return_value=mock_moderator),
+    ):
         result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "error"
@@ -707,7 +713,10 @@ async def test_read_file_directory_raises_error():
     mock_moderator.name = "test_moderator"
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
-    with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
+    with patch(
+        "chibi.services.providers.tools.file_editor.get_moderation_provider",
+        new=AsyncMock(return_value=mock_moderator),
+    ):
         result: ToolResponseSchema = await read_file(full_path=str(TEST_DIR), user_id=123)
 
     assert result.status == "error"
@@ -724,7 +733,10 @@ async def test_read_file_with_encoding():
     mock_moderator.name = "test_moderator"
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="approved"))
 
-    with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
+    with patch(
+        "chibi.services.providers.tools.file_editor.get_moderation_provider",
+        new=AsyncMock(return_value=mock_moderator),
+    ):
         result: ToolResponseSchema = await read_file(full_path=file_path, encoding="utf-8", user_id=123)
 
     assert result.status == "ok"
@@ -742,7 +754,10 @@ async def test_read_file_moderation_declined():
     mock_moderator.name = "test_moderator"
     mock_moderator.moderate_command = AsyncMock(return_value=Mock(verdict="declined", reason="Not allowed"))
 
-    with patch("chibi.services.providers.tools.file_editor.get_moderation_provider", return_value=mock_moderator):
+    with patch(
+        "chibi.services.providers.tools.file_editor.get_moderation_provider",
+        new=AsyncMock(return_value=mock_moderator),
+    ):
         result: ToolResponseSchema = await read_file(full_path=file_path, user_id=123)
 
     assert result.status == "error"

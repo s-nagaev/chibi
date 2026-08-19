@@ -138,7 +138,7 @@ class TestAnalyzeImageTool:
         test_file.write_bytes(b"fake image data")
 
         # Mock describe_image
-        with patch("chibi.services.providers.tools.vision.describe_image") as mock_describe:
+        with patch("chibi.services.providers.tools.vision.describe_image", new=AsyncMock()) as mock_describe:
             mock_describe.return_value = Mock(
                 model_dump=lambda: {
                     "short_description": "A test image",
@@ -170,7 +170,7 @@ class TestAnalyzeImageTool:
         mock_get_storage.return_value = mock_storage
 
         # Mock describe_image
-        with patch("chibi.services.providers.tools.vision.describe_image") as mock_describe:
+        with patch("chibi.services.providers.tools.vision.describe_image", new=AsyncMock()) as mock_describe:
             mock_describe.return_value = Mock(
                 model_dump=lambda: {
                     "short_description": "A test image",
@@ -200,7 +200,7 @@ class TestAnalyzeImageTool:
         test_file = TEST_DIR / "test_image_noext"
         test_file.write_bytes(b"fake image data")
 
-        with patch("chibi.services.providers.tools.vision.describe_image") as mock_describe:
+        with patch("chibi.services.providers.tools.vision.describe_image", new=AsyncMock()) as mock_describe:
             mock_describe.return_value = Mock(model_dump=lambda: {})
 
             await AnalyzeImageTool.function(

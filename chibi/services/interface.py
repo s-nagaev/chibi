@@ -622,20 +622,23 @@ class TelegramInterface(UserInterface):
         """
         if not thoughts or thoughts == "No content":
             return None
-        try:
-            if self._thinking_draft_id is None:
-                self._thinking_draft_id = random.randint(1, 2**31 - 1)
 
-            payload = RichMessageBuilder.build_thinking_draft(
-                thoughts=thoughts,
-                chat_id=self.chat_id,
-                thread_id=self.thread_id if self.thread_id != 0 else None,
-            )
-            payload["draft_id"] = self._thinking_draft_id
+        if self._thinking_draft_id is None:
+            self._thinking_draft_id = random.randint(1, 2**31 - 1)
+
+        payload = RichMessageBuilder.build_thinking_draft(
+            thoughts=thoughts,
+            chat_id=self.chat_id,
+            thread_id=self.thread_id if self.thread_id != 0 else None,
+        )
+
+        payload["draft_id"] = self._thinking_draft_id
+
+        try:
             await self.context.bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
         except Exception as e:
             logger.warning(f"sendRichMessageDraft failed: {e}, falling back to plain text")
-            await self.send_message(f"💡💭 {thoughts}", reply=False)
+            # await self.send_message(f"💡💭 {thoughts}", reply=False)
         return None
 
     async def get_caption(self) -> str | None:

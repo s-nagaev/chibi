@@ -243,14 +243,25 @@ class IDEStdioRunner:
         self._stdout_lock = asyncio.Lock()
 
     async def _write(self, message: dict[str, Any]) -> None:
-        """Write one protocol frame to stdout.
+        """Write one protocol frame to stdout as a UTF-8 encoded JSONL line.
+
+        The frame is written to the binary stdout buffer so the wire protocol
+        stays strictly UTF-8 regardless of the console locale or code page
+        (a cp1252 console on Windows cannot encode Cyrillic text otherwise).
+        Streams without a binary buffer fall back to a plain text write.
 
         Args:
             message: JSON-compatible protocol message.
         """
+        line = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
         async with self._stdout_lock:
-            sys.stdout.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n")
-            sys.stdout.flush()
+            buffer = getattr(sys.stdout, "buffer", None)
+            if buffer is None:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                return
+            buffer.write(line.encode("utf-8"))
+            buffer.flush()
 
     async def _error(self, code: str, message: str, request_id: str | None = None, **extra: Any) -> None:
         """Write a correlated protocol error."""
