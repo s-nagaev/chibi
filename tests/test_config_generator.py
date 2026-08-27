@@ -24,7 +24,7 @@ class TestGenerateDefaultConfig:
         }
 
     @patch("chibi.config_generator.print")
-    def test_writes_utf8_file(self, mock_print, temp_dirs, monkeypatch):
+    def test_writes_utf8_file(self, _mock_print, temp_dirs, monkeypatch):
         """Generated config file must be written with encoding='utf-8'."""
         original_open = builtins.open
         captured_encoding: str | None = None
@@ -50,7 +50,7 @@ class TestGenerateDefaultConfig:
         assert captured_encoding == "utf-8"
 
     @patch("chibi.config_generator.print")
-    def test_does_not_overwrite_existing(self, mock_print, temp_dirs):
+    def test_does_not_overwrite_existing(self, _mock_print, temp_dirs):
         """Existing config file should not be overwritten."""
         dirs = temp_dirs
         dirs["config_path"].parent.mkdir(parents=True, exist_ok=True)

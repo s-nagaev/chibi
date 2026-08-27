@@ -121,7 +121,7 @@ def provider() -> MoonshotAI:
 
 
 @pytest.fixture
-def mocked_metrics() -> Iterator[MagicMock]:
+def _mocked_metrics() -> Iterator[MagicMock]:
     """Patch MetricsService to keep usage metrics out of the test run."""
     with patch("chibi.services.providers.provider.MetricsService") as metrics_mock:
         yield metrics_mock
@@ -144,7 +144,7 @@ def interface() -> UserInterface:
 @pytest.mark.asyncio
 async def test_get_chat_response_passes_conversation_messages_to_prepare_system_prompt(
     provider: MoonshotAI,
-    mocked_metrics: MagicMock,
+    _mocked_metrics: MagicMock,
     interface: UserInterface,
 ) -> None:
     """The provider must forward the real conversation to prepare_system_prompt."""
@@ -182,7 +182,7 @@ async def test_get_chat_response_passes_conversation_messages_to_prepare_system_
 @pytest.mark.asyncio
 async def test_tool_call_recursion_grows_context_size(
     provider: MoonshotAI,
-    mocked_metrics: MagicMock,
+    _mocked_metrics: MagicMock,
     interface: UserInterface,
 ) -> None:
     """During a tool-call loop the context size reported to the LLM must include tool traffic."""

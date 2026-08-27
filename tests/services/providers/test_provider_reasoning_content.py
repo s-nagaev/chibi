@@ -51,7 +51,7 @@ def provider() -> MoonshotAI:
 
 
 @pytest.fixture
-def mocked_metrics() -> Iterator[MagicMock]:
+def _mocked_metrics() -> Iterator[MagicMock]:
     """Patch MetricsService to keep usage metrics out of the test run."""
     with patch("chibi.services.providers.provider.MetricsService") as metrics_mock:
         yield metrics_mock
@@ -76,7 +76,7 @@ def patch_client(response: ChatCompletion) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_final_answer_surfaces_reasoning_content(provider: MoonshotAI, mocked_metrics: MagicMock) -> None:
+async def test_final_answer_surfaces_reasoning_content(provider: MoonshotAI, _mocked_metrics: MagicMock) -> None:
     """Reasoning content must be sent as thoughts when the response has no tool calls."""
     response = create_final_answer_response(answer="42", reasoning_content="Let me think about the answer.")
     interface = MagicMock()
@@ -104,7 +104,7 @@ async def test_final_answer_surfaces_reasoning_content(provider: MoonshotAI, moc
 
 
 @pytest.mark.asyncio
-async def test_final_answer_reaches_interface_thoughts(provider: MoonshotAI, mocked_metrics: MagicMock) -> None:
+async def test_final_answer_reaches_interface_thoughts(provider: MoonshotAI, _mocked_metrics: MagicMock) -> None:
     """The interface receives the reasoning text through the real send_llm_thoughts helper."""
     response = create_final_answer_response(answer="Done", reasoning_content="Step by step reasoning.")
     interface = MagicMock()
@@ -125,7 +125,7 @@ async def test_final_answer_reaches_interface_thoughts(provider: MoonshotAI, moc
 
 @pytest.mark.asyncio
 async def test_final_answer_without_reasoning_sends_no_thoughts(
-    provider: MoonshotAI, mocked_metrics: MagicMock
+    provider: MoonshotAI, _mocked_metrics: MagicMock
 ) -> None:
     """No thoughts are sent when the final answer carries no reasoning content."""
     response = create_final_answer_response(answer="Plain answer")
@@ -149,7 +149,7 @@ async def test_final_answer_without_reasoning_sends_no_thoughts(
 
 @pytest.mark.asyncio
 async def test_final_answer_with_empty_reasoning_sends_no_thoughts(
-    provider: MoonshotAI, mocked_metrics: MagicMock
+    provider: MoonshotAI, _mocked_metrics: MagicMock
 ) -> None:
     """An empty reasoning_content value must not trigger a thoughts message."""
     response = create_final_answer_response(answer="Plain answer", reasoning_content="")

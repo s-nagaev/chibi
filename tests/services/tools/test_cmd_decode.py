@@ -11,7 +11,7 @@ class TestRunCommandInTerminalDecode:
     """Tests for subprocess output decoding in RunCommandInTerminalTool."""
 
     @pytest.fixture
-    def mock_moderation(self):
+    def _mock_moderation(self):
         """Return mocked moderation provider and dependencies."""
         moderator = MagicMock()
         moderator.moderate_command = AsyncMock(return_value=MagicMock(verdict="accepted", reason=""))
@@ -34,7 +34,7 @@ class TestRunCommandInTerminalDecode:
         return process
 
     @pytest.mark.asyncio
-    async def test_decodes_invalid_utf8_with_replacement(self, mock_moderation, mock_process):
+    async def test_decodes_invalid_utf8_with_replacement(self, _mock_moderation, mock_process):
         """Invalid UTF-8 bytes in stdout/stderr must be replaced, not raise."""
         # 0xff is never valid UTF-8
         mock_process.communicate.return_value = (b"valid \xff text", b"err \xfe data")
