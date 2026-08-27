@@ -355,11 +355,13 @@ REACTIVE_CONTEXT_RECOVERY=true
 # per-message structural overhead + conversation content), NOT the old
 # history-only estimate. The old default was 64000 and measured only conversation
 # content+role; the real figure is ~4.8x larger for an identical conversation, so
-# the default was re-based to 320000 to preserve the same effective headroom.
+# the default was re-based to 100000 to protect the smallest commonly-supported
+# context window (128k): the threshold sits below it (~78%) so summarization fires
+# before a 128k model overflows, while leaving ~50% headroom on a 200k window.
 # MIGRATION: if you previously set MAX_HISTORY_TOKENS explicitly, your old value
 # is now ~4.8x too small for the new (truthful) metric. Re-tune it upward by ~5x
-# (e.g. 64000 -> 320000) unless you intentionally want more aggressive summarization.
-MAX_HISTORY_TOKENS=320000
+# (e.g. 64000 -> 100000) unless you intentionally want more aggressive summarization.
+MAX_HISTORY_TOKENS=100000
 
 
 # ============================================================================
