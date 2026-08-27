@@ -6,15 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-08-27
+
+### Added
+- **Rich Text rendering:** Markdown tables in bot replies are automatically rendered as native Telegram rich-message tables (with graceful fallback to ASCII tables if the API call fails), and LLM reasoning streams are displayed as collapsible "thinking" blocks instead of plain-text emoji headers.
+- **Reactive context recovery:** New `REACTIVE_CONTEXT_RECOVERY` setting (default `true`) — when a provider rejects a request with a typed `context_length_exceeded` error, Chibi summarizes the conversation and retries the turn exactly once. Disable it to keep the previous log-and-apologize behavior.
+- **New LLM providers:** Melious (`MELIOUS_API_KEY`) and CheaperInference (`CHEAPERINFERENCE_API_KEY`).
+
 ### Changed
 - System prompt now reports the real provider-reported prompt token count (from `UsageCacheStore`) instead of the heuristic `(len(content)+len(role))//4` estimate, which under-reported by ~4.8x.
 - `approximate_context_size` is now expressed as `"N tokens (P% of M limit)"` where the percentage is of `max_history_tokens`, or `"n/a"` when no provider data is available yet (e.g. first turn after restart).
-- Context-overflow warning threshold is now configurable via `CONTEXT_SIZE_WARNING_THRESHOLD` (default `50`, range 0–100) instead of a hardcoded 70%.
-- The warning is suppressed when the real context size is unknown (`n/a`).
+- Context-overflow warning threshold is now configurable via `CONTEXT_SIZE_WARNING_THRESHOLD` (default `50`, range 0–100) instead of a hardcoded 70%. The warning is suppressed when the real context size is unknown (`n/a`).
 - Auto-summarization trigger (`check_history_and_summarize`) now compares the real provider-reported prompt size from `UsageCacheStore` (same `(user_id, thread_id)` key as the write/read sides) instead of the history-only `estimate_tokens` heuristic. On cold start (store empty for the key) it falls back to `sum(estimate_tokens)` so summarization still functions.
+- IDE stdio sessions (`chibi ide --stdio`) now enable filesystem-access tools and stdio MCP servers by default (`FILESYSTEM_ACCESS`, `ENABLE_MCP_STDIO`). Explicit settings/environment overrides still take precedence; Telegram sessions are unaffected.
+- Background tool completions are acknowledged silently by the assistant via an internal marker instead of generating extra chat messages.
+- `CHIBI_ENV=dev` runs skip loading `~/chibi-bot/settings`, isolating development runs from production configuration.
+- ZhipuAI available-models list expanded (`glm-4.7-flash`, `glm-4.7-flashx`, `glm-4-32b-0414-128k`).
 
 ### Fixed
-- `MAX_HISTORY_TOKENS` default re-based from `64000` to `320000` to prevent aggressive false-positive summarization now that the trigger measures the truthful (entire-request) prompt size (~4.8x larger than the old history-only estimate). Existing deployments that set `MAX_HISTORY_TOKENS` explicitly should re-tune it upward by ~5x (see README migration note).
+- `MAX_HISTORY_TOKENS` default re-based from `64000` to `100000` to prevent aggressive false-positive summarization now that the trigger measures the truthful (entire-request) prompt size (~4.8x larger than the old history-only estimate). Existing deployments that set `MAX_HISTORY_TOKENS` explicitly should re-tune it upward by ~5x (see README migration note).
+- Conversation memory no longer accumulates tool responses and non-JSON user entries — Chroma archival skips them.
+- Windows hardening: terminal tool output decoding uses an OEM/locale-aware fallback; UTF-8 stream reconfiguration for `python -m chibi`.
 
 ## [1.13.1b1] - 2026-07-20
 
@@ -615,7 +627,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...v1.13.1
 [1.13.1b1]: https://github.com/s-nagaev/chibi/compare/v1.13.1-beta...v1.13.1b1
 [1.13.1-beta]: https://github.com/s-nagaev/chibi/compare/v1.13.0...v1.13.1-beta
 [1.12.0]: https://github.com/s-nagaev/chibi/compare/v1.11.0...v1.12.0
