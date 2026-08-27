@@ -6,9 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Thread-scoped working directory:** the agent's CWD is now bound per thread/conversation - any thread can override it in isolation via the assistant's `set_working_dir` tool (LLM-driven, no slash command), while the default comes from the `WORKING_DIR` setting through the legacy user-level value (resolution order: thread override → user-level → settings). Sub-agents share their thread's working directory, set paths are expanded to absolute paths (`~/x` → `/abs/x`), and overrides survive thread cloning.
-
 ## [1.13.1] - 2026-08-27
 
 ### Added
