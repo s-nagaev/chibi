@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from anthropic.types import Message as AnthropicMessage
 
-from chibi.models import Message
+from chibi.models import Message, User
 from chibi.schemas.app import UsageSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.utils import get_usage_from_anthropic_response, prepare_system_prompt
@@ -16,15 +16,8 @@ from chibi.services.usage_cache import UsageCacheStore
 
 
 def _make_user() -> Any:
-    """Build a minimal user stub for prepare_system_prompt tests."""
-    return SimpleNamespace(
-        working_dir="/tmp",
-        approximate_context_size=lambda thread_id: 999,
-        messages=[Message(role="user", content="stale")],
-        id=1,
-        info="",
-        llm_skills={},
-    )
+    """Build a minimal user for prepare_system_prompt tests (real resolution chain)."""
+    return User(id=1, working_dir="/tmp", info="", llm_skills={})
 
 
 def _reset_usage_cache() -> None:
@@ -67,15 +60,14 @@ async def test_prepare_system_prompt_context_size_shows_real_value_and_percentag
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
         patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.config.gpt.gpt_settings.max_history_tokens", 200000),
+        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
 
     prompt = json.loads(prompt_json)
-    from chibi.config import gpt_settings
-
-    max_tokens = gpt_settings.max_history_tokens
-    expected_pct = round(58372 / max_tokens * 100)
-    assert prompt["approximate_context_size"] == f"58,372 tokens ({expected_pct}% of {max_tokens:,} limit)"
+    expected_pct = round(58372 / 200000 * 100)
+    assert prompt["approximate_context_size"] == f"58,372 tokens ({expected_pct}% of {200000:,} limit)"
     assert "context_size_warning" not in prompt
 
 
@@ -102,23 +94,31 @@ async def test_prepare_system_prompt_warning_fires_above_threshold() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prepare_system_prompt_warning_silent_at_or_below_threshold() -> None:
-    """Warning is NOT emitted when the real context is at or below the threshold."""
+@pytest.mark.parametrize("stored_tokens", [50000, 40000])
+async def test_prepare_system_prompt_warning_silent_at_or_below_threshold(stored_tokens: int) -> None:
+    """Warning is NOT emitted when the real context is at or below the threshold.
+
+    50000 tokens equals exactly 50% of the pinned limit (boundary of the strict ``>`` check),
+    40000 tokens is clearly below it.
+    """
     _reset_usage_cache()
     user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
-    store._data[store._make_key(user_id=1, thread_id=0)] = 100000
+    store._data[store._make_key(user_id=1, thread_id=0)] = stored_tokens
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
         patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.config.gpt.gpt_settings.max_history_tokens", 100000),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
 
     prompt = json.loads(prompt_json)
+    expected_pct = round(stored_tokens / 100000 * 100)
+    assert expected_pct <= 50
     assert "context_size_warning" not in prompt
 
 

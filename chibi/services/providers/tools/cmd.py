@@ -14,8 +14,8 @@ from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
-from chibi.services.user import get_cwd, get_moderation_provider
+from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
+from chibi.services.user import get_chibi_user, get_moderation_provider
 
 
 def _decode_output(data: bytes) -> str:
@@ -93,7 +93,9 @@ class RunCommandInTerminalTool(ChibiTool):
             raise ToolException("This function requires user_id to be automatically provided.")
 
         if not cwd:
-            cwd = await get_cwd(user_id=user_id)
+            _, thread_id = resolve_session_context(**kwargs)
+            user = await get_chibi_user(user_id=user_id)
+            cwd = user.get_effective_working_dir(thread_id=thread_id)
 
         if cmd.startswith("cat ") and "|" not in cmd:
             raise ToolException("To read the whole file, please use the 'read_file' tool instead.")

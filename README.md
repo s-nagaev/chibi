@@ -290,6 +290,17 @@ Chibi: *analyzes changes, suggests improvements, updates docs via MCP*
 
 `REACTIVE_CONTEXT_RECOVERY` (default: `true`) is the reactive safety net that complements the proactive `MAX_HISTORY_TOKENS` threshold. When a provider rejects a request with a typed `context_length_exceeded` error, Chibi automatically summarizes the conversation history and retries the turn **exactly once**. If the retry succeeds, the user receives a normal answer (with a short note that context was compressed). If the retry overflows again or recovery fails for any reason, the turn falls back to the existing apology path — the summarization+retry loop can never run more than once per original turn. Set to `false` to disable reactive recovery and keep the pre-existing behavior (log + apology, no retry).
 
+### Working directory is thread-scoped (`WORKING_DIR`)
+
+The agent's working directory - used for terminal commands and reported to the model as its current CWD - is **thread-scoped**, mirroring how the selected LLM model is bound per thread.
+
+- **Default:** comes from the `WORKING_DIR` setting (default `~/chibi`) through the legacy user-level value; fresh deployments inherit the setting directly.
+- **Per-thread override:** any thread/conversation can override its working directory **in isolation** via the agent's `set_working_dir` tool (LLM-driven only - there is no slash command, available when `FILESYSTEM_ACCESS` is enabled). This lets two agents in different threads work on different projects simultaneously without interfering.
+- **Resolution order:** thread override → legacy user-level directory → `WORKING_DIR` setting.
+- **Path normalization:** values you set are expanded to absolute paths on save (`~/x` becomes `/abs/x`); untouched defaults keep their raw form.
+- **Sub-agents** spawned within a thread share that thread's working directory - the same effective path is injected into their system prompts and tool calls.
+- Overrides **survive thread cloning**: `/new_thread_with_current_context` carries the working directory over together with messages and model preferences.
+
 ---
 
 ## Documentation

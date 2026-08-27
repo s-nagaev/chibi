@@ -9,15 +9,15 @@ from chibi.config import application_settings, gpt_settings
 from chibi.memory.chroma import memory
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
 from chibi.services.user import (
     activate_llm_skill,
     deactivate_llm_skill,
     drop_tool_call_history,
-    get_cwd,
+    get_chibi_user,
     reset_chat_history,
     set_info,
-    set_working_dir,
+    set_thread_working_dir,
 )
 
 
@@ -62,7 +62,11 @@ class SetWorkingDirTool(ChibiTool):
         type="function",
         function=FunctionDefinition(
             name="set_working_dir",
-            description="Set a directory as a default CWD for 'run_command_in_terminal' tool.",
+            description=(
+                "Set a directory as a default CWD for 'run_command_in_terminal' tool. "
+                "The override is scoped to the CURRENT thread/conversation only: other threads "
+                "and conversations are not affected and keep using the global default from settings."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -79,11 +83,13 @@ class SetWorkingDirTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
+        _, thread_id = resolve_session_context(**kwargs)
         logger.log(
             "TOOL",
-            f"[{kwargs.get('caller_model', 'unknown model')}] Setting new working DIR for user #{user_id}: {new_wd}",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Setting new working DIR for user #{user_id}, "
+            f"thread #{thread_id}: {new_wd}",
         )
-        await set_working_dir(user_id=user_id, new_wd=new_wd)
+        await set_thread_working_dir(user_id=user_id, thread_id=thread_id, new_wd=new_wd)
         return {"status": "ok"}
 
 
@@ -93,7 +99,10 @@ class GetCurrentWorkingDirTool(ChibiTool):
         type="function",
         function=FunctionDefinition(
             name="get_current_working_dir",
-            description="Get CWD for current user",
+            description=(
+                "Get the effective CWD for the current user in the CURRENT thread/conversation: "
+                "a thread-level override wins over the global default from settings."
+            ),
             parameters={
                 "type": "object",
                 "properties": {},
@@ -108,8 +117,14 @@ class GetCurrentWorkingDirTool(ChibiTool):
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ValueError("This function requires user_id to be automatically provided.")
-        cwd = await get_cwd(user_id=user_id)
-        logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Getting CWD for user #{user_id}: {cwd}")
+        _, thread_id = resolve_session_context(**kwargs)
+        user = await get_chibi_user(user_id=user_id)
+        cwd = user.get_effective_working_dir(thread_id=thread_id)
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Getting CWD for user #{user_id}, "
+            f"thread #{thread_id}: {cwd}",
+        )
         return {"cwd": cwd}
 
 

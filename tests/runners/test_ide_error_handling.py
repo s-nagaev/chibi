@@ -173,20 +173,12 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
     selected_file_storage: str,
 ) -> None:
     """IDE prompts do not resolve Telegram-only uploaded-file storage."""
-    from types import SimpleNamespace
-
+    from chibi.models import User
     from chibi.runners.ide_transport import IDEInterface
     from chibi.services.providers.utils import prepare_system_prompt
 
     interface = IDEInterface(1, "ping", {}, lambda _: None)
-    user = SimpleNamespace(
-        working_dir="/tmp",
-        approximate_context_size=lambda thread_id: 0,
-        messages=[],
-        id=1,
-        info="",
-        llm_skills={},
-    )
+    user = User(id=1, working_dir="/tmp", info="", llm_skills={})
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
         patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),

@@ -63,6 +63,7 @@ async def prepare_system_prompt(
     user_id: int,
     interface: UserInterface | None,
     conversation_messages: list[Message] | None = None,
+    thread_id: int | None = None,
 ) -> str:
     """Prepare the system prompt payload sent to the LLM.
 
@@ -74,11 +75,15 @@ async def prepare_system_prompt(
         conversation_messages: Retained for caller compatibility; no longer
             used to compute the context size (the real provider-reported value
             from ``UsageCacheStore`` is used instead).
+        thread_id: Session thread ID used when the interface is absent (e.g.
+            sub-agent requests) so the effective working directory resolves to
+            the same thread-scoped value as the parent request.
 
     Returns:
         JSON-encoded system prompt payload.
     """
     user = await get_chibi_user(user_id=user_id)
+    session_thread_id = interface.thread_id if interface else thread_id
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
@@ -111,7 +116,7 @@ async def prepare_system_prompt(
 
     if gpt_settings.filesystem_access:
         system_data = {
-            "current_working_dir": user.working_dir,
+            "current_working_dir": user.get_effective_working_dir(session_thread_id),
             "platform": platform.platform(),
             "shell": os.environ.get("SHELL", "unknown"),
             "running_inside_container": application_settings.running_in_container,

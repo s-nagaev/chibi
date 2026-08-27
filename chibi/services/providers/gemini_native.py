@@ -234,6 +234,8 @@ class Gemini(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -242,6 +244,7 @@ class Gemini(RestApiFriendlyProvider):
             user_id=user.id,
             interface=interface,
             conversation_messages=conversation_messages,
+            thread_id=caller_thread_id,
         )
 
         if "flash" in model_name and self.temperature > 0.4:
@@ -307,7 +310,13 @@ class Gemini(RestApiFriendlyProvider):
             for function_call in response.function_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model_name, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model_name,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         thought_signature = self._get_thought_signature(response=response)
@@ -367,6 +376,8 @@ class Gemini(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]
@@ -379,6 +390,8 @@ class Gemini(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]

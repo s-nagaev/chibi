@@ -56,6 +56,8 @@ class OpenAI(OpenAIFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response with Responses API fallback to Chat Completions.
 
@@ -70,6 +72,10 @@ class OpenAI(OpenAIFriendlyProvider):
                 user-facing chat turns opt in; sub-agent and other internal
                 calls keep the default False so they never overwrite the
                 parent conversation's cached value.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -88,6 +94,8 @@ class OpenAI(OpenAIFriendlyProvider):
                 system_prompt=system_prompt,
                 interface=interface,
                 track_prompt_size=track_prompt_size,
+                caller_storage_id=caller_storage_id,
+                caller_thread_id=caller_thread_id,
             )
         except (BadRequestError, NotFoundError) as e:
             # Only fallback for 400/404 errors (unsupported model or parameter)
@@ -104,6 +112,8 @@ class OpenAI(OpenAIFriendlyProvider):
                 system_prompt=system_prompt,
                 interface=interface,
                 track_prompt_size=track_prompt_size,
+                caller_storage_id=caller_storage_id,
+                caller_thread_id=caller_thread_id,
             )
 
         new_messages = [msg for msg in updated_messages if msg not in messages]
@@ -155,6 +165,8 @@ class OpenAI(OpenAIFriendlyProvider):
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -168,6 +180,10 @@ class OpenAI(OpenAIFriendlyProvider):
                 count in UsageCacheStore. Defaults to False so internal
                 callers (sub-agent, fallback retries) never corrupt the
                 parent conversation's cached value.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -186,6 +202,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 user_id=user.id,
                 interface=interface,
                 conversation_messages=messages,
+                thread_id=caller_thread_id,
             )
 
         reasoning_effort = self.get_reasoning_effort_value(model_name=model)
@@ -266,7 +283,13 @@ class OpenAI(OpenAIFriendlyProvider):
             for item in tool_call_items
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         assistant_message = Message(

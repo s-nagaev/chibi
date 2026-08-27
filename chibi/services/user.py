@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import timezone
 from io import BytesIO
 from itertools import islice
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -435,6 +436,25 @@ async def get_cwd(db: Database, user_id: int) -> str:
 
 
 @inject_database
+async def set_thread_working_dir(db: Database, user_id: int, thread_id: int, new_wd: str) -> None:
+    """Set the working directory override for a specific thread.
+
+    The path is normalized via ``Path(...).expanduser()`` only — no existence
+    check is performed. Users loaded from older persisted records are handled
+    naturally by the pydantic default of the new dict field.
+
+    Args:
+        db: The database instance.
+        user_id: The storage ID of the user.
+        thread_id: The ID of the thread to set the working directory for.
+        new_wd: The new working directory path.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    user.thread_working_dirs[thread_id] = str(Path(new_wd).expanduser())
+    await db.save_user(user)
+
+
+@inject_database
 async def get_moderation_provider(db: Database, user_id: int) -> "Provider":
     user = await db.get_or_create_user(user_id=user_id)
     return user.moderation_provider
@@ -522,6 +542,8 @@ async def clone_thread_messages(
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
     if old_thread_id in user.thread_selected_image_model:
         user.thread_selected_image_model[new_thread_id] = user.thread_selected_image_model[old_thread_id]
+    if old_thread_id in user.thread_working_dirs:
+        user.thread_working_dirs[new_thread_id] = user.thread_working_dirs[old_thread_id]
 
     user.thread_names[new_thread_id] = name or str(new_thread_id)
 

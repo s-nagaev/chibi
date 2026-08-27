@@ -275,6 +275,8 @@ class Provider(ABC):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
 
@@ -395,12 +397,45 @@ class Provider(ABC):
         caller_provider: str,
         user_id: int | None = None,
         interface: UserInterface | None = None,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> list[ToolResponseSchema]:
+        """Execute tool calls, injecting the originating session identity.
+
+        Every tool payload receives ``caller_storage_id``/``caller_thread_id``
+        resolved from the interface when present, otherwise from the explicit
+        caller options (sub-agent requests have no interface). Tools resolve
+        their thread context via these fields when the interface is absent.
+
+        Args:
+            calls: Tool calls requested by the model.
+            caller_model: The model that issued the tool calls.
+            caller_provider: The provider that issued the tool calls.
+            user_id: The storage ID of the user, or None if unavailable.
+            interface: The interface of the top-level request, or None for
+                internal (sub-agent) requests.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
+
+        Returns:
+            The collected tool responses.
+        """
+        if interface is not None:
+            context_storage_id: int | None = interface.storage_id
+            context_thread_id: int | None = interface.thread_id
+        else:
+            context_storage_id = caller_storage_id
+            context_thread_id = caller_thread_id
+
         tool_context: dict[str, Any] = {
             "user_id": user_id,
             "interface": interface,
             "caller_model": caller_model,
             "caller_provider": caller_provider,
+            "caller_storage_id": context_storage_id,
+            "caller_thread_id": context_thread_id,
         }
         tool_coroutines = [
             RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args) for call in calls
@@ -502,6 +537,8 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
@@ -514,6 +551,8 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             interface=interface,
             conversation_messages=messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -530,6 +569,8 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
@@ -540,6 +581,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 user_id=user.id,
                 interface=interface,
                 conversation_messages=conversation_messages,
+                thread_id=caller_thread_id,
             )
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
@@ -601,7 +643,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         for tool_call, result in zip(tool_calls, results):
@@ -942,6 +990,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
@@ -957,6 +1007,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -973,12 +1025,15 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
             user_id=user.id,
             interface=interface,
             conversation_messages=conversation_messages,
+            thread_id=caller_thread_id,
         )
         response_message: AnthropicMessage = await self._generate_content(
             model=model,
@@ -1038,7 +1093,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             for tool_call_part in tool_call_parts
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         for tool_call_part, result in zip(tool_call_parts, results):

@@ -10,7 +10,12 @@ from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, get_models_available_to_user, get_sub_agent_response
+from chibi.services.providers.tools.utils import (
+    AdditionalOptions,
+    get_models_available_to_user,
+    get_sub_agent_response,
+    resolve_session_context,
+)
 
 
 class GetAvailableLLMModelsTool(ChibiTool):
@@ -117,8 +122,15 @@ class DelegateTool(ChibiTool):
 
         logger.log("DELEGATE", f"[{caller_model}] Delegating a task to {model_name}: {prompt}")
 
+        caller_storage_id, caller_thread_id = resolve_session_context(**kwargs)
+
         coro = get_sub_agent_response(
-            user_id=user_id, prompt=prompt, provider_name=provider_name, model_name=model_name
+            user_id=user_id,
+            prompt=prompt,
+            provider_name=provider_name,
+            model_name=model_name,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         try:
             response: ChatResponseSchema = await asyncio.wait_for(fut=coro, timeout=timeout)

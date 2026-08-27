@@ -130,6 +130,8 @@ class MistralAI(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_mistral() for msg in messages]
@@ -141,6 +143,8 @@ class MistralAI(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -157,12 +161,15 @@ class MistralAI(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
             user_id=user.id,
             interface=interface,
             conversation_messages=conversation_messages,
+            thread_id=caller_thread_id,
         )
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages
@@ -219,7 +226,13 @@ class MistralAI(RestApiFriendlyProvider):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         for tool_call, result in zip(tool_calls, results):
