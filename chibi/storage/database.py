@@ -1,6 +1,6 @@
 import asyncio
 from functools import wraps
-from typing import Awaitable, Callable, Concatenate, Optional, ParamSpec, TypeVar, cast
+from typing import Awaitable, Callable, Concatenate, Generic, Optional, ParamSpec, TypeVar, cast
 
 from chibi.config.app import application_settings
 from chibi.memory.chroma import memory, with_chroma_archival
@@ -11,6 +11,30 @@ from chibi.storage.redis import RedisStorage
 
 R = TypeVar("R")
 P = ParamSpec("P")
+
+
+class InjectedCallable(Generic[P, R]):
+    """Callable produced by ``inject_database`` that preserves the original function.
+
+    Exposes the undecorated function via ``__wrapped__`` so type checkers can
+    see the original signature (including the injected ``Database`` parameter).
+    """
+
+    __wrapped__: Callable[Concatenate[Database, P], Awaitable[R]]
+
+    def __init__(
+        self,
+        func: Callable[Concatenate[Database, P], Awaitable[R]],
+        wrapper: Callable[P, Awaitable[R]],
+    ) -> None:
+        self.__wrapped__ = func
+        self._wrapper = wrapper
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Awaitable[R]:
+        return self._wrapper(*args, **kwargs)
+
+    def __repr__(self) -> str:
+        return f"<InjectedCallable {self.__wrapped__.__module__}.{self.__wrapped__.__name__}>"
 
 
 class DatabaseCache:
@@ -70,10 +94,11 @@ _db_provider = DatabaseCache()
 
 def inject_database(
     func: Callable[Concatenate[Database, P], Awaitable[R]],
-) -> Callable[P, Awaitable[R]]:
+) -> InjectedCallable[P, R]:
     """Decorator to inject the Database instance into async functions.
 
     Wraps a function with signature func(db, *args, **kwargs) -> Awaitable.
+    The returned callable preserves the original function via ``__wrapped__``.
 
     Args:
         func: The function to decorate.
@@ -87,4 +112,4 @@ def inject_database(
         db = await _db_provider.get_database()
         return await func(db, *args, **kwargs)
 
-    return wrapper
+    return InjectedCallable(func, wrapper)

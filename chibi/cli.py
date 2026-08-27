@@ -16,6 +16,20 @@ def main() -> None:
     pass
 
 
+@main.group(invoke_without_command=True)
+@click.option("--stdio", is_flag=True, default=False, help="Run the IDE JSONL protocol over standard input/output.")
+@click.pass_context
+def ide(ctx: click.Context, stdio: bool) -> None:
+    """Run the Chibi IDE interface."""
+    if stdio:
+        from chibi.runners.ide import run_ide
+
+        run_ide()
+
+    if ctx.invoked_subcommand is None and not stdio:
+        click.echo(ctx.get_help())
+
+
 @main.command()
 def start() -> None:
     """Start the Chibi bot service as a daemon."""

@@ -22,6 +22,8 @@ class GPTSettings(BaseSettings):
     grok_key: str | None = Field(alias="GROK_API_KEY", default=None)
     mistralai_key: str | None = Field(alias="MISTRALAI_API_KEY", default=None)
     moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
+    melious_key: str | None = Field(alias="MELIOUS_API_KEY", default=None)
+    cheaperinference_key: str | None = Field(alias="CHEAPERINFERENCE_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
     elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
@@ -65,7 +67,28 @@ class GPTSettings(BaseSettings):
     moderation_model: str | None = Field(default=None)
 
     max_conversation_age_minutes: int = Field(default=360)
-    max_history_tokens: int = Field(default=64000)
+    reactive_context_recovery: bool = Field(
+        default=True,
+        description=(
+            "When True and a provider rejects a request because the context window is exceeded, "
+            "automatically summarize the conversation history and retry the turn exactly once. "
+            "This is the reactive safety net that complements the proactive MAX_HISTORY_TOKENS threshold."
+        ),
+    )
+    max_history_tokens: int = Field(
+        default=100000,
+        description=(
+            "Threshold (in tokens) of the *real* provider-reported prompt size at which the "
+            "conversation is auto-summarized. The value now reflects the entire outgoing request "
+            "(system prompt, activated skills, tool schemas, tool-call arguments, per-message "
+            "structural overhead, and conversation content) rather than the old history-only "
+            "estimate, which under-reported by ~4.8x. Re-based from 64000 to 100000 to protect the "
+            "smallest commonly-supported context window (128k): the threshold sits below it (~78%) "
+            "so summarization fires before a 128k model overflows, while leaving ~50% headroom on "
+            "a 200k window. Explicit setters should re-tune to the ~100k scale."
+        ),
+    )
+    context_size_warning_threshold: int = Field(alias="CONTEXT_SIZE_WARNING_THRESHOLD", default=50, ge=0, le=100)
 
     image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
     models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)

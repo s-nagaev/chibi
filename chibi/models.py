@@ -515,6 +515,7 @@ class User(BaseModel):
     thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_names: dict[int, str] = Field(default_factory=dict)
+    thread_working_dirs: dict[int, str] = Field(default_factory=dict)
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
@@ -644,6 +645,26 @@ class User(BaseModel):
             return selected_model.name
         return None
 
+    def get_effective_working_dir(self, thread_id: int | None) -> str:
+        """Resolve the working directory for a thread.
+
+        Follows the same fallback chain as LLM selection: a thread-scoped
+        override wins, then the legacy user-level directory, then the
+        application-wide default. The stored value is returned as-is —
+        normalization (e.g. expanduser) happens only on write.
+
+        Args:
+            thread_id: The ID of the thread, or None to skip thread-level lookup.
+
+        Returns:
+            The effective working directory value.
+        """
+        if thread_id is not None and (thread_wd := self.thread_working_dirs.get(thread_id)):
+            return thread_wd
+        if self.working_dir:
+            return self.working_dir
+        return application_settings.working_dir
+
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances
         tasks = [provider.get_available_models(image_generation=image_generation) for provider in providers]
@@ -660,8 +681,15 @@ class User(BaseModel):
         return len(self.images) >= gpt_settings.image_generations_monthly_limit
 
     def approximate_context_size(self, thread_id: int) -> int:
-        messages = self.thread_messages_map.get(thread_id)
-        if not messages:
+        messages_to_count = []
+        if thread_id == 0:
+            messages_to_count.extend(self.messages)
+
+        thread_messages = self.thread_messages_map.get(thread_id)
+        if thread_messages:
+            messages_to_count.extend(thread_messages)
+
+        if not messages_to_count:
             return 0
 
-        return sum(msg.estimate_tokens for msg in messages)
+        return sum(msg.estimate_tokens for msg in messages_to_count)

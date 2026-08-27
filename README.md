@@ -110,6 +110,24 @@ The bot will run as a background service. Use CLI commands to manage it.
 
 ---
 
+## VS Code IDE client
+
+Chibi can serve the VS Code extension over its versioned local JSONL protocol:
+
+```bash
+chibi ide --stdio
+```
+
+The command is intended to be started by the [Chibi VS Code extension](https://github.com/s-nagaev/chibi-vscode),
+not used interactively. Chibi owns the `v1` IDE protocol and supports compatible clients that negotiate the same
+version. The stdio process writes protocol frames only to stdout and diagnostics to stderr. Existing Chibi command,
+tool, permission and moderation behavior remains authoritative; the IDE adds no tool policy layer.
+
+See the extension repository for installation, VSIX release instructions, client troubleshooting and its supported
+Chibi version range.
+
+---
+
 ## 🚀 Quick start (Docker)
 
 Create `docker-compose.yml`:
@@ -257,6 +275,31 @@ Chibi: *analyzes changes, suggests improvements, updates docs via MCP*
 - **Access control:** whitelist users/groups/models
 - **Storage options:** local volumes, Redis, or DynamoDB
 - **Tool safety:** agent tools are configurable; terminal execution is moderated and can be restricted
+
+---
+
+### `MAX_HISTORY_TOKENS` — context summarization threshold (breaking default change)
+
+`MAX_HISTORY_TOKENS` is the threshold at which Chibi auto-summarizes a conversation to keep context manageable. Its **semantics changed**: it now compares against the **real, provider-reported prompt token count** (the entire outgoing request: system prompt + activated skills + tool schemas + tool-call arguments + per-message structural overhead + conversation content) instead of the old heuristic that measured only conversation `content` + `role`. The real figure is **~4.8x larger** than the old estimate for an identical conversation (see `fix_context_size/context_size_accounting_analysis.md` for the measured breakdown).
+
+- **Default re-based:** `64000` -> `100000`. The new value protects the smallest commonly-supported context window (128k tokens): `100000` is ~78% of a 128k window (so summarization fires *before* a 128k model overflows) and ~50% of a 200k window (leaving comfortable headroom). The old `64000` was a history-only estimate that was never hit before a real overflow, because the estimate under-counts Cyrillic ~2x and excludes the fixed per-turn overhead (system prompt ~3.7k, tool schemas ~6.8k, activated skills ~5.9k, `user_info` ~0.75–3k) — so a 128k model overflowed at ~128k real tokens while the heuristic still reported well under 64k.
+- **Migration:** if you set `MAX_HISTORY_TOKENS` explicitly in your `.env`, your old value was tuned against the old history-only estimate and now compares against a truthful figure that is ~4.8x larger for the same conversation. Re-tune it to the **~100k scale** (e.g. `64000` -> `100000`) so summarization fires before your smallest model's context window overflows, not after. If you never set it, the new default applies automatically.
+- The cold-start fallback (first turn after a process restart, when no provider data is cached yet) still uses the old heuristic so summarization remains functional.
+
+### `REACTIVE_CONTEXT_RECOVERY` — one-shot retry after context overflow
+
+`REACTIVE_CONTEXT_RECOVERY` (default: `true`) is the reactive safety net that complements the proactive `MAX_HISTORY_TOKENS` threshold. When a provider rejects a request with a typed `context_length_exceeded` error, Chibi automatically summarizes the conversation history and retries the turn **exactly once**. If the retry succeeds, the user receives a normal answer (with a short note that context was compressed). If the retry overflows again or recovery fails for any reason, the turn falls back to the existing apology path — the summarization+retry loop can never run more than once per original turn. Set to `false` to disable reactive recovery and keep the pre-existing behavior (log + apology, no retry).
+
+### Working directory is thread-scoped (`WORKING_DIR`)
+
+The agent's working directory - used for terminal commands and reported to the model as its current CWD - is **thread-scoped**, mirroring how the selected LLM model is bound per thread.
+
+- **Default:** comes from the `WORKING_DIR` setting (default `~/chibi`) through the legacy user-level value; fresh deployments inherit the setting directly.
+- **Per-thread override:** any thread/conversation can override its working directory **in isolation** via the agent's `set_working_dir` tool (LLM-driven only - there is no slash command, available when `FILESYSTEM_ACCESS` is enabled). This lets two agents in different threads work on different projects simultaneously without interfering.
+- **Resolution order:** thread override → legacy user-level directory → `WORKING_DIR` setting.
+- **Path normalization:** values you set are expanded to absolute paths on save (`~/x` becomes `/abs/x`); untouched defaults keep their raw form.
+- **Sub-agents** spawned within a thread share that thread's working directory - the same effective path is injected into their system prompts and tool calls.
+- Overrides **survive thread cloning**: `/new_thread_with_current_context` carries the working directory over together with messages and model preferences.
 
 ---
 

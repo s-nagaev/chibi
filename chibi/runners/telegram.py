@@ -1,6 +1,8 @@
+import io
 import json
+import sys
 from datetime import datetime
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from loguru import logger
 from telegram import (
@@ -46,10 +48,12 @@ from chibi.services.bot import (
 from chibi.services.interface import TelegramInterface
 from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
+from chibi.services.providers.tools.topic import RenameThreadTool
 from chibi.services.scheduler import ChibiScheduler
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
+from chibi.utils.encoding import reconfigure_stream_utf8
 from chibi.utils.telegram import (
     check_user_allowance,
     current_user_action,
@@ -64,6 +68,7 @@ from chibi.utils.telegram import (
 )
 
 _T = TypeVar("_T")
+RenameThreadTool.register = True
 
 base_commands = [
     BotCommand(command="help", description="Show this help message"),
@@ -840,7 +845,15 @@ class ChibiBot:
         app.run_polling()
 
 
-def run_chibi():
+def run_chibi() -> None:
+    """Start the Telegram bot runner.
+
+    Reconfigures stdout/stderr to UTF-8 first so that non-ASCII output is safe on
+    hosts with a legacy locale (e.g. Windows cp1252) regardless of the entrypoint used.
+    """
+    reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stdout))
+    reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
+
     log_application_settings()
     telegram_setting_pre_start_check()
     telegram_security_pre_start_check()

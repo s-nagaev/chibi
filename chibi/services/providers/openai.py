@@ -19,6 +19,7 @@ from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import get_usage_msg, prepare_system_prompt, send_llm_thoughts
+from chibi.services.usage_cache import UsageCacheStore
 
 RESPONSES_ONLY_MODELS = {"gpt-5.2", "gpt-5.3", "gpt-5.4", "codex"}
 
@@ -54,6 +55,9 @@ class OpenAI(OpenAIFriendlyProvider):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response with Responses API fallback to Chat Completions.
 
@@ -63,6 +67,15 @@ class OpenAI(OpenAIFriendlyProvider):
             model: The model to use. Defaults to self.default_model.
             system_prompt: System prompt for the assistant.
             interface: Optional user interface for sending thoughts.
+            track_prompt_size: When True, record the provider-reported prompt
+                token count in the in-memory UsageCacheStore. Only genuine
+                user-facing chat turns opt in; sub-agent and other internal
+                calls keep the default False so they never overwrite the
+                parent conversation's cached value.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -74,12 +87,15 @@ class OpenAI(OpenAIFriendlyProvider):
         model = model or self.default_model
 
         try:
-            return await self._get_response_completion_response(
+            response, updated_messages = await self._get_response_completion_response(
                 messages=messages,
                 model=model,
                 user=user,
                 system_prompt=system_prompt,
                 interface=interface,
+                track_prompt_size=track_prompt_size,
+                caller_storage_id=caller_storage_id,
+                caller_thread_id=caller_thread_id,
             )
         except (BadRequestError, NotFoundError) as e:
             # Only fallback for 400/404 errors (unsupported model or parameter)
@@ -89,13 +105,19 @@ class OpenAI(OpenAIFriendlyProvider):
                     raise
 
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
-            return await super().get_chat_response(
+            response, updated_messages = await super().get_chat_response(
                 messages=messages,
                 user=user,
                 model=model,
                 system_prompt=system_prompt,
                 interface=interface,
+                track_prompt_size=track_prompt_size,
+                caller_storage_id=caller_storage_id,
+                caller_thread_id=caller_thread_id,
             )
+
+        new_messages = [msg for msg in updated_messages if msg not in messages]
+        return response, new_messages
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
@@ -142,6 +164,9 @@ class OpenAI(OpenAIFriendlyProvider):
         user: User,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -151,6 +176,14 @@ class OpenAI(OpenAIFriendlyProvider):
             user: The user requesting the response.
             system_prompt: Optional system prompt to use as instructions.
             interface: Optional user interface for sending thoughts.
+            track_prompt_size: When True, record the reported prompt token
+                count in UsageCacheStore. Defaults to False so internal
+                callers (sub-agent, fallback retries) never corrupt the
+                parent conversation's cached value.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -165,7 +198,11 @@ class OpenAI(OpenAIFriendlyProvider):
         instructions: str | Omit = omit
         if system_prompt:
             instructions = await prepare_system_prompt(
-                base_system_prompt=system_prompt, user_id=user.id, interface=interface
+                base_system_prompt=system_prompt,
+                user_id=user.id,
+                interface=interface,
+                conversation_messages=messages,
+                thread_id=caller_thread_id,
             )
 
         reasoning_effort = self.get_reasoning_effort_value(model_name=model)
@@ -214,6 +251,13 @@ class OpenAI(OpenAIFriendlyProvider):
                 total_tokens=response.usage.total_tokens,
             )
 
+        if track_prompt_size:
+            UsageCacheStore().store(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+            )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
@@ -239,7 +283,13 @@ class OpenAI(OpenAIFriendlyProvider):
             for item in tool_call_items
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         assistant_message = Message(
@@ -269,7 +319,12 @@ class OpenAI(OpenAIFriendlyProvider):
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_response_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
+            track_prompt_size=track_prompt_size,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

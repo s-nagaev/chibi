@@ -1,0 +1,1 @@
+{"type": "ready", "protocol_version": 1, "server": {"name": "chibi", "version": "1.0.0"}, "capabilities": {"commands": ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]}}

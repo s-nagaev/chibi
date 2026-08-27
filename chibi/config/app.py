@@ -1,8 +1,10 @@
+import os
 import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from dotenv import dotenv_values
 from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -121,6 +123,11 @@ class ApplicationSettings(BaseSettings):
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
+    if os.getenv("CHIBI_ENV", "no-dev").lower() != "dev":
+        settings_path = Path.home() / "chibi-bot" / "settings"
+        if settings_path.exists():
+            overrides = dotenv_values(settings_path)
+            os.environ.update({k: v for k, v in overrides.items() if v is not None})
     return ApplicationSettings()
 
 

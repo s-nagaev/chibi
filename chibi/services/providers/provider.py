@@ -34,6 +34,7 @@ from openai import (
     APIConnectionError,
     AsyncOpenAI,
     AuthenticationError,
+    BadRequestError,
     OpenAIError,
     RateLimitError,
     omit,
@@ -54,6 +55,7 @@ from openai.types.chat.chat_completion import ChatCompletion, Choice
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
 from chibi.exceptions import (
+    ContextLengthExceededError,
     NoApiKeyProvidedError,
     NoModelSelectedError,
     NoResponseError,
@@ -76,6 +78,7 @@ from chibi.services.providers.utils import (
     prepare_system_prompt,
     send_llm_thoughts,
 )
+from chibi.services.usage_cache import UsageCacheStore
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -271,6 +274,9 @@ class Provider(ABC):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
 
@@ -391,12 +397,45 @@ class Provider(ABC):
         caller_provider: str,
         user_id: int | None = None,
         interface: UserInterface | None = None,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> list[ToolResponseSchema]:
+        """Execute tool calls, injecting the originating session identity.
+
+        Every tool payload receives ``caller_storage_id``/``caller_thread_id``
+        resolved from the interface when present, otherwise from the explicit
+        caller options (sub-agent requests have no interface). Tools resolve
+        their thread context via these fields when the interface is absent.
+
+        Args:
+            calls: Tool calls requested by the model.
+            caller_model: The model that issued the tool calls.
+            caller_provider: The provider that issued the tool calls.
+            user_id: The storage ID of the user, or None if unavailable.
+            interface: The interface of the top-level request, or None for
+                internal (sub-agent) requests.
+            caller_storage_id: Session storage ID propagated from a parent
+                request without an interface, or None.
+            caller_thread_id: Session thread ID propagated from a parent
+                request without an interface, or None.
+
+        Returns:
+            The collected tool responses.
+        """
+        if interface is not None:
+            context_storage_id: int | None = interface.storage_id
+            context_thread_id: int | None = interface.thread_id
+        else:
+            context_storage_id = caller_storage_id
+            context_thread_id = caller_thread_id
+
         tool_context: dict[str, Any] = {
             "user_id": user_id,
             "interface": interface,
             "caller_model": caller_model,
             "caller_provider": caller_provider,
+            "caller_storage_id": context_storage_id,
+            "caller_thread_id": context_thread_id,
         }
         tool_coroutines = [
             RegisteredChibiTools.call(tool_name=call.tool_name, tools_args=tool_context | call.args) for call in calls
@@ -451,6 +490,11 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                         raise NotAuthorizedError(provider=self.name, model=model_name)
                     except RateLimitError:
                         raise ServiceRateLimitError(provider=self.name, model=model_name)
+                    except BadRequestError as e:
+                        logger.error(e)
+                        if e.code == "context_length_exceeded":
+                            raise ContextLengthExceededError(provider=self.name, model=model_name)
+                        raise ServiceResponseError(provider=self.name, model=model_name)
                     except OpenAIError as e:
                         logger.error(e)
                         raise ServiceResponseError(provider=self.name, model=model_name)
@@ -492,12 +536,23 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
         initial_messages = [msg.to_openai() for msg in messages]
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), model=model, system_prompt=system_prompt, user=user, interface=interface
+            messages=initial_messages.copy(),
+            model=model,
+            system_prompt=system_prompt,
+            user=user,
+            interface=interface,
+            conversation_messages=messages,
+            track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -512,13 +567,21 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         user: User,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
+        conversation_messages: list[Message] | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
             dialog = messages
         else:
             prepared_system_prompt = await prepare_system_prompt(
-                base_system_prompt=system_prompt, user_id=user.id, interface=interface
+                base_system_prompt=system_prompt,
+                user_id=user.id,
+                interface=interface,
+                conversation_messages=conversation_messages,
+                thread_id=caller_thread_id,
             )
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
@@ -544,6 +607,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         answer: str = data.message.content or ""
 
         usage = get_usage_from_openai_response(response_message=response)
+        if track_prompt_size:
+            UsageCacheStore().store(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+            )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
@@ -551,6 +621,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls  # type: ignore
 
         if not tool_calls:
+            if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
+                await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
+                logger.log("THINK", data.message.reasoning_content)
             messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
@@ -570,7 +643,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             for tool_call in tool_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         for tool_call, result in zip(tool_calls, results):
@@ -591,6 +670,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             }
             # Add reasoning_content if present (DeepSeek-Reasoner, Moonshot KIMI, etc.)
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
+                await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
                 logger.log("THINK", data.message.reasoning_content)
                 message_dict["reasoning_content"] = data.message.reasoning_content
 
@@ -601,10 +681,19 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 content=result.model_dump_json(),
             )
             messages.append(tool_result_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_openai(cast(ChatCompletionMessageParam, message_dict)))
+                conversation_messages.append(Message.from_openai(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=conversation_messages,
+            track_prompt_size=track_prompt_size,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -900,6 +989,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
@@ -908,7 +1000,15 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=messages,
+            track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -923,9 +1023,17 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         user: User,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        conversation_messages: list[Message] | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user_id=user.id, interface=interface
+            base_system_prompt=system_prompt,
+            user_id=user.id,
+            interface=interface,
+            conversation_messages=conversation_messages,
+            thread_id=caller_thread_id,
         )
         response_message: AnthropicMessage = await self._generate_content(
             model=model,
@@ -933,6 +1041,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             messages=messages,
         )
         usage = get_usage_from_anthropic_response(response_message=response_message)
+        if track_prompt_size:
+            UsageCacheStore().store(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+            )
 
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, user=user, model=model, provider=self.name)
@@ -978,7 +1093,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             for tool_call_part in tool_call_parts
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         for tool_call_part, result in zip(tool_call_parts, results):
@@ -999,10 +1120,19 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             )
             messages.append(tool_call_message)
             messages.append(tool_result_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_anthropic(tool_call_message))
+                conversation_messages.append(Message.from_anthropic(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            model=model,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=conversation_messages,
+            track_prompt_size=track_prompt_size,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

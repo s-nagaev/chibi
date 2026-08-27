@@ -1,0 +1,3 @@
+{"type": "ready", "protocol_version": 1, "server": {"name": "chibi", "version": "1.0.0"}, "capabilities": {"commands": ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]}}
+{"type": "status", "request_id": "01HXY9K2CANCELL0", "state": "running"}
+{"type": "error", "request_id": "01HXY9K2CANCELL0", "code": "cancelled", "message": "Request cancelled."}

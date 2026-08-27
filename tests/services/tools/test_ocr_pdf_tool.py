@@ -123,7 +123,7 @@ class TestOcrPdfTool:
         test_file.write_bytes(SAMPLE_PDF_BYTES)
 
         # Mock ocr_pdf service function
-        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf") as mock_ocr:
+        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf", new=AsyncMock()) as mock_ocr:
             mock_ocr.return_value = Mock(
                 model_dump=lambda: {
                     "short_description": "Test PDF",
@@ -154,7 +154,7 @@ class TestOcrPdfTool:
         mock_get_storage.return_value = mock_storage
 
         # Mock ocr_pdf service function
-        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf") as mock_ocr:
+        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf", new=AsyncMock()) as mock_ocr:
             mock_ocr.return_value = Mock(
                 model_dump=lambda: {
                     "short_description": "Test PDF",
@@ -207,7 +207,7 @@ class TestOcrPdfTool:
         mock_get_storage.return_value = mock_storage
 
         # Mock ocr_pdf to raise an exception
-        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf") as mock_ocr:
+        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf", new=AsyncMock()) as mock_ocr:
             mock_ocr.side_effect = ValueError("OCR provider error")
 
             with pytest.raises(ValueError, match="OCR provider error"):
@@ -226,7 +226,7 @@ class TestOcrPdfTool:
         test_file.write_bytes(SAMPLE_PDF_BYTES)
 
         # Mock ocr_pdf service function
-        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf") as mock_ocr:
+        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf", new=AsyncMock()) as mock_ocr:
             mock_ocr.return_value = Mock(
                 model_dump=lambda: {
                     "short_description": "Test PDF",

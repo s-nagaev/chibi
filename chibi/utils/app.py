@@ -1,7 +1,7 @@
 from abc import ABCMeta
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import httpx
 from loguru import logger
@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import SETTING_DISABLED, SETTING_ENABLED, SETTING_SET, SETTING_UNSET
 from chibi.exceptions import (
+    ContextLengthExceededError,
     NoApiKeyProvidedError,
     NoModelSelectedError,
     NoProviderSelectedError,
@@ -19,7 +20,29 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.interface import UserInterface
+
+
+@runtime_checkable
+class IDEErrorInterface(Protocol):
+    """Optional error-state contract used by the IDE interface."""
+
+    error_code: str | None
+    error_message: str | None
+
+
+def _set_ide_error(interface: UserInterface, code: str, message: str) -> None:
+    """Record a sanitized error only for interfaces that opt into IDE state.
+
+    Args:
+        interface: User interface receiving the fallback response.
+        code: Machine-readable IDE error code.
+        message: Sanitized user-facing IDE error message.
+    """
+    if isinstance(interface, IDEErrorInterface):
+        interface.error_code = code
+        interface.error_message = message
 
 
 class SingletonMeta(ABCMeta):
@@ -155,6 +178,35 @@ def log_application_settings() -> None:
         )
 
 
+async def _try_reactive_context_recovery(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    storage_id: int,
+    thread_id: int,
+) -> Any:
+    """Summarize history and retry the wrapped function once after context overflow.
+
+    Args:
+        func: The wrapped function to retry.
+        args: Positional arguments for the function.
+        kwargs: Keyword arguments for the function.
+        storage_id: User/chat storage identifier to summarize.
+        thread_id: Thread identifier to summarize.
+
+    Returns:
+        The result of the retried function call.
+
+    Raises:
+        ContextLengthExceededError: If the retry also overflows.
+        Exception: Any exception raised by emergency_summarization or the retry.
+    """
+    from chibi.services.user import emergency_summarization  # Circular import avoidance
+
+    await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
+    return await func(*args, **kwargs)
+
+
 def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator handling openai module's exceptions.
 
@@ -187,14 +239,27 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except NoResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_error",
+                "The provider returned no response. Try again or check provider availability.",
+            )
             return None
 
         except NoApiKeyProvidedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface, "provider_configuration", "This provider is not configured. Set its API key, then try again."
+            )
             text = "Oops! It looks like you didn't set the API key for this provider."
 
         except NotAuthorizedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_authorization",
+                f"The {e.provider} provider rejected its credentials. Check the provider API key.",
+            )
             text = (
                 "We encountered an authorization problem when interacting with a remote service.\n"
                 f"Please check your {e.provider} API key."
@@ -202,22 +267,62 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except ServiceResponseError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "provider_error",
+                f"The {e.provider} provider returned an unexpected response. Try again later.",
+            )
             text = (
                 f"😲Lol... we got an unexpected response from the {e.provider} service! \n"
                 f"Please, try again a bit later."
             )
 
+        except ContextLengthExceededError as e:
+            if gpt_settings.reactive_context_recovery:
+                try:
+                    result = await _try_reactive_context_recovery(
+                        func=func,
+                        args=args,
+                        kwargs=kwargs,
+                        storage_id=interface.storage_id,
+                        thread_id=interface.thread_id,
+                    )
+                    if isinstance(result, ChatResponseSchema):
+                        result = result.model_copy(
+                            update={"answer": result.answer + "\n\n_(Context was compressed to stay within limits.)_"}
+                        )
+                    return result
+                except ContextLengthExceededError:
+                    logger.warning(f"{error_msg_prefix}: context still too large after reactive summarization")
+                except Exception as recovery_error:
+                    logger.exception(f"{error_msg_prefix}: reactive context recovery failed: {recovery_error!r}")
+            logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "context_length_exceeded",
+                "The conversation context is too large for the model. Start a new thread or reset history.",
+            )
+            text = (
+                "I'm sorry, but this conversation has grown too large for the model's context window. "
+                "Please start a new thread or reset the chat history with /reset."
+            )
+
         except ServiceRateLimitError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface, "provider_rate_limit", f"The {e.provider} provider rate limit was reached. Try again later."
+            )
             text = f"Rate Limit exceeded for {e.provider}. We should back off a bit."
 
         except NoModelSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
 
+            _set_ide_error(interface, "missing_model", "Select a model before sending a request.")
             text = "Please, select your model first."
 
         except NoProviderSelectedError as e:
             logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(interface, "missing_provider", "Select a provider before sending a request.")
             text = "Please, select your provider first."
 
         except RecursionLimitExceeded as e:
@@ -231,6 +336,11 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
 
         except Exception as e:
             logger.exception(f"{error_msg_prefix}: {e!r}")
+            _set_ide_error(
+                interface,
+                "runtime_error",
+                "Chibi could not complete the provider operation. Check the output channel for details.",
+            )
 
         await interface.send_message(message=text)
 

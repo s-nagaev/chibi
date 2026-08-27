@@ -50,6 +50,7 @@ from chibi.services.providers.utils import (
     prepare_system_prompt,
     send_llm_thoughts,
 )
+from chibi.services.usage_cache import UsageCacheStore
 
 
 class Gemini(RestApiFriendlyProvider):
@@ -231,11 +232,19 @@ class Gemini(RestApiFriendlyProvider):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        conversation_messages: list[Message] | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
         prepared_system_prompt = await prepare_system_prompt(
-            base_system_prompt=system_prompt, user_id=user.id, interface=interface
+            base_system_prompt=system_prompt,
+            user_id=user.id,
+            interface=interface,
+            conversation_messages=conversation_messages,
+            thread_id=caller_thread_id,
         )
 
         if "flash" in model_name and self.temperature > 0.4:
@@ -262,6 +271,13 @@ class Gemini(RestApiFriendlyProvider):
         )
         answer = self._get_text(response)
         usage = get_usage_from_google_response(response_message=response)
+        if track_prompt_size:
+            UsageCacheStore().store(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+            )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model_name, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
@@ -294,7 +310,13 @@ class Gemini(RestApiFriendlyProvider):
             for function_call in response.function_calls
         ]
         results = await self.call_functions(
-            calls=calls, caller_model=model_name, caller_provider=self.name, user_id=user.id, interface=interface
+            calls=calls,
+            caller_model=model_name,
+            caller_provider=self.name,
+            user_id=user.id,
+            interface=interface,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         thought_signature = self._get_thought_signature(response=response)
@@ -331,10 +353,19 @@ class Gemini(RestApiFriendlyProvider):
 
             messages.append(tool_call_message)
             messages.append(tool_result_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_google(tool_call_message))
+                conversation_messages.append(Message.from_google(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
         return await self._get_chat_completion_response(
-            messages=messages, model=model_name, user=user, system_prompt=system_prompt, interface=interface
+            messages=messages,
+            model=model_name,
+            user=user,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=conversation_messages,
+            track_prompt_size=track_prompt_size,
         )
 
     async def get_chat_response(
@@ -344,12 +375,23 @@ class Gemini(RestApiFriendlyProvider):
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
+        track_prompt_size: bool = False,
+        caller_storage_id: int | None = None,
+        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]
 
         chat_response, updated_messages = await self._get_chat_completion_response(
-            messages=initial_messages.copy(), user=user, model=model, system_prompt=system_prompt, interface=interface
+            messages=initial_messages.copy(),
+            user=user,
+            model=model,
+            system_prompt=system_prompt,
+            interface=interface,
+            conversation_messages=messages,
+            track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]

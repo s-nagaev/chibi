@@ -105,6 +105,21 @@ async def test_save_and_get_existent_user(storage: Database) -> None:
     assert refreshed_user.thread_selected_llm[0].provider_name == active_provider
 
 
+async def test_save_and_get_thread_working_dir(storage: Database) -> None:
+    """Tests that a thread-scoped working directory survives the save/get round trip."""
+    user_id = 123
+    thread_dir = "/tmp/project"
+
+    user = await storage.get_or_create_user(user_id)
+    user.thread_working_dirs[5] = thread_dir
+    await storage.save_user(user)
+
+    refreshed_user = await storage.get_or_create_user(user_id)
+    assert refreshed_user is not None
+    assert refreshed_user.get_effective_working_dir(thread_id=5) == thread_dir
+    assert refreshed_user.get_effective_working_dir(thread_id=99) == refreshed_user.working_dir
+
+
 async def test_add_and_get_messages(storage: Database) -> None:
     user_id = 123
     user = await storage.get_or_create_user(user_id)

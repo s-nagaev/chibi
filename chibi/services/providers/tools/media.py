@@ -144,7 +144,7 @@ class GenerateImageTool(ChibiTool):
             prompt=prompt,
             interface=interface,
         )
-        return {"detail": "Image was successfully generated and sent."}
+        return {"detail": "Image was successfully generated and sent to user."}
 
 
 class GenerateMusicViaSunoTool(ChibiTool):

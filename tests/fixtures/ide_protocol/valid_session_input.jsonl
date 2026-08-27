@@ -1,0 +1,2 @@
+{"type": "initialize", "protocol_version": 1, "client": {"name": "chibi-vscode", "version": "0.1.0"}}
+{"type": "request", "request_id": "01HXY9K1ABCDEFGH", "thread_id": 3, "prompt": "Explain what this function does.", "workspace_root": "/home/user/projects/demo", "active_file": "/home/user/projects/demo/src/main.py", "selection": {"start_line": 10, "end_line": 22, "text": "def foo():\n    return 42"}, "cursor_position": {"line": 15, "character": 8}, "language_id": "python"}

@@ -14,9 +14,11 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
+from chibi.models import Message
 from chibi.schemas.app import UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.interface import UserInterface
+from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import get_chibi_user
 from chibi.storage.files import get_file_storage
 from chibi.storage.files.file_storage import FileStorage
@@ -56,8 +58,32 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
-async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface: UserInterface | None) -> str:
+async def prepare_system_prompt(
+    base_system_prompt: str,
+    user_id: int,
+    interface: UserInterface | None,
+    conversation_messages: list[Message] | None = None,
+    thread_id: int | None = None,
+) -> str:
+    """Prepare the system prompt payload sent to the LLM.
+
+    Args:
+        base_system_prompt: The base system prompt text.
+        user_id: The user identifier used to fetch user metadata and to key
+            the real context-size cache.
+        interface: The user interface for the current request, or None.
+        conversation_messages: Retained for caller compatibility; no longer
+            used to compute the context size (the real provider-reported value
+            from ``UsageCacheStore`` is used instead).
+        thread_id: Session thread ID used when the interface is absent (e.g.
+            sub-agent requests) so the effective working directory resolves to
+            the same thread-scoped value as the parent request.
+
+    Returns:
+        JSON-encoded system prompt payload.
+    """
     user = await get_chibi_user(user_id=user_id)
+    session_thread_id = interface.thread_id if interface else thread_id
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
@@ -65,23 +91,32 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
 
     if application_settings.is_chroma_configured:
         retention_days = application_settings.chroma_history_retention_days
-        prompt["system_prompt"] += f"""\n\n# Persistent Memory\n
+        prompt["system_prompt"] += f"""\n\n# Persistent Memory
+
             You can access conversation history from the last {retention_days} days using the
             `search_in_conversation_history` tool.\n\n
             Use memory search when:\n
+
             - The user refers to past conversations not present in the current context\n
+
             - The user asks what they said or discussed earlier\n
+
             - Previous preferences, decisions, or project context may improve the response\n\n
             Guidelines:\n
+
             - Prefer semantic descriptions over exact quotes when searching\n
+
             - Do not search memory if the current context already contains the needed information\n
+
             - Never fabricate recalled information\n
+
             - If memory results are ambiguous or empty, state that clearly\n
+
             - Distinguish recalled facts from inferred assumptions\n"""
 
     if gpt_settings.filesystem_access:
         system_data = {
-            "current_working_dir": user.working_dir,
+            "current_working_dir": user.get_effective_working_dir(session_thread_id),
             "platform": platform.platform(),
             "shell": os.environ.get("SHELL", "unknown"),
             "running_inside_container": application_settings.running_in_container,
@@ -92,18 +127,27 @@ async def prepare_system_prompt(base_system_prompt: str, user_id: int, interface
         prompt["system"] = system_data
 
     if interface:
-        storage: FileStorage = get_file_storage(interface=interface)
-        prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
+        if getattr(interface, "uses_uploaded_file_storage", True):
+            storage: FileStorage = get_file_storage(interface=interface)
+            prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
         thread_id = interface.thread_id
-        context_size = user.approximate_context_size(thread_id=thread_id)
-        prompt["approximate_context_size"] = context_size
-        if context_size > gpt_settings.max_history_tokens * 0.7:
-            prompt["context_size_warning"] = (
-                f"The context size is more than 70% of the maximum allowed ({gpt_settings.max_history_tokens}) tokens. "
-                f"It is strongly recommended to reduce the context by calling 'summarize_history' "
-                f"or 'clear_tool_call_history' and generating the most detailed summary possible."
+        real_context_size = UsageCacheStore().get(user_id=user_id, thread_id=thread_id)
+        max_history_tokens = gpt_settings.max_history_tokens
+        if real_context_size is not None:
+            context_percentage = round(real_context_size / max_history_tokens * 100) if max_history_tokens else 0
+            prompt["approximate_context_size"] = (
+                f"{real_context_size:,} tokens ({context_percentage}% of {max_history_tokens:,} limit)"
             )
+            if context_percentage > gpt_settings.context_size_warning_threshold:
+                prompt["context_size_warning"] = (
+                    f"The context size is more than {gpt_settings.context_size_warning_threshold}% of the "
+                    f"maximum allowed ({max_history_tokens}) tokens. It is strongly recommended to reduce "
+                    f"the context by calling 'summarize_history' or 'clear_tool_call_history' and "
+                    f"generating the most detailed summary possible."
+                )
+        else:
+            prompt["approximate_context_size"] = "n/a"
 
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)
@@ -119,19 +163,21 @@ async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = Non
     if thoughts == "No content":
         return None
 
-    message = f"💡💭 {thoughts}"
-
-    await interface.send_message(message=message, reply=False)
+    await interface.send_llm_thoughts(thoughts)
     return None
 
 
 def get_usage_from_anthropic_response(response_message: AnthropicMessage) -> UsageSchema:
+    output_tokens = response_message.usage.output_tokens
+    input_tokens = response_message.usage.input_tokens
+    cache_creation_input_tokens = getattr(response_message.usage, "cache_creation_input_tokens", None) or 0
+    cache_read_input_tokens = getattr(response_message.usage, "cache_read_input_tokens", None) or 0
     return UsageSchema(
-        completion_tokens=response_message.usage.output_tokens,
-        prompt_tokens=response_message.usage.input_tokens,
-        cache_creation_input_tokens=response_message.usage.cache_creation_input_tokens or 0,
-        cache_read_input_tokens=response_message.usage.cache_read_input_tokens or 0,
-        total_tokens=response_message.usage.output_tokens + response_message.usage.input_tokens,
+        completion_tokens=output_tokens,
+        prompt_tokens=input_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+        total_tokens=output_tokens + input_tokens + cache_creation_input_tokens + cache_read_input_tokens,
     )
 
 
@@ -211,7 +257,7 @@ def suno_task_still_processing(task_data_response: SunoGetGenerationDetailsSchem
 
 # def limit_recursion(
 #     max_depth: int = application_settings.max_consecutive_tool_calls,
-# ) -> Callable[[AsyncFunc[P, T]], AsyncFunc[P, T]]:
+# ) -> Callable[[AsyncFunc[P], T]], AsyncFunc[P, T]]:
 #     def decorator(func: AsyncFunc[P, T]) -> AsyncFunc[P, T]:
 #         depth_var: ContextVar[int] = ContextVar(f"{func.__name__}_depth", default=0)
 #

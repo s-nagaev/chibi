@@ -2,10 +2,12 @@
 
 import json
 
+import pytest
 from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlockParam
 from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDict, PartDict
 
-from chibi.models import FunctionSchema, Message, ToolSchema
+from chibi.config import application_settings
+from chibi.models import FunctionSchema, Message, ToolSchema, User
 
 
 class TestMessageGoogleConversion:
@@ -358,3 +360,54 @@ class TestMessageAnthropicConversion:
         assert result.tool_call_id == "call_function_npanp5e9uv0s_1"
         assert result.tool_name == "ddgs_web_search"
         assert result.content == json.dumps(tool_result)
+
+
+class TestUserEffectiveWorkingDir:
+    """Test thread-scoped working directory resolution on User."""
+
+    def test_thread_override_wins(self) -> None:
+        """Test that a thread-specific working directory takes priority over the legacy one."""
+        user = User(id=1)
+        user.working_dir = "/legacy"
+        user.thread_working_dirs[42] = "/thread/override"
+
+        assert user.get_effective_working_dir(thread_id=42) == "/thread/override"
+
+    def test_missing_key_falls_back_to_legacy(self) -> None:
+        """Test that a thread without an override falls back to the legacy user-level directory."""
+        user = User(id=1)
+        user.working_dir = "/legacy"
+
+        assert user.get_effective_working_dir(thread_id=42) == "/legacy"
+
+    def test_legacy_empty_falls_back_to_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an empty legacy directory falls back to the application setting."""
+        monkeypatch.setattr(application_settings, "working_dir", "/cfg/default")
+        user = User(id=1)
+        user.working_dir = ""
+
+        assert user.get_effective_working_dir(thread_id=42) == "/cfg/default"
+
+    def test_thread_id_none_skips_thread_level(self) -> None:
+        """Test that thread_id=None skips the thread-level lookup entirely."""
+        user = User(id=1)
+        user.working_dir = "/legacy"
+        user.thread_working_dirs[42] = "/thread/override"
+
+        assert user.get_effective_working_dir(thread_id=None) == "/legacy"
+
+    def test_stored_value_returned_asis_without_expanduser(self) -> None:
+        """Test that the stored value is returned verbatim — no expansion on read."""
+        user = User(id=1)
+        user.thread_working_dirs[42] = "~/relative/path"
+
+        result = user.get_effective_working_dir(thread_id=42)
+
+        assert result == "~/relative/path"
+
+    def test_old_records_without_field_get_default_dict(self) -> None:
+        """Test that users constructed from old persisted records without the field get the default."""
+        user = User(id=1, working_dir="/legacy")
+
+        assert user.thread_working_dirs == {}
+        assert user.get_effective_working_dir(thread_id=1) == "/legacy"

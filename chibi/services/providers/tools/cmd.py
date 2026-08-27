@@ -1,6 +1,8 @@
 import asyncio
+import locale
 import os
 import signal
+import sys
 from typing import Any, Unpack
 
 from loguru import logger
@@ -12,8 +14,39 @@ from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
-from chibi.services.user import get_cwd, get_moderation_provider
+from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
+from chibi.services.user import get_chibi_user, get_moderation_provider
+
+
+def _decode_output(data: bytes) -> str:
+    """Decode subprocess output with locale-aware fallback.
+
+    On Windows the console emits output in the OEM code page (e.g. cp866), which differs
+    from the ANSI code page returned by `locale.getpreferredencoding` (e.g. cp1252), so the
+    OEM code page is tried first to avoid mojibake.
+
+    Args:
+        data: Raw bytes from subprocess stdout or stderr.
+
+    Returns:
+        Decoded string.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    if sys.platform == "win32":
+        try:
+            return data.decode("oem")
+        except (UnicodeDecodeError, LookupError):
+            pass
+
+    preferred_encoding = locale.getpreferredencoding(False)
+    try:
+        return data.decode(preferred_encoding)
+    except (UnicodeDecodeError, LookupError):
+        return data.decode("utf-8", errors="replace")
 
 
 class RunCommandInTerminalTool(ChibiTool):
@@ -60,7 +93,9 @@ class RunCommandInTerminalTool(ChibiTool):
             raise ToolException("This function requires user_id to be automatically provided.")
 
         if not cwd:
-            cwd = await get_cwd(user_id=user_id)
+            _, thread_id = resolve_session_context(**kwargs)
+            user = await get_chibi_user(user_id=user_id)
+            cwd = user.get_effective_working_dir(thread_id=thread_id)
 
         if cmd.startswith("cat ") and "|" not in cmd:
             raise ToolException("To read the whole file, please use the 'read_file' tool instead.")
@@ -110,8 +145,8 @@ class RunCommandInTerminalTool(ChibiTool):
         except Exception as e:
             raise ToolException(f"Failed to run command in terminal! Command: '{cmd}'. Error: {e}")
 
-        raw_stdout = stdout.decode()
-        raw_stderr = stderr.decode()
+        raw_stdout = _decode_output(stdout)
+        raw_stderr = _decode_output(stderr)
 
         result: dict[str, str | int | None] = {"return_code": process.returncode}
 

@@ -1,0 +1,3 @@
+{"type": "initialize", "protocol_version": 1, "client": {"name": "chibi-vscode", "version": "0.1.0"}}
+{"type": "request", "request_id": "01HXY9K2CANCELL0", "thread_id": 5, "prompt": "Refactor this module end to end.", "workspace_root": "/home/user/projects/demo", "active_file": "/home/user/projects/demo/src/main.py", "selection": null, "cursor_position": {"line": 0, "character": 0}, "language_id": "python"}
+{"type": "cancel", "request_id": "01HXY9K2CANCELL0"}

@@ -345,8 +345,23 @@ IMAGE_SIZE_ALIBABA=1664*928
 # Maximum age of conversation history in minutes before cleanup (default: 360)
 MAX_CONVERSATION_AGE_MINUTES=360
 
-# Maximum number of tokens to keep in conversation history (default: 64000)
-MAX_HISTORY_TOKENS=64000
+# Automatically summarize and retry once when a provider reports context overflow.
+# This reactive safety net complements the proactive MAX_HISTORY_TOKENS threshold. (default: true)
+REACTIVE_CONTEXT_RECOVERY=true
+
+# Threshold (in tokens) of the real provider-reported prompt size at which the
+# conversation is auto-summarized. This value reflects the ENTIRE outgoing request
+# (system prompt + activated skills + tool schemas + tool-call arguments +
+# per-message structural overhead + conversation content), NOT the old
+# history-only estimate. The old default was 64000 and measured only conversation
+# content+role; the real figure is ~4.8x larger for an identical conversation, so
+# the default was re-based to 100000 to protect the smallest commonly-supported
+# context window (128k): the threshold sits below it (~78%) so summarization fires
+# before a 128k model overflows, while leaving ~50% headroom on a 200k window.
+# MIGRATION: if you previously set MAX_HISTORY_TOKENS explicitly, your old value
+# is now ~4.8x too small for the new (truthful) metric. Re-tune it upward by ~5x
+# (e.g. 64000 -> 100000) unless you intentionally want more aggressive summarization.
+MAX_HISTORY_TOKENS=100000
 
 
 # ============================================================================
@@ -452,7 +467,7 @@ def generate_default_config() -> None:
 
     if not os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "w") as config_file:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as config_file:
                 config_file.write(DEFAULT_CONFIG)
             print(f"Created default configuration at {CONFIG_PATH}")
         except IOError as e:

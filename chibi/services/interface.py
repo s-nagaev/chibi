@@ -1,6 +1,7 @@
+import random
 from abc import ABC
 from io import BytesIO
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from telegram import Chat as TelegramChat
@@ -9,7 +10,18 @@ from telegram.constants import ChatAction, ChatType
 from telegram.ext import ContextTypes
 
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, GROUP_CHAT_TYPES
+from chibi.utils.rich_message import RichMessageBuilder
 from chibi.utils.telegram import send_answer_message, send_images
+
+
+@runtime_checkable
+class EditorContextProvider(Protocol):
+    """Protocol for interfaces that provide IDE editor context."""
+
+    @property
+    def editor_context(self) -> dict[str, Any] | None:
+        """Return editor context supplied by an IDE client, if available."""
+        ...
 
 
 class UserInterface(ABC):
@@ -44,6 +56,11 @@ class UserInterface(ABC):
 
     @property
     def thread_id(self) -> int:
+        """Returns the message thread ID for the current chat context.
+
+        Returns:
+            The thread identifier, or 0 for non-threaded chats.
+        """
         raise NotImplementedError
 
     @property
@@ -99,9 +116,19 @@ class UserInterface(ABC):
         raise NotImplementedError
 
     async def get_caption(self) -> str | None:
+        """Retrieve the caption attached to the current message.
+
+        Returns:
+            The caption string, or None if no caption is present.
+        """
         raise NotImplementedError
 
     def set_caption(self, caption: str) -> None:
+        """Store a caption for use during subsequent media sends.
+
+        Args:
+            caption: The caption text to associate with the next media message.
+        """
         raise NotImplementedError
 
     async def send_action_typing(self) -> None:
@@ -249,12 +276,31 @@ class UserInterface(ABC):
         """
         raise NotImplementedError
 
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Send LLM thinking/thoughts to the user.
+
+        Default implementation sends as plain text.
+        Telegram overrides with native <tg-thinking> animation.
+
+        Args:
+            thoughts: The LLM reasoning text to display.
+        """
+        await self.send_message(f"💡💭 {thoughts}", reply=False)
+        return None
+
 
 class TelegramInterface(UserInterface):
     def __init__(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Initialize the Telegram interface from an incoming update.
+
+        Args:
+            update: The Telegram update object.
+            context: The PTB callback context.
+        """
         self.update = update
         self.context = context
         self._caption: str | None = None
+        self._thinking_draft_id: int | None = None
 
     @property
     def _chat(self) -> TelegramChat:
@@ -269,6 +315,11 @@ class TelegramInterface(UserInterface):
 
     @property
     def thread_id(self) -> int:
+        """Returns the message thread ID from the current Telegram message.
+
+        Returns:
+            The thread ID, or 0 for non-threaded chats and non-forum supergroups.
+        """
         if message := self.update.effective_message:
             if message.chat.type == ChatType.SUPERGROUP and not message.chat.is_forum:
                 return 0
@@ -426,7 +477,30 @@ class TelegramInterface(UserInterface):
             reply: Whether to reply to the user's message.
             **kwargs: Additional arguments for the message sending function.
         """
+        await self._clear_thinking_draft()
         await send_answer_message(message=message, update=self.update, context=self.context, reply=reply, **kwargs)
+
+    async def _clear_thinking_draft(self) -> None:
+        """Clear any active ``<tg-thinking>`` draft before the final message.
+
+        Works around a known Mac Telegram client bug where the
+        ``<tg-thinking>`` draft persists and overlaps the final message.
+        """
+        if self._thinking_draft_id is None:
+            return None
+        try:
+            payload = RichMessageBuilder.build_thinking_draft(
+                thoughts="\u200b",
+                chat_id=self.chat_id,
+                thread_id=self.thread_id if self.thread_id != 0 else None,
+            )
+            payload["draft_id"] = self._thinking_draft_id
+            await self.context.bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.warning(f"Failed to clear thinking draft: {e}")
+        finally:
+            self._thinking_draft_id = None
+        return None
 
     async def send_audio(
         self,
@@ -540,7 +614,42 @@ class TelegramInterface(UserInterface):
             message_thread_id=self.thread_id,
         )
 
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Send LLM thoughts as native Telegram ``<tg-thinking>`` animation.
+
+        Args:
+            thoughts: The LLM reasoning text to display.
+        """
+        if not thoughts or thoughts == "No content":
+            return None
+
+        if self._thinking_draft_id is None:
+            self._thinking_draft_id = random.randint(1, 2**31 - 1)
+
+        payload = RichMessageBuilder.build_thinking_draft(
+            thoughts=thoughts,
+            chat_id=self.chat_id,
+            thread_id=self.thread_id if self.thread_id != 0 else None,
+        )
+
+        payload["draft_id"] = self._thinking_draft_id
+
+        try:
+            await self.context.bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.warning(f"sendRichMessageDraft failed: {e}, falling back to plain text")
+            # await self.send_message(f"💡💭 {thoughts}", reply=False)
+        return None
+
     async def get_caption(self) -> str | None:
+        """Retrieve the caption for the current message.
+
+        Returns the previously stored caption if set, otherwise falls back
+        to the caption from the Telegram message.
+
+        Returns:
+            The caption string, or None if no caption is present.
+        """
         if self._caption:
             return self._caption
 
@@ -550,6 +659,11 @@ class TelegramInterface(UserInterface):
         return None
 
     def set_caption(self, caption: str) -> None:
+        """Store a caption to associate with the next media message.
+
+        Args:
+            caption: The caption text.
+        """
         self._caption = caption
         return None
 

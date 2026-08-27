@@ -35,7 +35,21 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
                     provider=self.name, name="cogview-4-250304", display_name="CogView 4", image_generation=True
                 ),
             ]
-        return await super().get_available_models(image_generation=False)
+        models = await super().get_available_models(image_generation=False)
+
+        additional_models = [
+            ModelChangeSchema(
+                provider=self.name, name="glm-4-32b-0414-128k", display_name="GLM 4 32B", image_generation=False
+            ),
+            ModelChangeSchema(
+                provider=self.name, name="glm-4.7-flash", display_name="GLM 4.7 Flash", image_generation=False
+            ),
+            ModelChangeSchema(
+                provider=self.name, name="glm-4.7-flashx", display_name="GLM 4.7 FlashX", image_generation=False
+            ),
+        ]
+        models.extend(additional_models)
+        return models
 
     async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
         model = model or self.default_image_model

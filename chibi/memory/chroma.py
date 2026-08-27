@@ -1,6 +1,7 @@
 """ChromaDB memory implementation with batch metadata and context retrieval."""
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Callable, cast
 
@@ -921,9 +922,29 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
 
         async def add_message(user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
             await original_add_message(user=user, message=message, ttl=ttl, thread_id=thread_id)
+            if message.role not in ("user", "assistant"):
+                return None
+            if any((message.tool_name, message.tool_calls, message.tool_call_id)):
+                return None
+
+            if message.role == "user":
+                try:
+                    content = json.loads(message.content)
+                    if isinstance(content, dict) and content.get("type") == "tool_response":
+                        return None
+
+                    snippet = (
+                        content.get("prompt", message.content) if isinstance(content, dict) else message.content
+                    )[:50]
+                except (json.JSONDecodeError, TypeError):
+                    snippet = str(message.content)[:50]
+            else:
+                snippet = message.content[:50]
+            logger.debug(f"Scheduling archival of message {message.id} for user {user.id}. Message: {snippet}")
             task_manager.run_task(
                 long_conv_memory.archive(user_id=user.id, messages=[message], thread_id=thread_id), user_id=user.id
             )
+            return None
 
         setattr(storage, "add_message", add_message)
         return storage

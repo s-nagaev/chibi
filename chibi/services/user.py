@@ -5,17 +5,17 @@ from copy import deepcopy
 from datetime import timezone
 from io import BytesIO
 from itertools import islice
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
-
-from aiocache import cached
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
-from chibi.services.interface import UserInterface
+from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
+from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
@@ -50,8 +50,8 @@ async def reset_chat_history(db: Database, storage_id: int, thread_id: int) -> N
 async def emergency_summarization(db: Database, storage_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=storage_id)
 
-    chat_history = await db.get_messages(user=user, thread_id=thread_id)
-    chat_history_string = str(msg for msg in chat_history if not any((msg.get("tool_calls"), msg.get("tool_call_id"))))
+    chat_history = await db.get_conversation_messages(user=user, thread_id=thread_id)
+    chat_history_string = "\n".join(msg.content for msg in chat_history if not msg.tool_calls and not msg.tool_call_id)
     user_messages: list[Message] = [Message(role="user", content=chat_history_string)]
 
     response, _ = await user.get_active_llm_provider(thread_id=thread_id).get_chat_response(
@@ -94,7 +94,7 @@ async def send_scheduled_message_to_llm(
         active_model = user.get_active_llm_model(thread_id=thread_id)
 
         chat_response, new_messages = await active_provider.get_chat_response(
-            messages=conversation_messages, user=user, model=active_model, interface=interface
+            messages=conversation_messages, user=user, model=active_model, interface=interface, track_prompt_size=True
         )
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for msg in new_messages:
@@ -156,6 +156,7 @@ async def get_llm_chat_completion_answer(
         raise ValueError("Can't compute voice message: no STT provide available.")
 
     prompt: dict[str, Any]
+    editor_ctx = interface.editor_context if isinstance(interface, EditorContextProvider) else None
 
     if tool_message:
         prompt = {
@@ -185,6 +186,24 @@ async def get_llm_chat_completion_answer(
             "transcribed_from_voice_message": bool(user_voice_message),
         }
 
+    if editor_ctx:
+        selection = editor_ctx.get("selection")
+        editor_context: dict[str, Any] = {
+            "active_file": editor_ctx.get("active_file"),
+            "language_id": editor_ctx.get("language_id"),
+            "cursor_position": editor_ctx.get("cursor_position"),
+        }
+        workspace_root = editor_ctx.get("workspace_root")
+        if isinstance(workspace_root, str):
+            editor_context["workspace_root"] = workspace_root.rstrip("/\\").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if isinstance(selection, dict) and isinstance(selection.get("text"), str) and selection["text"]:
+            editor_context["selection"] = {
+                "start_line": selection.get("start_line"),
+                "end_line": selection.get("end_line"),
+                "text": selection["text"][:4096],
+            }
+        prompt["editor_context"] = editor_context
+
     async with lock:
         conversation_messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
         new_message_to_llm = Message(role="user", content=json.dumps(prompt))
@@ -198,6 +217,7 @@ async def get_llm_chat_completion_answer(
             user=user,
             model=active_model,
             interface=interface,
+            track_prompt_size=True,
         )
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
@@ -207,12 +227,45 @@ async def get_llm_chat_completion_answer(
 
 @inject_database
 async def check_history_and_summarize(db: Database, storage_id: int, thread_id: int) -> bool:
+    """Decide whether the conversation has grown large enough to auto-summarize.
+
+    The primary signal is the real provider-reported prompt size cached in
+    ``UsageCacheStore`` for this ``(user_id, thread_id)`` — the same key the
+    write side (provider chat completion) and the read side
+    (``prepare_system_prompt``) use. This figure reflects the *entire* outgoing
+    request (system prompt, skills, tool schemas, tool-call arguments,
+    structural overhead) rather than only the conversation ``content+role`` the
+    old heuristic measured, so it is ~4.8x larger for an identical conversation.
+
+    On cold start — the first turn after a process restart, when the store is
+    empty for this key — the real size is unknown, so we fall back to the
+    existing ``estimate_tokens`` heuristic over the conversation messages. This
+    keeps summarization functional even when no provider data is available yet,
+    at the cost of being the old (history-only) approximation for that single
+    turn. ``estimate_tokens`` itself is left untouched and remains the
+    cold-start fallback.
+
+    Args:
+        db: Database instance (injected).
+        storage_id: The user/chat identifier used as the store key's ``user_id``.
+        thread_id: The message thread identifier (0 for the main thread).
+
+    Returns:
+        True if summarization was triggered, False otherwise.
+    """
     user = await db.get_or_create_user(user_id=storage_id)
     messages: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
-    # Roughly estimating how many tokens the current conversation history will comprise. It is possible to calculate
-    # this accurately, but the modules that can be used for this need to be separately built for armv7, which is
-    # difficult to do right now (but will be done further, I hope).
-    tokens = sum(msg.estimate_tokens for msg in messages)
+
+    real_prompt_size = UsageCacheStore().get(user_id=storage_id, thread_id=thread_id)
+    if real_prompt_size is not None:
+        tokens = real_prompt_size
+    else:
+        # Cold start: the store has no value for this key yet (e.g. first turn
+        # after a process restart). Fall back to the history-only heuristic so
+        # summarization still functions. estimate_tokens is intentionally left
+        # intact and used here as-is.
+        tokens = sum(msg.estimate_tokens for msg in messages)
+
     if tokens >= gpt_settings.max_history_tokens:
         await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
         return True
@@ -294,7 +347,7 @@ async def ocr_pdf(
     return await provider.ocr(pdf=pdf, model=model)
 
 
-@cached(ttl=3600)
+# @cached(ttl=3600)
 @inject_database
 async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
@@ -383,6 +436,25 @@ async def get_cwd(db: Database, user_id: int) -> str:
 
 
 @inject_database
+async def set_thread_working_dir(db: Database, user_id: int, thread_id: int, new_wd: str) -> None:
+    """Set the working directory override for a specific thread.
+
+    The path is normalized via ``Path(...).expanduser()`` only — no existence
+    check is performed. Users loaded from older persisted records are handled
+    naturally by the pydantic default of the new dict field.
+
+    Args:
+        db: The database instance.
+        user_id: The storage ID of the user.
+        thread_id: The ID of the thread to set the working directory for.
+        new_wd: The new working directory path.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    user.thread_working_dirs[thread_id] = str(Path(new_wd).expanduser())
+    await db.save_user(user)
+
+
+@inject_database
 async def get_moderation_provider(db: Database, user_id: int) -> "Provider":
     user = await db.get_or_create_user(user_id=user_id)
     return user.moderation_provider
@@ -401,12 +473,12 @@ async def drop_tool_call_history(db: Database, storage_id: int, thread_id: int) 
         await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
 
-@inject_database
-async def summarize_history(db: Database, storage_id: int, thread_id: int) -> None:
-    user = await db.get_or_create_user(user_id=storage_id)
-    chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
-    await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
-    await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl, thread_id=thread_id)
+# @inject_database
+# async def drop_history(db: Database, storage_id: int, thread_id: int) -> None:
+#     user = await db.get_or_create_user(user_id=storage_id)
+#     chat_history: list[Message] = await db.get_conversation_messages(user=user, thread_id=thread_id)
+#     await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
+#     await db.add_message(user=user, message=chat_history[0], ttl=gpt_settings.messages_ttl, thread_id=thread_id)
 
 
 @inject_database
@@ -470,6 +542,8 @@ async def clone_thread_messages(
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
     if old_thread_id in user.thread_selected_image_model:
         user.thread_selected_image_model[new_thread_id] = user.thread_selected_image_model[old_thread_id]
+    if old_thread_id in user.thread_working_dirs:
+        user.thread_working_dirs[new_thread_id] = user.thread_working_dirs[old_thread_id]
 
     user.thread_names[new_thread_id] = name or str(new_thread_id)
 

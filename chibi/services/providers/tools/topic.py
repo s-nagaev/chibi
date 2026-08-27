@@ -1,3 +1,4 @@
+import sys
 from typing import Unpack
 
 from loguru import logger
@@ -11,7 +12,8 @@ from chibi.services.user import save_thread_name
 
 
 class RenameThreadTool(ChibiTool):
-    register = True
+    # Thread renaming requires Telegram's forum-topic API; avoid exposing it to non-Telegram runners.
+    register = bool(sys.modules.get("chibi.runners.telegram"))
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(

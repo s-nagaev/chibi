@@ -43,6 +43,7 @@ async def handle_model_selection(
     await query.edit_message_text(text=f"Selected model: '{model.name} ({model.provider})'")
 
 
+@handle_gpt_exceptions
 async def handle_tool_response(tool_response: ToolResponseSchema, interface: UserInterface) -> None:
     chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
         storage_id=interface.storage_id, tool_message=tool_response, interface=interface
@@ -131,6 +132,8 @@ async def handle_user_prompt(interface: UserInterface) -> None:
             interface=interface,
         )
 
+    setattr(interface, "response_model", chat_response.model)
+    setattr(interface, "response_provider", chat_response.provider)
     usage = chat_response.usage
     usage_message = get_usage_msg(usage)
 
