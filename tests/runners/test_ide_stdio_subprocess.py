@@ -314,3 +314,40 @@ def test_real_cli_non_ascii_result_round_trips_on_narrow_console() -> None:
         client.shutdown()
     finally:
         client.close()
+
+
+def test_real_cli_stdout_is_pure_jsonl_and_logs_go_to_stderr() -> None:
+    """Every stdout line of a full session parses as protocol JSON; loguru goes to stderr."""
+    process = subprocess.Popen(
+        [sys.executable, "-c", _BOOTSTRAP],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=0,
+        env=dict(os.environ),
+    )
+    try:
+        session = [
+            json.dumps({"type": "initialize", "protocol_version": 1}),
+            json.dumps(request("r1", 1, "hello")),
+            json.dumps(request("r2", 2, "hello")),
+            json.dumps({"type": "shutdown"}),
+        ]
+        stdout, stderr = process.communicate(input=("\n".join(session) + "\n").encode(), timeout=30)
+        assert process.returncode == 0, stderr.decode(errors="replace")
+
+        stdout_lines = [line for line in stdout.decode().splitlines() if line.strip()]
+        assert stdout_lines, "expected protocol frames on stdout"
+        decoded = [json.loads(line) for line in stdout_lines]  # raises if any line is not JSON
+        results = [frame for frame in decoded if frame.get("type") == "result"]
+        assert {frame["request_id"] for frame in results} == {"r1", "r2"}
+        for frame in results:
+            assert frame["content"] == "deterministic response"
+
+        text = stderr.decode(errors="replace")
+        assert "client_handshake" in text, text  # loguru output reached stderr
+        assert not any(line.lstrip().startswith('{"type"') for line in text.splitlines()), text
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)

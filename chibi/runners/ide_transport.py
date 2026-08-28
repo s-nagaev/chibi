@@ -494,8 +494,10 @@ class IDEStdioRunner:
 
     async def run(self) -> int:
         """Run until shutdown or stdin EOF, then clean up in-flight work."""
-        logger.remove()
-        logger.add(sys.stderr, level="INFO")
+        from chibi.config.logging import use_stderr_logging
+
+        # stdout is the JSONL protocol channel; loguru must never write there.
+        use_stderr_logging()
         try:
             while not self._stopping:
                 line = await self._read_line()

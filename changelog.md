@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- IDE stdio sessions (`chibi ide --stdio`) now redirect loguru output to stderr via an explicit `use_stderr_logging()` switch called from the runner entry, so stdout strictly carries JSONL protocol frames (log lines previously could corrupt the line-by-line JSON protocol). Terminal and Telegram modes are unchanged.
+
 ## [1.13.1] - 2026-08-27
 
 ### Added
