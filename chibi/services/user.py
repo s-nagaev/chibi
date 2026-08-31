@@ -548,6 +548,10 @@ async def clone_thread_messages(
         cloned.id = time.time_ns() + i
         await db.add_message(user=user, message=cloned, thread_id=new_thread_id)
 
+    # Re-fetch the user: LocalStorage.add_message persists into a reloaded copy, so
+    # the object above is stale and saving it would wipe the just-cloned messages.
+    user = await db.get_or_create_user(user_id=storage_id)
+
     if old_thread_id in user.thread_selected_llm:
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
     if old_thread_id in user.thread_selected_image_model:
