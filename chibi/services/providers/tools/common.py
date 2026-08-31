@@ -16,10 +16,11 @@ from chibi.services.providers.tools.utils import (
     get_sub_agent_response,
     resolve_session_context,
 )
+from chibi.utils.app import convert_list_of_models_to_str
 
 
 class GetAvailableLLMModelsTool(ChibiTool):
-    register = True
+    register = False
     loop_warning: int = 10
     loop_break: int = 12
     definition = ChatCompletionToolParam(
@@ -47,7 +48,7 @@ class GetAvailableLLMModelsTool(ChibiTool):
         data: list[ModelChangeSchema] = await get_models_available_to_user(user_id=user_id, image_generation=False)
 
         return {
-            "available_models": [info.model_dump(include={"provider", "name", "display_name"}) for info in data],
+            "available_models": convert_list_of_models_to_str(models=data),
         }
 
 
@@ -64,8 +65,7 @@ class DelegateTool(ChibiTool):
                 "exhaustive and expect a concrete result, or an explanation for its absence. The task should be "
                 "as atomic as possible. Delegate preferably tasks that involve processing large volumes of "
                 "information, to avoid saturating your context. Try to assign simpler tasks to cheaper and faster "
-                "models. You can find out the list of available models by executing tool get_available_llm_models. "
-                "If no model/provider specified, your model will be used (be sure you know your model)."
+                "models."
             ),
             parameters={
                 "type": "object",
@@ -73,9 +73,9 @@ class DelegateTool(ChibiTool):
                     "prompt": {"type": "string", "description": "Prompt"},
                     "provider_name": {"type": "string", "description": "Provider name, i.e. 'OpenAI'"},
                     "model_name": {"type": "string", "description": "Model name, i.e. 'gpt-5.2'"},
-                    "timeout": {"type": "integer", "description": "Timeout in seconds", "default": 600},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds", "default": 0},
                 },
-                "required": ["prompt"],
+                "required": ["prompt", "provider_name", "model_name"],
             },
         ),
     )

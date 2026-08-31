@@ -140,8 +140,8 @@ async def get_sub_agent_response(
     prompt: str,
     model_name: str,
     provider_name: str,
-    caller_storage_id: int | None = None,
-    caller_thread_id: int | None = None,
+    caller_storage_id: int,
+    caller_thread_id: int,
 ) -> ChatResponseSchema:
     """Run a one-shot sub-agent request sharing the parent turn's session context.
 

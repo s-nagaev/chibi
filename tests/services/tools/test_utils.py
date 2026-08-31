@@ -128,7 +128,14 @@ class TestSubAgentPropagation:
 
         with patch.object(User, "providers", new_callable=PropertyMock) as providers_prop:
             providers_prop.return_value = _StubProviders(provider_mock)
-            await get_sub_agent_response(user_id=5, prompt="p", model_name="m", provider_name="OpenAI")
+            await get_sub_agent_response(
+                user_id=5,
+                prompt="p",
+                model_name="m",
+                provider_name="OpenAI",
+                caller_storage_id=5,
+                caller_thread_id=0,
+            )
 
         payload = json.loads(provider_mock.get_chat_response.await_args.kwargs["messages"][0].content)
         assert payload["current_working_dir"] == legacy

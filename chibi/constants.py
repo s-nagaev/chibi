@@ -3,6 +3,7 @@ from typing import Literal
 
 from telegram import constants
 
+from chibi.config import application_settings
 from chibi.config.telegram import telegram_settings
 
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
@@ -65,7 +66,7 @@ Reason: sub-agents do not have access to the user interaction interface and will
 anything to the user
 
 **How to delegate effectively:**
-1. Check available models and provider calling `get_available_llm_models` tool if you didn't do it before
+1. Check available models and providers.
 
 2. **Decompose clearly**: Break the main task into atomic, self-contained subtasks. Each subtask should:
    - Have a clear, unambiguous objective
@@ -189,6 +190,25 @@ will be handled by the moderator).
 10. Provide a brief summary when done; detailed logs only on request.
 11. When conversation grows very long, proactively use `summarize_history`
 or `clear_tool_call_history` to keep context clean.
+"""
+
+PERSISTENT_MEMORY_PROMPT = f"""
+# Persistent Memory
+
+You can access conversation history from the last {application_settings.chroma_history_retention_days} days using the
+`search_in_conversation_history` tool.
+
+Use memory search when:
+- The user refers to past conversations not present in the current context
+- The user asks what they said or discussed earlier
+- Previous preferences, decisions, or project context may improve the response Guidelines.
+
+Guidelines:
+- Prefer semantic descriptions over exact quotes when searching
+- Do not search memory if the current context already contains the needed information
+- If memory results are ambiguous or empty, state that clearly
+- Distinguish recalled facts from inferred assumptions
+- Never fabricate recalled information
 """
 
 

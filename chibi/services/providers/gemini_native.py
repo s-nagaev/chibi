@@ -372,12 +372,12 @@ class Gemini(RestApiFriendlyProvider):
         self,
         messages: list[Message],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]

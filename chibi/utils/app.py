@@ -1,3 +1,4 @@
+import json
 from abc import ABCMeta
 from functools import wraps
 from pathlib import Path
@@ -20,7 +21,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.schemas.app import ChatResponseSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.interface import UserInterface
 
 
@@ -361,3 +362,14 @@ def get_builtin_skill_names() -> dict[str, str]:
         except (UnicodeDecodeError, OSError):
             continue
     return result
+
+
+def convert_list_of_models_to_str(models: list[ModelChangeSchema]) -> str:
+    available_llm_models = {}
+
+    for llm in models:
+        if llm.provider not in available_llm_models:
+            available_llm_models[llm.provider] = llm.name
+        else:
+            available_llm_models[llm.provider] += f", {llm.name}"
+    return json.dumps(available_llm_models)

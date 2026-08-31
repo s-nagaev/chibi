@@ -75,6 +75,7 @@ def interface() -> UserInterface:
     return cast(
         UserInterface,
         SimpleNamespace(
+            storage_id=12345,
             thread_id=3,
             uses_uploaded_file_storage=False,
             send_llm_thoughts=AsyncMock(),
@@ -104,6 +105,8 @@ async def test_openai_friendly_provider_writes_cache_when_influx_not_configured(
         await provider.get_chat_response(
             messages=[Message(role="user", content="Hi")],
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,
@@ -186,6 +189,8 @@ async def test_sub_agent_call_does_not_overwrite_parent_cache(
         await provider.get_chat_response(
             messages=[Message(role="user", content="Hi")],
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,
@@ -204,6 +209,8 @@ async def test_sub_agent_call_does_not_overwrite_parent_cache(
         await provider.get_chat_response(
             messages=[Message(role="user", content="sub-agent prompt")],
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
         )
@@ -238,6 +245,8 @@ async def test_call_without_opt_in_does_not_write(
         await provider.get_chat_response(
             messages=[Message(role="user", content="Hi")],
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,
@@ -268,6 +277,8 @@ async def test_moderation_does_not_overwrite_chat_cache(
         await provider.get_chat_response(
             messages=[Message(role="user", content="Hi")],
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,
