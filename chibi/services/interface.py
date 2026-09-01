@@ -165,6 +165,20 @@ class UserInterface(ABC):
         """
         raise NotImplementedError
 
+    async def send_tool_answer(self, content: str, model: str | None = None, provider: str | None = None) -> None:
+        """Delivers an answer produced by a background tool task.
+
+        The default delivery is a regular message. Interfaces with an
+        out-of-band background channel may override this to route the
+        answer differently once the originating request has finished.
+
+        Args:
+            content: The assistant text to deliver.
+            model: The model that produced the answer, when known.
+            provider: The provider that produced the answer, when known.
+        """
+        await self.send_message(message=content)
+
     async def send_audio(
         self,
         audio: bytes | str,
