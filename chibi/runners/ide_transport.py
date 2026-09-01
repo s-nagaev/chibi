@@ -12,13 +12,22 @@ from loguru import logger
 
 from chibi.constants import IDE_STORAGE_ID
 from chibi.exceptions import ConfigurationError, StorageError
+from chibi.models import Message
 from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.task_manager import task_manager
-from chibi.services.user import get_info, get_models_available, set_active_model
+from chibi.services.user import (
+    clone_thread_messages,
+    get_info,
+    get_models_available,
+    save_thread_name,
+    set_active_model,
+)
+from chibi.storage.abstract import Database
+from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
-COMMANDS = ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
+COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
 
 # Maps backend-internal error codes to the closest frontend-facing code.
 # Codes without a clean frontend analog (malformed_request, not_initialized,
@@ -51,6 +60,22 @@ _FRONTEND_CODE_MAP: dict[str, str] = {
 def _frontend_code(code: str) -> str:
     """Translate a backend-internal error code to its frontend-facing form."""
     return _FRONTEND_CODE_MAP.get(code, code)
+
+
+@inject_database
+async def _get_thread_messages(db: Database, storage_id: int, thread_id: int) -> list[Message]:
+    """Return the conversation history stored for one thread.
+
+    Args:
+        db: Database instance injected by :func:`chibi.storage.database.inject_database`.
+        storage_id: The storage identity owning the thread.
+        thread_id: The thread whose messages should be returned.
+
+    Returns:
+        The stored conversation messages; empty for unknown or empty threads.
+    """
+    user = await db.get_or_create_user(user_id=storage_id)
+    return await db.get_conversation_messages(user=user, thread_id=thread_id)
 
 
 class IDEInterface(UserInterface, EditorContextProvider):
@@ -220,8 +245,19 @@ class IDEInterface(UserInterface, EditorContextProvider):
         raise NotImplementedError("IDE threads are allocated by the client")
 
     async def rename_thread(self, new_name: str) -> bool:
-        """Reject Telegram-only thread renaming."""
-        raise NotImplementedError("IDE threads cannot be renamed")
+        """Persist the thread name in backend storage.
+
+        IDE threads have no external topic to edit, so the name is registered
+        in the user's thread-name map (the same place the clone command uses).
+
+        Args:
+            new_name: The new display name for this request's thread.
+
+        Returns:
+            True once the name is persisted.
+        """
+        await save_thread_name(storage_id=self.storage_id, thread_id=self.thread_id, name=new_name)
+        return True
 
     async def delete_thread(self) -> bool:
         """Reject deletion of IDE threads."""
@@ -239,6 +275,7 @@ class IDEStdioRunner:
         self._stopping = False
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._thread_requests: dict[int, int] = {}
+        self._active_clones: set[int] = set()
         self.exit_code = 0
         self._stdout_lock = asyncio.Lock()
 
@@ -313,6 +350,89 @@ class IDEStdioRunner:
             and isinstance(message.get("language_id"), (str, type(None)))
         )
 
+    async def _handle_new_thread_with_current_context(
+        self, interface: IDEInterface, args: str, responses: list[str]
+    ) -> None:
+        """Clone a source thread's history into the request's (new) thread.
+
+        The request frame arrives on the destination thread's identity (the
+        client minted the new thread id, mirroring how /reset arrives on the
+        thread it resets); the source thread id is taken from the command
+        arguments: ``/new_thread_with_current_context <source_thread_id> [name]``.
+        The clone re-keys the source conversation onto the destination bucket
+        via :func:`chibi.services.user.clone_thread_messages`, which also
+        registers the thread name.
+
+        Args:
+            interface: Request-local interface bound to the destination thread.
+            args: Raw command arguments (source thread id and optional name).
+            responses: Accumulated response lines for the result frame.
+        """
+        parts = args.split(maxsplit=1)
+        raw_source = parts[0] if parts else ""
+        name = parts[1].strip() if len(parts) > 1 else ""
+
+        source = int(raw_source) if raw_source.isascii() and raw_source.isdigit() else None
+        if source is None or source < 0:
+            interface.error_code = "invalid_argument"
+            interface.error_message = (
+                f"Invalid source thread id: {raw_source!r}. "
+                "Usage: /new_thread_with_current_context <source_thread_id> [name]"
+            )
+            return
+        if self._thread_requests.get(source, 0) > 0:
+            interface.error_code = "invalid_argument"
+            interface.error_message = f"Source thread {source} is busy. Wait for it to finish before cloning."
+            return
+        if source in self._active_clones:
+            interface.error_code = "invalid_argument"
+            interface.error_message = f"A clone of thread {source} is already in progress."
+            return
+
+        self._active_clones.add(source)
+        try:
+            try:
+                source_history = await _get_thread_messages(storage_id=IDE_STORAGE_ID, thread_id=source)
+                if not source_history:
+                    interface.error_code = "invalid_argument"
+                    interface.error_message = f"Source thread {source} has no message history to clone."
+                    return
+                destination_history = await _get_thread_messages(
+                    storage_id=IDE_STORAGE_ID, thread_id=interface.thread_id
+                )
+                if destination_history:
+                    interface.error_code = "invalid_argument"
+                    interface.error_message = (
+                        f"Destination thread {interface.thread_id} already has message history. "
+                        "Clone into an empty thread instead."
+                    )
+                    return
+                cloned_messages = await clone_thread_messages(
+                    storage_id=IDE_STORAGE_ID,
+                    old_thread_id=source,
+                    new_thread_id=interface.thread_id,
+                    name=name or None,
+                )
+            except StorageError as exc:
+                logger.exception("IDE thread clone failed")
+                interface.error_code = "request_failed"
+                interface.error_message = f"Failed to clone thread {source}: {exc.detail}"
+                return
+            except Exception:
+                logger.exception("IDE thread clone failed")
+                interface.error_code = "request_failed"
+                interface.error_message = (
+                    f"Failed to clone thread {source}. Check the Chibi output channel for details."
+                )
+                return
+        finally:
+            self._active_clones.discard(source)
+
+        responses.append(
+            f"✅ Thread cloned: {name or str(interface.thread_id)} (ID: {interface.thread_id}). "
+            f"{cloned_messages} messages copied."
+        )
+
     async def _run_request(self, message: dict[str, Any]) -> None:
         """Route and complete one request."""
         request_id = message["request_id"]
@@ -329,6 +449,10 @@ class IDEStdioRunner:
                     responses.append("Available commands: " + ", ".join(COMMANDS))
                 elif command == "/reset":
                     await handle_reset(interface=interface)
+                elif command == "/new_thread_with_current_context":
+                    await self._handle_new_thread_with_current_context(
+                        interface=interface, args=args, responses=responses
+                    )
                 elif command == "/imagine":
                     if not args:
                         raise ValueError("Please provide a prompt: /imagine <description>")
@@ -494,8 +618,10 @@ class IDEStdioRunner:
 
     async def run(self) -> int:
         """Run until shutdown or stdin EOF, then clean up in-flight work."""
-        logger.remove()
-        logger.add(sys.stderr, level="INFO")
+        from chibi.config.logging import use_stderr_logging
+
+        # stdout is the JSONL protocol channel; loguru must never write there.
+        use_stderr_logging()
         try:
             while not self._stopping:
                 line = await self._read_line()

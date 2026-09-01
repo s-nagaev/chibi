@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-31
+
+### Added
+- **Thread cloning with context:** support for IDE stdio protocol.
+- IDE stdio sessions (`chibi ide --stdio`) now redirect loguru output to stderr via an explicit `use_stderr_logging()` switch called from the runner entry, so stdout strictly carries JSONL protocol frames (log lines previously could corrupt the line-by-line JSON protocol). Terminal and Telegram modes are unchanged.
+
+### Fixed
+- `clone_thread_messages` no longer wipes the cloned history on LocalStorage (caused by a stale user save); cloned threads now persist correctly.
+
 ## [1.13.1] - 2026-08-27
 
 ### Added
@@ -627,7 +636,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/s-nagaev/chibi/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...v1.13.1
 [1.13.1b1]: https://github.com/s-nagaev/chibi/compare/v1.13.1-beta...v1.13.1b1
 [1.13.1-beta]: https://github.com/s-nagaev/chibi/compare/v1.13.0...v1.13.1-beta

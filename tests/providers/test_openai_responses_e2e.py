@@ -51,6 +51,8 @@ async def test_responses_api_basic_text(openai_provider: OpenAI, test_user: User
     response, new_messages = await openai_provider.get_chat_response(
         messages=messages,
         user=test_user,
+        caller_storage_id=test_user.id,
+        caller_thread_id=0,
         model="o3-mini",
         system_prompt="",  # skip system prompt to avoid DB dependency in e2e
     )
@@ -84,6 +86,8 @@ async def test_responses_api_tool_call(openai_provider: OpenAI, test_user: User)
     response, new_messages = await openai_provider.get_chat_response(
         messages=messages,
         user=test_user,
+        caller_storage_id=test_user.id,
+        caller_thread_id=0,
         model="o3-mini",
         system_prompt="",
     )

@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 
+from aiocache import cached
 from anthropic.types import (
     MessageParam,
     TextBlockParam,
@@ -665,6 +666,7 @@ class User(BaseModel):
             return self.working_dir
         return application_settings.working_dir
 
+    @cached(ttl=60 * 60)
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances
         tasks = [provider.get_available_models(image_generation=image_generation) for provider in providers]

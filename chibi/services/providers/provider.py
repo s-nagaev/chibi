@@ -51,6 +51,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -271,12 +272,12 @@ class Provider(ABC):
         self,
         messages: list[Message],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         raise NotImplementedError
 
@@ -529,16 +530,17 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=16), reraise=True)
     async def get_chat_response(
         self,
         messages: list[Message],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
@@ -986,12 +988,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         self,
         messages: list[Message],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]

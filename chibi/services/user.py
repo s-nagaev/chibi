@@ -58,6 +58,8 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
         messages=user_messages,
         user=user,
         system_prompt="Summarize this conversation, keeping the most important and useful information using English.",
+        caller_storage_id=storage_id,
+        caller_thread_id=thread_id,
     )
     initial_message = Message(role="user", content="What we were talking about?")
     answer_message = Message(role="assistant", content=response.answer)
@@ -94,7 +96,13 @@ async def send_scheduled_message_to_llm(
         active_model = user.get_active_llm_model(thread_id=thread_id)
 
         chat_response, new_messages = await active_provider.get_chat_response(
-            messages=conversation_messages, user=user, model=active_model, interface=interface, track_prompt_size=True
+            messages=conversation_messages,
+            user=user,
+            model=active_model,
+            interface=interface,
+            track_prompt_size=True,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for msg in new_messages:
@@ -218,6 +226,8 @@ async def get_llm_chat_completion_answer(
             model=active_model,
             interface=interface,
             track_prompt_size=True,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
@@ -537,6 +547,10 @@ async def clone_thread_messages(
         cloned = deepcopy(message)
         cloned.id = time.time_ns() + i
         await db.add_message(user=user, message=cloned, thread_id=new_thread_id)
+
+    # Re-fetch the user: LocalStorage.add_message persists into a reloaded copy, so
+    # the object above is stale and saving it would wipe the just-cloned messages.
+    user = await db.get_or_create_user(user_id=storage_id)
 
     if old_thread_id in user.thread_selected_llm:
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]

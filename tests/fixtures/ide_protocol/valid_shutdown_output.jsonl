@@ -1,1 +1,1 @@
-{"type": "ready", "protocol_version": 1, "server": {"name": "chibi", "version": "1.0.0"}, "capabilities": {"commands": ["/reset", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]}}
+{"type": "ready", "protocol_version": 1, "server": {"name": "chibi", "version": "1.0.0"}, "capabilities": {"commands": ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]}}

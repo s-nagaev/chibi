@@ -14,15 +14,16 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
+from chibi.constants import PERSISTENT_MEMORY_PROMPT
 from chibi.models import Message
-from chibi.schemas.app import UsageSchema
+from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.interface import UserInterface
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import get_chibi_user
 from chibi.storage.files import get_file_storage
 from chibi.storage.files.file_storage import FileStorage
-from chibi.utils.app import get_builtin_skill_names
+from chibi.utils.app import convert_list_of_models_to_str, get_builtin_skill_names
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -90,29 +91,7 @@ async def prepare_system_prompt(
     }
 
     if application_settings.is_chroma_configured:
-        retention_days = application_settings.chroma_history_retention_days
-        prompt["system_prompt"] += f"""\n\n# Persistent Memory
-
-            You can access conversation history from the last {retention_days} days using the
-            `search_in_conversation_history` tool.\n\n
-            Use memory search when:\n
-
-            - The user refers to past conversations not present in the current context\n
-
-            - The user asks what they said or discussed earlier\n
-
-            - Previous preferences, decisions, or project context may improve the response\n\n
-            Guidelines:\n
-
-            - Prefer semantic descriptions over exact quotes when searching\n
-
-            - Do not search memory if the current context already contains the needed information\n
-
-            - Never fabricate recalled information\n
-
-            - If memory results are ambiguous or empty, state that clearly\n
-
-            - Distinguish recalled facts from inferred assumptions\n"""
+        prompt["system_prompt"] += PERSISTENT_MEMORY_PROMPT
 
     if gpt_settings.filesystem_access:
         system_data = {
@@ -142,12 +121,15 @@ async def prepare_system_prompt(
             if context_percentage > gpt_settings.context_size_warning_threshold:
                 prompt["context_size_warning"] = (
                     f"The context size is more than {gpt_settings.context_size_warning_threshold}% of the "
-                    f"maximum allowed ({max_history_tokens}) tokens. It is strongly recommended to reduce "
+                    f"maximum allowed ({max_history_tokens}) tokens. It is STRONGLY RECOMMENDED to reduce "
                     f"the context by calling 'summarize_history' or 'clear_tool_call_history' and "
                     f"generating the most detailed summary possible."
                 )
         else:
             prompt["approximate_context_size"] = "n/a"
+
+    llms_data: list[ModelChangeSchema] = await user.get_available_models()
+    prompt["available_models_to_delegate"] = convert_list_of_models_to_str(models=llms_data)
 
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
     return json.dumps(prompt)

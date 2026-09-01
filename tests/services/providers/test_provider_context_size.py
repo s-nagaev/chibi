@@ -134,6 +134,7 @@ def interface() -> UserInterface:
     return cast(
         UserInterface,
         SimpleNamespace(
+            storage_id=12345,
             thread_id=0,
             uses_uploaded_file_storage=False,
             send_llm_thoughts=AsyncMock(),
@@ -166,6 +167,8 @@ async def test_get_chat_response_passes_conversation_messages_to_prepare_system_
         chat_response, new_messages = await provider.get_chat_response(
             messages=conversation,
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,
@@ -209,6 +212,8 @@ async def test_tool_call_recursion_grows_context_size(
         chat_response, new_messages = await provider.get_chat_response(
             messages=conversation,
             user=user,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
             model=TEST_MODEL,
             system_prompt="base",
             interface=interface,

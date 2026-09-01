@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from chibi.services.user import get_cwd, set_thread_working_dir, set_working_dir
+from chibi.models import Message
+from chibi.services.user import clone_thread_messages, get_cwd, set_thread_working_dir, set_working_dir
 from chibi.storage.local import LocalStorage
 
 
@@ -54,3 +55,33 @@ async def test_legacy_set_working_dir_stores_value_verbatim(tmp_path: Path) -> N
     user = await db.get_or_create_user(user_id=1)
     assert user.working_dir == "~/legacy"
     assert await get_cwd.__wrapped__(db, user_id=1) == "~/legacy"
+
+
+async def test_clone_thread_messages_persists_cloned_history_on_real_local_storage(tmp_path: Path) -> None:
+    """Regression: on LocalStorage the clone's final save_user must not wipe just-cloned messages.
+
+    LocalStorage keeps thread messages inside the user pickle and add_message persists a reloaded
+    copy, so a stale save_user after the clone loop used to erase the cloned history (destination
+    ended up empty while the ack reported N copies). Uses a real LocalStorage on a tmp dir — no DB mocking.
+    """
+    db = LocalStorage(storage_path=str(tmp_path))
+    seeded = [
+        Message(role="user", content="My favorite number is 42."),
+        Message(role="assistant", content="OK"),
+    ]
+    user = await db.get_or_create_user(user_id=777)
+    for message in seeded:
+        await db.add_message(user=user, message=message, thread_id=101)
+
+    copied = await clone_thread_messages.__wrapped__(
+        db, storage_id=777, old_thread_id=101, new_thread_id=202, name="regression-clone"
+    )
+
+    assert copied == len(seeded)
+    refreshed = await db.get_or_create_user(user_id=777)  # fresh read from disk
+    assert [(m.role, m.content) for m in refreshed.thread_messages_map[202]] == [
+        (m.role, m.content) for m in seeded
+    ]
+    assert len(refreshed.thread_messages_map[202]) == copied  # returned count matches reality
+    assert len(refreshed.thread_messages_map[101]) == len(seeded)  # source thread intact
+    assert refreshed.thread_names[202] == "regression-clone"

@@ -50,7 +50,7 @@ async def handle_tool_response(tool_response: ToolResponseSchema, interface: Use
     )
     usage_message = get_usage_msg(chat_response.usage)
 
-    if "<chibi>ack</chibi>" in chat_response.answer.lower():
+    if "<chibi>ack</chibi>" in chat_response.answer.lower() and len(chat_response.answer) <= 27:
         logger.info(
             f"[{interface.user_data}-{interface.chat_data}] LLM silently received tool result "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
@@ -143,7 +143,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
     else:
         logged_answer = ""
 
-    if "<chibi>ack</chibi>" in chat_response.answer.lower():
+    if "<chibi>ack</chibi>" in chat_response.answer.lower() and len(chat_response.answer) <= 27:
         logger.info(
             f"[{interface.user_data}-{interface.chat_data}] LLM silently received user request "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"

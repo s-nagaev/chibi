@@ -52,12 +52,12 @@ class OpenAI(OpenAIFriendlyProvider):
         self,
         messages: list[Message],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response with Responses API fallback to Chat Completions.
 
