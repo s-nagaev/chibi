@@ -108,17 +108,17 @@ def deliver_later(content: str, model: str | None = None, provider: str | None =
 
         task = asyncio.create_task(deliver())
         BACKGROUND_TASKS.append(task)
-        interface.background_task = task
         await interface.send_message("Foreground answer")
 
     return fake_prompt
 
 
-def initialize(capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
+def initialize(capabilities: Any = None) -> dict[str, Any]:
     """Build an initialize message.
 
     Args:
-        capabilities: Optional client capabilities payload.
+        capabilities: Optional client capabilities payload. Non-object values
+            (for example a bare string) are allowed for malformed-input tests.
 
     Returns:
         A protocol initialize message.
