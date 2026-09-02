@@ -9,10 +9,13 @@ from io import BytesIO
 from typing import Any, Callable
 
 from loguru import logger
+from openai.types import CompletionUsage
 
+from chibi.config.gpt import gpt_settings
 from chibi.constants import IDE_STORAGE_ID
 from chibi.exceptions import ConfigurationError, StorageError
-from chibi.models import Message
+from chibi.models import Message, get_model_context_window
+from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.task_manager import task_manager
@@ -28,6 +31,56 @@ from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
 COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
+
+
+def build_usage_payload(
+    usage: UsageSchema | CompletionUsage | None, provider: str | None, model: str | None
+) -> dict[str, Any] | None:
+    """Shape provider usage data into the result-frame ``usage`` object.
+
+    The numbers are exactly what the provider reported for the request that
+    produced this answer, never an estimate. Input tokens include Anthropic
+    cache reads and writes when they are reported separately, mirroring how
+    ``UsageCacheStore`` computes the real prompt size. The emitted
+    ``context_window`` is the effective ceiling ``min(model window,
+    MAX_HISTORY_TOKENS)``: proactive summarization fires at
+    ``MAX_HISTORY_TOKENS`` (default 100000), so the denominator the client
+    sees must reflect that ceiling rather than the raw model window. When the
+    backend has no curated context window for the model, ``context_window``
+    is null and stays null (no clamp possible, nothing fabricated).
+
+    Args:
+        usage: Usage object attached to the chat response, if the provider
+            reported one.
+        provider: Name of the provider that served the response.
+        model: Name of the model that served the response.
+
+    Returns:
+        A dict with ``input_tokens``, ``output_tokens`` and ``context_window``,
+        or None when no usage data is available.
+    """
+    if usage is None:
+        return None
+    input_tokens = usage.prompt_tokens
+    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    # Anthropic-compatible APIs (Anthropic itself and MiniMax, which rides the
+    # same Anthropic Messages path) report cached input outside input_tokens,
+    # so the cache parts must be added. Every other provider includes cached
+    # tokens inside its prompt token count already.
+    if provider and provider.lower() in ("anthropic", "minimax"):
+        input_tokens += cache_creation + cache_read
+    context_window = get_model_context_window(model)
+    if context_window is not None:
+        # Effective ceiling: summarization triggers at MAX_HISTORY_TOKENS, so
+        # cap the advertised window there. Unknown models keep null.
+        context_window = min(context_window, gpt_settings.max_history_tokens)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": usage.completion_tokens,
+        "context_window": context_window,
+    }
+
 
 # Maps backend-internal error codes to the closest frontend-facing code.
 # Codes without a clean frontend analog (malformed_request, not_initialized,
@@ -110,6 +163,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         self._closed = False
         self.response_model: str | None = None
         self.response_provider: str | None = None
+        self.response_usage: UsageSchema | CompletionUsage | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
 
@@ -578,6 +632,11 @@ class IDEStdioRunner:
             if interface.response_model is not None and interface.response_provider is not None:
                 result["model"] = interface.response_model
                 result["provider"] = interface.response_provider
+            usage_payload = build_usage_payload(
+                usage=interface.response_usage, provider=interface.response_provider, model=interface.response_model
+            )
+            if usage_payload is not None:
+                result["usage"] = usage_payload
             await self._write(result)
         except asyncio.CancelledError:
             await self._error("cancelled", "Request cancelled.", request_id)
