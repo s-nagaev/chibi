@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-09-02
+
+### Added
+- **Background message delivery (IDE stdio):** background tool completions (e.g. delegation results) are no longer silently lost when the original request has already finished. Clients that declare `capabilities.background_messages: true` in the `initialize` handshake receive out-of-band `{type: "message", thread_id, content, model?, provider?}` frames routed by thread; `model`/`provider` are set when the producing response carries them. Emission failures are logged and the frame is dropped. Clients that do not declare the capability are unaffected; no protocol_version bump.
+
 ## [1.14.0] - 2026-08-31
 
 ### Added
@@ -636,7 +641,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/s-nagaev/chibi/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...v1.13.1
 [1.13.1b1]: https://github.com/s-nagaev/chibi/compare/v1.13.1-beta...v1.13.1b1
