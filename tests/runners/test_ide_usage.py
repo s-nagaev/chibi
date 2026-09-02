@@ -17,7 +17,7 @@ from openai.types import CompletionUsage
 
 import chibi.config  # noqa: F401
 from chibi.config.gpt import gpt_settings
-from chibi.models import get_model_context_window
+from chibi.constants import get_model_context_window
 from chibi.runners.ide_transport import IDEStdioRunner, build_usage_payload
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 
@@ -176,8 +176,9 @@ async def test_result_frame_usage_context_window_is_null_for_unknown_model(monke
 def test_build_usage_payload_adds_anthropic_cache_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     """Anthropic-style usage reports cached input outside input_tokens.
 
-    The model window equals MAX_HISTORY_TOKENS here (boundary case of the
-    clamp: min is a no-op when both sides are equal).
+    The model window (200000 for claude-haiku-4.5, resolved through the
+    dated spelling and normalization) equals MAX_HISTORY_TOKENS here
+    (boundary case of the clamp: min is a no-op when both sides are equal).
     """
     monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
     usage = UsageSchema(
@@ -187,7 +188,7 @@ def test_build_usage_payload_adds_anthropic_cache_tokens(monkeypatch: pytest.Mon
         cache_creation_input_tokens=30,
         cache_read_input_tokens=400,
     )
-    payload = build_usage_payload(usage=usage, provider="Anthropic", model="claude-sonnet-4-5-20250929")
+    payload = build_usage_payload(usage=usage, provider="Anthropic", model="claude-haiku-4-5-20251001")
     assert payload == {"input_tokens": 530, "output_tokens": 20, "context_window": 200000}
 
 
@@ -233,7 +234,7 @@ class TestModelContextWindowLookup:
     """Curated context-window map behavior."""
 
     def test_exact_match(self) -> None:
-        assert get_model_context_window("deepseek-chat") == 128000
+        assert get_model_context_window("deepseek-v4-pro") == 1000000
 
     def test_case_insensitive_exact_match(self) -> None:
         assert get_model_context_window("MiniMax-M2.7") == 204800
@@ -250,6 +251,142 @@ class TestModelContextWindowLookup:
     def test_none_and_empty_return_none(self) -> None:
         assert get_model_context_window(None) is None
         assert get_model_context_window("") is None
+
+
+MODELS_TXT_IDS: list[tuple[str, int | None]] = [
+    ("claude-sonnet-5", 1000000),
+    ("claude-sonnet-4-6", 1000000),
+    ("claude-opus-5", 1000000),
+    ("claude-opus-4-8", 1000000),
+    ("claude-opus-4-7", 1000000),
+    ("claude-opus-4-6", 1000000),
+    ("claude-haiku-4-5-20251001", 200000),
+    ("claude-fable-5-1", 1000000),
+    ("claude-fable-5", 1000000),
+    ("deepseek-v4-pro", 1000000),
+    ("deepseek-v4-flash-vision-exp", 1000000),
+    ("deepseek-v4-flash", 1000000),
+    ("models/gemma-4-31b-it", 262144),
+    ("models/gemma-4-26b-a4b-it", 262144),
+    ("models/gemini-3.8-flash", 1048576),
+    ("models/gemini-3.7-flash", 1000000),
+    ("models/gemini-3.6-flash", 1048576),
+    ("models/gemini-3.5-flash-lite", 1000000),
+    ("models/gemini-3.5-flash", 1000000),
+    ("models/gemini-3.1-pro-preview", 1000000),
+    ("models/gemini-3.1-flash-lite", 1048576),
+    ("models/gemini-2.5-pro", 1000000),
+    ("models/gemini-2.5-flash-lite", 1048576),
+    ("models/gemini-2.5-flash", 1048576),
+    ("grok-build-0.1", 200000),
+    ("grok-4.6", 500000),
+    ("grok-4.5", 500000),
+    ("grok-4.3", 1000000),
+    ("grok-4.20-multi-agent-0309", 1000000),
+    ("grok-4.20-0309-reasoning", 1000000),
+    ("grok-4.20-0309-non-reasoning", 1000000),
+    ("MiniMax-M3", 1048576),
+    ("MiniMax-M2.7", 204800),
+    ("MiniMax-M2.5", 204800),
+    ("mistral-small-latest", 262144),
+    ("mistral-medium-latest", 262144),
+    ("mistral-large-latest", 262144),
+    ("mistral-code-latest", None),
+    ("kimi-k3", 1048576),
+    ("kimi-k2.7-code", 262144),
+    ("kimi-k2.6", 262144),
+    ("o4-mini", 200000),
+    ("o3", 200000),
+    ("o1", 200000),
+    ("gpt-5.6-terra", 872000),
+    ("gpt-5.6-sol", 272000),
+    ("gpt-5.6-luna", 872000),
+    ("gpt-5.5", 1000000),
+    ("gpt-5.4-nano", 400000),
+    ("gpt-5.4-mini", 400000),
+    ("gpt-5.4", 1050000),
+    ("gpt-5.3-codex", 400000),
+    ("gpt-5.2", 400000),
+    ("gpt-5.1", 400000),
+    ("gpt-5-nano", 400000),
+    ("gpt-5-mini", 400000),
+    ("gpt-4o-mini", 128000),
+    ("gpt-4o", 128000),
+    ("gpt-4.1-nano", 1000000),
+    ("gpt-4.1-mini", 1000000),
+    ("gpt-4.1", 1000000),
+    ("glm-5.3-flash", 1048576),
+    ("glm-5.3", 1000000),
+    ("glm-5.2", 1048576),
+    ("glm-5.1", 200000),
+    ("glm-5-turbo", 200000),
+    ("glm-5", 200000),
+    ("glm-4.7", 200000),
+    ("glm-4.6", 200000),
+    ("glm-4.5-air", 128000),
+    ("glm-4.5", 128000),
+    ("glm-4-32b-0414-128k", 128000),
+    ("glm-4.7-flash", 200000),
+    ("glm-4.7-flashx", 200000),
+]
+
+QWEN_IDS: list[tuple[str, int | None]] = [
+    ("qwen3.8-max", 1000000),
+    ("qwen3.5-plus", 1000000),
+    ("qwen3.5-flash", 1000000),
+    ("qwen-plus", 1000000),
+    ("qwen-flash", 1000000),
+]
+
+
+class TestAuthoritativeModelListCoverage:
+    """Every authoritative ID resolves exactly as the verified map prescribes."""
+
+    @pytest.mark.parametrize(("model_id", "expected"), MODELS_TXT_IDS)
+    def test_models_txt_id(self, model_id: str, expected: int | None) -> None:
+        assert get_model_context_window(model_id) == expected
+
+    @pytest.mark.parametrize(("model_id", "expected"), QWEN_IDS)
+    def test_qwen_id(self, model_id: str, expected: int | None) -> None:
+        assert get_model_context_window(model_id) == expected
+
+
+class TestModelContextWindowNormalization:
+    """Normalization pipeline: vendor prefixes, case, dates and version dots."""
+
+    @pytest.mark.parametrize(
+        ("model_id", "expected"),
+        [
+            ("claude-haiku-4-5-20251001", 200000),  # date suffix + dash-dot
+            ("models/gemini-3.8-flash", 1048576),  # models/ vendor prefix
+            ("MiniMax-M3", 1048576),  # MiniMax capitalization
+            ("minimax-m3", 1048576),  # already-lowercase MiniMax
+            ("grok-4.20-0309-reasoning", 1000000),  # dated variant -> family key
+            ("grok-4.20-multi-agent-0309", 1000000),  # trailing date suffix
+            ("deepseek-v4-pro-0813", 1000000),  # short snapshot suffix
+            ("gpt-5.2-2026-01-15", 400000),  # full-date suffix
+        ],
+    )
+    def test_normalized_ids_resolve(self, model_id: str, expected: int) -> None:
+        assert get_model_context_window(model_id) == expected
+
+    @pytest.mark.parametrize(
+        ("model_id", "expected"),
+        [
+            ("glm-4-32b-0414-128k", 128000),  # semantic dashes: never rewritten
+            ("kimi-k2.7-code", 262144),  # semantic suffix: never stripped
+            ("deepseek-v4-flash-vision-exp", 1000000),  # word dashes stay
+        ],
+    )
+    def test_semantic_dash_ids_unchanged(self, model_id: str, expected: int) -> None:
+        assert get_model_context_window(model_id) == expected
+
+    @pytest.mark.parametrize(
+        "model_id",
+        ["mistral-code-latest"],
+    )
+    def test_no_match_returns_none(self, model_id: str) -> None:
+        assert get_model_context_window(model_id) is None
 
 
 class _FakeInterfaceForBot:

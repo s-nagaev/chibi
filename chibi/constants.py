@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 from typing import Literal
 
@@ -20,6 +21,146 @@ FILE_UPLOAD_TIMEOUT = 120.0
 AUDIO_UPLOAD_TIMEOUT = 60.0
 # Stable, collision-safe storage identity reserved for the IDE channel.
 IDE_STORAGE_ID = -(10**16)
+
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "o1": 200000,
+    "o3": 200000,
+    "o4-mini": 200000,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4.1": 1000000,
+    "gpt-4.1-mini": 1000000,
+    "gpt-4.1-nano": 1000000,
+    "gpt-5.1": 400000,
+    "gpt-5.2": 400000,
+    "gpt-5.3-codex": 400000,
+    "gpt-5.4": 1050000,
+    "gpt-5.4-mini": 400000,
+    "gpt-5.4-nano": 400000,
+    "gpt-5.5": 1000000,
+    "gpt-5.6-sol": 272000,
+    "gpt-5.6-terra": 872000,
+    "gpt-5.6-luna": 872000,
+    "gpt-5-mini": 400000,
+    "gpt-5-nano": 400000,
+    "claude-sonnet-4-6": 1000000,
+    "claude-sonnet-5": 1000000,
+    "claude-opus-4-6": 1000000,
+    "claude-opus-4-7": 1000000,
+    "claude-opus-4-8": 1000000,
+    "claude-opus-5": 1000000,
+    "claude-haiku-4.5": 200000,
+    "claude-fable-5": 1000000,
+    "claude-fable-5-1": 1000000,
+    "deepseek-v4-pro": 1000000,
+    "deepseek-v4-flash": 1000000,
+    "deepseek-v4-flash-vision-exp": 1000000,
+    "gemma-4-31b-it": 262144,
+    "gemma-4-26b-a4b-it": 262144,
+    "gemini-3.8-flash": 1048576,
+    "gemini-3.7-flash": 1000000,
+    "gemini-3.6-flash": 1048576,
+    "gemini-3.5-flash": 1000000,
+    "gemini-3.5-flash-lite": 1000000,
+    "gemini-3.1-pro": 1000000,
+    "gemini-3.1-flash-lite": 1048576,
+    "gemini-2.5-pro": 1000000,
+    "gemini-2.5-flash": 1048576,
+    "gemini-2.5-flash-lite": 1048576,
+    "grok-build-0.1": 200000,
+    "grok-4.3": 1000000,
+    "grok-4.5": 500000,
+    "grok-4.6": 500000,
+    "grok-4.20": 1000000,
+    "minimax-m3": 1048576,
+    "minimax-m2.7": 204800,
+    "minimax-m2.5": 204800,
+    "mistral-small-latest": 262144,
+    "mistral-medium-latest": 262144,
+    "mistral-large-latest": 262144,
+    "kimi-k3": 1048576,
+    "kimi-k2.7-code": 262144,
+    "kimi-k2.6": 262144,
+    "qwen3.8-max": 1000000,
+    "qwen3.5-plus": 1000000,
+    "qwen3.5-flash": 1000000,
+    "qwen-plus": 1000000,
+    "qwen-flash": 1000000,
+    "glm-5.3": 1000000,
+    "glm-5.3-flash": 1048576,
+    "glm-5.2": 1048576,
+    "glm-5.1": 200000,
+    "glm-5-turbo": 200000,
+    "glm-5": 200000,
+    "glm-4.7": 200000,
+    "glm-4.7-flash": 200000,
+    "glm-4.7-flashx": 200000,
+    "glm-4.6": 200000,
+    "glm-4.5": 128000,
+    "glm-4.5-air": 128000,
+    "glm-4-32b-0414-128k": 128000,
+}
+
+_DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$|-\d{8}$|-\d{4}$")
+_DIGIT_HYPHEN_RE = re.compile(r"(?<=\d)-(?=\d)")
+
+
+def _longest_prefix_window(name: str) -> int | None:
+    """Return the window of the longest map key that prefixes ``name``.
+
+    A prefix only counts when it ends at a family boundary (end of string,
+    a hyphen or a dot), so "gpt-4.1" never matches "gpt-4.11".
+    """
+    best_key = ""
+    for key in MODEL_CONTEXT_WINDOWS:
+        if len(key) > len(best_key) and name.startswith(key) and (len(name) == len(key) or name[len(key)] in "-."):
+            best_key = key
+    return MODEL_CONTEXT_WINDOWS.get(best_key) if best_key else None
+
+
+def get_model_context_window(model_name: str | None) -> int | None:
+    """Look up the provider-advertised context window for a model.
+
+    The map holds lowercase family identifiers; dated snapshots and
+    vendor-prefixed spellings resolve through the pipeline below, and
+    unknown models yield None.
+
+    Resolution order:
+      1. exact hit on the lowercased, vendor-prefix-stripped name
+         ("MiniMax-M3" -> "minimax-m3", "models/gemini-3.8-flash" ->
+         "gemini-3.8-flash");
+      2. normalized hit: trailing date/snapshot suffixes are removed and
+         version hyphens between digit runs become dots
+         ("claude-haiku-4-5-20251001" -> "claude-haiku-4.5");
+      3. longest family-prefix match ("gemini-3.1-pro-preview" ->
+         "gemini-3.1-pro").
+
+    IDs with semantic dashes such as "glm-4-32b-0414-128k" and
+    "kimi-k2.7-code" are exact map keys, so they resolve at step 1 and no
+    normalization is ever applied to them.
+
+    Args:
+        model_name: Model identifier as reported by the provider, if any.
+
+    Returns:
+        The context window in tokens, or None when the model is unknown.
+    """
+    if not model_name:
+        return None
+    name = model_name.lower()
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    if name in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[name]
+    stripped = _DATE_SUFFIX_RE.sub("", name)
+    normalized = _DIGIT_HYPHEN_RE.sub(".", stripped)
+    if normalized in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[normalized]
+    for candidate in (stripped, normalized):
+        window = _longest_prefix_window(candidate)
+        if window is not None:
+            return window
+    return None
 
 
 class UserContext(Enum):
