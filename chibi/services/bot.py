@@ -67,7 +67,9 @@ async def handle_tool_response(tool_response: ToolResponseSchema, interface: Use
         f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer in "
         f"the {interface.chat_data}. {logged_answer} {usage_message}"
     )
-    await interface.send_message(message=chat_response.answer)
+    await interface.send_tool_answer(
+        content=chat_response.answer, model=chat_response.model, provider=chat_response.provider
+    )
 
 
 # async def handle_scheduled_event(

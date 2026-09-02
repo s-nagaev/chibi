@@ -83,7 +83,14 @@ class IDEInterface(UserInterface, EditorContextProvider):
 
     uses_uploaded_file_storage = False
 
-    def __init__(self, thread_id: int, prompt: str, context: dict[str, Any], emit: Callable[[str], Any]) -> None:
+    def __init__(
+        self,
+        thread_id: int,
+        prompt: str,
+        context: dict[str, Any],
+        emit: Callable[[str], Any],
+        background_emit: Callable[[int, str, str | None, str | None], Any] | None = None,
+    ) -> None:
         """Initialize an IDE request interface.
 
         Args:
@@ -91,15 +98,29 @@ class IDEInterface(UserInterface, EditorContextProvider):
             prompt: User prompt for this request.
             context: Editor context supplied by the client.
             emit: Callback receiving assistant text responses.
+            background_emit: Optional session-level callback delivering
+                assistant text as out-of-band background message frames
+                after the owning request has finished.
         """
         self._thread_id = thread_id
         self._prompt = prompt
         self._context = context
         self._emit = emit
+        self._background_emit = background_emit
+        self._closed = False
         self.response_model: str | None = None
         self.response_provider: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
+
+    def mark_closed(self) -> None:
+        """Flag the owning request as finished.
+
+        After this, assistant text delivered by background tool tasks is
+        routed to the out-of-band background emitter instead of the dead
+        request's response buffer.
+        """
+        self._closed = True
 
     @property
     def editor_context(self) -> dict[str, Any] | None:
@@ -191,6 +212,35 @@ class IDEInterface(UserInterface, EditorContextProvider):
     async def delete_last_user_message(self) -> None:
         """Ignore message deletion on stdio."""
 
+    async def send_tool_answer(self, content: str, model: str | None = None, provider: str | None = None) -> None:
+        """Deliver an answer produced by a background tool task.
+
+        While the owning request is still open, the text is appended to the
+        request's response buffer exactly as before. Once the request has
+        finished, the text is routed to the session-level background emitter
+        so it reaches the client as a ``message`` frame instead of being
+        silently lost.
+
+        Args:
+            content: Assistant text being delivered.
+            model: Model that produced the answer, when known.
+            provider: Provider that produced the answer, when known.
+        """
+        if self._closed:
+            if self._background_emit is None:
+                logger.debug(
+                    "Dropping background tool answer for thread {}: client did not declare background_messages",
+                    self._thread_id,
+                )
+                return
+            result = self._background_emit(self._thread_id, content, model, provider)
+            if inspect.isawaitable(result):
+                await result
+            return
+        result = self._emit(content)
+        if inspect.isawaitable(result):
+            await result
+
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Emit assistant text through the request-local callback."""
         result = self._emit(message)
@@ -276,6 +326,7 @@ class IDEStdioRunner:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._thread_requests: dict[int, int] = {}
         self._active_clones: set[int] = set()
+        self._background_messages_enabled = False
         self.exit_code = 0
         self._stdout_lock = asyncio.Lock()
 
@@ -305,6 +356,32 @@ class IDEStdioRunner:
         await self._write(
             {"type": "error", "request_id": request_id, "code": _frontend_code(code), "message": message, **extra}
         )
+
+    async def _emit_background_message(
+        self, thread_id: int, content: str, model: str | None, provider: str | None
+    ) -> None:
+        """Write one out-of-band background message frame to stdout.
+
+        The frame shares the regular stdout write lock, so wire lines are
+        never interleaved. On a write failure the message is logged and
+        dropped: background delivery is best effort and there is no
+        request id to correlate an error frame to.
+
+        Args:
+            thread_id: Thread the background task was spawned from.
+            content: Assistant text being delivered.
+            model: Model that produced the answer, if known.
+            provider: Provider that produced the answer, if known.
+        """
+        frame: dict[str, Any] = {"type": "message", "thread_id": thread_id, "content": content}
+        if model is not None:
+            frame["model"] = model
+        if provider is not None:
+            frame["provider"] = provider
+        try:
+            await self._write(frame)
+        except Exception:
+            logger.exception("Failed to deliver a background message for thread {}", thread_id)
 
     async def emit_rate_limited(self, message: str, retry_after: int, request_id: str | None = None) -> None:
         """Emit a canonical rate-limited error frame with a retry hint.
@@ -439,7 +516,8 @@ class IDEStdioRunner:
         thread_id = message["thread_id"]
         prompt = message["prompt"].strip()
         responses: list[str] = []
-        interface = IDEInterface(thread_id, prompt, message, responses.append)
+        background_emit = self._emit_background_message if self._background_messages_enabled else None
+        interface = IDEInterface(thread_id, prompt, message, responses.append, background_emit=background_emit)
         await self._write({"type": "status", "request_id": request_id, "state": "running"})
         try:
             if prompt.startswith("/"):
@@ -530,6 +608,7 @@ class IDEStdioRunner:
                 cause=type(exc).__name__,
             )
         finally:
+            interface.mark_closed()
             self._tasks.pop(request_id, None)
             remaining = self._thread_requests.get(thread_id, 1) - 1
             if remaining <= 0:
@@ -563,6 +642,11 @@ class IDEStdioRunner:
                 raw_version = client.get("version")
                 self.client_name = raw_name if isinstance(raw_name, str) else None
                 self.client_version = raw_version if isinstance(raw_version, str) else None
+                raw_capabilities = message.get("capabilities")
+                capabilities = raw_capabilities if isinstance(raw_capabilities, dict) else {}
+                self._background_messages_enabled = capabilities.get("background_messages") is True
+                if self._background_messages_enabled:
+                    logger.debug("client declared the background_messages capability")
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
