@@ -16,6 +16,7 @@ from chibi.services.providers.tools.utils import (
     get_sub_agent_response,
     resolve_session_context,
 )
+from chibi.services.subagent_events import subagent_tracker
 from chibi.utils.app import convert_list_of_models_to_str
 
 
@@ -87,7 +88,7 @@ class DelegateTool(ChibiTool):
         prompt: str,
         provider_name: str | None = None,
         model_name: str | None = None,
-        timeout: int | None = gpt_settings.delegate_task_timeout,
+        timeout: float | None = gpt_settings.delegate_task_timeout,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
         user_id = kwargs.get("user_id")
@@ -132,10 +133,18 @@ class DelegateTool(ChibiTool):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
         )
+        # Every validation failure above raised before this line, so a
+        # failed delegation attempt (bad tool params and the like) is never
+        # counted and never emits a started event. The matching finally
+        # below guarantees the finished event on every exit path, including
+        # the timeout and cancellation branches.
+        subagent_tracker.subagent_started(caller_thread_id, name=model_name)
         try:
             response: ChatResponseSchema = await asyncio.wait_for(fut=coro, timeout=timeout)
         except asyncio.TimeoutError:
             raise ToolException("Timed out waiting for delegated task to complete!")
+        finally:
+            subagent_tracker.subagent_finished(caller_thread_id, name=model_name)
 
         logger.log("SUBAGENT", f"[{model_name or caller_model}] Delegated task is done: {response.answer}")
 

@@ -1,0 +1,5 @@
+{"type":"ready","protocol_version":1,"server":{"name":"chibi","version":"1.0.0"},"capabilities":{"commands":["/reset","/new_thread_with_current_context","/model","/imagine","/info","/help","/quit","/exit"]}}
+{"type":"status","request_id":"01HXY9K3SUBAGENTX","state":"running"}
+{"type":"agent_event","request_id":"01HXY9K3SUBAGENTX","event":"started","active":1,"total":1,"name":"gpt-example"}
+{"type":"agent_event","request_id":"01HXY9K3SUBAGENTX","event":"finished","active":0,"total":1,"name":"gpt-example"}
+{"type":"result","request_id":"01HXY9K3SUBAGENTX","content":"This function `foo` returns the integer `42`.","model":"gpt-example","provider":"openai"}
