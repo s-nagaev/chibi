@@ -12,9 +12,9 @@ from loguru import logger
 from openai.types import CompletionUsage
 
 from chibi.config.gpt import gpt_settings
-from chibi.constants import IDE_STORAGE_ID
+from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
-from chibi.models import Message, get_model_context_window
+from chibi.models import Message
 from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
 from chibi.services.interface import EditorContextProvider, UserInterface
