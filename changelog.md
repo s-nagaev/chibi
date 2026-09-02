@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Token usage in IDE result frames:** result frames now carry an optional `usage` object with `input_tokens`, `output_tokens` and `context_window` whenever the provider reported usage for the request that produced the answer. Numbers are the real provider-reported counts, not estimates; for Anthropic-compatible APIs cached input tokens are added to the input count, and `context_window` comes from a curated per-model map capped at `MAX_HISTORY_TOKENS` (the effective summarization ceiling; null when the model is unknown). Clients that never send usage-related data are unaffected: when no usage is available the field is omitted entirely, so v1 clients see no change.
+
 ## [1.14.1] - 2026-09-02
 
 ### Added

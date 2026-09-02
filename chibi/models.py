@@ -60,6 +60,87 @@ CHAT_COMPLETION_CLASSES = {
     "user": ChatCompletionUserMessageParam,
 }
 
+# Curated static map of well-known model names to their provider-advertised
+# context windows (in tokens), as of September 2026. Model identifiers that
+# carry a date suffix (e.g. "gpt-4o-2024-11-20") resolve through prefix
+# matching in `get_model_context_window`, so only the stable family prefix is
+# listed here. Unknown models simply yield None downstream.
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    # OpenAI
+    "gpt-5.2": 400000,
+    "gpt-5.1": 400000,
+    "gpt-5": 400000,
+    "gpt-4.1": 1047576,
+    "gpt-4o": 128000,
+    "o4-mini": 200000,
+    "o3": 200000,
+    # Anthropic
+    "claude-opus-5": 200000,
+    "claude-opus-4": 200000,
+    "claude-sonnet-5": 200000,
+    "claude-sonnet-4": 200000,
+    "claude-haiku-4": 200000,
+    "claude-3-5-sonnet": 200000,
+    "claude-3-5-haiku": 200000,
+    "claude-3-opus": 200000,
+    # Google Gemini
+    "gemini-3-pro": 1048576,
+    "gemini-3-flash": 1048576,
+    "gemini-2.5-pro": 1048576,
+    "gemini-2.5-flash": 1048576,
+    # DeepSeek
+    "deepseek-chat": 128000,
+    "deepseek-reasoner": 128000,
+    # ZhipuAI GLM
+    "glm-4.7": 200000,
+    "glm-4.6": 200000,
+    "glm-4.5": 128000,
+    "glm-4-32b-0414-128k": 128000,
+    # MiniMax
+    "minimax-m3": 1000000,
+    "minimax-m2": 204800,
+    "minimax-m1": 1000000,
+    # MoonshotAI
+    "kimi-k3": 256000,
+    "kimi-k2": 256000,
+    # Alibaba Qwen
+    "qwen3.8-max": 262144,
+    "qwen3-max": 262144,
+    "qwen3.5-plus": 131072,
+    "qwen-plus": 131072,
+    # xAI Grok
+    "grok-4": 256000,
+    "grok-3": 131072,
+    # Mistral
+    "mistral-large-latest": 128000,
+    "mistral-medium-latest": 128000,
+    "mistral-small-latest": 128000,
+}
+
+
+def get_model_context_window(model_name: str | None) -> int | None:
+    """Look up the provider-advertised context window for a model.
+
+    Exact names match first; otherwise the longest known family prefix wins,
+    which lets dated variants like "gpt-4o-2024-11-20" resolve to their
+    family's window.
+
+    Args:
+        model_name: Model identifier as reported by the provider, if any.
+
+    Returns:
+        The context window in tokens, or None when the model is unknown.
+    """
+    if not model_name:
+        return None
+    name = model_name.lower()
+    if name in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[name]
+    prefix_matches = [key for key in MODEL_CONTEXT_WINDOWS if name.startswith(key)]
+    if not prefix_matches:
+        return None
+    return MODEL_CONTEXT_WINDOWS[max(prefix_matches, key=len)]
+
 
 class FunctionSchema(BaseModel):
     id: str | None = None
