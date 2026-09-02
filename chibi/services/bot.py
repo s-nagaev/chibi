@@ -136,6 +136,11 @@ async def handle_user_prompt(interface: UserInterface) -> None:
 
     setattr(interface, "response_model", chat_response.model)
     setattr(interface, "response_provider", chat_response.provider)
+    # Carry the provider-reported usage of this request so transports that
+    # build result frames (IDE stdio) can expose real token counts. Interfaces
+    # without the attribute simply ignore it.
+    if chat_response.usage is not None:
+        setattr(interface, "response_usage", chat_response.usage)
     usage = chat_response.usage
     usage_message = get_usage_msg(usage)
 
