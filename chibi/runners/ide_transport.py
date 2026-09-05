@@ -31,6 +31,8 @@ from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
 COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
+MAX_THOUGHTS_BYTES = 64 * 1024
+THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 64 KB limit reached ...]"
 
 
 def build_usage_payload(
@@ -80,6 +82,27 @@ def build_usage_payload(
         "output_tokens": usage.completion_tokens,
         "context_window": context_window,
     }
+
+
+def _cap_thoughts(thoughts: str) -> str:
+    """Cap reasoning text at :data:`MAX_THOUGHTS_BYTES` with a truncation marker.
+
+    Truncation is byte-based so the emitted JSONL line stays within a
+    predictable size regardless of content; a cut can only land on a UTF-8
+    character boundary because invalid trailing bytes are dropped on decode.
+
+    Args:
+        thoughts: Full reasoning text captured for the request.
+
+    Returns:
+        The original text when it fits the cap, otherwise the largest
+        UTF-8-safe prefix that leaves room for the marker appended at the end.
+    """
+    encoded = thoughts.encode("utf-8")
+    if len(encoded) <= MAX_THOUGHTS_BYTES:
+        return thoughts
+    budget = MAX_THOUGHTS_BYTES - len(THOUGHTS_TRUNCATION_MARKER.encode("utf-8"))
+    return encoded[:budget].decode("utf-8", errors="ignore") + THOUGHTS_TRUNCATION_MARKER
 
 
 # Maps backend-internal error codes to the closest frontend-facing code.
@@ -135,6 +158,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
     """User-interface adapter that collects Chibi responses for one IDE request."""
 
     uses_uploaded_file_storage = False
+    captures_llm_thoughts: bool = True
 
     def __init__(
         self,
@@ -164,6 +188,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         self.response_model: str | None = None
         self.response_provider: str | None = None
         self.response_usage: UsageSchema | CompletionUsage | None = None
+        self.response_thoughts: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
 
@@ -295,6 +320,24 @@ class IDEInterface(UserInterface, EditorContextProvider):
         if inspect.isawaitable(result):
             await result
 
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Capture LLM reasoning for the result frame instead of emitting it as text.
+
+        Providers may report reasoning more than once during agentic tool
+        loops; the pieces are accumulated in arrival order and joined with
+        newlines. Captured text lives only on this request-local object and
+        is never written to thread history.
+
+        Args:
+            thoughts: The LLM reasoning text to capture.
+        """
+        if not thoughts:
+            return
+        if self.response_thoughts is None:
+            self.response_thoughts = thoughts
+        else:
+            self.response_thoughts = f"{self.response_thoughts}\n{thoughts}"
+
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Emit assistant text through the request-local callback."""
         result = self._emit(message)
@@ -381,6 +424,7 @@ class IDEStdioRunner:
         self._thread_requests: dict[int, int] = {}
         self._active_clones: set[int] = set()
         self._background_messages_enabled = False
+        self._thoughts_enabled = False
         self.exit_code = 0
         self._stdout_lock = asyncio.Lock()
 
@@ -637,6 +681,10 @@ class IDEStdioRunner:
             )
             if usage_payload is not None:
                 result["usage"] = usage_payload
+            if self._thoughts_enabled and interface.response_thoughts:
+                thoughts = _cap_thoughts(interface.response_thoughts)
+                logger.debug("attaching LLM thoughts to result frame bytes={}", len(thoughts.encode("utf-8")))
+                result["thoughts"] = thoughts
             await self._write(result)
         except asyncio.CancelledError:
             await self._error("cancelled", "Request cancelled.", request_id)
@@ -706,6 +754,9 @@ class IDEStdioRunner:
                 self._background_messages_enabled = capabilities.get("background_messages") is True
                 if self._background_messages_enabled:
                     logger.debug("client declared the background_messages capability")
+                self._thoughts_enabled = capabilities.get("thoughts") is True
+                if self._thoughts_enabled:
+                    logger.debug("client declared the thoughts capability")
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
