@@ -136,13 +136,24 @@ async def prepare_system_prompt(
 
 
 async def send_llm_thoughts(thoughts: str, interface: UserInterface | None = None) -> None:
-    if not gpt_settings.show_llm_thoughts:
-        return None
+    """Forward LLM reasoning to the interface through the shared capture seam.
 
+    The global ``show_llm_thoughts`` toggle governs interfaces that display
+    thoughts as chat content (Telegram). Interfaces that capture thoughts for
+    their own protocol (``captures_llm_thoughts``) always receive them and
+    decide themselves what to do with the text.
+
+    Args:
+        thoughts: The LLM reasoning text to forward.
+        interface: The active user interface, if any.
+    """
     if not interface:
         return None
 
     if thoughts == "No content":
+        return None
+
+    if not gpt_settings.show_llm_thoughts and not interface.captures_llm_thoughts:
         return None
 
     await interface.send_llm_thoughts(thoughts)
