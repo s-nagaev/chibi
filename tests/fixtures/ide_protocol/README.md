@@ -28,6 +28,13 @@ Request cancellation:
 Graceful shutdown:
 `initialize` → `ready` → `shutdown`.
 
+### `valid_subagent_events_input.jsonl` / `valid_subagent_events_output.jsonl`
+Subagent lifecycle events (requires the `capabilities.subagents` opt-in):
+`initialize(subagents)` → `ready` → `request` → `status(running)` →
+`agent_event(started, active 1, total 1)` → `agent_event(finished, active 0, total 1)` → `result`.
+The final zero-active `finished` is the client's signal to hide its subagent spinner line; the result frame stays
+the implicit end of the request and no agent_event ever follows it.
+
 ## Invalid / edge cases
 
 ### `invalid_cases.jsonl`
