@@ -162,11 +162,11 @@ class OpenAI(OpenAIFriendlyProvider):
         messages: list[Message],
         model: str,
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -325,6 +325,8 @@ class OpenAI(OpenAIFriendlyProvider):
             system_prompt=system_prompt,
             interface=interface,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

@@ -296,9 +296,7 @@ def setup_logging() -> None:
 
     logger.add(
         sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level}</level> | "
-        "<level>{message}</level>",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <level>{message}</level>",
         level="INFO",
     )
 

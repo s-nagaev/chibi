@@ -51,7 +51,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -396,10 +396,10 @@ class Provider(ABC):
         calls: list[ToolCallSchema],
         caller_model: str,
         caller_provider: str,
+        caller_storage_id: int,
+        caller_thread_id: int,
         user_id: int | None = None,
         interface: UserInterface | None = None,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> list[ToolResponseSchema]:
         """Execute tool calls, injecting the originating session identity.
 
@@ -530,7 +530,15 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=16), reraise=True)
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_chain(
+            wait_fixed(10),
+            wait_fixed(25),
+            wait_fixed(45),
+        ),
+        reraise=True,
+    )
     async def get_chat_response(
         self,
         messages: list[Message],
@@ -567,12 +575,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         messages: list[ChatCompletionMessageParam],
         model: str,
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
@@ -696,6 +704,8 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             interface=interface,
             conversation_messages=conversation_messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -1023,12 +1033,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         messages: list[MessageParam],
         model: str,
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -1135,6 +1145,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=conversation_messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
