@@ -32,8 +32,8 @@ class AdditionalOptions(TypedDict, total=False):
     user_id: int | None
     caller_model: str
     caller_provider: str
-    caller_storage_id: int | None
-    caller_thread_id: int | None
+    caller_storage_id: int
+    caller_thread_id: int
     interface: UserInterface | None
 
 

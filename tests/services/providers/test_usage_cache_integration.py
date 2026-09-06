@@ -148,6 +148,8 @@ async def test_openai_responses_api_writes_cache_when_influx_not_configured(
             system_prompt="base",
             interface=interface,
             track_prompt_size=True,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
 
     assert usage_cache_store.get(user_id=user.id, thread_id=interface.thread_id) == 250
