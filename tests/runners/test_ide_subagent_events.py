@@ -262,7 +262,7 @@ class TestAgentEventFrames:
 
     @pytest.mark.asyncio
     async def test_last_agent_event_precedes_result_frame(self) -> None:
-        """No agent_event frame may arrive after the result frame."""
+        """A foreground request keeps its whole lifecycle strictly pre-result."""
         instance, output = runner()
 
         async def fake_prompt(interface: IDEInterface) -> None:
@@ -276,11 +276,13 @@ class TestAgentEventFrames:
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
+            await instance.drain_subagent_events()
 
         result_index = output.index(next(f for f in output if f.get("type") == "result"))
         event_indexes = [output.index(frame) for frame in agent_events(output)]
         assert event_indexes
         assert max(event_indexes) < result_index
+        assert 42 not in instance._subagent_requests
 
     @pytest.mark.asyncio
     async def test_concurrent_subagents_drive_the_counters(self) -> None:
@@ -363,8 +365,13 @@ class TestAgentEventFrames:
         ]
 
     @pytest.mark.asyncio
-    async def test_late_finish_after_result_is_dropped(self) -> None:
-        """A subagent finishing after its request completed emits nothing."""
+    async def test_background_subagent_finish_after_result_is_emitted(self) -> None:
+        """A subagent finishing after its request completed still reaches the wire.
+
+        The parent request seals and ends while the background subagent is
+        still counted, so the state is retained and the late natural finish
+        emits the zero-active frame after the result, then retires the state.
+        """
         instance, output = runner()
 
         async def fake_prompt(interface: IDEInterface) -> None:
@@ -388,9 +395,163 @@ class TestAgentEventFrames:
             await instance.drain_subagent_events()
 
         events = agent_events(output)
-        assert [event["event"] for event in events] == ["started"]
+        assert [(event["event"], event["active"], event["total"]) for event in events] == [
+            ("started", 1, 1),
+            ("finished", 0, 1),
+        ]
         result_index = output.index(next(f for f in output if f.get("type") == "result"))
-        assert all(output.index(event) < result_index for event in events)
+        assert output.index(events[0]) < result_index < output.index(events[1])
+        assert 42 not in instance._subagent_requests
+
+    @pytest.mark.asyncio
+    async def test_late_started_on_retained_state_is_emitted(self) -> None:
+        """A background subagent starting after the result joins the retained counters.
+
+        The fast-answer variant: one delegation is counted before the parent
+        answers, a second one starts only after the result frame. The
+        retained state accepts the late start and drains to zero afterwards.
+        """
+        instance, output = runner()
+
+        async def fake_prompt(interface: IDEInterface) -> None:
+            subagent_tracker.subagent_started(42, "gpt-x")
+            await subagent_tracker.drain()
+
+            async def late_start_and_finish() -> None:
+                await wait_until_closed(interface)
+                subagent_tracker.subagent_started(42, "gpt-y")
+                await subagent_tracker.drain()
+                subagent_tracker.subagent_finished(42, "gpt-x")
+                await subagent_tracker.drain()
+                subagent_tracker.subagent_finished(42, "gpt-y")
+                await subagent_tracker.drain()
+
+            task = asyncio.create_task(late_start_and_finish())
+            SPAWNED_TASKS.append(task)
+            await interface.send_message("answer")
+
+        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+            await instance._handle_message(initialize({"subagents": True}))
+            await run_request(instance, "r1", 42)
+            await wait_for_frame(output, "result")
+            for task in list(SPAWNED_TASKS):
+                await asyncio.gather(task)
+            await instance.drain_subagent_events()
+
+        events = agent_events(output)
+        assert [(event["event"], event["active"], event["total"]) for event in events] == [
+            ("started", 1, 1),
+            ("started", 2, 2),
+            ("finished", 1, 2),
+            ("finished", 0, 2),
+        ]
+        result_index = output.index(next(f for f in output if f.get("type") == "result"))
+        assert output.index(events[0]) < result_index
+        assert all(output.index(event) > result_index for event in events[1:])
+        assert 42 not in instance._subagent_requests
+
+    @pytest.mark.asyncio
+    async def test_kill_flush_clears_retained_post_result_state(self) -> None:
+        """A post-result /stop flushes the retained counters and retires the state."""
+        instance, output = runner()
+        responses: list[str] = []
+
+        await instance._handle_message(initialize({"subagents": True}))
+        instance.begin_request(7, "r1")
+        subagent_tracker.subagent_started(7, "gpt-x")
+        await subagent_tracker.drain()
+        instance.seal_request(7, "r1")
+        instance.end_request(7, "r1")
+        assert instance._subagent_requests[7]["sealed"] is True
+        assert instance._subagent_requests[7]["active"] == 1
+
+        interface = IDEInterface(7, "/stop", {}, responses.append)
+        await handle_stop(interface=interface)
+        await instance.drain_subagent_events()
+
+        flush_events = [
+            event
+            for event in agent_events(output)
+            if event["event"] == "finished" and event["active"] == 0 and "name" not in event
+        ]
+        assert flush_events == [
+            {"type": "agent_event", "request_id": "r1", "event": "finished", "active": 0, "total": 1}
+        ]
+        assert 7 not in instance._subagent_requests
+        assert responses == ["Everything stopped."]
+
+        subagent_tracker.subagent_finished(7, "gpt-x")
+        await instance.drain_subagent_events()
+        assert (
+            agent_events(output)
+            == [
+                {
+                    "type": "agent_event",
+                    "request_id": "r1",
+                    "event": "started",
+                    "active": 1,
+                    "total": 1,
+                    "name": "gpt-x",
+                }
+            ]
+            + flush_events
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_resurrection_after_retirement(self) -> None:
+        """Stray lifecycle calls after full retirement neither emit nor recreate state."""
+        instance, output = runner()
+
+        await instance._handle_message(initialize({"subagents": True}))
+        instance.begin_request(7, "r1")
+        subagent_tracker.subagent_started(7, "gpt-x")
+        await subagent_tracker.drain()
+        subagent_tracker.subagent_finished(7, "gpt-x")
+        await subagent_tracker.drain()
+        instance.seal_request(7, "r1")
+        instance.end_request(7, "r1")
+        assert 7 not in instance._subagent_requests
+
+        subagent_tracker.subagent_started(7, "gpt-y")
+        subagent_tracker.subagent_finished(7, "gpt-y")
+        await instance.drain_subagent_events()
+
+        assert 7 not in instance._subagent_requests
+        assert agent_events(output) == [
+            {"type": "agent_event", "request_id": "r1", "event": "started", "active": 1, "total": 1, "name": "gpt-x"},
+            {"type": "agent_event", "request_id": "r1", "event": "finished", "active": 0, "total": 1, "name": "gpt-x"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_new_request_flushes_retained_state(self) -> None:
+        """begin_request retires a retained state with one authoritative flush."""
+        instance, output = runner()
+
+        await instance._handle_message(initialize({"subagents": True}))
+        instance.begin_request(7, "r1")
+        subagent_tracker.subagent_started(7, "gpt-x")
+        await subagent_tracker.drain()
+        instance.seal_request(7, "r1")
+        instance.end_request(7, "r1")
+
+        instance.begin_request(7, "r2")
+        await instance.drain_subagent_events()
+
+        flush_events = [
+            event
+            for event in agent_events(output)
+            if event["request_id"] == "r1" and event["event"] == "finished" and "name" not in event
+        ]
+        assert flush_events == [
+            {"type": "agent_event", "request_id": "r1", "event": "finished", "active": 0, "total": 1}
+        ]
+        assert instance._subagent_requests[7]["request_id"] == "r2"
+        assert instance._subagent_requests[7]["active"] == 0
+        assert instance._subagent_requests[7]["total"] == 0
+
+        subagent_tracker.subagent_finished(7, "gpt-x")
+        await instance.drain_subagent_events()
+        assert [event for event in agent_events(output) if event["request_id"] == "r2"] == []
 
 
 class TestV1ClientCompatibility:

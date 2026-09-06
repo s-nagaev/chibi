@@ -240,3 +240,77 @@ class TestDelegateLifecycleEvents:
             await subagent_tracker.drain()
 
         assert agent_events(output) == []
+
+
+async def fake_subagent_fast(**kwargs: Any) -> ChatResponseSchema:
+    """Fake subagent runner finishing shortly after the request ends."""
+    await asyncio.sleep(0.01)
+    return ChatResponseSchema(answer="delegated answer", provider="prov", model="gpt-x", usage=None)
+
+
+async def fake_subagent_slow(**kwargs: Any) -> ChatResponseSchema:
+    """Fake subagent runner finishing well after its sibling."""
+    await asyncio.sleep(0.15)
+    return ChatResponseSchema(answer="delegated answer", provider="prov", model="gpt-x", usage=None)
+
+
+class TestBackgroundDelegationOutlivesRequest:
+    """Background delegations whose subagents finish after the request ends."""
+
+    @pytest.mark.asyncio
+    async def test_finished_frames_reach_the_wire_after_request_ends(self) -> None:
+        """Subagents outliving their request emit their lifecycle frames.
+
+        Mirrors the production background path: the delegation coroutine runs
+        as an independent task while the parent request drains, seals its
+        counters and retires. The retained state keeps the counters alive, so
+        both late natural finishes are emitted and the last one retires the
+        state instead of leaving a stale counter on the wire.
+        """
+        instance, output = counting_runner()
+
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                side_effect=[fake_subagent_fast(), fake_subagent_slow()],
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", fake_models_available),
+        ):
+            tasks = [
+                asyncio.create_task(
+                    DelegateTool.function(
+                        prompt=f"task {index}",
+                        model_name="gpt-x",
+                        provider_name="prov",
+                        **delegate_kwargs(),
+                    )
+                )
+                for index in range(2)
+            ]
+            for _ in range(300):
+                if len([event for event in agent_events(output) if event["event"] == "started"]) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            await subagent_tracker.drain()
+            assert [(event["event"], event["active"], event["total"]) for event in agent_events(output)] == [
+                ("started", 1, 1),
+                ("started", 2, 2),
+            ]
+
+            instance.seal_request(42, "r1")
+            instance.end_request(42, "r1")
+            assert instance._subagent_requests[42]["sealed"] is True
+            assert instance._subagent_requests[42]["active"] == 2
+
+            results = await asyncio.gather(*tasks)
+            await subagent_tracker.drain()
+
+        assert results == [{"response": "delegated answer"}, {"response": "delegated answer"}]
+        events = agent_events(output)
+        assert [(event["event"], event["active"], event["total"]) for event in events] == [
+            ("started", 1, 1),
+            ("started", 2, 2),
+            ("finished", 1, 2),
+            ("finished", 0, 2),
+        ]
+        assert 42 not in instance._subagent_requests
