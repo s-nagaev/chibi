@@ -294,10 +294,11 @@ def setup_logging() -> None:
     # Ensure stderr can emit UTF-8 before attaching the loguru sink
     reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
 
-    # Add console logger
     logger.add(
         sys.stderr,
-        format="<level>{level: <8}</level> <level>{message}</level>",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level}</level> | "
+        "<level>{message}</level>",
         level="INFO",
     )
 

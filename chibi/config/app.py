@@ -137,15 +137,25 @@ def add_user_context(record) -> bool:
     return True
 
 
-logger.remove()
-logger.add(
-    sys.stderr,
-    format="<level>{level: <9}</level> | "
-    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | "
-    "{extra[user_id]}"
-    "<level>{message}</level>",
-    filter=add_user_context,
-)
+def configure_stderr_sink() -> None:
+    """Install the backend stderr loguru sink.
+
+    Every emitted line follows the plain shape ``YYYY-MM-DD HH:MM:SS | LEVEL |
+    message`` (local time, no file/line references), optionally prefixed by the
+    bound user id. Terminal and IDE runners install their own sinks instead.
+    """
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level}</level> | "
+        "{extra[user_id]}"
+        "<level>{message}</level>",
+        filter=add_user_context,
+    )
+
+
+configure_stderr_sink()
 logger.level("TOOL", no=20, color="<light-blue>")
 logger.level("THINK", no=20, color="<light-magenta>")
 logger.level("CALL", no=20, color="<magenta>")
