@@ -530,7 +530,7 @@ class IDEStdioRunner:
             active: Snapshot of running subagents for the request.
             total: Snapshot of spawned subagents for the request.
             name: Trivially available subagent label, if any.
-            force: Bypass the per-thread accept check (kill-flush only).
+            force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
         """
         if not self._subagent_events_enabled:
             return
@@ -556,13 +556,17 @@ class IDEStdioRunner:
     ) -> None:
         """Write one subagent lifecycle frame to stdout.
 
-        The accept-or-drop decision happens while the stdout lock is held, so
-        a late event can never land after the result frame of the same
-        request: the owning request seals its state right before that frame
-        is written, and a sealed, missing or replaced state drops the event
-        here. Kill-flush events pass ``force`` because their state has
-        already been retired. On a write failure the frame is logged and
-        dropped, mirroring the background message policy.
+        The accept-or-drop decision happens while the stdout lock is held,
+        so an event can never land under a replaced state: a missing state
+        or a mismatching request id drops the event here. A request seals
+        its state right before its result frame is written; a sealed state
+        whose counters are drained drops further events, while a sealed
+        state that still counts running background subagents keeps
+        accepting events so their lifecycle stays visible after the result.
+        Kill-flush events and the retirement finish of a drained retained
+        state pass ``force`` because their state has already been retired.
+        On a write failure the frame is logged and dropped, mirroring the
+        background message policy.
 
         Args:
             thread_id: Thread whose request owns the counters.
@@ -571,7 +575,7 @@ class IDEStdioRunner:
             active: Snapshot of running subagents for the request.
             total: Snapshot of spawned subagents for the request.
             name: Trivially available subagent label, if any.
-            force: Bypass the per-thread accept check (kill-flush only).
+            force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
         """
         frame: dict[str, Any] = {
             "type": "agent_event",
@@ -587,7 +591,7 @@ class IDEStdioRunner:
                 return
             if not force:
                 state = self._subagent_requests.get(thread_id)
-                if state is None or state["sealed"] or state["request_id"] != request_id:
+                if state is None or state["request_id"] != request_id or (state["sealed"] and state["active"] <= 0):
                     logger.debug("Dropping a late agent_event for thread {}", thread_id)
                     return
             try:
@@ -598,10 +602,14 @@ class IDEStdioRunner:
     def begin_request(self, thread_id: int, request_id: str) -> None:
         """Register fresh subagent counters for a request that starts running.
 
-        A new request always counts from zero. An existing state with
+        A new request always counts from zero. An existing live state with
         non-zero counters is kept: it belongs to a still-running request on
         the same thread (its result frame has not been written yet), and
-        wiping it would hide the in-flight subagents from the kill-flush.
+        wiping it would hide the in-flight subagents from the kill-flush. A
+        sealed post-result state is retired first; when it still counts
+        running background subagents, exactly one authoritative zero-active
+        finished frame is emitted for the old request so the client never
+        keeps a stale counter across requests.
 
         Args:
             thread_id: Thread the request runs on.
@@ -610,17 +618,22 @@ class IDEStdioRunner:
         if not self._subagent_events_enabled:
             return
         state = self._subagent_requests.get(thread_id)
-        if state is not None and (state["active"] or state["total"]):
-            return
+        if state is not None:
+            if not state["sealed"] and (state["active"] or state["total"]):
+                return
+            if state["active"] > 0:
+                self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], None, force=True)
         self._subagent_requests[thread_id] = {"request_id": request_id, "active": 0, "total": 0, "sealed": False}
 
     def seal_request(self, thread_id: int, request_id: str) -> None:
-        """Seal the counters so late events cannot follow this request's frames.
+        """Seal the counters once the request's terminal frame is being written.
 
         Called synchronously right before the terminal frame of the request
-        is written; combined with the check under the stdout lock in
-        :meth:`_emit_agent_event`, this enforces that no agent_event frame
-        ever arrives after the final result frame of the same request.
+        is written. A sealed state with drained counters drops all further
+        events (both here via :meth:`_emit_agent_event` and by being retired
+        in :meth:`end_request`), while a sealed state that still counts
+        running background subagents is retained and keeps accepting events
+        until it drains.
 
         Args:
             thread_id: Thread the request runs on.
@@ -633,23 +646,35 @@ class IDEStdioRunner:
     def end_request(self, thread_id: int, request_id: str) -> None:
         """Retire the counters of a finished request.
 
+        A sealed state that still counts running background subagents is
+        retained instead of retired: their natural finishes keep emitting
+        lifecycle frames after the result, and the last finish retires the
+        state (:meth:`subagent_finished`), as do :meth:`kill_flush` and the
+        next :meth:`begin_request` on the thread.
+
         Args:
             thread_id: Thread the request ran on.
             request_id: Identifier of the finishing request.
         """
         state = self._subagent_requests.get(thread_id)
         if state is not None and state["request_id"] == request_id:
+            if state["sealed"] and state["active"] > 0:
+                return
             self._subagent_requests.pop(thread_id, None)
 
     def subagent_started(self, thread_id: int, name: str | None = None) -> None:
         """Count an accepted subagent start and emit the started event.
 
+        Starts are also accepted on a retained post-result state, so a
+        background delegation that begins after its parent's result frame
+        still becomes visible on the wire.
+
         Args:
-            thread_id: Thread whose running request owns the counters.
+            thread_id: Thread whose running or retained request owns the counters.
             name: Trivially available subagent label (the delegated model), if any.
         """
         state = self._subagent_requests.get(thread_id)
-        if state is None or state["sealed"]:
+        if state is None:
             return
         state["active"] += 1
         state["total"] += 1
@@ -659,27 +684,35 @@ class IDEStdioRunner:
         """Count a subagent finish and emit the finished event.
 
         The last natural finish emits the zero-active event the client uses
-        to hide its spinner line.
+        to hide its spinner line. On a retained post-result state that
+        zero-active finish also retires the state, and it is force-emitted
+        because the state is already gone when the emission task runs.
+        Finishes that match no counted start are ignored.
 
         Args:
-            thread_id: Thread whose running request owns the counters.
+            thread_id: Thread whose running or retained request owns the counters.
             name: Trivially available subagent label, if any.
         """
         state = self._subagent_requests.get(thread_id)
-        if state is None or state["sealed"]:
+        if state is None or state["active"] <= 0:
             return
-        state["active"] = max(0, state["active"] - 1)
+        state["active"] -= 1
+        if state["sealed"] and state["active"] == 0:
+            self._subagent_requests.pop(thread_id, None)
+            self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], name, force=True)
+            return
         self._spawn_agent_event(thread_id, state["request_id"], "finished", state["active"], state["total"], name)
 
     def kill_flush(self, thread_id: int) -> None:
         """Emit the single kill-flush event for a killed or reset request.
 
         Called after a successful /stop or /reset killed the thread's
-        background processes. When in-flight counters existed, exactly one
-        ``finished`` event with ``active`` 0 and no name is force-emitted;
-        it is the authoritative reset for clients, because individually
-        killed subagents never report their own finished events. The state
-        is retired first, so late cleanup-path emissions become no-ops.
+        background processes. When in-flight counters existed — including a
+        retained post-result state — exactly one ``finished`` event with
+        ``active`` 0 and no name is force-emitted; it is the authoritative
+        reset for clients, because individually killed subagents never
+        report their own finished events. The state is retired first, so
+        late cleanup-path emissions become no-ops.
 
         Args:
             thread_id: Thread whose request state is being retired.
@@ -900,10 +933,12 @@ class IDEStdioRunner:
                 logger.debug("attaching LLM thoughts to result frame bytes={}", len(thoughts.encode("utf-8")))
                 result["thoughts"] = thoughts
             # Let in-flight lifecycle events reach the wire first, then seal
-            # the counters so no agent_event can follow this result frame.
-            # The drain is skipped when a kill is already pending on this
-            # task: suspending here would turn a completed /reset or /stop
-            # into a cancelled error frame, which v1 clients never saw.
+            # the counters: a drained state can no longer emit after this
+            # result frame, while a state that still counts background
+            # subagents is retained by end_request and keeps emitting until
+            # it drains. The drain is skipped when a kill is already pending
+            # on this task: suspending here would turn a completed /reset or
+            # /stop into a cancelled error frame, which v1 clients never saw.
             current_task = asyncio.current_task()
             if current_task is None or current_task.cancelling() == 0:
                 await self.drain_subagent_events()
