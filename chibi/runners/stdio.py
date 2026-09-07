@@ -1,4 +1,4 @@
-"""CLI entrypoint for the IDE stdio runner."""
+"""CLI entrypoint for the stdio JSONL runner."""
 
 import asyncio
 import io
@@ -13,8 +13,8 @@ os.environ.setdefault("FILESYSTEM_ACCESS", "true")
 os.environ.setdefault("ENABLE_MCP_STDIO", "true")
 
 
-def run_ide() -> None:
-    """Start the IDE JSONL runner using the project's async entrypoint convention."""
+def run_stdio() -> None:
+    """Start the stdio JSONL runner using the project's async entrypoint convention."""
     from chibi.config.logging import use_stderr_logging
     from chibi.utils.encoding import reconfigure_stream_utf8
 
@@ -35,4 +35,4 @@ def run_ide() -> None:
 
 
 if __name__ == "__main__":
-    run_ide()
+    run_stdio()
