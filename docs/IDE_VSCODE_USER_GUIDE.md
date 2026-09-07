@@ -45,14 +45,14 @@ Open **Settings**, search for `Chibi`, and configure:
 | Setting | Type | Current default | Meaning |
 |---|---|---|---|
 | `chibi.executable` | string | `chibi` | Executable used to spawn the local backend. |
-| `chibi.args` | array of strings | `["ide", "--stdio"]` | Arguments passed to that executable. |
+| `chibi.args` | array of strings | `["stdio", "--vscode"]` | Arguments passed to that executable. |
 
 The equivalent JSON settings are:
 
 ```json
 {
   "chibi.executable": "chibi",
-  "chibi.args": ["ide", "--stdio"]
+  "chibi.args": ["stdio", "--vscode"]
 }
 ```
 
@@ -61,7 +61,7 @@ If Chibi is installed in a virtual environment, use its absolute executable path
 ```json
 {
   "chibi.executable": "/absolute/path/to/venv/bin/chibi",
-  "chibi.args": ["ide", "--stdio"]
+  "chibi.args": ["stdio", "--vscode"]
 }
 ```
 
@@ -71,7 +71,7 @@ process directly and expects newline-delimited JSON on stdout. Chibi logs and di
 Before troubleshooting VS Code, verify the configured executable and arguments independently:
 
 ```sh
-chibi ide --stdio
+chibi stdio --vscode
 ```
 
 This is a protocol process, not an interactive terminal. Stop it with EOF/Ctrl-D rather than typing ordinary chat
@@ -147,11 +147,11 @@ cancelled request as an error and does not return a result for it.
 Run the exact executable and arguments from a terminal:
 
 ```sh
-/path/to/chibi ide --stdio
+/path/to/chibi stdio --vscode
 ```
 
 Check that the executable is on PATH (or use an absolute path), that Chibi is configured, and that at least one
-provider is ready. Ensure `chibi.args` is an array containing `"ide"` and `"--stdio"`.
+provider is ready. Ensure `chibi.args` is an array containing `"stdio"` and `"--vscode"`.
 
 ### The chat reports a protocol error
 

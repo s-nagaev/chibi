@@ -14,7 +14,7 @@ The single most actionable finding is the `send_images` bug (§2.1) — any curr
 
 ## 1. Architecture Overview
 
-The Chibi IDE runner is a thin stdio transport that exposes Chibi's assistant to an external IDE. It runs as a separate process invoked by `chibi run-ide --stdio` (CLI entrypoint in `cli.py`). The process owns a single asyncio event loop that drives:
+The Chibi IDE runner is a thin stdio transport that exposes Chibi's assistant to an external IDE. It runs as a separate process invoked by `chibi stdio --vscode` (CLI entrypoint in `cli.py`). The process owns a single asyncio event loop that drives:
 
 - **A reader thread** that performs blocking `sys.stdin.readline()` via `asyncio.to_thread` and feeds JSONL frames into the loop.
 - **A request dispatcher** that validates each frame, dispatches it via a global `task_manager.run_task(...)`, and tracks inflight requests in `_tasks[request_id]` and per-thread concurrency in `_thread_requests[thread_id]`.
@@ -363,7 +363,7 @@ See H1. The singleton identity pattern leaks across sessions. Severity compounds
 - **Description:** Stderr loguru sink is INFO; no way to change verbosity from CLI.
 - **Location:** `cli.py`; `ide_transport.py:284`.
 - **Impact:** Operational inconvenience.
-- **Fix:** Add `--log-level` option to `chibi run-ide --stdio`.
+- **Fix:** Add `--log-level` option to `chibi stdio --vscode`.
 
 #### A13. Per-request latency not surfaced
 - **Sources:** Transport review §4.4.

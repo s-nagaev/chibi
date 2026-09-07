@@ -48,6 +48,30 @@ class TestStdioRunnerCLI:
         mock_run_stdio.assert_called_once()
         assert application_settings.client == "tui"
 
+    @pytest.mark.parametrize(
+        ("flag", "client"),
+        [("--vscode", "vscode"), ("--pycharm", "pycharm"), ("--neovim", "neovim")],
+    )
+    def test_stdio_client_flag_dispatches_and_sets_client(
+        self, runner: CliRunner, restore_client_setting: Iterator[None], flag: str, client: str
+    ) -> None:
+        """`chibi stdio <client flag>` sets application_settings.client and invokes the runner."""
+        with patch("chibi.runners.stdio.run_stdio") as mock_run_stdio:
+            result = runner.invoke(main, ["stdio", flag])
+
+        assert result.exit_code == 0
+        mock_run_stdio.assert_called_once()
+        assert application_settings.client == client
+
+    def test_stdio_rejects_multiple_client_flags(
+        self, runner: CliRunner, restore_client_setting: Iterator[None]
+    ) -> None:
+        """`chibi stdio` rejects passing more than one client flag."""
+        result = runner.invoke(main, ["stdio", "--tui", "--vscode"])
+
+        assert result.exit_code != 0
+        assert "Multiple clients selected" in result.output
+
     def test_stdio_tui_does_not_accept_arguments(self, runner: CliRunner) -> None:
         """`chibi stdio --tui` does not take positional arguments."""
         result = runner.invoke(main, ["stdio", "--tui", "extra"])

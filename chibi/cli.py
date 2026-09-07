@@ -5,6 +5,7 @@ import sys
 import click
 
 from chibi.config import application_settings
+from chibi.config.app import ClientType
 from chibi.config_generator import CONFIG_PATH, generate_default_config
 from chibi.service import Service
 
@@ -19,12 +20,21 @@ def main() -> None:
 
 @main.command()
 @click.option("--tui", is_flag=True, default=False, help="Serve the terminal UI client over the JSONL stdio protocol.")
-def stdio(tui: bool) -> None:
+@click.option("--vscode", is_flag=True, default=False, help="Serve the VS Code client over the JSONL stdio protocol.")
+@click.option("--pycharm", is_flag=True, default=False, help="Serve the PyCharm client over the JSONL stdio protocol.")
+@click.option("--neovim", is_flag=True, default=False, help="Serve the Neovim client over the JSONL stdio protocol.")
+def stdio(tui: bool, vscode: bool, pycharm: bool, neovim: bool) -> None:
     """Serve a client session over the JSONL stdio protocol."""
-    if not tui:
-        raise click.UsageError("No client selected: pass --tui to start the stdio session.")
+    clients: tuple[ClientType, ...] = ("tui", "vscode", "pycharm", "neovim")
+    selected = [client for client, requested in zip(clients, (tui, vscode, pycharm, neovim)) if requested]
+    if not selected:
+        raise click.UsageError(
+            "No client selected: pass --tui, --vscode, --pycharm or --neovim to start the stdio session."
+        )
+    if len(selected) > 1:
+        raise click.UsageError("Multiple clients selected: pass exactly one client flag.")
 
-    application_settings.client = "tui"
+    application_settings.client = selected[0]
 
     from chibi.runners.stdio import run_stdio
 

@@ -110,19 +110,21 @@ The bot will run as a background service. Use CLI commands to manage it.
 
 ---
 
-## Terminal UI client
+## Local client frontends
 
-Chibi can serve the terminal UI over its versioned local JSONL protocol:
+Chibi can serve its local clients over the versioned local JSONL protocol:
 
 ```bash
 chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
 ```
 
-The command is intended to be started by the Chibi terminal UI, not used interactively. Chibi owns the `v1`
+The command is intended to be started by the client frontend, not used interactively. Chibi owns the `v1`
 protocol and supports compatible clients that negotiate the same version. The stdio process writes protocol
 frames only to stdout and diagnostics to stderr. Existing Chibi command, tool, permission and moderation
-behavior remains authoritative; the client adds no tool policy layer. The `client` setting also knows about
-`vscode`, `pycharm` and `neovim` frontends, which will wire their own launch commands as they ship.
+behavior remains authoritative; the client adds no tool policy layer.
 
 ---
 
