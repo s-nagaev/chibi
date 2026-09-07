@@ -402,3 +402,49 @@ async def test_canonical_subagent_events_output() -> None:
         subagent_tracker.set_sink(None)
         for item in active:
             item.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_command_kills_running_request_and_answers() -> None:
+    """/stop issued while a request runs kills it (cancelled error) and answers its own result."""
+    gate = asyncio.Event()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("running", 2, "one"))
+        await wait_for(output, "running", "status")
+        await instance._handle_message(request("stop", 2, "/stop"))
+        await wait_for(output, "stop", "result")
+        await wait_for(output, "running", "error")
+        stop_result = next(frame for frame in output if frame.get("request_id") == "stop" and frame["type"] == "result")
+        assert stop_result["content"] == "Everything stopped."
+        killed_error = next(
+            frame for frame in output if frame.get("request_id") == "running" and frame["type"] == "error"
+        )
+        assert killed_error["code"] == "cancelled"
+    finally:
+        gate.set()
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_command_when_idle_is_safe() -> None:
+    """/stop with nothing running still answers its own result and emits no error frames."""
+    active = patches(None)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("stop", 2, "/stop"))
+        await wait_for(output, "stop", "result")
+        stop_result = next(frame for frame in output if frame.get("request_id") == "stop" and frame["type"] == "result")
+        assert stop_result["content"] == "Everything stopped."
+        assert not [frame for frame in output if frame["type"] == "error"]
+    finally:
+        for item in active:
+            item.stop()
