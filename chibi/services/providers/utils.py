@@ -88,6 +88,7 @@ async def prepare_system_prompt(
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
         "available_builtin_skills": get_builtin_skill_names(),
+        "client": application_settings.client,
     }
 
     if application_settings.is_chroma_configured:
