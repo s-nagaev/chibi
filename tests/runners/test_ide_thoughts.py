@@ -2,7 +2,7 @@
 
 Covers:
   provider reasoning → send_llm_thoughts capture seam → IDEInterface
-    → result frame "thoughts" field (capability-gated, 64 KB capped)
+    → result frame "thoughts" field (capability-gated, 256 KB capped)
 plus the feature-quiet no-reasoning path and result-frame-only delivery.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.config.gpt import gpt_settings
-from chibi.runners.ide_transport import MAX_THOUGHTS_BYTES, THOUGHTS_TRUNCATION_MARKER, IDEStdioRunner
+from chibi.runners.ide_transport import MAX_THOUGHTS_BYTES, THOUGHTS_TRUNCATION_MARKER, IDEStdioRunner, _cap_thoughts
 from chibi.services.providers.utils import send_llm_thoughts as deliver_thoughts
 
 
@@ -177,10 +177,12 @@ async def test_thoughts_accumulate_across_multiple_captures(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_thoughts_capped_at_64kb_with_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Oversized reasoning is byte-capped and ends with the truncation marker."""
+async def test_thoughts_capped_at_256kb_marker_at_head_tail_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Oversized reasoning keeps the tail, drops the head, marker lands at the head."""
     monkeypatch.setattr(gpt_settings, "show_llm_thoughts", False)
-    oversized = "x" * (MAX_THOUGHTS_BYTES + 4096)
+    head_token = "HEADTOKEN"
+    tail = "T" * 8192
+    oversized = head_token + "A" * (MAX_THOUGHTS_BYTES + 4096 - len(head_token) - len(tail)) + tail
 
     async def prompt(interface: Any) -> None:
         await deliver_thoughts(thoughts=oversized, interface=interface)
@@ -194,8 +196,9 @@ async def test_thoughts_capped_at_64kb_with_marker(monkeypatch: pytest.MonkeyPat
         await instance._handle_message(request("r1"))
         result = await wait_for_result(frames)
         emitted = result["thoughts"]
-        assert emitted.encode("utf-8").startswith(b"xxxxx")
-        assert emitted.endswith(THOUGHTS_TRUNCATION_MARKER)
+        assert emitted.startswith(THOUGHTS_TRUNCATION_MARKER)
+        assert emitted.endswith(tail)
+        assert head_token not in emitted
         assert len(emitted.encode("utf-8")) == MAX_THOUGHTS_BYTES
     finally:
         stop_patches(patches)
@@ -227,7 +230,7 @@ async def test_thoughts_at_exact_cap_pass_through_unchanged(monkeypatch: pytest.
 async def test_multibyte_thoughts_truncation_stays_utf8_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     """A byte cut landing inside a multibyte character never emits invalid UTF-8."""
     monkeypatch.setattr(gpt_settings, "show_llm_thoughts", False)
-    oversized = "я" * 40000
+    oversized = "я" * 140000
 
     async def prompt(interface: Any) -> None:
         await deliver_thoughts(thoughts=oversized, interface=interface)
@@ -242,9 +245,41 @@ async def test_multibyte_thoughts_truncation_stays_utf8_safe(monkeypatch: pytest
         result = await wait_for_result(frames)
         encoded = result["thoughts"].encode("utf-8")
         assert MAX_THOUGHTS_BYTES - 4 <= len(encoded) <= MAX_THOUGHTS_BYTES
-        assert result["thoughts"].endswith(THOUGHTS_TRUNCATION_MARKER)
+        assert result["thoughts"].startswith(THOUGHTS_TRUNCATION_MARKER)
     finally:
         stop_patches(patches)
+
+
+def test_cap_thoughts_keeps_tail_drops_head_and_prepends_marker() -> None:
+    """Oversized text keeps only the tail bytes; the marker is prepended at the head."""
+    head_token = "HEADTOKEN"
+    tail = "T" * 8192
+    oversized = head_token + "A" * (MAX_THOUGHTS_BYTES + 4096 - len(head_token) - len(tail)) + tail
+    capped = _cap_thoughts(oversized)
+    assert capped.startswith(THOUGHTS_TRUNCATION_MARKER)
+    assert capped.endswith(tail)
+    assert head_token not in capped
+    assert len(capped.encode("utf-8")) == MAX_THOUGHTS_BYTES
+
+
+def test_cap_thoughts_multibyte_straddle_stays_utf8_safe() -> None:
+    """A cut landing inside a multibyte character drops the partial bytes and stays valid UTF-8."""
+    marker_len = len(THOUGHTS_TRUNCATION_MARKER.encode("utf-8"))
+    budget = MAX_THOUGHTS_BYTES - marker_len
+    filler = (budget + 2) % 4
+    oversized = "🦊" * (MAX_THOUGHTS_BYTES // 4 + 1) + "x" * filler
+    capped = _cap_thoughts(oversized)
+    assert capped.startswith(THOUGHTS_TRUNCATION_MARKER)
+    assert len(capped.encode("utf-8")) == MAX_THOUGHTS_BYTES - 2
+    assert capped.endswith("🦊🦊" + "x" * filler)
+    assert "\ufffd" not in capped
+
+
+def test_cap_thoughts_under_cap_passthrough() -> None:
+    """Text at or under the cap is returned verbatim with no marker."""
+    assert _cap_thoughts("chain of thought") == "chain of thought"
+    exact = "x" * MAX_THOUGHTS_BYTES
+    assert _cap_thoughts(exact) == exact
 
 
 @pytest.mark.asyncio

@@ -32,8 +32,8 @@ from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
 COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
-MAX_THOUGHTS_BYTES = 64 * 1024
-THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 64 KB limit reached ...]"
+MAX_THOUGHTS_BYTES = 256 * 1024
+THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
 
 
 class _SubagentRequestState(TypedDict):
@@ -98,21 +98,23 @@ def _cap_thoughts(thoughts: str) -> str:
     """Cap reasoning text at :data:`MAX_THOUGHTS_BYTES` with a truncation marker.
 
     Truncation is byte-based so the emitted JSONL line stays within a
-    predictable size regardless of content; a cut can only land on a UTF-8
-    character boundary because invalid trailing bytes are dropped on decode.
+    predictable size regardless of content, and the LAST bytes are kept so
+    the reasoning closest to the answer survives. A cut can only land on a
+    UTF-8 character boundary because invalid leading bytes are dropped on
+    decode.
 
     Args:
         thoughts: Full reasoning text captured for the request.
 
     Returns:
-        The original text when it fits the cap, otherwise the largest
-        UTF-8-safe prefix that leaves room for the marker appended at the end.
+        The original text when it fits the cap, otherwise the marker
+        prepended to the largest UTF-8-safe tail that leaves room for it.
     """
     encoded = thoughts.encode("utf-8")
     if len(encoded) <= MAX_THOUGHTS_BYTES:
         return thoughts
     budget = MAX_THOUGHTS_BYTES - len(THOUGHTS_TRUNCATION_MARKER.encode("utf-8"))
-    return encoded[:budget].decode("utf-8", errors="ignore") + THOUGHTS_TRUNCATION_MARKER
+    return THOUGHTS_TRUNCATION_MARKER + encoded[-budget:].decode("utf-8", errors="ignore")
 
 
 # Maps backend-internal error codes to the closest frontend-facing code.
