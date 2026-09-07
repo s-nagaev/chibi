@@ -74,12 +74,12 @@ _BOOTSTRAP = textwrap.dedent(r"""
     transport.get_info = info
 
     from chibi.cli import main
-    main(["ide", "--stdio"])
+    main(["stdio", "--tui"])
 """)
 
 
 class EditorContextProcess:
-    """Manage a real ``chibi ide --stdio`` process with editor_context capture."""
+    """Manage a real ``chibi stdio --tui`` process with editor_context capture."""
 
     def __init__(self) -> None:
         self.process = subprocess.Popen(
