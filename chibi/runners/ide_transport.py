@@ -178,7 +178,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         prompt: str,
         context: dict[str, Any],
         emit: Callable[[str], Any],
-        background_emit: Callable[[int, str, str | None, str | None], Any] | None = None,
+        background_emit: Callable[[int, str, str | None, str | None, str | None], Any] | None = None,
     ) -> None:
         """Initialize an IDE request interface.
 
@@ -201,6 +201,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         self.response_provider: str | None = None
         self.response_usage: UsageSchema | CompletionUsage | None = None
         self.response_thoughts: str | None = None
+        self._thoughts_at_close: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
 
@@ -209,9 +210,33 @@ class IDEInterface(UserInterface, EditorContextProvider):
 
         After this, assistant text delivered by background tool tasks is
         routed to the out-of-band background emitter instead of the dead
-        request's response buffer.
+        request's response buffer. The reasoning already attached to the
+        request's result frame is snapshotted so a background tool task can
+        later report ONLY the reasoning its own continuation turn added.
         """
         self._closed = True
+        self._thoughts_at_close = self.response_thoughts
+
+    def _continuation_thoughts(self) -> str | None:
+        """Return the reasoning captured after the request closed.
+
+        The background tool task's continuation LLM call appends its
+        reasoning to the same request-local buffer via
+        :meth:`send_llm_thoughts`; everything beyond the snapshot taken at
+        :meth:`mark_closed` belongs to the continuation turn alone.
+
+        Returns:
+            The continuation turn's reasoning text, or None when nothing
+            new was captured after the request closed.
+        """
+        captured = self.response_thoughts
+        if not captured:
+            return None
+        baseline = self._thoughts_at_close
+        if baseline and captured.startswith(baseline):
+            delta = captured[len(baseline) :].lstrip("\n")
+            return delta or None
+        return captured
 
     @property
     def editor_context(self) -> dict[str, Any] | None:
@@ -310,7 +335,8 @@ class IDEInterface(UserInterface, EditorContextProvider):
         request's response buffer exactly as before. Once the request has
         finished, the text is routed to the session-level background emitter
         so it reaches the client as a ``message`` frame instead of being
-        silently lost.
+        silently lost; the continuation turn's reasoning rides along so the
+        client can render it with the answer.
 
         Args:
             content: Assistant text being delivered.
@@ -324,7 +350,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
                     self._thread_id,
                 )
                 return
-            result = self._background_emit(self._thread_id, content, model, provider)
+            result = self._background_emit(self._thread_id, content, model, provider, self._continuation_thoughts())
             if inspect.isawaitable(result):
                 await result
             return
@@ -483,26 +509,36 @@ class IDEStdioRunner:
         )
 
     async def _emit_background_message(
-        self, thread_id: int, content: str, model: str | None, provider: str | None
+        self,
+        thread_id: int,
+        content: str,
+        model: str | None = None,
+        provider: str | None = None,
+        thoughts: str | None = None,
     ) -> None:
         """Write one out-of-band background message frame to stdout.
 
         The frame shares the regular stdout write lock, so wire lines are
         never interleaved. On a write failure the message is logged and
         dropped: background delivery is best effort and there is no
-        request id to correlate an error frame to.
+        request id to correlate an error frame to. The continuation turn's
+        reasoning rides on the frame only when the client opted in to
+        thoughts at handshake, capped like result-frame reasoning.
 
         Args:
             thread_id: Thread the background task was spawned from.
             content: Assistant text being delivered.
             model: Model that produced the answer, if known.
             provider: Provider that produced the answer, if known.
+            thoughts: Reasoning captured for the continuation turn, if any.
         """
         frame: dict[str, Any] = {"type": "message", "thread_id": thread_id, "content": content}
         if model is not None:
             frame["model"] = model
         if provider is not None:
             frame["provider"] = provider
+        if thoughts is not None and self._thoughts_enabled:
+            frame["thoughts"] = _cap_thoughts(thoughts)
         try:
             await self._write(frame)
         except Exception:
