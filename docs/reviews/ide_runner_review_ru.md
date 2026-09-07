@@ -14,7 +14,7 @@
 
 ## 1. Обзор архитектуры
 
-Chibi IDE runner — это тонкий stdio-транспорт, предоставляющий доступ к ассистенту Chibi из внешней IDE. Он запускается как отдельный процесс через `chibi run-ide --stdio` (точка входа CLI в `cli.py`). Процесс владеет одним циклом событий asyncio, который управляет:
+Chibi IDE runner — это тонкий stdio-транспорт, предоставляющий доступ к ассистенту Chibi из внешней IDE. Он запускается как отдельный процесс через `chibi stdio --vscode` (точка входа CLI в `cli.py`). Процесс владеет одним циклом событий asyncio, который управляет:
 
 - **Потоком чтения**, выполняющим блокирующий `sys.stdin.readline()` через `asyncio.to_thread` и передающим JSONL-фреймы в цикл.
 - **Диспетчером запросов**, валидирующим каждый фрейм, направляющим его через глобальный `task_manager.run_task(...)` и отслеживающим активные запросы в `_tasks[request_id]` и конкурентность на поток в `_thread_requests[thread_id]`.
@@ -404,7 +404,7 @@ IDE runner повторно использует обработчики бота
 - **Описание:** Stderr loguru sink is INFO; no way to change verbosity from CLI.
 - **Местоположение:** `cli.py`; `ide_transport.py:284`.
 - **Влияние:** Операционное неудобство.
-- **Исправление:** Добавить опцию `--log-level` в `chibi run-ide --stdio`.
+- **Исправление:** Добавить опцию `--log-level` в `chibi stdio --vscode`.
 
 #### A13. Per-request latency not surfaced
 

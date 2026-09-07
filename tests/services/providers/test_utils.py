@@ -1,6 +1,7 @@
 """Unit tests for provider utilities."""
 
 import json
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -8,6 +9,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from anthropic.types import Message as AnthropicMessage
 
+from chibi.config import application_settings
+from chibi.config.app import ClientType
 from chibi.models import Message, User
 from chibi.schemas.app import UsageSchema
 from chibi.services.interface import UserInterface
@@ -162,6 +165,34 @@ async def test_prepare_system_prompt_uses_correct_key_matching_write_side() -> N
 
     prompt = json.loads(prompt_json)
     assert "12,345 tokens" in prompt["approximate_context_size"]
+
+
+@pytest.fixture
+def restore_client_setting() -> Iterator[None]:
+    """Restore the original client value after the test."""
+    original = application_settings.client
+    yield
+    application_settings.client = original
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("restore_client_setting")
+@pytest.mark.parametrize("client", ["telegram", "tui", "vscode", "pycharm", "neovim"])
+async def test_prepare_system_prompt_includes_active_client(client: ClientType) -> None:
+    """The assembled prompt payload carries the active client on every launch path."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
+    application_settings.client = client
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface)
+
+    prompt = json.loads(prompt_json)
+    assert prompt["client"] == client
 
 
 def _make_anthropic_response(
