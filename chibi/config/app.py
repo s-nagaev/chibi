@@ -9,6 +9,8 @@ from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ClientType = Literal["telegram", "tui", "vscode", "pycharm", "neovim"]
+
 
 class ApplicationSettings(BaseSettings):
     """
@@ -30,6 +32,7 @@ class ApplicationSettings(BaseSettings):
         heartbeat_frequency_call: Interval between heartbeat calls.
         heartbeat_retry_calls: Number of retries for heartbeat.
         heartbeat_proxy: Proxy URL for heartbeat.
+        client: Client frontend served by this process (telegram, tui, vscode, pycharm, neovim).
     """
 
     model_config = SettingsConfigDict(
@@ -81,6 +84,7 @@ class ApplicationSettings(BaseSettings):
     # Interface
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
+    client: ClientType = Field(default="telegram")
 
     # Other settings
     log_prompt_data: bool = Field(default=False)
@@ -142,7 +146,7 @@ def configure_stderr_sink() -> None:
 
     Every emitted line follows the plain shape ``YYYY-MM-DD HH:MM:SS | LEVEL |
     message`` (local time, no file/line references), optionally prefixed by the
-    bound user id. Terminal and IDE runners install their own sinks instead.
+    bound user id. Terminal and stdio runners install their own sinks instead.
     """
     logger.remove()
     logger.add(

@@ -1,5 +1,6 @@
-"""Tests for the IDE runner CLI entrypoint and tool registration behavior."""
+"""Tests for the stdio runner CLI entrypoint and tool registration behavior."""
 
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +9,7 @@ from click.testing import CliRunner
 # Import config first to avoid a circular import when constants is loaded directly.
 import chibi.config  # noqa: F401
 from chibi.cli import main
+from chibi.config import application_settings
 from chibi.constants import IDE_STORAGE_ID
 
 
@@ -17,30 +19,47 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-class TestIDERunnerCLI:
-    """CLI dispatch tests for the `chibi ide` entrypoint."""
+@pytest.fixture
+def restore_client_setting() -> Iterator[None]:
+    """Restore the original client value after the test."""
+    original = application_settings.client
+    yield
+    application_settings.client = original
 
-    def test_ide_group_shows_help_without_subcommand(self, runner: CliRunner) -> None:
-        """Running `chibi ide` without flags or subcommands prints help."""
-        result = runner.invoke(main, ["ide"])
 
-        assert result.exit_code == 0
-        assert "Run the Chibi IDE interface" in result.output
-        assert "--stdio" in result.output
+class TestStdioRunnerCLI:
+    """CLI dispatch tests for the `chibi stdio` entrypoint."""
 
-    def test_ide_stdio_flag_dispatches_to_runner(self, runner: CliRunner) -> None:
-        """`chibi ide --stdio` invokes the deferred IDE runner entrypoint."""
-        with patch("chibi.runners.ide.run_ide") as mock_run_ide:
-            result = runner.invoke(main, ["ide", "--stdio"])
-
-        assert result.exit_code == 0
-        mock_run_ide.assert_called_once()
-
-    def test_ide_stdio_flag_does_not_accept_arguments(self, runner: CliRunner) -> None:
-        """`chibi ide --stdio` does not take positional arguments."""
-        result = runner.invoke(main, ["ide", "--stdio", "extra"])
+    def test_stdio_without_flag_is_rejected(self, runner: CliRunner) -> None:
+        """Running `chibi stdio` without a client flag fails with usage guidance."""
+        result = runner.invoke(main, ["stdio"])
 
         assert result.exit_code != 0
+        assert "No client selected" in result.output
+
+    def test_stdio_tui_dispatches_and_sets_client(
+        self, runner: CliRunner, restore_client_setting: Iterator[None]
+    ) -> None:
+        """`chibi stdio --tui` sets application_settings.client to "tui" and invokes the runner."""
+        with patch("chibi.runners.stdio.run_stdio") as mock_run_stdio:
+            result = runner.invoke(main, ["stdio", "--tui"])
+
+        assert result.exit_code == 0
+        mock_run_stdio.assert_called_once()
+        assert application_settings.client == "tui"
+
+    def test_stdio_tui_does_not_accept_arguments(self, runner: CliRunner) -> None:
+        """`chibi stdio --tui` does not take positional arguments."""
+        result = runner.invoke(main, ["stdio", "--tui", "extra"])
+
+        assert result.exit_code != 0
+
+    def test_ide_command_removed(self, runner: CliRunner) -> None:
+        """The removed `chibi ide` command no longer exists."""
+        result = runner.invoke(main, ["ide", "--stdio"])
+
+        assert result.exit_code != 0
+        assert "No such command" in result.output
 
 
 class TestIDEStorageIdentity:

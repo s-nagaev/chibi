@@ -4,6 +4,7 @@ import sys
 
 import click
 
+from chibi.config import application_settings
 from chibi.config_generator import CONFIG_PATH, generate_default_config
 from chibi.service import Service
 
@@ -16,18 +17,18 @@ def main() -> None:
     pass
 
 
-@main.group(invoke_without_command=True)
-@click.option("--stdio", is_flag=True, default=False, help="Run the IDE JSONL protocol over standard input/output.")
-@click.pass_context
-def ide(ctx: click.Context, stdio: bool) -> None:
-    """Run the Chibi IDE interface."""
-    if stdio:
-        from chibi.runners.ide import run_ide
+@main.command()
+@click.option("--tui", is_flag=True, default=False, help="Serve the terminal UI client over the JSONL stdio protocol.")
+def stdio(tui: bool) -> None:
+    """Serve a client session over the JSONL stdio protocol."""
+    if not tui:
+        raise click.UsageError("No client selected: pass --tui to start the stdio session.")
 
-        run_ide()
+    application_settings.client = "tui"
 
-    if ctx.invoked_subcommand is None and not stdio:
-        click.echo(ctx.get_help())
+    from chibi.runners.stdio import run_stdio
+
+    run_stdio()
 
 
 @main.command()

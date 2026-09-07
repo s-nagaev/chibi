@@ -1,4 +1,4 @@
-"""Contract coverage through the real ``chibi ide --stdio`` command."""
+"""Contract coverage through the real ``chibi stdio --tui`` command."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ _BOOTSTRAP = textwrap.dedent(
 
     from chibi.cli import main
 
-    main(["ide", "--stdio"])
+    main(["stdio", "--tui"])
     """
 )
 
@@ -64,7 +64,7 @@ class ProtocolProcess:
     """Manage one real CLI process and its unbuffered JSONL stream."""
 
     def __init__(self, io_encoding: str | None = None) -> None:
-        """Start a deterministic ``chibi ide --stdio`` process.
+        """Start a deterministic ``chibi stdio --tui`` process.
 
         Args:
             io_encoding: Optional ``PYTHONIOENCODING`` value used to emulate a

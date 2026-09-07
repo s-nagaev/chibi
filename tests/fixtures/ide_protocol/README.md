@@ -1,6 +1,6 @@
 # Chibi IDE Protocol Fixtures
 
-Canonical, versioned fixtures for the `chibi ide --stdio` protocol defined in
+Canonical, versioned fixtures for the `chibi stdio --tui` protocol defined in
 `/.project/ide_integration/architecture_specification.md`. Consumed by Chibi backend tests **and** by the
 `chibi-vscode` extension tests (the extension keeps its own copies and checks compatibility by `protocol_version`).
 
