@@ -16,7 +16,7 @@ from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
 from chibi.models import Message
 from chibi.schemas.app import UsageSchema
-from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
+from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
@@ -31,7 +31,17 @@ from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
-COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
+COMMANDS = [
+    "/reset",
+    "/stop",
+    "/new_thread_with_current_context",
+    "/model",
+    "/imagine",
+    "/info",
+    "/help",
+    "/quit",
+    "/exit",
+]
 MAX_THOUGHTS_BYTES = 256 * 1024
 THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
 
@@ -910,6 +920,8 @@ class IDEStdioRunner:
                     responses.append("Available commands: " + ", ".join(COMMANDS))
                 elif command == "/reset":
                     await handle_reset(interface=interface)
+                elif command == "/stop":
+                    await handle_stop(interface=interface)
                 elif command == "/new_thread_with_current_context":
                     await self._handle_new_thread_with_current_context(
                         interface=interface, args=args, responses=responses
