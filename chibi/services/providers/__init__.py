@@ -9,6 +9,7 @@ from chibi.services.providers.customopenai import CustomOpenAI
 from chibi.services.providers.deepinfra import DeepInfra
 from chibi.services.providers.deepseek import DeepSeek
 from chibi.services.providers.eleven_labs import ElevenLabs
+from chibi.services.providers.featherless import Featherless
 from chibi.services.providers.fireworks import Fireworks
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.grok import Grok
