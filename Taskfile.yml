@@ -47,6 +47,16 @@ tasks:
           -f agent.Dockerfile
           --push .
 
+  build:lfull:
+    desc: "Build full backend+TUI image locally (amd64) with specified tag"
+    cmds:
+      - docker buildx build
+          --load
+          --build-context tui-src=../chibi-tui
+          -t {{.IMAGE}}:full-{{.TAG}}
+          -f full.Dockerfile
+          .
+
   lint:
     desc: "Run linters: ruff format, ruff check --fix, and mypy"
     cmds:
