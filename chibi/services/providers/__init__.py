@@ -2,6 +2,7 @@
 
 from chibi.services.providers.alibaba import Alibaba
 from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.baseten import Baseten
 from chibi.services.providers.cheaperinference import Cheaperinference
 from chibi.services.providers.cloudflare import Cloudflare
 from chibi.services.providers.customopenai import CustomOpenAI
