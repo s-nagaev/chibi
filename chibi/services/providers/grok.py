@@ -19,7 +19,7 @@ class Grok(OpenAIFriendlyProvider):
     image_quality = omit
     image_size = None
     default_image_model = "grok-imagine-image-quality"
-    default_model = "grok-4.20-0309-reasoning"
+    default_model = "grok-4.6"
     default_moderation_model = "grok-4.20-0309-non-reasoning"
     default_vision_model = "grok-4.20-multi-agent-0309"
     presence_penalty = NOT_GIVEN

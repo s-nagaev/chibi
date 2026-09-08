@@ -12,7 +12,7 @@ class MoonshotAI(OpenAIFriendlyProvider):
     name = "MoonshotAI"
     model_name_keywords = ["moonshot", "kimi"]
     model_name_keywords_exclude = ["vision"]
-    default_model = "kimi-k2.6"
-    default_moderation_model = "kimi-k2.6"
-    default_vision_model = "kimi-k2.6"
+    default_model = "kimi-k2.7-code"
+    default_moderation_model = "kimi-k2.7-code"
+    default_vision_model = "kimi-k2.7-code"
     temperature = 1

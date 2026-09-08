@@ -85,6 +85,45 @@ ZHIPUAI_API_KEY=
 # OpenRouter models. https://openrouter.ai/keys
 OPENROUTER_API_KEY=
 
+# Kimi, GLM, MiniMax and other open models. https://melious.ai
+MELIOUS_API_KEY=
+
+# Open-source and community models (GLM, Qwen, etc.). https://novita.ai
+NOVITA_AI_API_KEY=
+
+# Xiaomi MiMo models. https://xiaomimimo.com
+MIMO_API_KEY=
+
+# Budget inference for open models (GLM, DeepSeek). https://cheaperinference.com
+CHEAPERINFERENCE_API_KEY=
+
+# Open-source models from DeepInfra. https://deepinfra.com
+DEEPINFRA_API_KEY=
+
+# Open-source models from Together AI. https://together.ai
+TOGETHER_API_KEY=
+
+# Fast inference for open models. https://fireworks.ai
+FIREWORKS_API_KEY=
+
+# Token Factory open-model inference. https://tokenfactory.nebius.com
+NEBIUS_API_KEY=
+
+# Open-source model inference. https://baseten.co
+BASETEN_API_KEY=
+
+# Fast inference for open models. https://cloud.sambanova.ai
+SAMBANOVA_API_KEY=
+
+# Open-source models from SiliconFlow. https://siliconflow.com
+SILICONFLOW_API_KEY=
+
+# DeepSeek and open-model inference. https://parasail.io
+PARASAIL_API_KEY=
+
+# Llama and open-model inference. https://featherless.ai
+FEATHERLESS_API_KEY=
+
 # Open-source models from Cloudflare. Chat-only. https://dash.cloudflare.com/profile/api-tokens
 CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.

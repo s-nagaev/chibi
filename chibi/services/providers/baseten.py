@@ -11,6 +11,6 @@ class Baseten(OpenAIFriendlyProvider):
     base_url = "https://inference.baseten.co/v1"
     name = "Baseten"
 
-    default_model = "openai/gpt-oss-120b"
+    default_model = "zai-org/GLM-5.3-Flash"
     default_moderation_model = "zai-org/GLM-5.3-Flash"
     default_vision_model = "zai-org/GLM-5.3-Flash"
