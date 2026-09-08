@@ -417,6 +417,27 @@ async def set_info(db: Database, user_id: int, new_info: str) -> None:
 
 
 @inject_database
+async def set_thread_notes(db: Database, user_id: int, thread_id: int, notes: str) -> None:
+    """Replace the thread-scoped notes for a specific thread.
+
+    The notes text is stored per thread on the user object and persisted with
+    the whole-user save. Full-replace semantics: the stored text is swapped
+    entirely, there is no merging. An empty string is allowed and clears the
+    notes for the thread. Users loaded from older persisted records are
+    handled naturally by the pydantic default of the dict field.
+
+    Args:
+        db: The database instance.
+        user_id: The storage ID of the user.
+        thread_id: The ID of the thread to set the notes for.
+        notes: The complete new notes text; an empty string clears the notes.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    user.thread_notes[thread_id] = notes
+    await db.save_user(user)
+
+
+@inject_database
 async def activate_llm_skill(db: Database, user_id: int, skill_name: str, skill_payload: str) -> None:
     user = await db.get_or_create_user(user_id=user_id)
     user.llm_skills[skill_name] = skill_payload

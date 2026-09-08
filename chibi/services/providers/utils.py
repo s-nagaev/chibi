@@ -81,7 +81,10 @@ async def prepare_system_prompt(
             the same thread-scoped value as the parent request.
 
     Returns:
-        JSON-encoded system prompt payload.
+        JSON-encoded system prompt payload. The current thread's notes, when
+        non-empty, are injected as the LAST payload key (the tail of the
+        serialized JSON) to minimize prompt-cache disturbance; an empty notes
+        string is treated the same as an absent one and the key is omitted.
     """
     user = await get_chibi_user(user_id=user_id)
     session_thread_id = interface.thread_id if interface else thread_id
@@ -133,6 +136,8 @@ async def prepare_system_prompt(
     prompt["available_models_to_delegate"] = convert_list_of_models_to_str(models=llms_data)
 
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
+    if session_thread_id is not None and (thread_notes := user.thread_notes.get(session_thread_id)):
+        prompt["thread_notes"] = thread_notes
     return json.dumps(prompt)
 
 
