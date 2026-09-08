@@ -61,19 +61,19 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, no moderation, chat/vision/tts/stt ready."""
+    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/tts/stt/moderation ready."""
     assert Together.name == "Together"
     assert Together.base_url == "https://api.together.ai/v1"
     assert Together.chat_ready is True
     assert Together.vision_ready is True
-    assert Together.moderation_ready is False
+    assert Together.moderation_ready is True
     assert Together.tts_ready is True
     assert Together.stt_ready is True
     assert Together.default_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
     assert Together.default_vision_model == "Qwen/Qwen3.5-9B"
     assert Together.default_tts_model == "hexgrad/Kokoro-82M"
     assert Together.default_stt_model == "openai/whisper-large-v3"
-    assert Together.default_moderation_model is None
+    assert Together.default_moderation_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:
