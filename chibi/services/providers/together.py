@@ -19,4 +19,3 @@ class Together(OpenAIFriendlyProvider):
     default_tts_model = "hexgrad/Kokoro-82M"
     default_tts_voice = "af_heart"
     default_stt_model = "openai/whisper-large-v3"
-    # temperature = 1

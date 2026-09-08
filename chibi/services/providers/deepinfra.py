@@ -11,7 +11,6 @@ class DeepInfra(OpenAIFriendlyProvider):
     base_url = "https://api.deepinfra.com/v1/openai"
     name = "Deepinfra"
 
-    default_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
-    default_moderation_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
-    default_vision_model = "google/gemma-3-4b-it"
-    # temperature = 1
+    default_model = "zai-org/GLM-5.3-Flash"
+    default_moderation_model = "zai-org/GLM-5.3-Flash"
+    default_vision_model = "zai-org/GLM-5.3-Flash"

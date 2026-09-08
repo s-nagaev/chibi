@@ -15,8 +15,8 @@ class Minimax(AnthropicFriendlyProvider):
 
     name = "Minimax"
     base_url = "https://api.minimax.io/anthropic"
-    default_model = "MiniMax-M2.7"
-    default_moderation_model = "MiniMax-M2.5-lighting"
+    default_model = "MiniMax-M3"
+    default_moderation_model = "MiniMax-M2.5"
     model_name_keywords = ["MiniMax"]
 
     base_tts_url = "https://api.minimax.io/v1/"

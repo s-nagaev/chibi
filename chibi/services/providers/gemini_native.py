@@ -78,14 +78,14 @@ class Gemini(RestApiFriendlyProvider):
         "1.5",
     ]
 
-    default_model = "models/gemini-2.5-pro"
+    default_model = "models/gemini-3.8-flash"
     default_image_model = "models/imagen-4.0-fast-generate-001"
     default_tts_voice = "Kore"
-    default_tts_model = "gemini-3.1-flash-tts-preview"
-    default_stt_model = "gemini-3-flash-preview"
-    default_moderation_model = "models/gemini-2.5-flash-lite"
-    default_vision_model = "models/gemini-3-flash-preview"
-    default_ocr_model = "models/gemini-3-flash-preview"
+    default_tts_model = "models/gemini-3.5-transcribe"
+    default_stt_model = "models/gemini-3.8-flash"
+    default_moderation_model = "models/gemini-3.5-flash-lite"
+    default_vision_model = "models/gemini-3.8-flash"
+    default_ocr_model = "models/gemini-3.8-flash"
 
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens

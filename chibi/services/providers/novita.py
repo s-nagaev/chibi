@@ -14,4 +14,3 @@ class Novita(OpenAIFriendlyProvider):
     default_model = "zai-org/glm-5.3-flash"
     default_moderation_model = "zai-org/glm-5.3-flash"
     default_vision_model = "zai-org/glm-5.3-flash"
-    # temperature = 1
