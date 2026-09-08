@@ -15,6 +15,7 @@ from chibi.services.providers.melious import Melious
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
+from chibi.services.providers.nebius import Nebius
 from chibi.services.providers.novita import Novita
 from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
