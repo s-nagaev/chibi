@@ -61,17 +61,17 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, no moderation, no TTS/STT."""
+    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready, no TTS/STT."""
     assert DeepInfra.name == "Deepinfra"
     assert DeepInfra.base_url == "https://api.deepinfra.com/v1/openai"
     assert DeepInfra.chat_ready is True
     assert DeepInfra.vision_ready is True
-    assert DeepInfra.moderation_ready is False
+    assert DeepInfra.moderation_ready is True
     assert DeepInfra.tts_ready is False
     assert DeepInfra.stt_ready is False
     assert DeepInfra.default_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
     assert DeepInfra.default_vision_model == "google/gemma-3-4b-it"
-    assert DeepInfra.default_moderation_model is None
+    assert DeepInfra.default_moderation_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:
