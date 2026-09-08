@@ -23,6 +23,8 @@ class GPTSettings(BaseSettings):
     mistralai_key: str | None = Field(alias="MISTRALAI_API_KEY", default=None)
     moonshotai_key: str | None = Field(alias="MOONSHOTAI_API_KEY", default=None)
     melious_key: str | None = Field(alias="MELIOUS_API_KEY", default=None)
+    novita_key: str | None = Field(alias="NOVITA_AI_API_KEY", default=None)
+    xiaomi_mimo_key: str | None = Field(alias="MIMO_API_KEY", default=None)
     cheaperinference_key: str | None = Field(alias="CHEAPERINFERENCE_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
