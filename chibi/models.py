@@ -517,6 +517,7 @@ class User(BaseModel):
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_names: dict[int, str] = Field(default_factory=dict)
     thread_working_dirs: dict[int, str] = Field(default_factory=dict)
+    thread_notes: dict[int, str] = Field(default_factory=dict)
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
