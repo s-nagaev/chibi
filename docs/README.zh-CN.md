@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>您的数字伙伴。不仅是工具，更是合作伙伴。</strong><br/>
-  <span>自托管的异步 Telegram 机器人，可协调多个 AI 提供商、工具 and 子代理，完成实际工作。</span>
+  <span>自托管的异步 Telegram 机器人，可协调多个 AI 提供商、工具和子代理，完成实际工作。</span>
 </p>
 
 <p align="center">
@@ -63,6 +63,19 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **月之暗面**（Moonshot AI）
 - **MiniMax**
 - **智谱AI**（GLM 系列模型）
+- **Novita AI**
+- **小米**（MiMo 系列模型）
+- **Melious**
+- **Cheaper Inference**
+- **DeepInfra**
+- **Together AI**
+- **Fireworks AI**
+- **Nebius**（Token Factory）
+- **Baseten**
+- **SambaNova**
+- **SiliconFlow**
+- **Parasail**
+- **Featherless**
 - **OpenRouter**（统一访问多种模型）
 - **Cloudflare Workers AI**（众多开源模型）
 
@@ -75,9 +88,9 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 
 ### 多模态提供商（可选）
 
-- **图像**：Google（Imagen、Nano Banana）、OpenAI（DALL·E）、阿里云（通义万相）、xAI（Grok Image）、Wan、**智谱AI（CogView）、MiniMax**
+- **图像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、阿里云（Qwen Image、Wan）、xAI（Grok Imagine）、智谱AI（GLM Image）、MiniMax、Cheaper Inference（Nano Banana Pro）
 - **音乐**：Suno
-- **语音**：ElevenLabs、MiniMax、OpenAI（Whisper）
+- **语音**：ElevenLabs、MiniMax、OpenAI（GPT-4o Transcribe / TTS）
 
 > 具体模型可用性取决于您配置的提供商密钥和启用的功能。
 
@@ -109,6 +122,21 @@ chibi start
 | `chibi restart` | 重启机器人 |
 | `chibi config` | 生成或编辑配置 |
 | `chibi logs` | 查看机器人日志 |
+
+---
+
+## 本地客户端前端
+
+Chibi 可通过版本化的本地 JSONL 协议为本地客户端提供服务：
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+该命令由客户端前端启动，不用于交互式使用。Chibi 负责维护 `v1` 协议并支持协商相同版本的兼容客户端。stdio 进程仅向 stdout 写入协议帧，向 stderr 写入诊断信息。现有的 Chibi 命令、工具、权限和审核行为仍具有权威性；客户端不添加额外的工具策略层。
 
 ---
 
@@ -157,7 +185,7 @@ docker-compose up -d
 **主要提供商：**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
 - **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
@@ -205,6 +233,7 @@ Chibi 可以在对话中途切换提供商的同时保持上下文，或为每�
 - **文件系统访问**：读取/写入/搜索/组织文件
 - **终端执行**：运行经 LLM 审核的安全命令
 - **持久化记忆**：对话历史在重启后仍保留，具备上下文管理和摘要功能
+- **技能**：可复用的指令模块，代理可按需加载到系统提示中（`load_builtin_skill`）
 
 ### 🔌 通过 MCP（模型上下文协议）扩展
 将 Chibi 连接到外部工具和服务（或构建您自己的）：
@@ -218,9 +247,9 @@ Chibi 可以在对话中途切换提供商的同时保持上下文，或为每�
 如果某个工具可以通过 MCP 暴露，Chibi 就能学会使用它。
 
 ### 🎨 丰富的内容生成
-- **图像**：Nano Banana、Imagen、通义万相、Wan、DALL·E、Grok
+- **图像**：Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
 - **音乐**：Suno（包括自定义模式：风格/歌词/人声）
-- **语音**：转录 + 文本转语音（ElevenLabs、MiniMax、OpenAI）
+- **语音**：转录 + 文本转语音（ElevenLabs、OpenAI、MiniMax）
 
 ---
 
@@ -259,6 +288,31 @@ Chibi：*分析变更，提出改进建议，通过 MCP 更新文档*
 - **访问控制**：白名单用户/群组/模型
 - **存储选项**：本地卷、Redis 或 DynamoDB
 - **工具安全**：代理工具可配置；终端执行经过审核且可限制
+
+---
+
+### `MAX_HISTORY_TOKENS` — 上下文摘要阈值（默认值变更）
+
+`MAX_HISTORY_TOKENS` 是 Chibi 自动摘要对话以保持上下文可控的阈值。其**语义已变更**：现在与**真实的、提供商报告的提示词 token 数量**进行比较（整个发出的请求：系统提示 + 已激活的技能 + 工具模式 + 工具调用参数 + 每条消息的结构开销 + 对话内容），而非旧的仅衡量对话 `content` + `role` 的启发式方法。对于相同对话，真实数字约为旧估计的 **4.8 倍**。
+
+- **默认值已重设**：`64000` → `100000`。新值保护最小常用上下文窗口（128k tokens）：`100000` 约为 128k 窗口的 78%（因此摘要会在 128k 模型溢出前触发），约为 200k 窗口的 50%（留有充裕空间）。旧的 `64000` 仅是历史记录的估计，从未在真正溢出前被触发，因为该估计对西里尔文的计算少约 2 倍，且排除了固定的每轮开销（系统提示约 3.7k、工具模式约 6.8k、已激活技能约 5.9k、`user_info` 约 0.75–3k）——因此 128k 模型在约 128k 真实 token 时溢出，而启发式仍远低于 64k。
+- **迁移**：如果您在 `.env` 中显式设置了 `MAX_HISTORY_TOKENS`，旧值是针对旧的历史估计调整的，现在与一个约为相同对话 4.8 倍的真实数字进行比较。请将其重新调整到 **~100k 量级**（例如 `64000` → `100000`），以便在最小模型的上下文窗口溢出前触发摘要。如果从未设置，新默认值将自动生效。
+- 冷启动回退（进程重启后的第一轮，尚无提供商数据缓存时）仍使用旧的启发式，因此摘要功能保持可用。
+
+### `REACTIVE_CONTEXT_RECOVERY` — 上下文溢出后的一次性重试
+
+`REACTIVE_CONTEXT_RECOVERY`（默认：`true`）是补充主动 `MAX_HISTORY_TOKENS` 阈值的反应式安全网。当提供商因类型化 `context_length_exceeded` 错误拒绝请求时，Chibi 会自动摘要对话历史并**恰好重试一次**该轮。如果重试成功，用户将收到正常回复（附带一条简短说明上下文已压缩的注释）。如果重试再次溢出或因任何原因恢复失败，则该轮回退到现有的道歉路径——摘要+重试循环在每个原始轮次中最多只能运行一次。设为 `false` 可禁用反应式恢复并保留旧行为（记录日志 + 道歉，不重试）。
+
+### 工作目录按线程隔离（`WORKING_DIR`）
+
+代理的工作目录——用于终端命令并作为当前工作目录报告给模型——是**按线程隔离的**，与所选 LLM 模型按线程绑定的方式一致。
+
+- **默认值**：来自 `WORKING_DIR` 设置（默认 `~/chibi`），通过遗留用户级值获取；全新部署直接继承该设置。
+- **每线程覆盖**：任何线程/对话均可**独立地**通过代理的 `set_working_dir` 工具覆盖其工作目录（仅限 LLM 驱动——没有斜杠命令，需启用 `FILESYSTEM_ACCESS`）。这允许不同线程中的两个代理同时在不同项目上工作而互不干扰。
+- **解析顺序**：线程覆盖 → 遗留用户级目录 → `WORKING_DIR` 设置。
+- **路径规范化**：设置的值在保存时会被扩展为绝对路径（`~/x` 变为 `/abs/x`）；未修改的默认值保持原始形式。
+- **子代理**在某线程中生成时共享该线程的工作目录——相同的有效路径会被注入其系统提示和工具调用中。
+- 覆盖**在线程克隆后保留**：`/new_thread_with_current_context` 会将工作目录与消息和模型偏好一起携带。
 
 ---
 
