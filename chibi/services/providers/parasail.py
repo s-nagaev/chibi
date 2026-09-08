@@ -11,5 +11,6 @@ class Parasail(OpenAIFriendlyProvider):
     base_url = "https://api.parasail.io/v1"
     name = "Parasail"
 
-    default_model = "parasail-deepseek-r1"
-    default_moderation_model = "parasail-deepseek-r1"
+    default_model = "zai-org/GLM-5.3-Flash"
+    default_moderation_model = "zai-org/GLM-5.3-Flash"
+    default_vision_model = "zai-org/GLM-5.3-Flash"

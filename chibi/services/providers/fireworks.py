@@ -14,4 +14,3 @@ class Fireworks(OpenAIFriendlyProvider):
     default_model = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
     default_moderation_model = "accounts/fireworks/models/glm-5p3-flash"
     default_vision_model = "accounts/fireworks/models/glm-5p3-flash"
-    # temperature = 1

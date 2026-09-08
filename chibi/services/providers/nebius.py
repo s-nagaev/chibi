@@ -14,4 +14,3 @@ class Nebius(OpenAIFriendlyProvider):
     default_model = "nvidia/Nemotron-3_5-Lightning"
     default_moderation_model = "zai-org/GLM-5.3-Flash"
     default_vision_model = "zai-org/GLM-5.3-Flash"
-    # temperature = 1

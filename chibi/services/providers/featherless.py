@@ -11,7 +11,6 @@ class Featherless(OpenAIFriendlyProvider):
     base_url = "https://api.featherless.ai/v1"
     name = "Featherless"
 
-    default_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    default_moderation_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    default_vision_model = "meta-llama/Llama-3.2-11B-Vision-Instruct"
-    # temperature = 1
+    default_model = "zai-org/GLM-5.3-Flash"
+    default_moderation_model = "zai-org/GLM-5.3-Flash"
+    default_vision_model = "zai-org/GLM-5.3-Flash"

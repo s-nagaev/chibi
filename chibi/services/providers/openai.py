@@ -39,14 +39,14 @@ class OpenAI(OpenAIFriendlyProvider):
     model_name_keywords_exclude = ["audio", "realtime", "transcribe", "tts", "image"]
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
-    default_model = "gpt-5.2"
+    default_model = "gpt-5.6-terra"
     default_image_model = "gpt-image-2"
-    default_moderation_model = "gpt-5-mini"
+    default_moderation_model = "gpt-5.4-mini"
     default_stt_model = "gpt-4o-transcribe"
-    default_tts_model = "gpt-4o-mini-tts"
+    default_tts_model = "tts-1-hd"
     default_tts_voice = "nova"
-    default_vision_model = "gpt-5-mini"
-    default_ocr_model = "gpt-5-mini"
+    default_vision_model = "gpt-5.6-luna"
+    default_ocr_model = "gpt-5.6-luna"
 
     async def get_chat_response(
         self,
