@@ -26,6 +26,7 @@ class GPTSettings(BaseSettings):
     novita_key: str | None = Field(alias="NOVITA_AI_API_KEY", default=None)
     xiaomi_mimo_key: str | None = Field(alias="MIMO_API_KEY", default=None)
     cheaperinference_key: str | None = Field(alias="CHEAPERINFERENCE_API_KEY", default=None)
+    deepinfra_key: str | None = Field(alias="DEEPINFRA_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
     elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)

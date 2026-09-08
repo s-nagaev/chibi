@@ -5,6 +5,7 @@ from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.cheaperinference import Cheaperinference
 from chibi.services.providers.cloudflare import Cloudflare
 from chibi.services.providers.customopenai import CustomOpenAI
+from chibi.services.providers.deepinfra import DeepInfra
 from chibi.services.providers.deepseek import DeepSeek
 from chibi.services.providers.eleven_labs import ElevenLabs
 from chibi.services.providers.gemini_native import Gemini
