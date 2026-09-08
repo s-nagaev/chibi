@@ -29,6 +29,7 @@ class GPTSettings(BaseSettings):
     deepinfra_key: str | None = Field(alias="DEEPINFRA_API_KEY", default=None)
     together_key: str | None = Field(alias="TOGETHER_API_KEY", default=None)
     fireworks_key: str | None = Field(alias="FIREWORKS_API_KEY", default=None)
+    nebius_key: str | None = Field(alias="NEBIUS_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
     elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
