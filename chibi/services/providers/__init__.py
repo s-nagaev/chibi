@@ -13,8 +13,10 @@ from chibi.services.providers.melious import Melious
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
+from chibi.services.providers.novita import Novita
 from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.suno import Suno
+from chibi.services.providers.xiaomi import Xiaomi
 from chibi.services.providers.zhipuai import ZhipuAI
