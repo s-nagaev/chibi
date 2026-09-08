@@ -33,6 +33,7 @@ class GPTSettings(BaseSettings):
     baseten_key: str | None = Field(alias="BASETEN_API_KEY", default=None)
     sambanova_key: str | None = Field(alias="SAMBANOVA_API_KEY", default=None)
     siliconflow_key: str | None = Field(alias="SILICONFLOW_API_KEY", default=None)
+    parasail_key: str | None = Field(alias="PARASAIL_API_KEY", default=None)
     openai_key: str | None = Field(alias="OPENAI_API_KEY", default=None)
     suno_key: str | None = Field(alias="SUNO_API_ORG_API_KEY", default=None)
     elevenlabs_api_key: str | None = Field(alias="ELEVEN_LABS_API_KEY", default=None)
