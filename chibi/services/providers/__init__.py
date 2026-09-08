@@ -22,6 +22,7 @@ from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.sambanova import SambaNova
+from chibi.services.providers.siliconflow import SiliconFlow
 from chibi.services.providers.suno import Suno
 from chibi.services.providers.together import Together
 from chibi.services.providers.xiaomi import Xiaomi
