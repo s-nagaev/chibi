@@ -20,6 +20,7 @@ from chibi.services.providers.nebius import Nebius
 from chibi.services.providers.novita import Novita
 from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
+from chibi.services.providers.parasail import Parasail
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.sambanova import SambaNova
 from chibi.services.providers.siliconflow import SiliconFlow
