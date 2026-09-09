@@ -7,6 +7,7 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
 from chibi.memory.chroma import memory
+from chibi.services.cwd_events import cwd_tracker
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
@@ -143,6 +144,7 @@ class SetWorkingDirTool(ChibiTool):
             f"thread #{thread_id}: {new_wd}",
         )
         await set_thread_working_dir(user_id=user_id, thread_id=thread_id, new_wd=new_wd)
+        cwd_tracker.cwd_changed(thread_id)
         return {"status": "ok"}
 
 
