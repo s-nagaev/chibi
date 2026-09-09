@@ -225,9 +225,9 @@ class TerminalRunner:
                 await self._handle_info()
                 return True
             else:
-                console.print(f"[red]Unknown command: {cmd}[/red]")
-                console.print("[dim]Type /help for available commands.[/dim]")
-                return True
+                # Unmatched slash-prefixed prompt: not a command — let the
+                # REPL route it to the bot as a plain user prompt.
+                return False
 
         return False
 
