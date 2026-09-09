@@ -962,7 +962,8 @@ class IDEStdioRunner:
                             or "No models available."
                         )
                 else:
-                    raise ValueError(f"Unknown command: {command}")
+                    # Unmatched slash-prefixed prompt: treat as a plain user prompt.
+                    await handle_user_prompt(interface=interface)
             else:
                 await handle_user_prompt(interface=interface)
             content = "\n".join(responses)

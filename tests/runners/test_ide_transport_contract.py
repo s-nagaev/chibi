@@ -448,3 +448,24 @@ async def test_stop_command_when_idle_is_safe() -> None:
     finally:
         for item in active:
             item.stop()
+
+
+@pytest.mark.asyncio
+async def test_unmatched_slash_prompt_goes_to_bot_as_plain_prompt() -> None:
+    """A slash-prefixed prompt matching no command is handled as a plain user prompt."""
+    gate = asyncio.Event()
+    gate.set()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("fallback", 2, "/definitely_not_a_command hello"))
+        await wait_for(output, "fallback", "result")
+        result = next(frame for frame in output if frame.get("request_id") == "fallback" and frame["type"] == "result")
+        assert result["content"] == "This function `foo` returns the integer `42`."  # fake_prompt answered
+        assert not [frame for frame in output if frame["type"] == "error"], f"Unexpected error frames: {output}"
+    finally:
+        for item in active:
+            item.stop()
