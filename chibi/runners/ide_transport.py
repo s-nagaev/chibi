@@ -6,6 +6,7 @@ import json
 import sys
 import warnings
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, TypedDict
 
 from loguru import logger
@@ -17,6 +18,7 @@ from chibi.exceptions import ConfigurationError, StorageError
 from chibi.models import Message
 from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
+from chibi.services.cwd_events import cwd_tracker
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
@@ -174,6 +176,24 @@ async def _get_thread_messages(db: Database, storage_id: int, thread_id: int) ->
     """
     user = await db.get_or_create_user(user_id=storage_id)
     return await db.get_conversation_messages(user=user, thread_id=thread_id)
+
+
+@inject_database
+async def _get_thread_cwd(db: Database, storage_id: int, thread_id: int) -> str:
+    """Resolve the effective working directory of one thread.
+
+    Args:
+        db: Database instance injected by :func:`chibi.storage.database.inject_database`.
+        storage_id: The storage identity owning the thread.
+        thread_id: The thread whose effective working directory is resolved.
+
+    Returns:
+        The value :meth:`chibi.models.ChibiUser.get_effective_working_dir`
+        resolves to for the thread, normalized via ``expanduser`` so a
+        legacy unexpanded ``~`` entry never reaches the wire.
+    """
+    user = await db.get_or_create_user(user_id=storage_id)
+    return str(Path(user.get_effective_working_dir(thread_id=thread_id)).expanduser())
 
 
 class IDEInterface(UserInterface, EditorContextProvider):
@@ -474,6 +494,9 @@ class IDEStdioRunner:
         self._background_messages_enabled = False
         self._thoughts_enabled = False
         self._subagent_events_enabled = False
+        self._cwd_updates_enabled = False
+        self._cwd_emitted_threads: set[int] = set()
+        self._cwd_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
         self.exit_code = 0
@@ -775,6 +798,60 @@ class IDEStdioRunner:
         if self._subagent_emissions:
             await asyncio.gather(*list(self._subagent_emissions), return_exceptions=True)
 
+    async def _emit_cwd_update(self, thread_id: int) -> None:
+        """Write one ``cwd_update`` frame to stdout.
+
+        The frame reports the effective working directory of the agent state
+        for the given thread — the exact value
+        :meth:`chibi.models.ChibiUser.get_effective_working_dir` resolves to,
+        normalized via ``expanduser``. It is a non-terminal, thread-scoped,
+        pure frontend-state update: like ``status``/``agent_event`` it never
+        affects a request lifecycle. Emission is gated on the ``cwd_updates``
+        capability, so v1 clients that never opted in see zero behavioral
+        change. On a resolution or write failure the frame is logged and
+        dropped: the update is best effort and there is no request id to
+        correlate an error frame to.
+
+        Args:
+            thread_id: Thread whose effective working directory is reported.
+        """
+        if not self._cwd_updates_enabled:
+            return
+        try:
+            cwd = await _get_thread_cwd(storage_id=IDE_STORAGE_ID, thread_id=thread_id)
+        except Exception:
+            logger.exception("Failed to resolve the working directory for thread {}", thread_id)
+            return
+        try:
+            await self._write({"type": "cwd_update", "thread_id": thread_id, "cwd": cwd})
+        except Exception:
+            logger.exception("Failed to deliver a cwd_update for thread {}", thread_id)
+
+    def cwd_changed(self, thread_id: int) -> None:
+        """Schedule one ``cwd_update`` frame for fire-and-forget delivery.
+
+        Sink callback invoked by :data:`chibi.services.cwd_events.cwd_tracker`
+        when deep code (the ``set_working_dir`` tool) changes a thread's
+        effective working directory. Emission must never block or serialize
+        tool execution, so the task is simply left to contend for the stdout
+        lock on its own.
+
+        Args:
+            thread_id: Thread whose effective working directory changed.
+        """
+        try:
+            task = asyncio.get_running_loop().create_task(self._emit_cwd_update(thread_id))
+        except RuntimeError:
+            logger.debug("No running loop for a cwd_update on thread {}", thread_id)
+            return
+        self._cwd_emissions.add(task)
+        task.add_done_callback(self._cwd_emissions.discard)
+
+    async def drain_cwd_updates(self) -> None:
+        """Wait until every in-flight cwd_update emission task has finished."""
+        if self._cwd_emissions:
+            await asyncio.gather(*list(self._cwd_emissions), return_exceptions=True)
+
     async def emit_rate_limited(self, message: str, retry_after: int, request_id: str | None = None) -> None:
         """Emit a canonical rate-limited error frame with a retry hint.
 
@@ -897,6 +974,12 @@ class IDEStdioRunner:
         finally:
             self._active_clones.discard(source)
 
+        # The clone copies the source thread's working-directory override
+        # onto the destination thread (clone_thread_messages); report the
+        # destination thread's effective cwd so the client's status line
+        # reflects the inherited directory immediately.
+        await self._emit_cwd_update(interface.thread_id)
+
         responses.append(
             f"✅ Thread cloned: {name or str(interface.thread_id)} (ID: {interface.thread_id}). "
             f"{cloned_messages} messages copied."
@@ -912,6 +995,12 @@ class IDEStdioRunner:
         interface = IDEInterface(thread_id, prompt, message, responses.append, background_emit=background_emit)
         self.begin_request(thread_id, request_id)
         await self._write({"type": "status", "request_id": request_id, "state": "running"})
+        if self._cwd_updates_enabled and thread_id not in self._cwd_emitted_threads:
+            # First request on this thread: sync the client with the thread's
+            # current effective cwd before anything runs (covers the initial
+            # status-line display and re-syncs after a Result-time change).
+            self._cwd_emitted_threads.add(thread_id)
+            await self._emit_cwd_update(thread_id)
         try:
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
@@ -993,6 +1082,7 @@ class IDEStdioRunner:
             current_task = asyncio.current_task()
             if current_task is None or current_task.cancelling() == 0:
                 await self.drain_subagent_events()
+                await self.drain_cwd_updates()
             self.seal_request(thread_id, request_id)
             await self._write(result)
         except asyncio.CancelledError:
@@ -1075,6 +1165,10 @@ class IDEStdioRunner:
                 subagent_tracker.set_sink(self if self._subagent_events_enabled else None)
                 if self._subagent_events_enabled:
                     logger.debug("client declared the subagents capability")
+                self._cwd_updates_enabled = capabilities.get("cwd_updates") is True
+                cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
+                if self._cwd_updates_enabled:
+                    logger.debug("client declared the cwd_updates capability")
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
@@ -1123,6 +1217,18 @@ class IDEStdioRunner:
                 await self._error("unknown_request", "Unknown request id.", request_id)
             else:
                 self._tasks[request_id].cancel()
+        elif message_type == "get_cwd":
+            if not self._initialized:
+                await self._error("not_initialized", "Not initialized.", request_id)
+            elif not self._cwd_updates_enabled:
+                # Clients that never opted in get the same treatment as any
+                # other unknown frame: old backends reject it, so a paired
+                # old client must not expect an answer either.
+                await self._error("unknown_message", f"Unknown message type: {message_type}.", request_id)
+            elif not isinstance(message.get("thread_id"), int) or message["thread_id"] < 0:
+                await self._error("malformed_request", "get_cwd requires a non-negative integer thread_id.", request_id)
+            else:
+                await self._emit_cwd_update(message["thread_id"])
         elif message_type == "shutdown":
             self._stopping = True
         else:
@@ -1150,5 +1256,6 @@ class IDEStdioRunner:
         finally:
             self._stopping = True
             subagent_tracker.release(self)
+            cwd_tracker.release(self)
             await task_manager.shutdown()
         return self.exit_code
