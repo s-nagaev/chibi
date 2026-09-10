@@ -63,8 +63,21 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Moonshot AI**
 - **MiniMax**
 - **ZhipuAI** (modelos GLM)
+- **Novita AI**
+- **Xiaomi** (modelos MiMo)
+- **Melious**
+- **Cheaper Inference**
+- **DeepInfra**
+- **Together AI**
+- **Fireworks AI**
+- **Nebius** (Token Factory)
+- **Baseten**
+- **SambaNova**
+- **SiliconFlow**
+- **Parasail**
+- **Featherless**
 - **OpenRouter** (acceso unificado a muchos modelos)
-- **Cloudflare Workers AI** (muchos modelos open-source)
+- **Cloudflare Workers AI** (muchos modelos de código abierto)
 
 ### Endpoints compatibles con OpenAI (autoalojado / local)
 
@@ -75,9 +88,9 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 
 ### Proveedores multimodales (opcional)
 
-- **Imágenes:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
+- **Imágenes:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
 - **Música:** Suno
-- **Voz:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Voz:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
 
 > La disponibilidad exacta de modelos depende de tus claves de proveedor configuradas y de las funciones habilitadas.
 
@@ -99,6 +112,33 @@ chibi start
 ```
 
 El bot se ejecutará como un servicio en segundo plano. Utiliza los comandos de CLI para gestionarlo.
+
+### Comandos de CLI
+
+| Comando         | Descripción                              |
+|-----------------|------------------------------------------|
+| `chibi start`   | Inicia el bot como servicio en segundo plano |
+| `chibi stop`    | Detiene el bot en ejecución              |
+| `chibi restart` | Reinicia el bot                          |
+| `chibi config`  | Genera o edita la configuración          |
+| `chibi logs`    | Muestra los registros del bot            |
+
+---
+
+## Clientes locales
+
+Chibi puede atender a sus clientes locales mediante el protocolo JSONL local versionado:
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+Este comando está pensado para que lo inicie el cliente, no para usarse de forma interactiva. Chibi es propietario del protocolo `v1` y admite clientes compatibles que negocien la misma versión. El proceso stdio escribe únicamente tramas de protocolo en stdout y diagnósticos en stderr. El comportamiento existente de Chibi para comandos, herramientas, permisos y moderación sigue siendo autoritativo; el cliente no añade una capa de políticas para herramientas.
+
+---
 ## 🚀 Inicio rápido (Docker)
 
 Crea `docker-compose.yml`:
@@ -192,6 +232,7 @@ Chibi puede mantener el contexto mientras cambia de proveedor a mitad de hilo, o
 - **Acceso al sistema de archivos:** leer/escribir/buscar/organizar archivos
 - **Ejecución en terminal:** ejecutar comandos con seguridad moderada por LLM
 - **Memoria persistente:** el historial de conversación sobrevive reinicios con gestión de contexto/resumen
+- **Skills:** módulos de instrucciones reutilizables que el agente puede cargar en su prompt del sistema bajo demanda (`load_builtin_skill`)
 
 ### 🔌 Extensible vía MCP (Model Context Protocol)
 Conecta Chibi a herramientas y servicios externos (o crea los tuyos):
@@ -205,9 +246,9 @@ Conecta Chibi a herramientas y servicios externos (o crea los tuyos):
 Si una herramienta puede exponerse vía MCP, Chibi puede aprender a usarla.
 
 ### 🎨 Generación de contenido enriquecido
-- **Imágenes:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Imágenes:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Música:** Suno (incluye modo personalizado: estilo/letra/voces)
-- **Voz:** transcripción + texto a voz (ElevenLabs, MiniMax, OpenAI)
+- **Voz:** transcripción + texto a voz (ElevenLabs, OpenAI, MiniMax)
 
 ---
 
@@ -246,6 +287,31 @@ Chibi: *analiza cambios, sugiere mejoras, actualiza docs vía MCP*
 - **Control de acceso:** lista blanca de usuarios/grupos/modelos
 - **Opciones de almacenamiento:** volúmenes locales, Redis o DynamoDB
 - **Seguridad de herramientas:** las herramientas del agente son configurables; la ejecución en terminal está moderada y puede restringirse
+
+---
+
+### `MAX_HISTORY_TOKENS` — umbral de resumen de contexto (cambio incompatible del valor predeterminado)
+
+`MAX_HISTORY_TOKENS` es el umbral a partir del cual Chibi resume automáticamente una conversación para mantener el contexto manejable. Su **semántica cambió**: ahora se compara con el **recuento real de tokens del prompt informado por el proveedor** (toda la solicitud saliente: prompt del sistema + Skills activadas + esquemas de herramientas + argumentos de llamadas a herramientas + sobrecarga estructural por mensaje + contenido de la conversación), en vez de la heurística anterior que medía solo `content` + `role` de la conversación. La cifra real es aproximadamente **4,8 veces mayor** que la estimación anterior para una conversación idéntica (consulta `fix_context_size/context_size_accounting_analysis.md` para el desglose medido).
+
+- **Predeterminado reajustado:** `64000` → `100000`. El nuevo valor protege la ventana de contexto común más pequeña (128k tokens): `100000` es aproximadamente el 78 % de una ventana de 128k (el resumen se activa *antes* de que un modelo de 128k se desborde) y aproximadamente el 50 % de una ventana de 200k (dejando margen suficiente). El anterior `64000` era una estimación solo del historial que nunca se alcanzaba antes de un desbordamiento real, pues subestima el cirílico unas 2 veces y excluye la sobrecarga fija por turno (prompt del sistema ~3,7k, esquemas de herramientas ~6,8k, Skills activadas ~5,9k, `user_info` ~0,75–3k).
+- **Migración:** si configuraste `MAX_HISTORY_TOKENS` explícitamente en `.env`, su valor anterior se ajustó a la antigua estimación basada solo en el historial y ahora se compara con una cifra veraz unas 4,8 veces mayor para la misma conversación. Reajústalo a la escala de **~100k** (por ejemplo, `64000` → `100000`) para que el resumen se active antes de que se desborde la ventana de contexto de tu modelo más pequeño. Si nunca lo configuraste, el nuevo valor predeterminado se aplica automáticamente.
+- La alternativa de arranque en frío (el primer turno tras reiniciar el proceso, cuando aún no hay datos del proveedor en caché) sigue usando la heurística anterior para que el resumen continúe funcionando.
+
+### `REACTIVE_CONTEXT_RECOVERY` — reintento único tras un desbordamiento de contexto
+
+`REACTIVE_CONTEXT_RECOVERY` (predeterminado: `true`) es la red de seguridad reactiva que complementa el umbral proactivo `MAX_HISTORY_TOKENS`. Cuando un proveedor rechaza una solicitud con un error tipado `context_length_exceeded`, Chibi resume automáticamente el historial y reintenta el turno **exactamente una vez**. Si tiene éxito, recibes una respuesta normal (con una nota breve indicando que se comprimió el contexto). Si vuelve a desbordarse o la recuperación falla, el turno recurre a la vía de disculpa existente: el bucle de resumen y reintento nunca se ejecuta más de una vez por turno original. Establécelo en `false` para desactivarlo y conservar el comportamiento previo (registro + disculpa, sin reintento).
+
+### El directorio de trabajo se limita al hilo (`WORKING_DIR`)
+
+El directorio de trabajo del agente —usado para comandos de terminal e informado al modelo como su CWD actual— tiene alcance **por hilo**, igual que el modelo LLM seleccionado se asocia a cada hilo.
+
+- **Predeterminado:** proviene del ajuste `WORKING_DIR` (predeterminado `~/chibi`) mediante el valor heredado de usuario; los despliegues nuevos heredan el ajuste directamente.
+- **Anulación por hilo:** cualquier hilo/conversación puede anular su directorio de trabajo **de forma aislada** mediante la herramienta `set_working_dir` del agente (solo controlada por LLM; no hay comando slash, disponible si `FILESYSTEM_ACCESS` está activado). Esto permite que dos agentes en hilos diferentes trabajen simultáneamente en proyectos distintos sin interferir.
+- **Orden de resolución:** anulación por hilo → directorio heredado de usuario → ajuste `WORKING_DIR`.
+- **Normalización de rutas:** los valores establecidos se expanden a rutas absolutas al guardarse (`~/x` pasa a ser `/abs/x`); los valores predeterminados sin modificar mantienen su forma original.
+- Los **subagentes** generados en un hilo comparten su directorio de trabajo: la misma ruta efectiva se inyecta en sus prompts del sistema y llamadas a herramientas.
+- Las anulaciones **sobreviven a la clonación de hilos**: `/new_thread_with_current_context` conserva el directorio de trabajo junto con los mensajes y las preferencias de modelo.
 
 ---
 

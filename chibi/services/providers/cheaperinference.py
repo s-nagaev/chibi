@@ -14,7 +14,7 @@ class Cheaperinference(OpenAIFriendlyProvider):
 
     model_name_keywords_exclude = ["imagine", "nano", "image", "embedding", "image", "pixtral", "multilingual"]
 
-    default_model = "glm-5.2"
+    default_model = "glm-5.3"
     default_moderation_model = "gpt-5.6-luna"
     default_vision_model = "gpt-5.6-luna"
     default_image_model = "nano-banana-pro"

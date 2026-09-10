@@ -1,0 +1,2 @@
+{"type":"initialize","protocol_version":1,"client":{"name":"chibi-vscode","version":"0.1.0"},"capabilities":{"subagents":true}}
+{"type":"request","request_id":"01HXY9K3SUBAGENTX","thread_id":3,"prompt":"delegate something","workspace_root":"/tmp","active_file":null,"selection":null,"cursor_position":null,"language_id":null}

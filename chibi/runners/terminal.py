@@ -225,9 +225,9 @@ class TerminalRunner:
                 await self._handle_info()
                 return True
             else:
-                console.print(f"[red]Unknown command: {cmd}[/red]")
-                console.print("[dim]Type /help for available commands.[/dim]")
-                return True
+                # Unmatched slash-prefixed prompt: not a command — let the
+                # REPL route it to the bot as a plain user prompt.
+                return False
 
         return False
 
@@ -294,10 +294,9 @@ def setup_logging() -> None:
     # Ensure stderr can emit UTF-8 before attaching the loguru sink
     reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
 
-    # Add console logger
     logger.add(
         sys.stderr,
-        format="<level>{level: <8}</level> <level>{message}</level>",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <level>{message}</level>",
         level="INFO",
     )
 

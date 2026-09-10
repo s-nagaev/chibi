@@ -21,11 +21,10 @@ class Alibaba(OpenAIFriendlyProvider):
 
     base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     name = "Alibaba"
-    model_name_keywords = ["qwen"]
-    model_name_keywords_exclude = ["tts", "stt", "image"]
-    default_model = "qwen-plus"
-    default_moderation_model = "qwen-turbo"
-    max_tokens: int = 8192
+    model_name_keywords_exclude = ["tts", "stt", "image", "embed"]
+    default_model = "qwen3.7-plus"
+    default_moderation_model = "qwen3.8-flash"
+
     default_image_model = "qwen-image-plus"
     default_vision_model = "qwen3-vl-flash"
 

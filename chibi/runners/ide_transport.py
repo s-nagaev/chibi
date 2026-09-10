@@ -6,15 +6,21 @@ import json
 import sys
 import warnings
 from io import BytesIO
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, TypedDict
 
 from loguru import logger
+from openai.types import CompletionUsage
 
-from chibi.constants import IDE_STORAGE_ID
+from chibi.config.gpt import gpt_settings
+from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
 from chibi.models import Message
-from chibi.services.bot import handle_image_generation, handle_reset, handle_user_prompt
+from chibi.schemas.app import UsageSchema
+from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
+from chibi.services.cwd_events import cwd_tracker
 from chibi.services.interface import EditorContextProvider, UserInterface
+from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     clone_thread_messages,
@@ -27,7 +33,101 @@ from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 
 PROTOCOL_VERSION = 1
-COMMANDS = ["/reset", "/new_thread_with_current_context", "/model", "/imagine", "/info", "/help", "/quit", "/exit"]
+COMMANDS = [
+    "/reset",
+    "/stop",
+    "/new_thread_with_current_context",
+    "/model",
+    "/imagine",
+    "/info",
+    "/help",
+    "/quit",
+    "/exit",
+]
+MAX_THOUGHTS_BYTES = 256 * 1024
+THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
+
+
+class _SubagentRequestState(TypedDict):
+    """Per-thread subagent counters for the request that currently owns the thread."""
+
+    request_id: str
+    active: int
+    total: int
+    sealed: bool
+
+
+def build_usage_payload(
+    usage: UsageSchema | CompletionUsage | None, provider: str | None, model: str | None
+) -> dict[str, Any] | None:
+    """Shape provider usage data into the result-frame ``usage`` object.
+
+    The numbers are exactly what the provider reported for the request that
+    produced this answer, never an estimate. Input tokens include Anthropic
+    cache reads and writes when they are reported separately, mirroring how
+    ``UsageCacheStore`` computes the real prompt size. The emitted
+    ``context_window`` is the effective ceiling ``min(model window,
+    MAX_HISTORY_TOKENS)``: proactive summarization fires at
+    ``MAX_HISTORY_TOKENS`` (default 100000), so the denominator the client
+    sees must reflect that ceiling rather than the raw model window. When the
+    backend has no curated context window for the model, ``context_window``
+    is null and stays null (no clamp possible, nothing fabricated).
+
+    Args:
+        usage: Usage object attached to the chat response, if the provider
+            reported one.
+        provider: Name of the provider that served the response.
+        model: Name of the model that served the response.
+
+    Returns:
+        A dict with ``input_tokens``, ``output_tokens`` and ``context_window``,
+        or None when no usage data is available.
+    """
+    if usage is None:
+        return None
+    input_tokens = usage.prompt_tokens
+    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    # Anthropic-compatible APIs (Anthropic itself and MiniMax, which rides the
+    # same Anthropic Messages path) report cached input outside input_tokens,
+    # so the cache parts must be added. Every other provider includes cached
+    # tokens inside its prompt token count already.
+    if provider and provider.lower() in ("anthropic", "minimax"):
+        input_tokens += cache_creation + cache_read
+    context_window = get_model_context_window(model)
+    if context_window is not None:
+        # Effective ceiling: summarization triggers at MAX_HISTORY_TOKENS, so
+        # cap the advertised window there. Unknown models keep null.
+        context_window = min(context_window, gpt_settings.max_history_tokens)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": usage.completion_tokens,
+        "context_window": context_window,
+    }
+
+
+def _cap_thoughts(thoughts: str) -> str:
+    """Cap reasoning text at :data:`MAX_THOUGHTS_BYTES` with a truncation marker.
+
+    Truncation is byte-based so the emitted JSONL line stays within a
+    predictable size regardless of content, and the LAST bytes are kept so
+    the reasoning closest to the answer survives. A cut can only land on a
+    UTF-8 character boundary because invalid leading bytes are dropped on
+    decode.
+
+    Args:
+        thoughts: Full reasoning text captured for the request.
+
+    Returns:
+        The original text when it fits the cap, otherwise the marker
+        prepended to the largest UTF-8-safe tail that leaves room for it.
+    """
+    encoded = thoughts.encode("utf-8")
+    if len(encoded) <= MAX_THOUGHTS_BYTES:
+        return thoughts
+    budget = MAX_THOUGHTS_BYTES - len(THOUGHTS_TRUNCATION_MARKER.encode("utf-8"))
+    return THOUGHTS_TRUNCATION_MARKER + encoded[-budget:].decode("utf-8", errors="ignore")
+
 
 # Maps backend-internal error codes to the closest frontend-facing code.
 # Codes without a clean frontend analog (malformed_request, not_initialized,
@@ -78,10 +178,29 @@ async def _get_thread_messages(db: Database, storage_id: int, thread_id: int) ->
     return await db.get_conversation_messages(user=user, thread_id=thread_id)
 
 
+@inject_database
+async def _get_thread_cwd(db: Database, storage_id: int, thread_id: int) -> str:
+    """Resolve the effective working directory of one thread.
+
+    Args:
+        db: Database instance injected by :func:`chibi.storage.database.inject_database`.
+        storage_id: The storage identity owning the thread.
+        thread_id: The thread whose effective working directory is resolved.
+
+    Returns:
+        The value :meth:`chibi.models.ChibiUser.get_effective_working_dir`
+        resolves to for the thread, normalized via ``expanduser`` so a
+        legacy unexpanded ``~`` entry never reaches the wire.
+    """
+    user = await db.get_or_create_user(user_id=storage_id)
+    return str(Path(user.get_effective_working_dir(thread_id=thread_id)).expanduser())
+
+
 class IDEInterface(UserInterface, EditorContextProvider):
     """User-interface adapter that collects Chibi responses for one IDE request."""
 
     uses_uploaded_file_storage = False
+    captures_llm_thoughts: bool = True
 
     def __init__(
         self,
@@ -89,7 +208,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         prompt: str,
         context: dict[str, Any],
         emit: Callable[[str], Any],
-        background_emit: Callable[[int, str, str | None, str | None], Any] | None = None,
+        background_emit: Callable[[int, str, str | None, str | None, str | None], Any] | None = None,
     ) -> None:
         """Initialize an IDE request interface.
 
@@ -110,6 +229,9 @@ class IDEInterface(UserInterface, EditorContextProvider):
         self._closed = False
         self.response_model: str | None = None
         self.response_provider: str | None = None
+        self.response_usage: UsageSchema | CompletionUsage | None = None
+        self.response_thoughts: str | None = None
+        self._thoughts_at_close: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
 
@@ -118,9 +240,33 @@ class IDEInterface(UserInterface, EditorContextProvider):
 
         After this, assistant text delivered by background tool tasks is
         routed to the out-of-band background emitter instead of the dead
-        request's response buffer.
+        request's response buffer. The reasoning already attached to the
+        request's result frame is snapshotted so a background tool task can
+        later report ONLY the reasoning its own continuation turn added.
         """
         self._closed = True
+        self._thoughts_at_close = self.response_thoughts
+
+    def _continuation_thoughts(self) -> str | None:
+        """Return the reasoning captured after the request closed.
+
+        The background tool task's continuation LLM call appends its
+        reasoning to the same request-local buffer via
+        :meth:`send_llm_thoughts`; everything beyond the snapshot taken at
+        :meth:`mark_closed` belongs to the continuation turn alone.
+
+        Returns:
+            The continuation turn's reasoning text, or None when nothing
+            new was captured after the request closed.
+        """
+        captured = self.response_thoughts
+        if not captured:
+            return None
+        baseline = self._thoughts_at_close
+        if baseline and captured.startswith(baseline):
+            delta = captured[len(baseline) :].lstrip("\n")
+            return delta or None
+        return captured
 
     @property
     def editor_context(self) -> dict[str, Any] | None:
@@ -219,7 +365,8 @@ class IDEInterface(UserInterface, EditorContextProvider):
         request's response buffer exactly as before. Once the request has
         finished, the text is routed to the session-level background emitter
         so it reaches the client as a ``message`` frame instead of being
-        silently lost.
+        silently lost; the continuation turn's reasoning rides along so the
+        client can render it with the answer.
 
         Args:
             content: Assistant text being delivered.
@@ -233,13 +380,31 @@ class IDEInterface(UserInterface, EditorContextProvider):
                     self._thread_id,
                 )
                 return
-            result = self._background_emit(self._thread_id, content, model, provider)
+            result = self._background_emit(self._thread_id, content, model, provider, self._continuation_thoughts())
             if inspect.isawaitable(result):
                 await result
             return
         result = self._emit(content)
         if inspect.isawaitable(result):
             await result
+
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Capture LLM reasoning for the result frame instead of emitting it as text.
+
+        Providers may report reasoning more than once during agentic tool
+        loops; the pieces are accumulated in arrival order and joined with
+        newlines. Captured text lives only on this request-local object and
+        is never written to thread history.
+
+        Args:
+            thoughts: The LLM reasoning text to capture.
+        """
+        if not thoughts:
+            return
+        if self.response_thoughts is None:
+            self.response_thoughts = thoughts
+        else:
+            self.response_thoughts = f"{self.response_thoughts}\n{thoughts}"
 
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Emit assistant text through the request-local callback."""
@@ -327,11 +492,31 @@ class IDEStdioRunner:
         self._thread_requests: dict[int, int] = {}
         self._active_clones: set[int] = set()
         self._background_messages_enabled = False
+        self._thoughts_enabled = False
+        self._subagent_events_enabled = False
+        self._cwd_updates_enabled = False
+        self._cwd_emitted_threads: set[int] = set()
+        self._cwd_emissions: set[asyncio.Task[None]] = set()
+        self._subagent_requests: dict[int, _SubagentRequestState] = {}
+        self._subagent_emissions: set[asyncio.Task[None]] = set()
         self.exit_code = 0
         self._stdout_lock = asyncio.Lock()
 
     async def _write(self, message: dict[str, Any]) -> None:
         """Write one protocol frame to stdout as a UTF-8 encoded JSONL line.
+
+        The write is serialized on the stdout lock so wire lines are never
+        interleaved, and it is delegated to :meth:`_write_line` so emitters
+        that already hold the lock can reuse the same encoding path.
+
+        Args:
+            message: JSON-compatible protocol message.
+        """
+        async with self._stdout_lock:
+            await self._write_line(message)
+
+    async def _write_line(self, message: dict[str, Any]) -> None:
+        """Write one protocol frame line; the caller must hold the stdout lock.
 
         The frame is written to the binary stdout buffer so the wire protocol
         stays strictly UTF-8 regardless of the console locale or code page
@@ -342,14 +527,13 @@ class IDEStdioRunner:
             message: JSON-compatible protocol message.
         """
         line = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
-        async with self._stdout_lock:
-            buffer = getattr(sys.stdout, "buffer", None)
-            if buffer is None:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                return
-            buffer.write(line.encode("utf-8"))
-            buffer.flush()
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            return
+        buffer.write(line.encode("utf-8"))
+        buffer.flush()
 
     async def _error(self, code: str, message: str, request_id: str | None = None, **extra: Any) -> None:
         """Write a correlated protocol error."""
@@ -358,30 +542,315 @@ class IDEStdioRunner:
         )
 
     async def _emit_background_message(
-        self, thread_id: int, content: str, model: str | None, provider: str | None
+        self,
+        thread_id: int,
+        content: str,
+        model: str | None = None,
+        provider: str | None = None,
+        thoughts: str | None = None,
     ) -> None:
         """Write one out-of-band background message frame to stdout.
 
         The frame shares the regular stdout write lock, so wire lines are
         never interleaved. On a write failure the message is logged and
         dropped: background delivery is best effort and there is no
-        request id to correlate an error frame to.
+        request id to correlate an error frame to. The continuation turn's
+        reasoning rides on the frame only when the client opted in to
+        thoughts at handshake, capped like result-frame reasoning.
 
         Args:
             thread_id: Thread the background task was spawned from.
             content: Assistant text being delivered.
             model: Model that produced the answer, if known.
             provider: Provider that produced the answer, if known.
+            thoughts: Reasoning captured for the continuation turn, if any.
         """
         frame: dict[str, Any] = {"type": "message", "thread_id": thread_id, "content": content}
         if model is not None:
             frame["model"] = model
         if provider is not None:
             frame["provider"] = provider
+        if thoughts is not None and self._thoughts_enabled:
+            frame["thoughts"] = _cap_thoughts(thoughts)
         try:
             await self._write(frame)
         except Exception:
             logger.exception("Failed to deliver a background message for thread {}", thread_id)
+
+    def _spawn_agent_event(
+        self,
+        thread_id: int,
+        request_id: str,
+        event: str,
+        active: int,
+        total: int,
+        name: str | None,
+        force: bool = False,
+    ) -> None:
+        """Schedule one agent_event frame for fire-and-forget delivery.
+
+        The counters are snapshotted here so the wire values stay correct no
+        matter when the emission task actually runs. Emission must never
+        block or serialize subagent execution, so the task is simply left to
+        contend for the stdout lock on its own.
+
+        Args:
+            thread_id: Thread whose request owns the counters.
+            request_id: Request the event belongs to.
+            event: Either ``started`` or ``finished``.
+            active: Snapshot of running subagents for the request.
+            total: Snapshot of spawned subagents for the request.
+            name: Trivially available subagent label, if any.
+            force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
+        """
+        if not self._subagent_events_enabled:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._emit_agent_event(thread_id, request_id, event, active, total, name, force)
+            )
+        except RuntimeError:
+            logger.debug("No running loop for an agent_event on thread {}", thread_id)
+            return
+        self._subagent_emissions.add(task)
+        task.add_done_callback(self._subagent_emissions.discard)
+
+    async def _emit_agent_event(
+        self,
+        thread_id: int,
+        request_id: str,
+        event: str,
+        active: int,
+        total: int,
+        name: str | None,
+        force: bool = False,
+    ) -> None:
+        """Write one subagent lifecycle frame to stdout.
+
+        The accept-or-drop decision happens while the stdout lock is held,
+        so an event can never land under a replaced state: a missing state
+        or a mismatching request id drops the event here. A request seals
+        its state right before its result frame is written; a sealed state
+        whose counters are drained drops further events, while a sealed
+        state that still counts running background subagents keeps
+        accepting events so their lifecycle stays visible after the result.
+        Kill-flush events and the retirement finish of a drained retained
+        state pass ``force`` because their state has already been retired.
+        On a write failure the frame is logged and dropped, mirroring the
+        background message policy.
+
+        Args:
+            thread_id: Thread whose request owns the counters.
+            request_id: Request the event belongs to.
+            event: Either ``started`` or ``finished``.
+            active: Snapshot of running subagents for the request.
+            total: Snapshot of spawned subagents for the request.
+            name: Trivially available subagent label, if any.
+            force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
+        """
+        frame: dict[str, Any] = {
+            "type": "agent_event",
+            "request_id": request_id,
+            "event": event,
+            "active": active,
+            "total": total,
+        }
+        if name is not None:
+            frame["name"] = name
+        async with self._stdout_lock:
+            if not self._subagent_events_enabled:
+                return
+            if not force:
+                state = self._subagent_requests.get(thread_id)
+                if state is None or state["request_id"] != request_id or (state["sealed"] and state["active"] <= 0):
+                    logger.debug("Dropping a late agent_event for thread {}", thread_id)
+                    return
+            try:
+                await self._write_line(frame)
+            except Exception:
+                logger.exception("Failed to deliver an agent_event for thread {}", thread_id)
+
+    def begin_request(self, thread_id: int, request_id: str) -> None:
+        """Register fresh subagent counters for a request that starts running.
+
+        A new request always counts from zero. An existing live state with
+        non-zero counters is kept: it belongs to a still-running request on
+        the same thread (its result frame has not been written yet), and
+        wiping it would hide the in-flight subagents from the kill-flush. A
+        sealed post-result state is retired first; when it still counts
+        running background subagents, exactly one authoritative zero-active
+        finished frame is emitted for the old request so the client never
+        keeps a stale counter across requests.
+
+        Args:
+            thread_id: Thread the request runs on.
+            request_id: Identifier of the starting request.
+        """
+        if not self._subagent_events_enabled:
+            return
+        state = self._subagent_requests.get(thread_id)
+        if state is not None:
+            if not state["sealed"] and (state["active"] or state["total"]):
+                return
+            if state["active"] > 0:
+                self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], None, force=True)
+        self._subagent_requests[thread_id] = {"request_id": request_id, "active": 0, "total": 0, "sealed": False}
+
+    def seal_request(self, thread_id: int, request_id: str) -> None:
+        """Seal the counters once the request's terminal frame is being written.
+
+        Called synchronously right before the terminal frame of the request
+        is written. A sealed state with drained counters drops all further
+        events (both here via :meth:`_emit_agent_event` and by being retired
+        in :meth:`end_request`), while a sealed state that still counts
+        running background subagents is retained and keeps accepting events
+        until it drains.
+
+        Args:
+            thread_id: Thread the request runs on.
+            request_id: Identifier of the sealing request.
+        """
+        state = self._subagent_requests.get(thread_id)
+        if state is not None and state["request_id"] == request_id:
+            state["sealed"] = True
+
+    def end_request(self, thread_id: int, request_id: str) -> None:
+        """Retire the counters of a finished request.
+
+        A sealed state that still counts running background subagents is
+        retained instead of retired: their natural finishes keep emitting
+        lifecycle frames after the result, and the last finish retires the
+        state (:meth:`subagent_finished`), as do :meth:`kill_flush` and the
+        next :meth:`begin_request` on the thread.
+
+        Args:
+            thread_id: Thread the request ran on.
+            request_id: Identifier of the finishing request.
+        """
+        state = self._subagent_requests.get(thread_id)
+        if state is not None and state["request_id"] == request_id:
+            if state["sealed"] and state["active"] > 0:
+                return
+            self._subagent_requests.pop(thread_id, None)
+
+    def subagent_started(self, thread_id: int, name: str | None = None) -> None:
+        """Count an accepted subagent start and emit the started event.
+
+        Starts are also accepted on a retained post-result state, so a
+        background delegation that begins after its parent's result frame
+        still becomes visible on the wire.
+
+        Args:
+            thread_id: Thread whose running or retained request owns the counters.
+            name: Trivially available subagent label (the delegated model), if any.
+        """
+        state = self._subagent_requests.get(thread_id)
+        if state is None:
+            return
+        state["active"] += 1
+        state["total"] += 1
+        self._spawn_agent_event(thread_id, state["request_id"], "started", state["active"], state["total"], name)
+
+    def subagent_finished(self, thread_id: int, name: str | None = None) -> None:
+        """Count a subagent finish and emit the finished event.
+
+        The last natural finish emits the zero-active event the client uses
+        to hide its spinner line. On a retained post-result state that
+        zero-active finish also retires the state, and it is force-emitted
+        because the state is already gone when the emission task runs.
+        Finishes that match no counted start are ignored.
+
+        Args:
+            thread_id: Thread whose running or retained request owns the counters.
+            name: Trivially available subagent label, if any.
+        """
+        state = self._subagent_requests.get(thread_id)
+        if state is None or state["active"] <= 0:
+            return
+        state["active"] -= 1
+        if state["sealed"] and state["active"] == 0:
+            self._subagent_requests.pop(thread_id, None)
+            self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], name, force=True)
+            return
+        self._spawn_agent_event(thread_id, state["request_id"], "finished", state["active"], state["total"], name)
+
+    def kill_flush(self, thread_id: int) -> None:
+        """Emit the single kill-flush event for a killed or reset request.
+
+        Called after a successful /stop or /reset killed the thread's
+        background processes. When in-flight counters existed — including a
+        retained post-result state — exactly one ``finished`` event with
+        ``active`` 0 and no name is force-emitted; it is the authoritative
+        reset for clients, because individually killed subagents never
+        report their own finished events. The state is retired first, so
+        late cleanup-path emissions become no-ops.
+
+        Args:
+            thread_id: Thread whose request state is being retired.
+        """
+        state = self._subagent_requests.pop(thread_id, None)
+        if state is None or state["active"] <= 0:
+            return
+        self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], None, force=True)
+
+    async def drain_subagent_events(self) -> None:
+        """Wait until every in-flight agent_event emission task has finished."""
+        if self._subagent_emissions:
+            await asyncio.gather(*list(self._subagent_emissions), return_exceptions=True)
+
+    async def _emit_cwd_update(self, thread_id: int) -> None:
+        """Write one ``cwd_update`` frame to stdout.
+
+        The frame reports the effective working directory of the agent state
+        for the given thread — the exact value
+        :meth:`chibi.models.ChibiUser.get_effective_working_dir` resolves to,
+        normalized via ``expanduser``. It is a non-terminal, thread-scoped,
+        pure frontend-state update: like ``status``/``agent_event`` it never
+        affects a request lifecycle. Emission is gated on the ``cwd_updates``
+        capability, so v1 clients that never opted in see zero behavioral
+        change. On a resolution or write failure the frame is logged and
+        dropped: the update is best effort and there is no request id to
+        correlate an error frame to.
+
+        Args:
+            thread_id: Thread whose effective working directory is reported.
+        """
+        if not self._cwd_updates_enabled:
+            return
+        try:
+            cwd = await _get_thread_cwd(storage_id=IDE_STORAGE_ID, thread_id=thread_id)
+        except Exception:
+            logger.exception("Failed to resolve the working directory for thread {}", thread_id)
+            return
+        try:
+            await self._write({"type": "cwd_update", "thread_id": thread_id, "cwd": cwd})
+        except Exception:
+            logger.exception("Failed to deliver a cwd_update for thread {}", thread_id)
+
+    def cwd_changed(self, thread_id: int) -> None:
+        """Schedule one ``cwd_update`` frame for fire-and-forget delivery.
+
+        Sink callback invoked by :data:`chibi.services.cwd_events.cwd_tracker`
+        when deep code (the ``set_working_dir`` tool) changes a thread's
+        effective working directory. Emission must never block or serialize
+        tool execution, so the task is simply left to contend for the stdout
+        lock on its own.
+
+        Args:
+            thread_id: Thread whose effective working directory changed.
+        """
+        try:
+            task = asyncio.get_running_loop().create_task(self._emit_cwd_update(thread_id))
+        except RuntimeError:
+            logger.debug("No running loop for a cwd_update on thread {}", thread_id)
+            return
+        self._cwd_emissions.add(task)
+        task.add_done_callback(self._cwd_emissions.discard)
+
+    async def drain_cwd_updates(self) -> None:
+        """Wait until every in-flight cwd_update emission task has finished."""
+        if self._cwd_emissions:
+            await asyncio.gather(*list(self._cwd_emissions), return_exceptions=True)
 
     async def emit_rate_limited(self, message: str, retry_after: int, request_id: str | None = None) -> None:
         """Emit a canonical rate-limited error frame with a retry hint.
@@ -505,6 +974,12 @@ class IDEStdioRunner:
         finally:
             self._active_clones.discard(source)
 
+        # The clone copies the source thread's working-directory override
+        # onto the destination thread (clone_thread_messages); report the
+        # destination thread's effective cwd so the client's status line
+        # reflects the inherited directory immediately.
+        await self._emit_cwd_update(interface.thread_id)
+
         responses.append(
             f"✅ Thread cloned: {name or str(interface.thread_id)} (ID: {interface.thread_id}). "
             f"{cloned_messages} messages copied."
@@ -518,7 +993,14 @@ class IDEStdioRunner:
         responses: list[str] = []
         background_emit = self._emit_background_message if self._background_messages_enabled else None
         interface = IDEInterface(thread_id, prompt, message, responses.append, background_emit=background_emit)
+        self.begin_request(thread_id, request_id)
         await self._write({"type": "status", "request_id": request_id, "state": "running"})
+        if self._cwd_updates_enabled and thread_id not in self._cwd_emitted_threads:
+            # First request on this thread: sync the client with the thread's
+            # current effective cwd before anything runs (covers the initial
+            # status-line display and re-syncs after a Result-time change).
+            self._cwd_emitted_threads.add(thread_id)
+            await self._emit_cwd_update(thread_id)
         try:
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
@@ -527,6 +1009,8 @@ class IDEStdioRunner:
                     responses.append("Available commands: " + ", ".join(COMMANDS))
                 elif command == "/reset":
                     await handle_reset(interface=interface)
+                elif command == "/stop":
+                    await handle_stop(interface=interface)
                 elif command == "/new_thread_with_current_context":
                     await self._handle_new_thread_with_current_context(
                         interface=interface, args=args, responses=responses
@@ -567,7 +1051,8 @@ class IDEStdioRunner:
                             or "No models available."
                         )
                 else:
-                    raise ValueError(f"Unknown command: {command}")
+                    # Unmatched slash-prefixed prompt: treat as a plain user prompt.
+                    await handle_user_prompt(interface=interface)
             else:
                 await handle_user_prompt(interface=interface)
             content = "\n".join(responses)
@@ -578,12 +1063,35 @@ class IDEStdioRunner:
             if interface.response_model is not None and interface.response_provider is not None:
                 result["model"] = interface.response_model
                 result["provider"] = interface.response_provider
+            usage_payload = build_usage_payload(
+                usage=interface.response_usage, provider=interface.response_provider, model=interface.response_model
+            )
+            if usage_payload is not None:
+                result["usage"] = usage_payload
+            if self._thoughts_enabled and interface.response_thoughts:
+                thoughts = _cap_thoughts(interface.response_thoughts)
+                logger.debug("attaching LLM thoughts to result frame bytes={}", len(thoughts.encode("utf-8")))
+                result["thoughts"] = thoughts
+            # Let in-flight lifecycle events reach the wire first, then seal
+            # the counters: a drained state can no longer emit after this
+            # result frame, while a state that still counts background
+            # subagents is retained by end_request and keeps emitting until
+            # it drains. The drain is skipped when a kill is already pending
+            # on this task: suspending here would turn a completed /reset or
+            # /stop into a cancelled error frame, which v1 clients never saw.
+            current_task = asyncio.current_task()
+            if current_task is None or current_task.cancelling() == 0:
+                await self.drain_subagent_events()
+                await self.drain_cwd_updates()
+            self.seal_request(thread_id, request_id)
             await self._write(result)
         except asyncio.CancelledError:
+            self.seal_request(thread_id, request_id)
             await self._error("cancelled", "Request cancelled.", request_id)
             raise
         except StorageError as exc:
             logger.exception("IDE request failed")
+            self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
                 exc.detail,
@@ -592,6 +1100,7 @@ class IDEStdioRunner:
             )
         except ConfigurationError as exc:
             logger.exception("IDE request failed")
+            self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
                 exc.detail,
@@ -600,6 +1109,7 @@ class IDEStdioRunner:
             )
         except Exception as exc:
             logger.exception("IDE request failed")
+            self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
                 "The backend could not complete this request. Check the Chibi output channel for details, "
@@ -608,6 +1118,7 @@ class IDEStdioRunner:
                 cause=type(exc).__name__,
             )
         finally:
+            self.end_request(thread_id, request_id)
             interface.mark_closed()
             self._tasks.pop(request_id, None)
             remaining = self._thread_requests.get(thread_id, 1) - 1
@@ -647,6 +1158,17 @@ class IDEStdioRunner:
                 self._background_messages_enabled = capabilities.get("background_messages") is True
                 if self._background_messages_enabled:
                     logger.debug("client declared the background_messages capability")
+                self._thoughts_enabled = capabilities.get("thoughts") is True
+                if self._thoughts_enabled:
+                    logger.debug("client declared the thoughts capability")
+                self._subagent_events_enabled = capabilities.get("subagents") is True
+                subagent_tracker.set_sink(self if self._subagent_events_enabled else None)
+                if self._subagent_events_enabled:
+                    logger.debug("client declared the subagents capability")
+                self._cwd_updates_enabled = capabilities.get("cwd_updates") is True
+                cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
+                if self._cwd_updates_enabled:
+                    logger.debug("client declared the cwd_updates capability")
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
@@ -695,6 +1217,18 @@ class IDEStdioRunner:
                 await self._error("unknown_request", "Unknown request id.", request_id)
             else:
                 self._tasks[request_id].cancel()
+        elif message_type == "get_cwd":
+            if not self._initialized:
+                await self._error("not_initialized", "Not initialized.", request_id)
+            elif not self._cwd_updates_enabled:
+                # Clients that never opted in get the same treatment as any
+                # other unknown frame: old backends reject it, so a paired
+                # old client must not expect an answer either.
+                await self._error("unknown_message", f"Unknown message type: {message_type}.", request_id)
+            elif not isinstance(message.get("thread_id"), int) or message["thread_id"] < 0:
+                await self._error("malformed_request", "get_cwd requires a non-negative integer thread_id.", request_id)
+            else:
+                await self._emit_cwd_update(message["thread_id"])
         elif message_type == "shutdown":
             self._stopping = True
         else:
@@ -721,5 +1255,7 @@ class IDEStdioRunner:
                 await self._handle_message(decoded)
         finally:
             self._stopping = True
+            subagent_tracker.release(self)
+            cwd_tracker.release(self)
             await task_manager.shutdown()
         return self.exit_code

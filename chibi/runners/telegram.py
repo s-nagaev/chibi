@@ -851,6 +851,7 @@ def run_chibi() -> None:
     Reconfigures stdout/stderr to UTF-8 first so that non-ASCII output is safe on
     hosts with a legacy locale (e.g. Windows cp1252) regardless of the entrypoint used.
     """
+    application_settings.client = "telegram"
     reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stdout))
     reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
 

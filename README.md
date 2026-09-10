@@ -61,6 +61,19 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 - **Moonshot AI**
 - **MiniMax**
 - **ZhipuAI** (GLM models)
+- **Novita AI**
+- **Xiaomi** (MiMo models)
+- **Melious**
+- **Cheaper Inference**
+- **DeepInfra**
+- **Together AI**
+- **Fireworks AI**
+- **Nebius** (Token Factory)
+- **Baseten**
+- **SambaNova**
+- **SiliconFlow**
+- **Parasail**
+- **Featherless**
 - **OpenRouter** (unified access to many models)
 - **Cloudflare Workers AI** (many open-source models)
 
@@ -73,9 +86,9 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### Multimodal providers (optional)
 
-- **Images:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
+- **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
 - **Music:** Suno
-- **Voice:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Voice:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
 
 > Exact model availability depends on your configured provider keys and enabled features.
 
@@ -110,21 +123,21 @@ The bot will run as a background service. Use CLI commands to manage it.
 
 ---
 
-## VS Code IDE client
+## Local client frontends
 
-Chibi can serve the VS Code extension over its versioned local JSONL protocol:
+Chibi can serve its local clients over the versioned local JSONL protocol:
 
 ```bash
-chibi ide --stdio
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
 ```
 
-The command is intended to be started by the [Chibi VS Code extension](https://github.com/s-nagaev/chibi-vscode),
-not used interactively. Chibi owns the `v1` IDE protocol and supports compatible clients that negotiate the same
-version. The stdio process writes protocol frames only to stdout and diagnostics to stderr. Existing Chibi command,
-tool, permission and moderation behavior remains authoritative; the IDE adds no tool policy layer.
-
-See the extension repository for installation, VSIX release instructions, client troubleshooting and its supported
-Chibi version range.
+The command is intended to be started by the client frontend, not used interactively. Chibi owns the `v1`
+protocol and supports compatible clients that negotiate the same version. The stdio process writes protocol
+frames only to stdout and diagnostics to stderr. Existing Chibi command, tool, permission and moderation
+behavior remains authoritative; the client adds no tool policy layer.
 
 ---
 
@@ -221,6 +234,7 @@ Chibi can keep context while switching providers mid-thread, or choose the best 
 - **Filesystem access:** read/write/search/organize files
 - **Terminal execution:** run commands with LLM-moderated security
 - **Persistent memory:** conversation history survives restarts with context management/summarization
+- **Skills:** reusable instruction modules the agent can load into its system prompt on demand (`load_builtin_skill`)
 
 ### 🔌 Extensible via MCP (Model Context Protocol)
 Connect Chibi to external tools and services (or build your own):
@@ -234,9 +248,9 @@ Connect Chibi to external tools and services (or build your own):
 If a tool can be exposed via MCP, Chibi can learn to use it.
 
 ### 🎨 Rich content generation
-- **Images:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Images:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Music:** Suno (including custom mode: style/lyrics/vocals)
-- **Voice:** transcription + text-to-speech (ElevenLabs, MiniMax, OpenAI)
+- **Voice:** transcription + text-to-speech (ElevenLabs, OpenAI, MiniMax)
 
 ---
 

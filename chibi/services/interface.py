@@ -25,6 +25,8 @@ class EditorContextProvider(Protocol):
 
 
 class UserInterface(ABC):
+    captures_llm_thoughts: bool = False
+
     @property
     def chat_id(self) -> str | int:
         """Returns the unique identifier for the current chat.

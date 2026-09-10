@@ -39,14 +39,14 @@ class OpenAI(OpenAIFriendlyProvider):
     model_name_keywords_exclude = ["audio", "realtime", "transcribe", "tts", "image"]
     base_url = "https://api.openai.com/v1"
     max_tokens = NOT_GIVEN
-    default_model = "gpt-5.2"
+    default_model = "gpt-5.6-terra"
     default_image_model = "gpt-image-2"
-    default_moderation_model = "gpt-5-mini"
+    default_moderation_model = "gpt-5.4-mini"
     default_stt_model = "gpt-4o-transcribe"
-    default_tts_model = "gpt-4o-mini-tts"
+    default_tts_model = "tts-1-hd"
     default_tts_voice = "nova"
-    default_vision_model = "gpt-5-mini"
-    default_ocr_model = "gpt-5-mini"
+    default_vision_model = "gpt-5.6-luna"
+    default_ocr_model = "gpt-5.6-luna"
 
     async def get_chat_response(
         self,
@@ -162,11 +162,11 @@ class OpenAI(OpenAIFriendlyProvider):
         messages: list[Message],
         model: str,
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -325,6 +325,8 @@ class OpenAI(OpenAIFriendlyProvider):
             system_prompt=system_prompt,
             interface=interface,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

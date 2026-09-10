@@ -157,12 +157,12 @@ class MistralAI(RestApiFriendlyProvider):
         messages: list[MistralMessageParam],
         model: str,
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -268,6 +268,8 @@ class MistralAI(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=conversation_messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
