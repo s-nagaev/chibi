@@ -15,7 +15,7 @@ from chibi.services.providers.tools.utils import AdditionalOptions, download
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
 
 if TYPE_CHECKING:
-    from chibi.services.providers import Suno
+    from chibi.services.providers import ElevenLabs, Suno
 
 
 class TextToSpeechTool(ChibiTool):
@@ -390,3 +390,75 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
 
         result = await cls._poll_and_send_audio(task_id=task_id, interface=interface)
         return result
+
+
+class GenerateMusicViaElevenLabsTool(ChibiTool):
+    register = bool(gpt_settings.elevenlabs_api_key)
+    run_in_background_by_default: bool = True
+    allow_model_to_change_background_mode: bool = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="generate_music_via_elevenlabs",
+            description=(
+                "Generate music via ElevenLabs Music API and send it to the user as an audio file. "
+                "You won't hear the audio itself, only a message about whether the operation was successful or not."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Description of the music to generate. English recommended.",
+                    },
+                    "music_length_ms": {
+                        "type": "integer",
+                        "description": (
+                            "Length of the generated track in milliseconds. "
+                            "Supported range: 10000 (10 s) - 600000 (10 min). Default: 180000 (3 min)."
+                        ),
+                        "default": 180000,
+                    },
+                },
+                "required": ["prompt"],
+            },
+        ),
+    )
+    name = "generate_music_via_elevenlabs"
+    _provider: Optional["ElevenLabs"] = None
+
+    @classmethod
+    async def function(
+        cls,
+        prompt: str,
+        music_length_ms: int = 180000,
+        **kwargs: Unpack[AdditionalOptions],
+    ) -> dict[str, Any]:
+        interface = cls.get_interface(kwargs=kwargs)
+        music_length_ms = max(10000, min(music_length_ms, 600000))
+        logger.log("TOOL", f"Generating music via ElevenLabs ({music_length_ms} ms). Prompt: {prompt}")
+
+        audio = await cls._get_provider().generate_music(prompt=prompt, music_length_ms=music_length_ms)
+
+        title = f"{prompt[:15]}..."
+        logger.log("TOOL", f"[ElevenLabs] Music generated. Sending it to the chat #{interface.chat_id}...")
+        await interface.send_audio(
+            audio=audio,
+            title=title,
+            performer=f"{telegram_settings.bot_name} AI via ElevenLabs",
+            duration=music_length_ms // 1000,
+            filename=f"{title.replace(' ', '_')}.mp3",
+        )
+        return {"detail": "Music was successfully generated and sent to user"}
+
+    @classmethod
+    def _get_provider(cls) -> "ElevenLabs":
+        from chibi.services.providers import RegisteredProviders, ElevenLabs
+
+        if cls._provider:
+            return cls._provider
+        provider = RegisteredProviders().get(provider_name="ElevenLabs")
+        if not isinstance(provider, ElevenLabs):
+            raise ToolException("This function requires ElevenLabs provider to be set.")
+        cls._provider = provider
+        return provider
