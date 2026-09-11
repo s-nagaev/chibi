@@ -23,6 +23,7 @@ class Minimax(AnthropicFriendlyProvider):
     default_tts_model = "speech-2.8-turbo"
     default_tts_voice = "Korean_HaughtyLady"
     default_image_model = "image-01"
+    default_music_model = "music-3.0"
 
     def __init__(self, token: str) -> None:
         self._client: AsyncClient | None = None
@@ -98,6 +99,21 @@ class Minimax(AnthropicFriendlyProvider):
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return bytes()
+        response_data = response.json()["data"]
+        return bytes.fromhex(response_data["audio"])
+
+    async def generate_music(self, prompt: str, model: str | None = None) -> bytes:
+        model = model or self.default_music_model
+
+        logger.info(f"Generating music with model {model}...")
+
+        url = f"{self.base_tts_url}music_generation"
+
+        data = {
+            "model": model,
+            "prompt": prompt,
+        }
+        response = await self._request(method="POST", url=url, data=data)
         response_data = response.json()["data"]
         return bytes.fromhex(response_data["audio"])
 
