@@ -15,7 +15,7 @@ from chibi.services.providers.tools.utils import AdditionalOptions, download
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
 
 if TYPE_CHECKING:
-    from chibi.services.providers import ElevenLabs, Suno
+    from chibi.services.providers import ElevenLabs, Minimax, Suno
 
 
 class TextToSpeechTool(ChibiTool):
@@ -460,5 +460,66 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
         provider = RegisteredProviders().get(provider_name="ElevenLabs")
         if not isinstance(provider, ElevenLabs):
             raise ToolException("This function requires ElevenLabs provider to be set.")
+        cls._provider = provider
+        return provider
+
+
+class GenerateMusicViaMinimaxTool(ChibiTool):
+    register = bool(gpt_settings.minimax_api_key)
+    run_in_background_by_default: bool = True
+    allow_model_to_change_background_mode: bool = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="generate_music_via_minimax",
+            description=(
+                "Generate music via MiniMax Music API and send it to the user as an audio file. "
+                "You won't hear the audio itself, only a message about whether the operation was successful or not."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Description of the music to generate. English recommended.",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        ),
+    )
+    name = "generate_music_via_minimax"
+    _provider: Optional["Minimax"] = None
+
+    @classmethod
+    async def function(
+        cls,
+        prompt: str,
+        **kwargs: Unpack[AdditionalOptions],
+    ) -> dict[str, Any]:
+        interface = cls.get_interface(kwargs=kwargs)
+        logger.log("TOOL", f"Generating music via MiniMax. Prompt: {prompt}")
+
+        audio = await cls._get_provider().generate_music(prompt=prompt)
+
+        title = f"{prompt[:15]}..."
+        logger.log("TOOL", f"[MiniMax] Music generated. Sending it to the chat #{interface.chat_id}...")
+        await interface.send_audio(
+            audio=audio,
+            title=title,
+            performer=f"{telegram_settings.bot_name} AI via MiniMax",
+            filename=f"{title.replace(' ', '_')}.mp3",
+        )
+        return {"detail": "Music was successfully generated and sent to user"}
+
+    @classmethod
+    def _get_provider(cls) -> "Minimax":
+        from chibi.services.providers import Minimax, RegisteredProviders
+
+        if cls._provider:
+            return cls._provider
+        provider = RegisteredProviders().get(provider_name="Minimax")
+        if not isinstance(provider, Minimax):
+            raise ToolException("This function requires Minimax provider to be set.")
         cls._provider = provider
         return provider
