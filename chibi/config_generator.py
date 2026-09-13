@@ -88,6 +88,9 @@ OPENROUTER_API_KEY=
 # Kimi, GLM, MiniMax and other open models. https://melious.ai
 MELIOUS_API_KEY=
 
+# Open-source models served in EU data centres. https://lyceum.technology
+LYCEUM_API_KEY=
+
 # Open-source and community models (GLM, Qwen, etc.). https://novita.ai
 NOVITA_AI_API_KEY=
 

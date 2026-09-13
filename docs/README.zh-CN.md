@@ -66,6 +66,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **Novita AI**
 - **小米**（MiMo 系列模型）
 - **Melious**
+- **Lyceum**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

@@ -66,6 +66,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **Novita AI**
 - **Xiaomi**（MiMoモデル）
 - **Melious**
+- **Lyceum**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**
