@@ -453,7 +453,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
 
     @classmethod
     def _get_provider(cls) -> "ElevenLabs":
-        from chibi.services.providers import RegisteredProviders, ElevenLabs
+        from chibi.services.providers import ElevenLabs, RegisteredProviders
 
         if cls._provider:
             return cls._provider
