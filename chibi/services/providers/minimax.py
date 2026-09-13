@@ -112,6 +112,7 @@ class Minimax(AnthropicFriendlyProvider):
         data = {
             "model": model,
             "prompt": prompt,
+            "is_instrumental": True,
         }
         response = await self._request(method="POST", url=url, data=data)
         response_data = response.json()["data"]
