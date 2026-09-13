@@ -91,6 +91,9 @@ MELIOUS_API_KEY=
 # Open-source models served in EU data centres. https://lyceum.technology
 LYCEUM_API_KEY=
 
+# GLM, Kimi, DeepSeek and other open models in the EU. https://greenpt.com
+GREENPT_API_KEY=
+
 # Open-source and community models (GLM, Qwen, etc.). https://novita.ai
 NOVITA_AI_API_KEY=
 
