@@ -69,7 +69,7 @@ def test_provider_attributes() -> None:
     assert Baseten.moderation_ready is True
     assert Baseten.tts_ready is False
     assert Baseten.stt_ready is False
-    assert Baseten.default_model == "openai/gpt-oss-120b"
+    assert Baseten.default_model == "zai-org/GLM-5.3-Flash"
     assert Baseten.default_vision_model == "zai-org/GLM-5.3-Flash"
     assert Baseten.default_moderation_model == "zai-org/GLM-5.3-Flash"
 

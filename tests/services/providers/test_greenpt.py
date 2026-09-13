@@ -1,5 +1,7 @@
 """Unit tests for the GreenPT provider adapter."""
 
+from unittest.mock import patch
+
 from chibi.config import gpt_settings
 from chibi.services.providers import GreenPT, RegisteredProviders
 
@@ -25,18 +27,19 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """OpenAI-compatible base_url, chat/vision ready, no moderation/image/tts/stt."""
+    """OpenAI-compatible base_url, chat/vision/moderation ready, no image/tts/stt/ocr."""
     assert GreenPT.name == "GreenPT"
     assert GreenPT.base_url == "https://api.greenpt.ai/v1"
     assert GreenPT.chat_ready is True
     assert GreenPT.vision_ready is True
-    assert GreenPT.moderation_ready is False
+    assert GreenPT.moderation_ready is True
     assert GreenPT.image_generation_ready is False
     assert GreenPT.tts_ready is False
     assert GreenPT.stt_ready is False
     assert GreenPT.ocr_ready is False
-    assert GreenPT.default_model == "glm-5.2"
-    assert GreenPT.default_vision_model == "kimi-k3"
+    assert GreenPT.default_model == "glm-5.3-flash"
+    assert GreenPT.default_vision_model == "glm-5.3-flash"
+    assert GreenPT.default_moderation_model == "glm-5.3-flash"
 
 
 def test_token_assignment() -> None:
@@ -46,7 +49,12 @@ def test_token_assignment() -> None:
 
 
 def test_model_filtering_excludes_non_chat_models() -> None:
-    """Embedding and reranker model IDs are filtered out of the chat model list."""
+    """Model IDs containing an excluded keyword substring ("embed") are filtered out.
+
+    Whitelist/blacklist are emptied so the result depends only on the keyword
+    mechanism: "green-embedding" is filtered ("embed" is a substring), while
+    "glm-5.2" and "green-rerank" (no "embed" substring) are kept.
+    """
     from chibi.schemas.app import ModelChangeSchema
 
     provider = _make_provider()
@@ -55,8 +63,13 @@ def test_model_filtering_excludes_non_chat_models() -> None:
         ModelChangeSchema(provider="GreenPT", name="green-embedding", image_generation=False),
         ModelChangeSchema(provider="GreenPT", name="green-rerank", image_generation=False),
     ]
-    filtered = provider.filter_and_return_list_of_models(models=models, image_generation=False)
+
+    with patch("chibi.services.providers.provider.gpt_settings") as mock_settings:
+        mock_settings.models_whitelist = []
+        mock_settings.models_blacklist = []
+        filtered = provider.filter_and_return_list_of_models(models=models, image_generation=False)
+
     names = [m.name for m in filtered]
     assert "glm-5.2" in names
     assert "green-embedding" not in names
-    assert "green-rerank" not in names
+    assert "green-rerank" in names

@@ -70,9 +70,9 @@ def test_provider_attributes() -> None:
     assert Featherless.moderation_ready is True
     assert Featherless.tts_ready is False
     assert Featherless.stt_ready is False
-    assert Featherless.default_model == "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    assert Featherless.default_moderation_model == "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    assert Featherless.default_vision_model == "meta-llama/Llama-3.2-11B-Vision-Instruct"
+    assert Featherless.default_model == "zai-org/GLM-5.3-Flash"
+    assert Featherless.default_moderation_model == "zai-org/GLM-5.3-Flash"
+    assert Featherless.default_vision_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

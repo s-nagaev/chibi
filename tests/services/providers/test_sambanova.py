@@ -69,7 +69,7 @@ def test_provider_attributes() -> None:
     assert SambaNova.moderation_ready is True
     assert SambaNova.tts_ready is False
     assert SambaNova.stt_ready is False
-    assert SambaNova.default_model == "gpt-oss-120b"
+    assert SambaNova.default_model == "MiniMax-M3"
     assert SambaNova.default_vision_model == "gemma-4-31B-it"
     assert SambaNova.default_moderation_model == "gpt-oss-120b"
 

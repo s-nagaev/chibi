@@ -10,7 +10,6 @@ from openai import AuthenticationError, BadRequestError, OpenAIError, RateLimitE
 from chibi.config import gpt_settings
 from chibi.exceptions import (
     ContextLengthExceededError,
-    NoModelSelectedError,
     NotAuthorizedError,
     ServiceRateLimitError,
     ServiceResponseError,
@@ -71,18 +70,29 @@ def test_provider_attributes() -> None:
     assert Parasail.moderation_ready is True
     assert Parasail.tts_ready is False
     assert Parasail.stt_ready is False
-    assert Parasail.default_model == "parasail-deepseek-r1"
-    assert Parasail.default_moderation_model == "parasail-deepseek-r1"
-    assert Parasail.default_vision_model is None
+    assert Parasail.default_model == "zai-org/GLM-5.3-Flash"
+    assert Parasail.default_moderation_model == "zai-org/GLM-5.3-Flash"
+    assert Parasail.default_vision_model == "zai-org/GLM-5.3-Flash"
 
 
 @pytest.mark.asyncio
-async def test_vision_without_model_raises_no_model_selected_error() -> None:
-    """No SPIKE-confirmed vision model exists, so the default is None and vision() refuses to run."""
+async def test_vision_resolves_default_model_without_no_model_selected_error() -> None:
+    """Parasail ships a default vision model, so vision() runs without an explicit model argument."""
     provider = _make_provider()
 
-    with pytest.raises(NoModelSelectedError):
-        await provider.vision(image=b"fake-image", mime_type="image/png")
+    mock_response = MagicMock()
+    mock_parsed = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.parsed = mock_parsed
+    mock_client = MagicMock()
+    mock_client.chat.completions.parse = AsyncMock(return_value=mock_response)
+    provider.client = mock_client
+
+    result = await provider.vision(image=b"fake-image", mime_type="image/png")
+
+    assert result is mock_parsed
+    _, kwargs = mock_client.chat.completions.parse.call_args
+    assert kwargs["model"] == Parasail.default_vision_model
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

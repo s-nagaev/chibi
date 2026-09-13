@@ -69,9 +69,9 @@ def test_provider_attributes() -> None:
     assert DeepInfra.moderation_ready is True
     assert DeepInfra.tts_ready is False
     assert DeepInfra.stt_ready is False
-    assert DeepInfra.default_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
-    assert DeepInfra.default_vision_model == "google/gemma-3-4b-it"
-    assert DeepInfra.default_moderation_model == "deepseek-ai/DeepSeek-V4-Flash-0731"
+    assert DeepInfra.default_model == "zai-org/GLM-5.3-Flash"
+    assert DeepInfra.default_vision_model == "zai-org/GLM-5.3-Flash"
+    assert DeepInfra.default_moderation_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:
