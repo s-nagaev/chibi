@@ -64,6 +64,7 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 - **Novita AI**
 - **Xiaomi** (MiMo models)
 - **Melious**
+- **Lyceum**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

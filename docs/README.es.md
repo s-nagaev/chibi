@@ -66,6 +66,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Novita AI**
 - **Xiaomi** (modelos MiMo)
 - **Melious**
+- **Lyceum**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

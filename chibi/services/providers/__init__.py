@@ -14,6 +14,7 @@ from chibi.services.providers.fireworks import Fireworks
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.grok import Grok
 from chibi.services.providers.melious import Melious
+from chibi.services.providers.lyceum import Lyceum
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
