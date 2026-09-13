@@ -51,33 +51,36 @@ Chibi поддерживает множество провайдерів в ра
 
 ### LLM-провайдери
 
-- **OpenAI** (моделі GPT)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Постачальники власних моделей:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
-- **ZhipuAI** (моделі GLM)
-- **Novita AI**
+- **OpenAI** (моделі GPT)
 - **Xiaomi** (моделі MiMo)
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius** (Token Factory)
+- **xAI** (Grok)
+- **ZhipuAI** (моделі GLM)
+
+**Реселери моделей та агрегатори інференсу:**
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter** (уніфікований доступ до багатьох моделей)
-- **Cloudflare Workers AI** (багато open-source моделей)
+- **Together AI**
 
 ### OpenAI-сумісні endpoints (self-host / local)
 
@@ -88,9 +91,9 @@ Chibi поддерживает множество провайдерів в ра
 
 ### Мультимодальні провайдери (опціонально)
 
-- **Зображення:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
-- **Музика:** Suno
-- **Голос:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
+- **Зображення:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), і будь-який реселер-агрегатор, що надає доступ до моделей генерації зображень
+- **Музика:** Suno, ElevenLabs Music
+- **Голос (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Доступність конкретних моделей залежить від налаштованих ключів провайдерів та увімкнених можливостей.
 
@@ -181,7 +184,7 @@ docker-compose up -d
 
 Кожен провайдер вимагає свій API-ключ. Ось прямі посилання:
 
-**Основні провайдери:**
+**Постачальники власних моделей:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -192,10 +195,26 @@ docker-compose up -d
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (уніфікований доступ до багатьох моделей): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
-**Креативні інструменти:**
+**Реселери моделей та агрегатори інференсу:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
+
+**Творчі інструменти:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
 - **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
 
@@ -248,7 +267,7 @@ Chibi може зберігати контекст, перемикаючись �
 ### 🎨 Генерація контенту
 - **Зображення:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Музика:** Suno (включно з custom mode: стиль/лірика/вокал)
-- **Голос:** транскрипція + text-to-speech (ElevenLabs, OpenAI, MiniMax)
+- **Голос:** транскрипція + text-to-speech (ElevenLabs, OpenAI)
 
 ---
 

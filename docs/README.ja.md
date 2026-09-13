@@ -53,33 +53,38 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 
 ### LLMプロバイダー
 
-- **OpenAI**（GPT 系）
-- **Anthropic**（Claude）
-- **Google**（Gemini）
-- **DeepSeek**
+ファーストパーティのモデルプロバイダー：
+
 - **Alibaba Cloud**（Qwen）
-- **xAI**（Grok）
-- **Mistral AI**
-- **Moonshot AI**
+- **Anthropic**（Claude）
+- **DeepSeek**
+- **Google**（Gemini）
 - **MiniMax**
-- **ZhipuAI**（GLMモデル）
-- **Novita AI**
+- **Mistral AI**
+- **Moonshot AI**（Kimi）
+- **OpenAI**（GPT 系）
 - **Xiaomi**（MiMoモデル）
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius**（Token Factory）
+- **xAI**（Grok）
+- **ZhipuAI**（GLMモデル）
+
+モデルリセラー・推論アグリゲーター：
+
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter**（多数のモデルへの統合アクセス）
-- **Cloudflare Workers AI**（多数のオープンソースモデル）
+- **Together AI**
 
 ### OpenAI互換エンドポイント（セルフホスト / ローカル）
 
@@ -90,9 +95,9 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 
 ### マルチモーダルプロバイダー（任意）
 
-- **画像:** Google（Imagen, Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image, Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image）、MiniMax、Cheaper Inference（Nano Banana Pro）
-- **音楽:** Suno
-- **音声:** ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、MiniMax（TTS）
+- **画像:** Google（Imagen, Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image, Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image, CogView）、MiniMax（Image-01）、および画像生成モデルへのアクセスを提供するあらゆるリセラー／アグリゲーター
+- **音楽:** Suno、ElevenLabs Music
+- **音声（TTS/STT）:** ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper, Kokoro）、Xiaomi（MiMo TTS）、カスタムOpenAI互換エンドポイント（セルフホスト）
 
 > 利用可能なモデルは、設定したプロバイダーキーと有効化した機能により異なります。
 
@@ -184,19 +189,35 @@ docker-compose up -d
 
 各プロバイダーには独自のAPIキーが必要です。直接リンクは以下の通りです：
 
-**主要プロバイダー：**
-- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
-- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+**ファーストパーティのモデルプロバイダー：**
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
-- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (多数のモデルへの統合アクセス): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**モデルリセラー・推論アグリゲーター：**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **クリエイティブツール：**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -251,7 +272,7 @@ MCP 経由で公開できるツールであれば、Chibi は使い方を学習�
 ### 🎨 リッチなコンテンツ生成
 - **画像:** Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
 - **音楽:** Suno（カスタムモード: スタイル/歌詞/ボーカル指定を含む）
-- **音声:** 文字起こし + テキスト読み上げ（ElevenLabs、OpenAI、MiniMax）
+- **音声:** 文字起こし + テキスト読み上げ（ElevenLabs、OpenAI）
 
 ---
 

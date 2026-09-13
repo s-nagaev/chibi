@@ -53,33 +53,38 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 
 ### LLM 提供商
 
-- **OpenAI**（GPT 模型）
+原廠模型提供商：
+
+- **Alibaba Cloud**（Qwen）
 - **Anthropic**（Claude）
-- **Google**（Gemini）
 - **DeepSeek**
-- **阿里雲**（Qwen）
-- **xAI**（Grok）
-- **Mistral AI**
-- **月之暗面**（Moonshot AI）
+- **Google**（Gemini）
 - **MiniMax**
-- **智譜AI**（GLM 系列模型）
-- **Novita AI**
-- **小米**（MiMo 系列模型）
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius**（Token Factory）
+- **Mistral AI**
+- **Moonshot AI**（Kimi）
+- **OpenAI**（GPT 模型）
+- **Xiaomi**（MiMo 系列模型）
+- **xAI**（Grok）
+- **ZhipuAI**（GLM 系列模型）
+
+模型轉售商及推理聚合商：
+
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter**（統一存取多種模型）
-- **Cloudflare Workers AI**（多個開源模型）
+- **Together AI**
 
 ### OpenAI 相容端點（自託管 / 本機）
 
@@ -90,9 +95,9 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 
 ### 多模態提供商（選用）
 
-- **影像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、阿里雲（Qwen Image、Wan）、xAI（Grok Imagine）、智譜AI（GLM Image）、MiniMax、Cheaper Inference（Nano Banana Pro）
-- **音樂**：Suno
-- **語音**：ElevenLabs、MiniMax、OpenAI（GPT-4o Transcribe / TTS）
+- **影像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image、Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image、CogView）、MiniMax（Image-01），以及任何提供影像生成模型的轉售聚合商
+- **音樂**：Suno、ElevenLabs Music
+- **語音（TTS/STT）**：ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper、Kokoro）、Xiaomi（MiMo TTS）、自訂 OpenAI 相容端點（自託管）
 
 > 實際可用的模型取決於您設定的提供者金鑰和啟用的功能。
 
@@ -184,23 +189,39 @@ docker-compose up -d
 
 每個提供商都需要自己的 API 金鑰。以下是直接連結：
 
-**主要提供商：**
-- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
-- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+**一級模型提供商：**
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
-- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **智譜AI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (統一存取多種模型): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**模型轉售商及推理聚合商：**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **創意工具：**
-- **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
-- **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
+- **ElevenLabs** (語音): [elevenlabs.io](https://elevenlabs.io/)
+- **Suno** (音樂，非官方): [sunoapi.org](https://sunoapi.org/)
 
 > 📚 **完整指南及設置說明：** [chibi.bot/guides/get-api-keys](https://chibi.bot/guides/get-api-keys)
 
@@ -251,7 +272,7 @@ Chibi 能在對話中途切換提供商時保持上下文，或為每個步驟�
 ### 🎨 豐富的內容生成
 - **影像**：Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
 - **音樂**：Suno（包含自訂模式：風格/歌詞/人聲）
-- **語音**：轉錄 + 文字轉語音（ElevenLabs、OpenAI、MiniMax）
+- **語音**：轉錄 + 文字轉語音（ElevenLabs、OpenAI）
 
 ---
 

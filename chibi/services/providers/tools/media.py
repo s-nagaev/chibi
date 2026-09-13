@@ -465,7 +465,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
 
 
 class GenerateMusicViaMinimaxTool(ChibiTool):
-    register = bool(gpt_settings.minimax_api_key)
+    register = False  # MiniMax music generation endpoint deactivated by vendor; re-enable when available
     run_in_background_by_default: bool = True
     allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(

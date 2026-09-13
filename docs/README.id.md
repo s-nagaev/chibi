@@ -53,33 +53,36 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ### Penyedia LLM
 
-- **OpenAI** (model GPT)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Penyedia model pihak pertama:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
-- **ZhipuAI** (model GLM)
-- **Novita AI**
+- **OpenAI** (model GPT)
 - **Xiaomi** (model MiMo)
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius** (Token Factory)
+- **xAI** (Grok)
+- **ZhipuAI** (model GLM)
+
+**Penjual kembali model dan agregator inferensi:**
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter** (akses terpadu ke banyak model)
-- **Cloudflare Workers AI** (banyak model open-source)
+- **Together AI**
 
 ### Endpoint kompatibel OpenAI (self-host / lokal)
 
@@ -90,9 +93,9 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ### Penyedia multimodal (opsional)
 
-- **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
-- **Musik:** Suno
-- **Suara:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
+- **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), dan penjual kembali-agregator apa pun yang menyediakan akses ke model pembuatan gambar
+- **Musik:** Suno, ElevenLabs Music
+- **Suara (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Ketersediaan model yang tepat bergantung pada API key yang Anda konfigurasi dan fitur yang diaktifkan.
 
@@ -183,7 +186,7 @@ Selanjutnya:
 
 Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 
-**Penyedia Utama:**
+**Penyedia model pihak pertama:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -193,9 +196,25 @@ Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-- **OpenRouter** (akses terpadu ke banyak model): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+
+**Penjual kembali model dan agregator inferensi:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Alat Kreatif:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -250,7 +269,7 @@ Jika sebuah tool bisa diekspos via MCP, Chibi bisa belajar menggunakannya.
 ### 🎨 Generasi konten kaya
 - **Gambar:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Musik:** Suno (termasuk custom mode: style/lyrics/vocal)
-- **Suara:** transkripsi + text-to-speech (ElevenLabs, OpenAI, MiniMax)
+- **Suara:** transkripsi + text-to-speech (ElevenLabs, OpenAI)
 
 ---
 

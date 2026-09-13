@@ -51,33 +51,38 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### LLM providers
 
-- **OpenAI** (GPT models)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+First-party model providers:
+
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
-- **Mistral AI**
-- **Moonshot AI**
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
 - **MiniMax**
-- **ZhipuAI** (GLM models)
-- **Novita AI**
+- **Mistral AI**
+- **Moonshot AI** (Kimi)
+- **OpenAI** (GPT models)
 - **Xiaomi** (MiMo models)
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius** (Token Factory)
+- **xAI** (Grok)
+- **ZhipuAI** (GLM models)
+
+Model resellers and inference aggregators:
+
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter** (unified access to many models)
-- **Cloudflare Workers AI** (many open-source models)
+- **Together AI**
 
 ### OpenAI-compatible endpoints (self-host / local)
 
@@ -88,9 +93,9 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### Multimodal providers (optional)
 
-- **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
-- **Music:** Suno
-- **Voice:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
+- **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), and any reseller-aggregator providing access to image generation models
+- **Music:** Suno, ElevenLabs Music
+- **Voice (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Exact model availability depends on your configured provider keys and enabled features.
 
@@ -185,19 +190,35 @@ Next:
 
 Each provider requires its own API key. Here are the direct links:
 
-**Major Providers:**
-- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
-- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+**First-party model providers:**
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
-- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (unified access to many models): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**Model resellers and inference aggregators:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Creative Tools:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -252,7 +273,7 @@ If a tool can be exposed via MCP, Chibi can learn to use it.
 ### 🎨 Rich content generation
 - **Images:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Music:** Suno (including custom mode: style/lyrics/vocals)
-- **Voice:** transcription + text-to-speech (ElevenLabs, OpenAI, MiniMax)
+- **Voice:** transcription + text-to-speech (ElevenLabs, OpenAI)
 
 ---
 

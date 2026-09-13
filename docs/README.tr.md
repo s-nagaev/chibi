@@ -53,33 +53,36 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ### LLM sağlayıcıları
 
-- **OpenAI** (GPT modelleri)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Birinci taraf model sağlayıcıları:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
-- **ZhipuAI** (GLM modelleri)
-- **Novita AI**
+- **OpenAI** (GPT modelleri)
 - **Xiaomi** (MiMo modelleri)
-- **Melious**
-- **Lyceum**
-- **GreenPT**
-- **Cheaper Inference**
-- **DeepInfra**
-- **Together AI**
-- **Fireworks AI**
-- **Nebius** (Token Factory)
+- **xAI** (Grok)
+- **ZhipuAI** (GLM modelleri)
+
+**Model satıcıları ve çıkarım toplayıcıları:**
 - **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
 - **SambaNova**
 - **SiliconFlow**
-- **Parasail**
-- **Featherless**
-- **OpenRouter** (birçok modele birleşik erişim)
-- **Cloudflare Workers AI** (birçok açık kaynak model)
+- **Together AI**
 
 ### OpenAI uyumlu endpoint’ler (self-host / local)
 
@@ -90,9 +93,9 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ### Multimodal sağlayıcılar (opsiyonel)
 
-- **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image), MiniMax, Cheaper Inference (Nano Banana Pro)
-- **Müzik:** Suno
-- **Ses:** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), MiniMax (TTS)
+- **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), ve görüntü oluşturma modellerine erişim sağlayan herhangi bir satıcı-toplayıcı
+- **Müzik:** Suno, ElevenLabs Music
+- **Ses (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Model erişilebilirliği, yapılandırdığınız sağlayıcı anahtarlarına ve etkinleştirdiğiniz özelliklere bağlıdır.
 
@@ -183,7 +186,7 @@ Sonraki adımlar:
 
 Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantılar:
 
-**Ana Sağlayıcılar:**
+**Birinci taraf model sağlayıcıları:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -193,9 +196,25 @@ Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantıl
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-- **OpenRouter** (birçok modele birleşik erişim): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+
+**Model satıcıları ve çıkarım toplayıcıları:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Yaratıcı Araçlar:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -250,7 +269,7 @@ Bir araç MCP üzerinden sunulabiliyorsa, Chibi onu kullanmayı öğrenebilir.
 ### 🎨 Zengin içerik üretimi
 - **Görseller:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Müzik:** Suno (custom mode dahil: stil/şarkı sözü/vokal)
-- **Ses:** transkripsiyon + metinden sese (ElevenLabs, OpenAI, MiniMax)
+- **Ses:** transkripsiyon + metinden sese (ElevenLabs, OpenAI)
 
 ---
 
