@@ -67,6 +67,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 - **Xiaomi** (MiMo modelleri)
 - **Melious**
 - **Lyceum**
+- **GreenPT**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

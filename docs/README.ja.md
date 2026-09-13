@@ -67,6 +67,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **Xiaomi**（MiMoモデル）
 - **Melious**
 - **Lyceum**
+- **GreenPT**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

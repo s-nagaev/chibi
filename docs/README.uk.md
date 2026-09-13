@@ -65,6 +65,7 @@ Chibi поддерживает множество провайдерів в ра
 - **Xiaomi** (моделі MiMo)
 - **Melious**
 - **Lyceum**
+- **GreenPT**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

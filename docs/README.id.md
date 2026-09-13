@@ -67,6 +67,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **Xiaomi** (model MiMo)
 - **Melious**
 - **Lyceum**
+- **GreenPT**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**

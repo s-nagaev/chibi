@@ -65,6 +65,7 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 - **Xiaomi** (MiMo models)
 - **Melious**
 - **Lyceum**
+- **GreenPT**
 - **Cheaper Inference**
 - **DeepInfra**
 - **Together AI**
