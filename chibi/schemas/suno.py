@@ -64,7 +64,8 @@ class SunoTrackSchema(SunoBaseModel):
 
 class TaskResponseSchema(SunoBaseModel):
     task_id: str
-    suno_data: list[SunoTrackSchema]
+    # The gateway may return sunoData: null while the task is still processing (or after a failure).
+    suno_data: list[SunoTrackSchema] | None = None
 
 
 class TaskDataSchema(SunoBaseModel):
