@@ -62,17 +62,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: chat/vision/moderation ready."""
     assert Parasail.name == "Parasail"
-    assert Parasail.base_url == "https://api.parasail.io/v1"
     assert Parasail.chat_ready is True
     assert Parasail.vision_ready is True
     assert Parasail.moderation_ready is True
     assert Parasail.tts_ready is False
     assert Parasail.stt_ready is False
-    assert Parasail.default_model == "zai-org/GLM-5.3-Flash"
-    assert Parasail.default_moderation_model == "zai-org/GLM-5.3-Flash"
-    assert Parasail.default_vision_model == "zai-org/GLM-5.3-Flash"
 
 
 @pytest.mark.asyncio

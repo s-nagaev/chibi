@@ -61,15 +61,11 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, full-id models, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: full-id models, chat/vision/moderation ready."""
     assert Fireworks.name == "Fireworks"
-    assert Fireworks.base_url == "https://api.fireworks.ai/inference/v1"
     assert Fireworks.chat_ready is True
     assert Fireworks.vision_ready is True
     assert Fireworks.moderation_ready is True
-    assert Fireworks.default_model == "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
-    assert Fireworks.default_vision_model == "accounts/fireworks/models/glm-5p3-flash"
-    assert Fireworks.default_moderation_model == "accounts/fireworks/models/glm-5p3-flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

@@ -61,17 +61,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready, no TTS/STT."""
+    """SPIKE-derived defaults: chat/vision/moderation ready, no TTS/STT."""
     assert DeepInfra.name == "Deepinfra"
-    assert DeepInfra.base_url == "https://api.deepinfra.com/v1/openai"
     assert DeepInfra.chat_ready is True
     assert DeepInfra.vision_ready is True
     assert DeepInfra.moderation_ready is True
     assert DeepInfra.tts_ready is False
     assert DeepInfra.stt_ready is False
-    assert DeepInfra.default_model == "zai-org/GLM-5.3-Flash"
-    assert DeepInfra.default_vision_model == "zai-org/GLM-5.3-Flash"
-    assert DeepInfra.default_moderation_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

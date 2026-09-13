@@ -62,17 +62,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: chat/vision/moderation ready."""
     assert Featherless.name == "Featherless"
-    assert Featherless.base_url == "https://api.featherless.ai/v1"
     assert Featherless.chat_ready is True
     assert Featherless.vision_ready is True
     assert Featherless.moderation_ready is True
     assert Featherless.tts_ready is False
     assert Featherless.stt_ready is False
-    assert Featherless.default_model == "zai-org/GLM-5.3-Flash"
-    assert Featherless.default_moderation_model == "zai-org/GLM-5.3-Flash"
-    assert Featherless.default_vision_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

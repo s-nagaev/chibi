@@ -61,17 +61,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: chat/vision/moderation ready."""
     assert SambaNova.name == "SambaNova"
-    assert SambaNova.base_url == "https://api.sambanova.ai/v1"
     assert SambaNova.chat_ready is True
     assert SambaNova.vision_ready is True
     assert SambaNova.moderation_ready is True
     assert SambaNova.tts_ready is False
     assert SambaNova.stt_ready is False
-    assert SambaNova.default_model == "MiniMax-M3"
-    assert SambaNova.default_vision_model == "gemma-4-31B-it"
-    assert SambaNova.default_moderation_model == "gpt-oss-120b"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

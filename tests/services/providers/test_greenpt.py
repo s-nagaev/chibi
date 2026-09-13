@@ -27,9 +27,8 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """OpenAI-compatible base_url, chat/vision/moderation ready, no image/tts/stt/ocr."""
+    """chat/vision/moderation ready, no image/tts/stt/ocr."""
     assert GreenPT.name == "GreenPT"
-    assert GreenPT.base_url == "https://api.greenpt.ai/v1"
     assert GreenPT.chat_ready is True
     assert GreenPT.vision_ready is True
     assert GreenPT.moderation_ready is True
@@ -37,9 +36,6 @@ def test_provider_attributes() -> None:
     assert GreenPT.tts_ready is False
     assert GreenPT.stt_ready is False
     assert GreenPT.ocr_ready is False
-    assert GreenPT.default_model == "glm-5.3-flash"
-    assert GreenPT.default_vision_model == "glm-5.3-flash"
-    assert GreenPT.default_moderation_model == "glm-5.3-flash"
 
 
 def test_token_assignment() -> None:

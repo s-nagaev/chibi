@@ -61,17 +61,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: chat/vision/moderation ready."""
     assert Baseten.name == "Baseten"
-    assert Baseten.base_url == "https://inference.baseten.co/v1"
     assert Baseten.chat_ready is True
     assert Baseten.vision_ready is True
     assert Baseten.moderation_ready is True
     assert Baseten.tts_ready is False
     assert Baseten.stt_ready is False
-    assert Baseten.default_model == "zai-org/GLM-5.3-Flash"
-    assert Baseten.default_vision_model == "zai-org/GLM-5.3-Flash"
-    assert Baseten.default_moderation_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

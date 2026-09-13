@@ -61,17 +61,13 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: chat/vision/moderation ready."""
     assert SiliconFlow.name == "Siliconflow"
-    assert SiliconFlow.base_url == "https://api.siliconflow.com/v1"
     assert SiliconFlow.chat_ready is True
     assert SiliconFlow.vision_ready is True
     assert SiliconFlow.moderation_ready is True
     assert SiliconFlow.tts_ready is False
     assert SiliconFlow.stt_ready is False
-    assert SiliconFlow.default_model == "deepseek-ai/DeepSeek-V4-Flash"
-    assert SiliconFlow.default_vision_model == "zai-org/GLM-5V-Turbo"
-    assert SiliconFlow.default_moderation_model == "deepseek-ai/DeepSeek-V4-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

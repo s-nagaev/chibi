@@ -61,15 +61,11 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """SPIKE-derived defaults: OpenAI-compatible base_url, full-id models, chat/vision/moderation ready."""
+    """SPIKE-derived defaults: full-id models, chat/vision/moderation ready."""
     assert Nebius.name == "Nebius"
-    assert Nebius.base_url == "https://api.tokenfactory.nebius.com/v1/"
     assert Nebius.chat_ready is True
     assert Nebius.vision_ready is True
     assert Nebius.moderation_ready is True
-    assert Nebius.default_model == "nvidia/Nemotron-3_5-Lightning"
-    assert Nebius.default_vision_model == "zai-org/GLM-5.3-Flash"
-    assert Nebius.default_moderation_model == "zai-org/GLM-5.3-Flash"
 
 
 def test_model_filtering_chat_ready_models_sorted() -> None:

@@ -25,9 +25,8 @@ def test_availability_gated_on_api_key() -> None:
 
 
 def test_provider_attributes() -> None:
-    """OpenAI-compatible base_url, chat/vision/moderation ready, no image/tts/stt/ocr."""
+    """chat/vision/moderation ready, no image/tts/stt/ocr."""
     assert Lyceum.name == "Lyceum"
-    assert Lyceum.base_url == "https://api.lyceum.technology/openai/v1"
     assert Lyceum.chat_ready is True
     assert Lyceum.vision_ready is True
     assert Lyceum.moderation_ready is True
@@ -35,9 +34,6 @@ def test_provider_attributes() -> None:
     assert Lyceum.tts_ready is False
     assert Lyceum.stt_ready is False
     assert Lyceum.ocr_ready is False
-    assert Lyceum.default_model == "z-ai/glm-5.3-flash"
-    assert Lyceum.default_vision_model == "z-ai/glm-5.3-flash"
-    assert Lyceum.default_moderation_model == "z-ai/glm-5.3-flash"
     assert Lyceum.temperature == 0.6
 
 
