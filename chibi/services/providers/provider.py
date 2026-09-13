@@ -932,6 +932,18 @@ class RestApiFriendlyProvider(Provider):
             raise NotAuthorizedError(provider=self.name)
         if response.status_code == 429:
             raise ServiceRateLimitError(provider=self.name)
+        detail: str | None = None
+        try:
+            base_resp = response.json().get("base_resp")
+        except Exception:
+            base_resp = None
+        if isinstance(base_resp, dict):
+            status_code = base_resp.get("status_code")
+            status_msg = base_resp.get("status_msg")
+            if status_code is not None or status_msg is not None:
+                detail = f"status_code: {status_code}, status_msg: {status_msg}"
+        if detail:
+            raise ServiceResponseError(provider=self.name, detail=detail)
         raise ServiceResponseError(provider=self.name)
 
 
