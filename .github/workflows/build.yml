@@ -75,7 +75,9 @@ jobs:
           cache-from: ${{ format('type=registry,ref={0}:{1}buildcache', matrix.image_name, matrix.tag_prefix) }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:{1}buildcache,mode=max', matrix.image_name, matrix.tag_prefix) || '' }}
 
-  docker-full:
+  docker-full-disabled:
+    if: false
+    # Temporarily disabled: chibi-tui repo is LICENSE-only, build-context tui-src has no code. Re-enable when TUI code lands.
     runs-on: ubuntu-latest
     steps:
       -

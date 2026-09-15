@@ -411,6 +411,10 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
                         "type": "string",
                         "description": "Description of the music to generate. English recommended.",
                     },
+                    "title": {
+                        "type": "string",
+                        "description": "Music title. English recommended.",
+                    },
                     "music_length_ms": {
                         "type": "integer",
                         "description": (
@@ -420,7 +424,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
                         "default": 180000,
                     },
                 },
-                "required": ["prompt"],
+                "required": ["prompt", "title"],
             },
         ),
     )
@@ -432,6 +436,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
         cls,
         prompt: str,
         music_length_ms: int = 180000,
+        title: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         interface = cls.get_interface(kwargs=kwargs)
@@ -440,14 +445,14 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
 
         audio = await cls._get_provider().generate_music(prompt=prompt, music_length_ms=music_length_ms)
 
-        title = f"{prompt[:15]}..."
+        name = title or f"{prompt[:18]}..."
         logger.log("TOOL", f"[ElevenLabs] Music generated. Sending it to the chat #{interface.chat_id}...")
         await interface.send_audio(
             audio=audio,
-            title=title,
+            title=name,
             performer=f"{telegram_settings.bot_name} AI via ElevenLabs",
             duration=music_length_ms // 1000,
-            filename=f"{title.replace(' ', '_')}.mp3",
+            filename=f"{name.replace(' ', '_')}.mp3",
         )
         return {"detail": "Music was successfully generated and sent to user"}
 
