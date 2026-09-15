@@ -37,9 +37,8 @@ class TestStdioRunnerCLI:
         assert result.exit_code != 0
         assert "No client selected" in result.output
 
-    def test_stdio_tui_dispatches_and_sets_client(
-        self, runner: CliRunner, restore_client_setting: Iterator[None]
-    ) -> None:
+    @pytest.mark.usefixtures("restore_client_setting")
+    def test_stdio_tui_dispatches_and_sets_client(self, runner: CliRunner) -> None:
         """`chibi stdio --tui` sets application_settings.client to "tui" and invokes the runner."""
         with patch("chibi.runners.stdio.run_stdio") as mock_run_stdio:
             result = runner.invoke(main, ["stdio", "--tui"])
@@ -52,9 +51,8 @@ class TestStdioRunnerCLI:
         ("flag", "client"),
         [("--vscode", "vscode"), ("--pycharm", "pycharm"), ("--neovim", "neovim")],
     )
-    def test_stdio_client_flag_dispatches_and_sets_client(
-        self, runner: CliRunner, restore_client_setting: Iterator[None], flag: str, client: str
-    ) -> None:
+    @pytest.mark.usefixtures("restore_client_setting")
+    def test_stdio_client_flag_dispatches_and_sets_client(self, runner: CliRunner, flag: str, client: str) -> None:
         """`chibi stdio <client flag>` sets application_settings.client and invokes the runner."""
         with patch("chibi.runners.stdio.run_stdio") as mock_run_stdio:
             result = runner.invoke(main, ["stdio", flag])
@@ -63,9 +61,8 @@ class TestStdioRunnerCLI:
         mock_run_stdio.assert_called_once()
         assert application_settings.client == client
 
-    def test_stdio_rejects_multiple_client_flags(
-        self, runner: CliRunner, restore_client_setting: Iterator[None]
-    ) -> None:
+    @pytest.mark.usefixtures("restore_client_setting")
+    def test_stdio_rejects_multiple_client_flags(self, runner: CliRunner) -> None:
         """`chibi stdio` rejects passing more than one client flag."""
         result = runner.invoke(main, ["stdio", "--tui", "--vscode"])
 

@@ -20,7 +20,8 @@ def restore_client_setting() -> Iterator[None]:
 class TestTelegramRunnerClient:
     """Tests for the client value set by the Telegram runner."""
 
-    def test_run_chibi_sets_client_to_telegram(self, restore_client_setting: Iterator[None]) -> None:
+    @pytest.mark.usefixtures("restore_client_setting")
+    def test_run_chibi_sets_client_to_telegram(self) -> None:
         """`run_chibi` marks the process as serving the telegram client."""
         with (
             patch("chibi.runners.telegram.ChibiBot") as bot_cls,

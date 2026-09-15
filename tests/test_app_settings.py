@@ -18,7 +18,8 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.Monkey
 class TestClientSetting:
     """Tests for the ApplicationSettings.client field."""
 
-    def test_client_defaults_to_telegram(self, clean_environment: Iterator[pytest.MonkeyPatch]) -> None:
+    @pytest.mark.usefixtures("clean_environment")
+    def test_client_defaults_to_telegram(self) -> None:
         """Without any override the process is assumed to serve the telegram client."""
         assert ApplicationSettings().client == "telegram"
 
@@ -33,9 +34,8 @@ class TestClientSetting:
         with pytest.raises(ValidationError):
             ApplicationSettings(client=client)
 
-    def test_client_is_readable_from_environment(
-        self, clean_environment: Iterator[pytest.MonkeyPatch], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @pytest.mark.usefixtures("clean_environment")
+    def test_client_is_readable_from_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The field is bound to the CLIENT environment variable like other settings."""
         monkeypatch.setenv("CLIENT", "tui")
 
