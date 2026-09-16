@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 from typing import Literal
 
@@ -20,6 +21,146 @@ FILE_UPLOAD_TIMEOUT = 120.0
 AUDIO_UPLOAD_TIMEOUT = 60.0
 # Stable, collision-safe storage identity reserved for the IDE channel.
 IDE_STORAGE_ID = -(10**16)
+
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "o1": 200000,
+    "o3": 200000,
+    "o4-mini": 200000,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4.1": 1000000,
+    "gpt-4.1-mini": 1000000,
+    "gpt-4.1-nano": 1000000,
+    "gpt-5.1": 400000,
+    "gpt-5.2": 400000,
+    "gpt-5.3-codex": 400000,
+    "gpt-5.4": 1050000,
+    "gpt-5.4-mini": 400000,
+    "gpt-5.4-nano": 400000,
+    "gpt-5.5": 1000000,
+    "gpt-5.6-sol": 272000,
+    "gpt-5.6-terra": 872000,
+    "gpt-5.6-luna": 872000,
+    "gpt-5-mini": 400000,
+    "gpt-5-nano": 400000,
+    "claude-sonnet-4-6": 1000000,
+    "claude-sonnet-5": 1000000,
+    "claude-opus-4-6": 1000000,
+    "claude-opus-4-7": 1000000,
+    "claude-opus-4-8": 1000000,
+    "claude-opus-5": 1000000,
+    "claude-haiku-4.5": 200000,
+    "claude-fable-5": 1000000,
+    "claude-fable-5-1": 1000000,
+    "deepseek-v4-pro": 1000000,
+    "deepseek-v4-flash": 1000000,
+    "deepseek-v4-flash-vision-exp": 1000000,
+    "gemma-4-31b-it": 262144,
+    "gemma-4-26b-a4b-it": 262144,
+    "gemini-3.8-flash": 1048576,
+    "gemini-3.7-flash": 1000000,
+    "gemini-3.6-flash": 1048576,
+    "gemini-3.5-flash": 1000000,
+    "gemini-3.5-flash-lite": 1000000,
+    "gemini-3.1-pro": 1000000,
+    "gemini-3.1-flash-lite": 1048576,
+    "gemini-2.5-pro": 1000000,
+    "gemini-2.5-flash": 1048576,
+    "gemini-2.5-flash-lite": 1048576,
+    "grok-build-0.1": 200000,
+    "grok-4.3": 1000000,
+    "grok-4.5": 500000,
+    "grok-4.6": 500000,
+    "grok-4.20": 1000000,
+    "minimax-m3": 1048576,
+    "minimax-m2.7": 204800,
+    "minimax-m2.5": 204800,
+    "mistral-small-latest": 262144,
+    "mistral-medium-latest": 262144,
+    "mistral-large-latest": 262144,
+    "kimi-k3": 1048576,
+    "kimi-k2.7-code": 262144,
+    "kimi-k2.6": 262144,
+    "qwen3.8-max": 1000000,
+    "qwen3.5-plus": 1000000,
+    "qwen3.5-flash": 1000000,
+    "qwen-plus": 1000000,
+    "qwen-flash": 1000000,
+    "glm-5.3": 1000000,
+    "glm-5.3-flash": 1048576,
+    "glm-5.2": 1048576,
+    "glm-5.1": 200000,
+    "glm-5-turbo": 200000,
+    "glm-5": 200000,
+    "glm-4.7": 200000,
+    "glm-4.7-flash": 200000,
+    "glm-4.7-flashx": 200000,
+    "glm-4.6": 200000,
+    "glm-4.5": 128000,
+    "glm-4.5-air": 128000,
+    "glm-4-32b-0414-128k": 128000,
+}
+
+_DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$|-\d{8}$|-\d{4}$")
+_DIGIT_HYPHEN_RE = re.compile(r"(?<=\d)-(?=\d)")
+
+
+def _longest_prefix_window(name: str) -> int | None:
+    """Return the window of the longest map key that prefixes ``name``.
+
+    A prefix only counts when it ends at a family boundary (end of string,
+    a hyphen or a dot), so "gpt-4.1" never matches "gpt-4.11".
+    """
+    best_key = ""
+    for key in MODEL_CONTEXT_WINDOWS:
+        if len(key) > len(best_key) and name.startswith(key) and (len(name) == len(key) or name[len(key)] in "-."):
+            best_key = key
+    return MODEL_CONTEXT_WINDOWS.get(best_key) if best_key else None
+
+
+def get_model_context_window(model_name: str | None) -> int | None:
+    """Look up the provider-advertised context window for a model.
+
+    The map holds lowercase family identifiers; dated snapshots and
+    vendor-prefixed spellings resolve through the pipeline below, and
+    unknown models yield None.
+
+    Resolution order:
+      1. exact hit on the lowercased, vendor-prefix-stripped name
+         ("MiniMax-M3" -> "minimax-m3", "models/gemini-3.8-flash" ->
+         "gemini-3.8-flash");
+      2. normalized hit: trailing date/snapshot suffixes are removed and
+         version hyphens between digit runs become dots
+         ("claude-haiku-4-5-20251001" -> "claude-haiku-4.5");
+      3. longest family-prefix match ("gemini-3.1-pro-preview" ->
+         "gemini-3.1-pro").
+
+    IDs with semantic dashes such as "glm-4-32b-0414-128k" and
+    "kimi-k2.7-code" are exact map keys, so they resolve at step 1 and no
+    normalization is ever applied to them.
+
+    Args:
+        model_name: Model identifier as reported by the provider, if any.
+
+    Returns:
+        The context window in tokens, or None when the model is unknown.
+    """
+    if not model_name:
+        return None
+    name = model_name.lower()
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    if name in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[name]
+    stripped = _DATE_SUFFIX_RE.sub("", name)
+    normalized = _DIGIT_HYPHEN_RE.sub(".", stripped)
+    if normalized in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[normalized]
+    for candidate in (stripped, normalized):
+        window = _longest_prefix_window(candidate)
+        if window is not None:
+            return window
+    return None
 
 
 class UserContext(Enum):
@@ -342,23 +483,41 @@ discrepancies can severely undermine trust.
 - If the user's message is marked as a voice message, you should probably duplicate your response by also recording
 a voice message, if the appropriate tool is available to you.
 
-# User Memory Rules (set_user_info)
-1. Proactive & Silent Save: Actively watch for important user details (profession, hobbies, preferences, pet names,
-tech stack, etc.) and save them without asking. This is part of your core behavior, not optional.
-Store each fact on a separate line. Before updating, always preserve existing entries — only add, edit, or remove
-the relevant line(s). Remove an entry only when the user explicitly asks to forget something.
-2. On Explicit Request: If the user directly asks you to remember something (e.g., "remember that..."),
-use the function and give a short confirmation (e.g., "Okay, got it.").
-3. !!! SENSITIVE INFO — DO NOT SAVE !!!
-You are strictly prohibited from saving the following without a direct, explicit request from the user:
+# User Memory Rules (set_user_info + update_notes)
+You have two memory tools with strictly different scope. Never mix them.
+
+## set_user_info — GLOBAL person facts about the human user (valid in every conversation)
+1. What belongs here ONLY: profession, hobbies, hardware, tech stack, stable preferences, family,
+pet names — stable facts about the person, not about any specific project or conversation.
+2. FORBIDDEN here: work conventions, project state, task progress, agreements or decisions made
+in a specific conversation. Those belong to update_notes.
+3. Proactive & Silent Save: Actively watch for important person details (profession, preferences,
+etc.) and save them without asking. This is part of your core behavior, not optional.
+Store each fact on a separate line. Before updating, always preserve existing entries — only add,
+edit, or remove the relevant line(s). Remove an entry only when the user explicitly asks to forget
+something.
+4. On Explicit Request: If the user directly asks you to remember something, decide by its nature:
+a person fact → set_user_info; anything about the current work or conversation → update_notes.
+
+## update_notes — thread-scoped operational notes (your own working memory for THIS conversation)
+5. What belongs here: current project state, conventions, agreements, decisions, plans, progress.
+Each agent writes its own notes for itself — keep them relevant to the ongoing work.
+6. Full replacement: the tool overrides ALL your current notes — always send the complete new
+notes text, keeping only what is still relevant. Keep them compact: they are injected into every
+system prompt of this conversation.
+
+## !!! SENSITIVE INFO — DO NOT SAVE (applies to set_user_info) !!!
+You are strictly prohibited from saving the following into user info without a direct, explicit
+request from the user:
 - Political views
 - Religious beliefs
 - Medical information
 - Sexual preferences
 
-**Example:**
+**Examples:**
 - User: "I'm not feeling well today." -> DO NOT SAVE.
-- User: "Remember that I'm allergic to pollen." -> SAVE.
+- User: "Remember that I'm allergic to pollen." -> SAVE to set_user_info (a person fact).
+- You: agreed on a convention with a sub-agent -> SAVE to update_notes, NOT to set_user_info.
     """
     if filesystem_access:
         return base_prompt + FILESYSTEM_ACCESS_PROMPT

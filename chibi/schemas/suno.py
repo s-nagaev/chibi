@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, HttpUrl
+from pydantic import BaseModel, ConfigDict, HttpUrl, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -26,10 +26,46 @@ class SunoTrackSchema(SunoBaseModel):
     create_time: int | None = None  # Milliseconds timestamp
     duration: float | None = None
 
+    @field_validator(
+        "source_audio_url",
+        "stream_audio_url",
+        "source_stream_audio_url",
+        "image_url",
+        "source_image_url",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_empty_urls_to_none(cls, v: Any) -> Any:
+        """The gateway returns empty strings for missing URLs — treat them as absent."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("create_time", mode="before")
+    @classmethod
+    def _coerce_create_time(cls, v: Any) -> int | None:
+        """The gateway changed createTime from a ms-timestamp int to a datetime string (docs 2025)."""
+        if isinstance(v, bool) or v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return int(v)
+        if isinstance(v, str):
+            value = v.strip()
+            if not value:
+                return None
+            if value.isdigit():
+                return int(value)
+            try:
+                return int(float(value))
+            except ValueError:
+                return None
+        return None
+
 
 class TaskResponseSchema(SunoBaseModel):
     task_id: str
-    suno_data: list[SunoTrackSchema]
+    # The gateway may return sunoData: null while the task is still processing (or after a failure).
+    suno_data: list[SunoTrackSchema] | None = None
 
 
 class TaskDataSchema(SunoBaseModel):
@@ -79,5 +115,6 @@ class SunoGetGenerationDetailsSchema(SunoAPIResponseSchema):
             "SUCCESS",
             "CREATE_TASK_FAILED",
             "GENERATE_AUDIO_FAILED",
+            "CALLBACK_EXCEPTION",
             "SENSITIVE_WORD_ERROR",
         )

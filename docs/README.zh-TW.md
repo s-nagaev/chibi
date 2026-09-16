@@ -53,18 +53,38 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 
 ### LLM 提供商
 
-- **OpenAI**（GPT 模型）
+原廠模型提供商：
+
+- **Alibaba Cloud**（Qwen）
 - **Anthropic**（Claude）
-- **Google**（Gemini）
 - **DeepSeek**
-- **阿里雲**（Qwen）
-- **xAI**（Grok）
-- **Mistral AI**
-- **月之暗面**（Moonshot AI）
+- **Google**（Gemini）
 - **MiniMax**
-- **智譜AI**（GLM 系列模型）
-- **OpenRouter**（統一存取多種模型）
-- **Cloudflare Workers AI**（多個開源模型）
+- **Mistral AI**
+- **Moonshot AI**（Kimi）
+- **OpenAI**（GPT 模型）
+- **Xiaomi**（MiMo 系列模型）
+- **xAI**（Grok）
+- **ZhipuAI**（GLM 系列模型）
+
+模型轉售商及推理聚合商：
+
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
 
 ### OpenAI 相容端點（自託管 / 本機）
 
@@ -75,9 +95,9 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 
 ### 多模態提供商（選用）
 
-- **影像**：Google（Imagen、Nano Banana）、OpenAI（DALL·E）、阿里雲（Qwen Image）、xAI（Grok Image）、Wan、**智譜AI（CogView）、MiniMax**
-- **音樂**：Suno
-- **語音**：ElevenLabs、MiniMax、OpenAI（Whisper）
+- **影像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image、Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image、CogView）、MiniMax（Image-01），以及任何提供影像生成模型的轉售聚合商
+- **音樂**：Suno、ElevenLabs Music
+- **語音（TTS/STT）**：ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper、Kokoro）、Xiaomi（MiMo TTS）、自訂 OpenAI 相容端點（自託管）
 
 > 實際可用的模型取決於您設定的提供者金鑰和啟用的功能。
 
@@ -109,6 +129,21 @@ chibi start
 | `chibi restart` | 重新啟動機器人 |
 | `chibi config` | 產生或編輯組態 |
 | `chibi logs` | 查看機器人日誌 |
+
+---
+
+## 本地客戶端前端
+
+Chibi 可透過版本化的本機 JSONL 協定為本地客戶端提供服務：
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+此命令由客戶端前端啟動，不供互動式使用。Chibi 負責維護 `v1` 協定，並支援協商相同版本的相容客戶端。stdio 程序僅將協定幀寫入 stdout，將診斷資訊寫入 stderr。現有的 Chibi 指令、工具、權限和審核行為仍具權威性；客戶端不會新增額外的工具策略層。
 
 ---
 
@@ -154,23 +189,39 @@ docker-compose up -d
 
 每個提供商都需要自己的 API 金鑰。以下是直接連結：
 
-**主要提供商：**
-- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
-- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+**一級模型提供商：**
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
-- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **智譜AI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (統一存取多種模型): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**模型轉售商及推理聚合商：**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **創意工具：**
-- **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
-- **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
+- **ElevenLabs** (語音): [elevenlabs.io](https://elevenlabs.io/)
+- **Suno** (音樂，非官方): [sunoapi.org](https://sunoapi.org/)
 
 > 📚 **完整指南及設置說明：** [chibi.bot/guides/get-api-keys](https://chibi.bot/guides/get-api-keys)
 
@@ -205,6 +256,7 @@ Chibi 能在對話中途切換提供商時保持上下文，或為每個步驟�
 - **檔案系統存取**：讀取/寫入/搜尋/整理檔案
 - **終端機執行**：執行指令並具備 LLM 調節的安全機制
 - **持久記憶**：對話歷史在重啟後仍保留，並具備上下文管理/摘要功能
+- **技能**：可複用的指令模組，代理可按需載入到系統提示中（`load_builtin_skill`）
 
 ### 🔌 透過 MCP（模型上下文協定）擴充
 將 Chibi 連接到外部工具和服務（或自行建構）：
@@ -218,9 +270,9 @@ Chibi 能在對話中途切換提供商時保持上下文，或為每個步驟�
 只要工具能透過 MCP 公開，Chibi 就能學會使用它。
 
 ### 🎨 豐富的內容生成
-- **影像**：Nano Banana、Imagen、Qwen、Wan、DALL·E、Grok
+- **影像**：Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
 - **音樂**：Suno（包含自訂模式：風格/歌詞/人聲）
-- **語音**：轉錄 + 文字轉語音（ElevenLabs、MiniMax、OpenAI）
+- **語音**：轉錄 + 文字轉語音（ElevenLabs、OpenAI）
 
 ---
 
@@ -259,6 +311,31 @@ Chibi：*分析變更，建議改進，透過 MCP 更新文件*
 - **存取控制**：白名單使用者/群組/模型
 - **儲存選項**：本機磁碟區、Redis 或 DynamoDB
 - **工具安全**：代理工具可設定；終端機執行經過調節且可限制
+
+---
+
+### `MAX_HISTORY_TOKENS` — 上下文摘要閾值（預設值變更）
+
+`MAX_HISTORY_TOKENS` 是 Chibi 自動摘要對話以維持上下文可控的閾值。其**語義已變更**：現在與**真實的、提供者回報的提示詞 token 數量**進行比較（整個發出的請求：系統提示 + 已啟用的技能 + 工具架構 + 工具呼叫引數 + 每則訊息的結構開銷 + 對話內容），而非舊的僅衡量對話 `content` + `role` 的啟發式方法。對於相同對話，真實數字約為舊估計的 **4.8 倍**（詳見 `fix_context_size/context_size_accounting_analysis.md` 的實測分析）。
+
+- **預設值已重設**：`64000` → `100000`。新值保護最小常用上下文視窗（128k tokens）：`100000` 約為 128k 視窗的 78%（因此摘要會在 128k 模型溢位前觸發），約為 200k 視窗的 50%（留有充裕空間）。舊的 `64000` 僅是歷史記錄的估計，從未在真正溢位前被觸發，因為該估計對西里爾文的計算少約 2 倍，且排除了固定的每輪開銷（系統提示約 3.7k、工具架構約 6.8k、已啟用技能約 5.9k、`user_info` 約 0.75–3k）——因此 128k 模型在約 128k 真實 token 時溢位，而啟發式仍遠低於 64k。
+- **遷移**：如果您在 `.env` 中明確設定了 `MAX_HISTORY_TOKENS`，舊值是針對舊的歷史估計調整的，現在與一個約為相同對話 4.8 倍的真實數字進行比較。請將其重新調整到 **~100k 量級**（例如 `64000` → `100000`），以便在最小模型的上下文視窗溢位前觸發摘要。如果從未設定，新預設值將自動生效。
+- 冷啟動回退（程序重啟後的第一輪，尚無提供者資料快取時）仍使用舊的啟發式，因此摘要功能維持可用。
+
+### `REACTIVE_CONTEXT_RECOVERY` — 上下文溢位後的一次性重試
+
+`REACTIVE_CONTEXT_RECOVERY`（預設：`true`）是補充主動 `MAX_HISTORY_TOKENS` 閾值的反應式安全網。當提供者因具型別的 `context_length_exceeded` 錯誤拒絕請求時，Chibi 會自動摘要對話歷史並**恰好重試一次**該輪。如果重試成功，使用者將收到正常回應（附帶一則簡短說明上下文已壓縮的註記）。如果重試再次溢位或因任何原因恢復失敗，則該輪回退到現有的道歉路徑——摘要+重試迴圈在每個原始輪次中最多只能執行一次。設為 `false` 可停用反應式恢復並保留舊行為（記錄日誌 + 道歉，不重試）。
+
+### 工作目錄按執行緒隔離（`WORKING_DIR`）
+
+代理的工作目錄——用於終端機指令並作為目前工作目錄回報給模型——是**按執行緒隔離的**，與所選 LLM 模型按執行緒綁定的方式一致。
+
+- **預設值**：來自 `WORKING_DIR` 設定（預設 `~/chibi`），透過遺留使用者層級值取得；全新部署直接繼承該設定。
+- **每執行緒覆寫**：任何執行緒/對話均可**獨立地**透過代理的 `set_working_dir` 工具覆寫其工作目錄（僅限 LLM 驅動——沒有斜線命令，需啟用 `FILESYSTEM_ACCESS`）。這允許不同執行緒中的兩個代理同時在不同專案上工作而互不干擾。
+- **解析順序**：執行緒覆寫 → 遺留使用者層級目錄 → `WORKING_DIR` 設定。
+- **路徑正規化**：設定的值在儲存時會被展開為絕對路徑（`~/x` 變為 `/abs/x`）；未修改的預設值保持原始形式。
+- **子代理**在某執行緒中產生時共用該執行緒的工作目錄——相同的有效路徑會被注入其系統提示和工具呼叫中。
+- 覆寫**在執行緒複製後保留**：`/new_thread_with_current_context` 會將工作目錄與訊息和模型偏好一起攜帶。
 
 ---
 

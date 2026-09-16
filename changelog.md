@@ -4,7 +4,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.15.0] - 2026-09-14
+
+### Added
+- **LLM reasoning in IDE result frames:** result frames now carry an optional `thoughts` string with the model's reasoning whenever the provider surfaced it and the client declared `capabilities.thoughts: true` in the `initialize` handshake; reasoning is capped at 256 KB, keeping the tail closest to the answer and prepending a `\n[... LLM reasoning truncated: 256 KB limit reached ...]` marker at the head, is delivered on the final result frame only (never on background message frames), and is never persisted to thread history: clients that do not declare the capability, and providers that expose no reasoning (Gemini, Anthropic, MiniMax), see no change at all.
+- **Token usage in IDE result frames:** result frames now carry an optional `usage` object with `input_tokens`, `output_tokens` and `context_window` whenever the provider reported usage for the request that produced the answer. Numbers are the real provider-reported counts, not estimates; for Anthropic-compatible APIs cached input tokens are added to the input count, and `context_window` comes from a curated per-model map capped at `MAX_HISTORY_TOKENS` (the effective summarization ceiling; null when the model is unknown). That map was rebuilt from verified September 2026 provider sources and now covers every model family of all supported providers, legacy lines and the Alibaba Qwen roster included. Clients that never send usage-related data are unaffected: when no usage is available the field is omitted entirely, so v1 clients see no change.
+- **Subagent lifecycle events (IDE stdio):** clients that declare `capabilities.subagents: true` in the `initialize` handshake now receive `{"type": "agent_event", "request_id", "event": "started" | "finished", "active", "total", "name"?}` frames while a request runs: `active` counts the subagents currently running for that request, `total` counts the ones spawned so far, and `name` carries only the delegated model name (never prompt content). A `started` event is emitted only once the delegation attempt has been accepted, so failed attempts produce no traffic; `finished` is guaranteed on every exit path (timeout, exception, cancellation) via cleanup. The last natural `finished` carries `active: 0`, which is the signal to hide the client's spinner line; the result frame stays the implicit end of a request, and no agent_event frame ever arrives after it. On a successful `/stop` or `/reset` that kills background work with counters still in flight, exactly one kill-flush `finished` event with `active: 0` and no name is emitted as the authoritative reset. Emission is fire-and-forget on the same serialized stdout pathway as background messages, and failures are logged and dropped. Clients without the opt-in are unaffected; no protocol_version bump.
+- **New LLM providers:** Novita AI, Xiaomi (MiMo models), DeepInfra, Together AI, Nebius (Token Factory), Fireworks AI, Baseten, SambaNova, SiliconFlow, Parasail, Featherless, Lyceum (`https://api.lyceum.technology/openai/v1`) and GreenPT (`https://api.greenpt.ai/v1`) — all OpenAI-compatible endpoints, each activated by setting its `*_API_KEY` environment variable.
+- **Music generation expansion:** music is no longer Suno-only — new ElevenLabs Music generation via the `generate_music_via_elevenlabs` tool.
+- **cwd statusline updates (IDE stdio):** clients that declare `capabilities.cwd_updates: true` in the `initialize` handshake receive an additive `{"type": "cwd_update", "thread_id", "cwd"}` frame whenever the agent changes the thread's working directory via the `set_working_dir` tool; emission is fire-and-forget and clients without the capability see no wire traffic.
+- **`/stop` over IDE stdio:** the `/stop` prompt is routed through the same command dispatch as `/reset`, so IDE clients can stop a running request with the exact Telegram runner semantics (task cancellation, subagent counter kill-flush, feedback text); the ready frame's advertised command list includes the new entry.
+- **Continuation thoughts on background message frames:** when a background tool task's continuation turn produces new LLM reasoning, the delta beyond the reasoning already reported on the result frame is now attached to the background message frame instead of being lost.
+- **Thread-scoped agent notes:** new `update_notes` tool lets the agent keep working notes (current project state, conventions, decisions, progress) for the current thread; notes are stored per thread on the user record with full-replace semantics, and an empty string clears them.
+- **Unified backend+TUI Docker image:** CI now builds and publishes a full `pysergio/chibi` image bundling the backend and the terminal UI (new `full.Dockerfile`), with a local `build:lfull` Taskfile task.
+- **Provider contract test suite (internal):** 278 parametrized invariant tests covering the class-attribute contracts of every registered provider (no instantiation, no network).
+
+### Changed
+- **Stdio client CLI:** the stdio JSONL session is now launched with `chibi stdio --tui`; the old `chibi ide --stdio` invocation is removed without an alias. `ApplicationSettings` gained a `client` selector with the values `telegram`, `tui`, `vscode`, `pycharm` and `neovim` (default `telegram`) that each launch path sets for itself: `--tui` marks a stdio session as serving the terminal UI, and the Telegram runner marks its process as `telegram`. The handshake (`protocol_version` 1 + capabilities) and every protocol frame are unchanged. The `chibi stdio` command also accepts per-client launch flags — `--vscode`, `--pycharm` and `--neovim` alongside `--tui` (exactly one required) — and the selected client identity is propagated into the system prompt.
+- **Backend log format:** backend log lines are now plain `datetime | LEVEL | message`, dropping the colored loguru markup.
+
+### Fixed
+- Unmatched slash prompts are now treated as plain user prompts in IDE stdio and terminal sessions instead of failing with "Unknown command" errors.
+- SunoAPI compatibility restored: track schemas now tolerate upstream gateway response changes (empty-string URLs, `createTime` delivered as a datetime string).
+- Provider `base_resp` error details are now propagated in `ServiceResponseError` instead of being swallowed.
+- Tool calls always receive the originating session identity (`caller_storage_id`/`caller_thread_id` are now required), fixing terminal-tool access for sessions where the caller context was previously missing.
+- Subagent counters are retained while background subagents outlive the request, so clients keep accurate `active`/`total` counts after the result frame.
 
 ## [1.14.1] - 2026-09-02
 
@@ -641,7 +665,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/s-nagaev/chibi/compare/v1.13.1...v1.14.0
 [1.13.1]: https://github.com/s-nagaev/chibi/compare/v1.13.1b1...v1.13.1

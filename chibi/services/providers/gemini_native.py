@@ -78,14 +78,14 @@ class Gemini(RestApiFriendlyProvider):
         "1.5",
     ]
 
-    default_model = "models/gemini-2.5-pro"
+    default_model = "models/gemini-3.8-flash"
     default_image_model = "models/imagen-4.0-fast-generate-001"
     default_tts_voice = "Kore"
-    default_tts_model = "gemini-3.1-flash-tts-preview"
-    default_stt_model = "gemini-3-flash-preview"
-    default_moderation_model = "models/gemini-2.5-flash-lite"
-    default_vision_model = "models/gemini-3-flash-preview"
-    default_ocr_model = "models/gemini-3-flash-preview"
+    default_tts_model = "models/gemini-3.5-transcribe"
+    default_stt_model = "models/gemini-3.8-flash"
+    default_moderation_model = "models/gemini-3.5-flash-lite"
+    default_vision_model = "models/gemini-3.8-flash"
+    default_ocr_model = "models/gemini-3.8-flash"
 
     frequency_penalty: float | None = gpt_settings.frequency_penalty
     max_tokens: int = gpt_settings.max_tokens
@@ -229,13 +229,13 @@ class Gemini(RestApiFriendlyProvider):
         self,
         messages: list[ContentDict],
         user: User,
+        caller_storage_id: int,
+        caller_thread_id: int,
         model: str | None = None,
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
-        caller_storage_id: int | None = None,
-        caller_thread_id: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -366,6 +366,8 @@ class Gemini(RestApiFriendlyProvider):
             interface=interface,
             conversation_messages=conversation_messages,
             track_prompt_size=track_prompt_size,
+            caller_storage_id=caller_storage_id,
+            caller_thread_id=caller_thread_id,
         )
 
     async def get_chat_response(

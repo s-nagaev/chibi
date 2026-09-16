@@ -930,7 +930,7 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
             if message.role == "user":
                 try:
                     content = json.loads(message.content)
-                    if isinstance(content, dict) and content.get("type") == "tool_response":
+                    if isinstance(content, dict) and content.get("type") == "tool response":
                         return None
 
                     snippet = (
@@ -940,6 +940,8 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                     snippet = str(message.content)[:50]
             else:
                 snippet = message.content[:50]
+            if "<chibi>ACK</chibi>" in snippet and len(snippet) <= 20:
+                return None
             logger.debug(f"Scheduling archival of message {message.id} for user {user.id}. Message: {snippet}")
             task_manager.run_task(
                 long_conv_memory.archive(user_id=user.id, messages=[message], thread_id=thread_id), user_id=user.id

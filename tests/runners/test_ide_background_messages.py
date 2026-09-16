@@ -273,8 +273,10 @@ class TestEmissionFailureResilience:
         instance, _output = runner(fail_on_types={"message"})
         responses: list[str] = []
 
-        async def emit_background(thread_id: int, content: str, model: str | None, provider: str | None) -> None:
-            await instance._emit_background_message(thread_id, content, model, provider)
+        async def emit_background(
+            thread_id: int, content: str, model: str | None, provider: str | None, thoughts: str | None = None
+        ) -> None:
+            await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
         interface = IDEInterface(3, "p", {}, responses.append, background_emit=emit_background)
         interface.mark_closed()
@@ -306,9 +308,11 @@ class TestHandleToolResponsePlumbing:
         instance, output = runner()
         emitted: list[tuple[int, str, str | None, str | None]] = []
 
-        async def emit_background(thread_id: int, content: str, model: str | None, provider: str | None) -> None:
+        async def emit_background(
+            thread_id: int, content: str, model: str | None, provider: str | None, thoughts: str | None = None
+        ) -> None:
             emitted.append((thread_id, content, model, provider))
-            await instance._emit_background_message(thread_id, content, model, provider)
+            await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
         interface = IDEInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
         interface.mark_closed()
@@ -337,3 +341,96 @@ class TestHandleToolResponsePlumbing:
             )
 
         assert responses == ["Tool answer"]
+
+
+class TestContinuationThoughts:
+    """The continuation turn's reasoning rides on the background message frame."""
+
+    @staticmethod
+    def _closed_interface_with_parent_thoughts(
+        instance: IDEStdioRunner,
+        parent_thoughts: str | None,
+    ) -> IDEInterface:
+        """Build a closed interface whose result frame already carried reasoning.
+
+        Args:
+            instance: Runner providing the real background emitter.
+            parent_thoughts: Reasoning attached to the parent request's result.
+
+        Returns:
+            The closed interface, ready to deliver a continuation answer.
+        """
+
+        async def emit_background(
+            thread_id: int, content: str, model: str | None, provider: str | None, thoughts: str | None = None
+        ) -> None:
+            await instance._emit_background_message(thread_id, content, model, provider, thoughts)
+
+        interface = IDEInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
+        interface.response_thoughts = parent_thoughts
+        interface.mark_closed()
+        return interface
+
+    @pytest.mark.asyncio
+    async def test_only_continuation_delta_rides_on_the_frame(self) -> None:
+        """Reasoning added after close is delivered; the parent's part is not repeated."""
+        instance, output = runner()
+        instance._thoughts_enabled = True
+        interface = self._closed_interface_with_parent_thoughts(instance, "parent step one")
+
+        await interface.send_llm_thoughts("continuation step two")
+        await interface.send_tool_answer("Continuation answer", model="m", provider="prov")
+
+        assert output == [
+            {
+                "type": "message",
+                "thread_id": 11,
+                "content": "Continuation answer",
+                "model": "m",
+                "provider": "prov",
+                "thoughts": "continuation step two",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_frame_without_thoughts_capability_omits_reasoning(self) -> None:
+        """A client that did not opt in to thoughts never receives them."""
+        instance, output = runner()
+        interface = self._closed_interface_with_parent_thoughts(instance, "parent step one")
+
+        await interface.send_llm_thoughts("continuation step two")
+        await interface.send_tool_answer("Continuation answer", model="m", provider="prov")
+
+        assert output == [
+            {"type": "message", "thread_id": 11, "content": "Continuation answer", "model": "m", "provider": "prov"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_no_continuation_reasoning_keeps_frame_fieldless(self) -> None:
+        """A continuation without fresh reasoning emits no thoughts field."""
+        instance, output = runner()
+        instance._thoughts_enabled = True
+        interface = self._closed_interface_with_parent_thoughts(instance, "parent step one")
+
+        await interface.send_tool_answer("Continuation answer")
+
+        assert output == [{"type": "message", "thread_id": 11, "content": "Continuation answer"}]
+
+    @pytest.mark.asyncio
+    async def test_thoughts_captured_without_parent_baseline_delivered_whole(self) -> None:
+        """With no parent reasoning, everything captured after close is the delta."""
+        instance, output = runner()
+        instance._thoughts_enabled = True
+        interface = self._closed_interface_with_parent_thoughts(instance, None)
+
+        await interface.send_llm_thoughts("all continuation reasoning")
+        await interface.send_tool_answer("Continuation answer")
+
+        assert output == [
+            {
+                "type": "message",
+                "thread_id": 11,
+                "content": "Continuation answer",
+                "thoughts": "all continuation reasoning",
+            }
+        ]

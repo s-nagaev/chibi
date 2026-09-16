@@ -93,12 +93,15 @@ class OutputRecorder:
 def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
+    The recorder replaces ``_write_line`` so both regular writes and
+    agent_event emissions (which bypass ``_write`` on purpose) are captured.
+
     Returns:
         The runner and its mutable captured-frame list.
     """
     instance = IDEStdioRunner()
     recorder = OutputRecorder()
-    instance.__dict__["_write"] = recorder
+    instance.__dict__["_write_line"] = recorder
     return instance, recorder.frames
 
 
@@ -359,5 +362,110 @@ async def test_commands_and_thread_scheduling() -> None:
         await wait_for(output, "second", "running")
     finally:
         gate.set()
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_canonical_subagent_events_output() -> None:
+    """Replay the canonical subagent lifecycle scenario and compare every frame."""
+    from chibi.services.subagent_events import subagent_tracker
+
+    async def subagent_prompt(interface: Any) -> None:
+        """Emit one deterministic started/finished pair before answering."""
+        interface.response_model = "gpt-example"
+        interface.response_provider = "openai"
+        subagent_tracker.subagent_started(interface.thread_id, "gpt-example")
+        await subagent_tracker.drain()
+        subagent_tracker.subagent_finished(interface.thread_id, "gpt-example")
+        await subagent_tracker.drain()
+        await interface.send_message("This function `foo` returns the integer `42`.")
+
+    instance, output = runner()
+    active: list[Any] = [
+        patch("chibi.runners.ide_transport.handle_user_prompt", subagent_prompt),
+        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
+        patch("chibi.runners.ide_transport.handle_image_generation", fake_imagine),
+        patch("chibi.runners.ide_transport.get_models_available", fake_models),
+        patch("chibi.runners.ide_transport.set_active_model", fake_select),
+        patch("chibi.runners.ide_transport.get_info", fake_info),
+    ]
+    for item in active:
+        item.start()
+    try:
+        for message in fixture("valid_subagent_events_input.jsonl"):
+            await instance._handle_message(message)
+        await wait_for(output, "01HXY9K3SUBAGENTX", "result")
+        await instance.drain_subagent_events()
+        assert output == fixture("valid_subagent_events_output.jsonl")
+    finally:
+        subagent_tracker.set_sink(None)
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_command_kills_running_request_and_answers() -> None:
+    """/stop issued while a request runs kills it (cancelled error) and answers its own result."""
+    gate = asyncio.Event()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("running", 2, "one"))
+        await wait_for(output, "running", "status")
+        await instance._handle_message(request("stop", 2, "/stop"))
+        await wait_for(output, "stop", "result")
+        await wait_for(output, "running", "error")
+        stop_result = next(frame for frame in output if frame.get("request_id") == "stop" and frame["type"] == "result")
+        assert stop_result["content"] == "Everything stopped."
+        killed_error = next(
+            frame for frame in output if frame.get("request_id") == "running" and frame["type"] == "error"
+        )
+        assert killed_error["code"] == "cancelled"
+    finally:
+        gate.set()
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_command_when_idle_is_safe() -> None:
+    """/stop with nothing running still answers its own result and emits no error frames."""
+    active = patches(None)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("stop", 2, "/stop"))
+        await wait_for(output, "stop", "result")
+        stop_result = next(frame for frame in output if frame.get("request_id") == "stop" and frame["type"] == "result")
+        assert stop_result["content"] == "Everything stopped."
+        assert not [frame for frame in output if frame["type"] == "error"]
+    finally:
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_unmatched_slash_prompt_goes_to_bot_as_plain_prompt() -> None:
+    """A slash-prefixed prompt matching no command is handled as a plain user prompt."""
+    gate = asyncio.Event()
+    gate.set()
+    active = patches(gate)
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        await instance._handle_message({"type": "initialize", "protocol_version": PROTOCOL_VERSION})
+        await instance._handle_message(request("fallback", 2, "/definitely_not_a_command hello"))
+        await wait_for(output, "fallback", "result")
+        result = next(frame for frame in output if frame.get("request_id") == "fallback" and frame["type"] == "result")
+        assert result["content"] == "This function `foo` returns the integer `42`."  # fake_prompt answered
+        assert not [frame for frame in output if frame["type"] == "error"], f"Unexpected error frames: {output}"
+    finally:
         for item in active:
             item.stop()

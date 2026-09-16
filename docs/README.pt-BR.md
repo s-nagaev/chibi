@@ -53,18 +53,36 @@ O Chibi suporta múltiplos provedores por trás de uma única conversa. Adicione
 
 ### Provedores de LLM
 
-- **OpenAI** (modelos GPT)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Provedores de modelos primários:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
+- **OpenAI** (modelos GPT)
+- **Xiaomi** (modelos MiMo)
+- **xAI** (Grok)
 - **ZhipuAI** (modelos GLM)
-- **OpenRouter** (acesso unificado a muitos modelos)
-- **Cloudflare Workers AI** (muitos modelos open-source)
+
+**Revendedores de modelos e agregadores de inferência:**
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
 
 ### Endpoints compatíveis com OpenAI (auto-hospedado / local)
 
@@ -75,9 +93,9 @@ O Chibi suporta múltiplos provedores por trás de uma única conversa. Adicione
 
 ### Provedores multimodais (opcional)
 
-- **Imagens:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
-- **Música:** Suno
-- **Voz:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Imagens:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), e qualquer revendedor-agregador que forneça acesso a modelos de geração de imagens
+- **Música:** Suno, ElevenLabs Music
+- **Voz (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > A disponibilidade exata de modelos depende das suas chaves configuradas e dos recursos habilitados.
 
@@ -99,6 +117,33 @@ chibi start
 ```
 
 O bot será executado como um serviço em segundo plano. Use comandos de CLI para gerenciá-lo.
+
+### Comandos da CLI
+
+| Comando         | Descrição                                  |
+|-----------------|--------------------------------------------|
+| `chibi start`   | Inicia o bot como serviço em segundo plano |
+| `chibi stop`    | Para o bot em execução                     |
+| `chibi restart` | Reinicia o bot                             |
+| `chibi config`  | Gera ou edita a configuração               |
+| `chibi logs`    | Exibe os logs do bot                       |
+
+---
+
+## Clientes locais
+
+O Chibi pode atender seus clientes locais pelo protocolo JSONL local versionado:
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+O comando deve ser iniciado pelo cliente, não usado interativamente. O Chibi é proprietário do protocolo `v1` e oferece suporte a clientes compatíveis que negociam a mesma versão. O processo stdio grava somente frames do protocolo em stdout e diagnósticos em stderr. O comportamento existente do Chibi para comandos, ferramentas, permissões e moderação permanece autoritativo; o cliente não adiciona uma camada de políticas de ferramentas.
+
+---
 ## 🚀 Começo rápido (Docker)
 
 Crie `docker-compose.yml`:
@@ -141,7 +186,7 @@ Próximos passos:
 
 Cada provedor requer sua própria chave de API. Aqui estão os links diretos:
 
-**Provedores principais:**
+**Provedores de modelos primários:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -152,8 +197,24 @@ Cada provedor requer sua própria chave de API. Aqui estão os links diretos:
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (acesso unificado a muitos modelos): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**Revendedores de modelos e agregadores de inferência:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Ferramentas criativas:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -192,6 +253,7 @@ O Chibi consegue manter o contexto enquanto troca de provedor no meio da convers
 - **Acesso ao sistema de arquivos:** ler/escrever/pesquisar/organizar arquivos
 - **Execução no terminal:** rodar comandos com segurança moderada por LLM
 - **Memória persistente:** histórico de conversa sobrevive a reinícios com gestão de contexto/sumarização
+- **Skills:** módulos de instruções reutilizáveis que o agente pode carregar sob demanda em seu prompt de sistema (`load_builtin_skill`)
 
 ### 🔌 Extensível via MCP (Model Context Protocol)
 Conecte o Chibi a ferramentas e serviços externos (ou crie os seus):
@@ -205,9 +267,9 @@ Conecte o Chibi a ferramentas e serviços externos (ou crie os seus):
 Se uma ferramenta puder ser exposta via MCP, o Chibi pode aprender a usá-la.
 
 ### 🎨 Geração de conteúdo rica
-- **Imagens:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Imagens:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Música:** Suno (inclui modo custom: estilo/letra/voz)
-- **Voz:** transcrição + texto-para-fala (ElevenLabs, MiniMax, OpenAI)
+- **Voz:** transcrição + texto-para-fala (ElevenLabs, OpenAI)
 
 ---
 
@@ -246,6 +308,31 @@ Chibi: *analisa mudanças, sugere melhorias, atualiza docs via MCP*
 - **Controle de acesso:** whitelist de usuários/grupos/modelos
 - **Opções de armazenamento:** volumes locais, Redis ou DynamoDB
 - **Segurança de ferramentas:** ferramentas do agente são configuráveis; execução no terminal é moderada e pode ser restrita
+
+---
+
+### `MAX_HISTORY_TOKENS` — limite de sumarização do contexto (alteração incompatível no padrão)
+
+`MAX_HISTORY_TOKENS` é o limite no qual o Chibi resume automaticamente uma conversa para manter o contexto administrável. Sua **semântica mudou**: agora ele compara a **contagem real de tokens do prompt informada pelo provedor** (toda a solicitação enviada: prompt de sistema + Skills ativadas + esquemas de ferramentas + argumentos de chamadas de ferramentas + sobrecarga estrutural por mensagem + conteúdo da conversa), em vez da heurística anterior que media apenas `content` + `role` da conversa. O valor real é cerca de **4,8 vezes maior** que a estimativa antiga para uma conversa idêntica (consulte `fix_context_size/context_size_accounting_analysis.md` para a divisão medida).
+
+- **Padrão recalibrado:** `64000` → `100000`. O novo valor protege a menor janela de contexto com suporte comum (128k tokens): `100000` é ~78% de uma janela de 128k (logo a sumarização dispara *antes* de um modelo de 128k estourar) e ~50% de uma janela de 200k (deixando boa margem). O antigo `64000` era uma estimativa apenas do histórico que nunca era atingida antes de um estouro real, pois subconta cirílico em ~2x e exclui a sobrecarga fixa por turno (prompt de sistema ~3,7k, esquemas de ferramentas ~6,8k, Skills ativadas ~5,9k, `user_info` ~0,75–3k).
+- **Migração:** se você definiu `MAX_HISTORY_TOKENS` explicitamente no `.env`, o valor antigo foi ajustado para a estimativa anterior, baseada apenas no histórico, e agora é comparado a uma medida verdadeira ~4,8 vezes maior para a mesma conversa. Recalibre-o para a escala de **~100k** (por exemplo, `64000` → `100000`) para que a sumarização ocorra antes de a menor janela de contexto dos seus modelos estourar, e não depois. Se nunca o definiu, o novo padrão é aplicado automaticamente.
+- O fallback de inicialização a frio (primeiro turno após reiniciar o processo, quando ainda não há dados do provedor em cache) continua usando a heurística antiga para que a sumarização permaneça funcional.
+
+### `REACTIVE_CONTEXT_RECOVERY` — nova tentativa única após estouro de contexto
+
+`REACTIVE_CONTEXT_RECOVERY` (padrão: `true`) é a rede de segurança reativa que complementa o limite proativo `MAX_HISTORY_TOKENS`. Quando um provedor rejeita uma solicitação com o erro tipado `context_length_exceeded`, o Chibi resume automaticamente o histórico e tenta novamente o turno **exatamente uma vez**. Se funcionar, você recebe uma resposta normal (com uma observação curta de que o contexto foi comprimido). Se a nova tentativa também estourar ou a recuperação falhar por qualquer motivo, o turno usa o caminho de desculpa existente; o ciclo resumir+tentar novamente nunca pode ocorrer mais de uma vez por turno original. Defina como `false` para desativá-lo e manter o comportamento anterior (log + desculpa, sem nova tentativa).
+
+### O diretório de trabalho tem escopo de thread (`WORKING_DIR`)
+
+O diretório de trabalho do agente — usado para comandos de terminal e informado ao modelo como seu CWD atual — tem escopo **por thread**, assim como o modelo LLM selecionado é vinculado por thread.
+
+- **Padrão:** vem da configuração `WORKING_DIR` (padrão `~/chibi`) pelo valor legado de nível de usuário; novas instalações herdam a configuração diretamente.
+- **Substituição por thread:** qualquer thread/conversa pode substituir seu diretório de trabalho **isoladamente** pela ferramenta `set_working_dir` do agente (somente controlada por LLM; não há slash command, disponível quando `FILESYSTEM_ACCESS` está ativado). Isso permite que dois agentes em threads diferentes trabalhem simultaneamente em projetos distintos sem interferência.
+- **Ordem de resolução:** substituição da thread → diretório legado do usuário → configuração `WORKING_DIR`.
+- **Normalização de caminho:** valores definidos são expandidos para caminhos absolutos ao salvar (`~/x` torna-se `/abs/x`); padrões inalterados mantêm a forma original.
+- **Subagentes** criados em uma thread compartilham seu diretório de trabalho — o mesmo caminho efetivo é injetado em seus prompts de sistema e chamadas de ferramentas.
+- As substituições **sobrevivem à clonagem de thread**: `/new_thread_with_current_context` leva o diretório de trabalho junto com mensagens e preferências de modelo.
 
 ---
 

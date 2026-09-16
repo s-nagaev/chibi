@@ -91,6 +91,8 @@ async def test_final_answer_surfaces_reasoning_content(provider: MoonshotAI, _mo
             user=User(id=12345),
             system_prompt=None,
             interface=interface,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
 
     send_thoughts_mock.assert_awaited_once_with(
@@ -118,6 +120,8 @@ async def test_final_answer_reaches_interface_thoughts(provider: MoonshotAI, _mo
             user=User(id=12345),
             system_prompt=None,
             interface=interface,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
 
     interface.send_llm_thoughts.assert_awaited_once_with("Step by step reasoning.")
@@ -141,6 +145,8 @@ async def test_final_answer_without_reasoning_sends_no_thoughts(
             user=User(id=12345),
             system_prompt=None,
             interface=interface,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
 
     send_thoughts_mock.assert_not_awaited()
@@ -165,6 +171,8 @@ async def test_final_answer_with_empty_reasoning_sends_no_thoughts(
             user=User(id=12345),
             system_prompt=None,
             interface=interface,
+            caller_storage_id=interface.storage_id,
+            caller_thread_id=interface.thread_id,
         )
 
     send_thoughts_mock.assert_not_awaited()

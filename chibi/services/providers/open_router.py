@@ -11,8 +11,8 @@ class OpenRouter(OpenAIFriendlyProvider):
 
     name = "OpenRouter"
     base_url = "https://openrouter.ai/api/v1"
-    default_model = "google/gemini-3.5-flash"
-    default_moderation_model = "google/gemini-3.1-flash-lite"
+    default_model = "~z-ai/glm-flash-latest"
+    default_moderation_model = "~z-ai/glm-flash-latest"
     presence_penalty = NOT_GIVEN
     frequency_penalty = omit
     image_n_choices = 1

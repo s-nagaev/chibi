@@ -53,18 +53,36 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ### Penyedia LLM
 
-- **OpenAI** (model GPT)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Penyedia model pihak pertama:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
-- **Cloudflare Workers AI** (banyak model open-source)
-- **OpenRouter** (akses terpadu ke banyak model)
+- **OpenAI** (model GPT)
+- **Xiaomi** (model MiMo)
+- **xAI** (Grok)
 - **ZhipuAI** (model GLM)
+
+**Penjual kembali model dan agregator inferensi:**
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
 
 ### Endpoint kompatibel OpenAI (self-host / lokal)
 
@@ -75,9 +93,9 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 
 ### Penyedia multimodal (opsional)
 
-- **Gambar:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
-- **Musik:** Suno
-- **Suara:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), dan penjual kembali-agregator apa pun yang menyediakan akses ke model pembuatan gambar
+- **Musik:** Suno, ElevenLabs Music
+- **Suara (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Ketersediaan model yang tepat bergantung pada API key yang Anda konfigurasi dan fitur yang diaktifkan.
 
@@ -99,6 +117,33 @@ chibi start
 ```
 
 Bot akan berjalan sebagai layanan background. Gunakan perintah CLI untuk mengelolanya.
+
+### Perintah CLI
+
+| Perintah        | Deskripsi                                |
+|-----------------|------------------------------------------|
+| `chibi start`   | Memulai bot sebagai layanan background   |
+| `chibi stop`    | Menghentikan bot yang berjalan           |
+| `chibi restart` | Memulai ulang bot                        |
+| `chibi config`  | Membuat atau menyunting konfigurasi      |
+| `chibi logs`    | Menampilkan log bot                      |
+
+---
+
+## Klien lokal
+
+Chibi dapat melayani klien lokal melalui protokol JSONL lokal berversi:
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+Perintah ini ditujukan untuk dijalankan oleh frontend klien, bukan digunakan secara interaktif. Chibi memiliki protokol `v1` dan mendukung klien kompatibel yang menegosiasikan versi sama. Proses stdio hanya menulis frame protokol ke stdout dan diagnostik ke stderr. Perilaku Chibi yang ada untuk perintah, tool, izin, dan moderasi tetap berwenang; klien tidak menambahkan lapisan kebijakan tool.
+
+---
 ## 🚀 Quick start (Docker)
 
 Buat `docker-compose.yml`:
@@ -141,7 +186,7 @@ Selanjutnya:
 
 Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 
-**Penyedia Utama:**
+**Penyedia model pihak pertama:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -151,9 +196,25 @@ Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-- **OpenRouter** (akses terpadu ke banyak model): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+
+**Penjual kembali model dan agregator inferensi:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Alat Kreatif:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -192,6 +253,7 @@ Chibi dapat menjaga konteks sambil berpindah penyedia di tengah thread, atau mem
 - **Akses filesystem:** baca/tulis/cari/rapikan file
 - **Eksekusi terminal:** menjalankan perintah dengan keamanan yang dimoderasi LLM
 - **Memori persisten:** riwayat percakapan tetap ada setelah restart dengan manajemen konteks/ringkasan
+- **Skills:** modul instruksi yang dapat digunakan kembali dan dimuat agen ke system prompt-nya sesuai kebutuhan (`load_builtin_skill`)
 
 ### 🔌 Dapat diperluas via MCP (Model Context Protocol)
 Hubungkan Chibi ke tools dan layanan eksternal (atau buat sendiri):
@@ -205,9 +267,9 @@ Hubungkan Chibi ke tools dan layanan eksternal (atau buat sendiri):
 Jika sebuah tool bisa diekspos via MCP, Chibi bisa belajar menggunakannya.
 
 ### 🎨 Generasi konten kaya
-- **Gambar:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Gambar:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Musik:** Suno (termasuk custom mode: style/lyrics/vocal)
-- **Suara:** transkripsi + text-to-speech (ElevenLabs, MiniMax, OpenAI)
+- **Suara:** transkripsi + text-to-speech (ElevenLabs, OpenAI)
 
 ---
 
@@ -246,6 +308,31 @@ Chibi: *menganalisis perubahan, menyarankan perbaikan, memperbarui docs via MCP*
 - **Kontrol akses:** whitelist user/grup/model
 - **Opsi penyimpanan:** volume lokal, Redis, atau DynamoDB
 - **Keamanan tools:** tools agen dapat dikonfigurasi; eksekusi terminal dimoderasi dan bisa dibatasi
+
+---
+
+### `MAX_HISTORY_TOKENS` — ambang peringkasan konteks (perubahan default yang bersifat breaking)
+
+`MAX_HISTORY_TOKENS` adalah ambang saat Chibi otomatis meringkas percakapan agar konteks tetap terkendali. **Semantiknya berubah**: kini nilainya dibandingkan dengan **jumlah token prompt nyata yang dilaporkan provider** (seluruh permintaan keluar: system prompt + Skills aktif + skema tool + argumen pemanggilan tool + overhead struktural per pesan + isi percakapan), bukan heuristik lama yang hanya mengukur `content` + `role` percakapan. Angka nyata sekitar **4,8x lebih besar** dari estimasi lama untuk percakapan yang sama (lihat `fix_context_size/context_size_accounting_analysis.md` untuk rincian pengukuran).
+
+- **Default dikalibrasi ulang:** `64000` → `100000`. Nilai baru melindungi jendela konteks terkecil yang umum didukung (128k token): `100000` adalah ~78% dari jendela 128k (peringkasan berjalan *sebelum* model 128k overflow) dan ~50% dari jendela 200k (menyisakan ruang lega). Nilai lama `64000` adalah estimasi riwayat saja yang tak pernah tercapai sebelum overflow nyata, karena menghitung karakter Kiril ~2x lebih rendah dan mengecualikan overhead tetap per giliran (system prompt ~3,7k, skema tool ~6,8k, Skills aktif ~5,9k, `user_info` ~0,75–3k).
+- **Migrasi:** bila Anda menetapkan `MAX_HISTORY_TOKENS` secara eksplisit di `.env`, nilai lama disetel terhadap estimasi lama berbasis riwayat saja dan kini dibandingkan dengan angka yang benar, ~4,8x lebih besar untuk percakapan sama. Setel ulang ke skala **~100k** (misalnya `64000` → `100000`) agar peringkasan terjadi sebelum jendela konteks model terkecil overflow. Bila belum pernah diatur, default baru berlaku otomatis.
+- Fallback cold-start (giliran pertama setelah proses dimulai ulang, ketika belum ada data provider dalam cache) tetap menggunakan heuristik lama agar peringkasan tetap berfungsi.
+
+### `REACTIVE_CONTEXT_RECOVERY` — satu kali coba ulang setelah konteks overflow
+
+`REACTIVE_CONTEXT_RECOVERY` (default: `true`) adalah jaring pengaman reaktif yang melengkapi ambang proaktif `MAX_HISTORY_TOKENS`. Saat provider menolak permintaan dengan error bertipe `context_length_exceeded`, Chibi otomatis meringkas riwayat dan mencoba ulang giliran tersebut **tepat satu kali**. Jika berhasil, Anda menerima jawaban normal (dengan catatan singkat bahwa konteks dikompresi). Jika kembali overflow atau pemulihan gagal karena alasan apa pun, giliran tersebut mengikuti jalur permintaan maaf yang sudah ada — siklus ringkas+coba ulang tidak akan berjalan lebih dari sekali untuk tiap giliran asli. Setel ke `false` untuk menonaktifkannya dan mempertahankan perilaku lama (log + permintaan maaf, tanpa coba ulang).
+
+### Direktori kerja memiliki cakupan per thread (`WORKING_DIR`)
+
+Direktori kerja agen — digunakan untuk perintah terminal dan dilaporkan ke model sebagai CWD saat ini — memiliki cakupan **per thread**, seperti model LLM yang dipilih juga terikat per thread.
+
+- **Default:** berasal dari pengaturan `WORKING_DIR` (default `~/chibi`) melalui nilai lama tingkat pengguna; deployment baru mewarisi pengaturan ini langsung.
+- **Override per thread:** thread/percakapan apa pun dapat mengubah direktori kerjanya **secara terisolasi** dengan tool agen `set_working_dir` (hanya digerakkan LLM; tidak ada slash command, tersedia saat `FILESYSTEM_ACCESS` aktif). Ini memungkinkan dua agen di thread berbeda bekerja di proyek berbeda bersamaan tanpa saling mengganggu.
+- **Urutan resolusi:** override thread → direktori lama tingkat pengguna → pengaturan `WORKING_DIR`.
+- **Normalisasi path:** nilai yang Anda set diperluas menjadi path absolut saat disimpan (`~/x` menjadi `/abs/x`); default yang belum diubah mempertahankan bentuk mentahnya.
+- **Sub-agent** yang dibuat dalam thread berbagi direktori kerja thread tersebut — path efektif yang sama dimasukkan ke system prompt dan tool call mereka.
+- Override **tetap ada saat cloning thread**: `/new_thread_with_current_context` membawa direktori kerja bersama pesan dan preferensi model.
 
 ---
 

@@ -51,18 +51,38 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### LLM providers
 
-- **OpenAI** (GPT models)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+First-party model providers:
+
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
-- **Mistral AI**
-- **Moonshot AI**
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
 - **MiniMax**
+- **Mistral AI**
+- **Moonshot AI** (Kimi)
+- **OpenAI** (GPT models)
+- **Xiaomi** (MiMo models)
+- **xAI** (Grok)
 - **ZhipuAI** (GLM models)
-- **OpenRouter** (unified access to many models)
-- **Cloudflare Workers AI** (many open-source models)
+
+Model resellers and inference aggregators:
+
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
 
 ### OpenAI-compatible endpoints (self-host / local)
 
@@ -73,9 +93,9 @@ Chibi supports multiple providers behind a single conversation. Add one key or m
 
 ### Multimodal providers (optional)
 
-- **Images:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
-- **Music:** Suno
-- **Voice:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), and any reseller-aggregator providing access to image generation models
+- **Music:** Suno, ElevenLabs Music
+- **Voice (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Exact model availability depends on your configured provider keys and enabled features.
 
@@ -110,21 +130,21 @@ The bot will run as a background service. Use CLI commands to manage it.
 
 ---
 
-## VS Code IDE client
+## Local client frontends
 
-Chibi can serve the VS Code extension over its versioned local JSONL protocol:
+Chibi can serve its local clients over the versioned local JSONL protocol:
 
 ```bash
-chibi ide --stdio
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
 ```
 
-The command is intended to be started by the [Chibi VS Code extension](https://github.com/s-nagaev/chibi-vscode),
-not used interactively. Chibi owns the `v1` IDE protocol and supports compatible clients that negotiate the same
-version. The stdio process writes protocol frames only to stdout and diagnostics to stderr. Existing Chibi command,
-tool, permission and moderation behavior remains authoritative; the IDE adds no tool policy layer.
-
-See the extension repository for installation, VSIX release instructions, client troubleshooting and its supported
-Chibi version range.
+The command is intended to be started by the client frontend, not used interactively. Chibi owns the `v1`
+protocol and supports compatible clients that negotiate the same version. The stdio process writes protocol
+frames only to stdout and diagnostics to stderr. Existing Chibi command, tool, permission and moderation
+behavior remains authoritative; the client adds no tool policy layer.
 
 ---
 
@@ -170,19 +190,35 @@ Next:
 
 Each provider requires its own API key. Here are the direct links:
 
-**Major Providers:**
-- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
-- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
+**First-party model providers:**
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
+- **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
+- **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
-- **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
+- **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (unified access to many models): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+**Model resellers and inference aggregators:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Creative Tools:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -221,6 +257,7 @@ Chibi can keep context while switching providers mid-thread, or choose the best 
 - **Filesystem access:** read/write/search/organize files
 - **Terminal execution:** run commands with LLM-moderated security
 - **Persistent memory:** conversation history survives restarts with context management/summarization
+- **Skills:** reusable instruction modules the agent can load into its system prompt on demand (`load_builtin_skill`)
 
 ### 🔌 Extensible via MCP (Model Context Protocol)
 Connect Chibi to external tools and services (or build your own):
@@ -234,9 +271,9 @@ Connect Chibi to external tools and services (or build your own):
 If a tool can be exposed via MCP, Chibi can learn to use it.
 
 ### 🎨 Rich content generation
-- **Images:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Images:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Music:** Suno (including custom mode: style/lyrics/vocals)
-- **Voice:** transcription + text-to-speech (ElevenLabs, MiniMax, OpenAI)
+- **Voice:** transcription + text-to-speech (ElevenLabs, OpenAI)
 
 ---
 

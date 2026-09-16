@@ -131,12 +131,15 @@ def _mocked_metrics() -> Iterator[MagicMock]:
 def interface() -> UserInterface:
     """Return a minimal UserInterface stub for context-size tests."""
     # Cast is safe: SimpleNamespace provides the attributes the production path reads from UserInterface.
+    # captures_llm_thoughts must be present: send_llm_thoughts() reads it whenever
+    # gpt_settings.show_llm_thoughts is False (the pydantic-settings default, i.e. CI without .env).
     return cast(
         UserInterface,
         SimpleNamespace(
             storage_id=12345,
             thread_id=0,
             uses_uploaded_file_storage=False,
+            captures_llm_thoughts=False,
             send_llm_thoughts=AsyncMock(),
         ),
     )

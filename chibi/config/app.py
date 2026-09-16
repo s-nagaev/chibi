@@ -9,6 +9,8 @@ from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ClientType = Literal["telegram", "tui", "vscode", "pycharm", "neovim"]
+
 
 class ApplicationSettings(BaseSettings):
     """
@@ -30,6 +32,7 @@ class ApplicationSettings(BaseSettings):
         heartbeat_frequency_call: Interval between heartbeat calls.
         heartbeat_retry_calls: Number of retries for heartbeat.
         heartbeat_proxy: Proxy URL for heartbeat.
+        client: Client frontend served by this process (telegram, tui, vscode, pycharm, neovim).
     """
 
     model_config = SettingsConfigDict(
@@ -81,6 +84,7 @@ class ApplicationSettings(BaseSettings):
     # Interface
     hide_models: bool = Field(default=False)
     hide_imagine: bool = Field(default=False)
+    client: ClientType = Field(default="telegram")
 
     # Other settings
     log_prompt_data: bool = Field(default=False)
@@ -137,15 +141,25 @@ def add_user_context(record) -> bool:
     return True
 
 
-logger.remove()
-logger.add(
-    sys.stderr,
-    format="<level>{level: <9}</level> | "
-    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | "
-    "{extra[user_id]}"
-    "<level>{message}</level>",
-    filter=add_user_context,
-)
+def configure_stderr_sink() -> None:
+    """Install the backend stderr loguru sink.
+
+    Every emitted line follows the plain shape ``YYYY-MM-DD HH:MM:SS | LEVEL |
+    message`` (local time, no file/line references), optionally prefixed by the
+    bound user id. Terminal and stdio runners install their own sinks instead.
+    """
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level}</level> | "
+        "{extra[user_id]}"
+        "<level>{message}</level>",
+        filter=add_user_context,
+    )
+
+
+configure_stderr_sink()
 logger.level("TOOL", no=20, color="<light-blue>")
 logger.level("THINK", no=20, color="<light-magenta>")
 logger.level("CALL", no=20, color="<magenta>")

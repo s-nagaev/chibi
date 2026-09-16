@@ -7,6 +7,7 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
 from chibi.memory.chroma import memory
+from chibi.services.cwd_events import cwd_tracker
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
@@ -17,8 +18,11 @@ from chibi.services.user import (
     get_chibi_user,
     reset_chat_history,
     set_info,
+    set_thread_notes,
     set_thread_working_dir,
 )
+
+THREAD_NOTES_MAX_LENGTH = 16000
 
 
 class SetUserInfoTool(ChibiTool):
@@ -56,6 +60,56 @@ class SetUserInfoTool(ChibiTool):
         return {"status": "ok"}
 
 
+class UpdateNotesTool(ChibiTool):
+    register = True
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="update_notes",
+            description=(
+                "Set your working notes for this conversation: current project state, "
+                "conventions, agreements, decisions, progress. "
+                "Important: this function will override ALL of your current notes — "
+                "send the complete new notes text, not a delta."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "new_notes": {
+                        "type": "string",
+                        "description": (
+                            "Complete new notes text. It replaces everything you had before. "
+                            "Empty string clears the notes."
+                        ),
+                    },
+                },
+                "required": ["new_notes"],
+            },
+        ),
+    )
+    name = "update_notes"
+
+    @classmethod
+    async def function(cls, new_notes: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+        user_id = kwargs.get("user_id")
+        if not user_id:
+            raise ValueError("This function requires user_id to be automatically provided.")
+        _, thread_id = resolve_session_context(**kwargs)
+        if len(new_notes) > THREAD_NOTES_MAX_LENGTH:
+            raise ToolException(
+                f"Notes are too large: {len(new_notes)} characters. "
+                f"The limit is {THREAD_NOTES_MAX_LENGTH} characters. "
+                "Shorten the notes — keep only what matters for this conversation — and try again."
+            )
+        logger.log(
+            "TOOL",
+            f"[{kwargs.get('caller_model', 'unknown model')}] Setting new thread notes for user #{user_id}, "
+            f"thread #{thread_id}: {new_notes}",
+        )
+        await set_thread_notes(user_id=user_id, thread_id=thread_id, notes=new_notes)
+        return {"status": "ok"}
+
+
 class SetWorkingDirTool(ChibiTool):
     register = gpt_settings.filesystem_access
     definition = ChatCompletionToolParam(
@@ -90,6 +144,7 @@ class SetWorkingDirTool(ChibiTool):
             f"thread #{thread_id}: {new_wd}",
         )
         await set_thread_working_dir(user_id=user_id, thread_id=thread_id, new_wd=new_wd)
+        cwd_tracker.cwd_changed(thread_id)
         return {"status": "ok"}
 
 

@@ -79,9 +79,7 @@ async def test_clone_thread_messages_persists_cloned_history_on_real_local_stora
 
     assert copied == len(seeded)
     refreshed = await db.get_or_create_user(user_id=777)  # fresh read from disk
-    assert [(m.role, m.content) for m in refreshed.thread_messages_map[202]] == [
-        (m.role, m.content) for m in seeded
-    ]
+    assert [(m.role, m.content) for m in refreshed.thread_messages_map[202]] == [(m.role, m.content) for m in seeded]
     assert len(refreshed.thread_messages_map[202]) == copied  # returned count matches reality
     assert len(refreshed.thread_messages_map[101]) == len(seeded)  # source thread intact
     assert refreshed.thread_names[202] == "regression-clone"

@@ -47,37 +47,55 @@ Chibi создан для тех моментов, когда вы понима�
 
 ---
 
-## Поддерживаемые AI‑провайдеры (и endpoints)
+## Поддерживаемые AI-провайдеры (и endpoints)
 
 Chibi поддерживает множество провайдеров в рамках одного диалога. Добавьте один ключ или несколько — Chibi умеет маршрутизировать запросы в зависимости от задачи.
 
-### LLM‑провайдеры
+### LLM-провайдеры
 
-- **OpenAI** (модели GPT)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Поставщики собственных моделей:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
+- **OpenAI** (модели GPT)
+- **Xiaomi** (модели MiMo)
+- **xAI** (Grok)
 - **ZhipuAI** (модели GLM)
-- **OpenRouter** (унифицированный доступ ко многим моделям)
-- **Cloudflare Workers AI** (множество open‑source моделей)
 
-### OpenAI‑совместимые endpoints (self‑host / local)
+**Реселлеры моделей и агрегаторы инференса:**
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
+
+### OpenAI-совместимые endpoints (self-host / local)
 
 - **Ollama**
 - **vLLM**
 - **LM Studio**
-- **Любой** OpenAI‑совместимый API
+- **Любой** OpenAI-совместимый API
 
 ### Мультимодальные провайдеры (опционально)
 
-- **Изображения:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
-- **Музыка:** Suno
-- **Голос:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Изображения:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), и любой реселлер-агрегатор, предоставляющий доступ к моделям генерации изображений
+- **Музыка:** Suno, ElevenLabs Music
+- **Голос (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Доступность конкретных моделей зависит от настроенных ключей провайдеров и включённых возможностей.
 
@@ -112,6 +130,20 @@ chibi start
 
 ---
 
+## Локальные клиентские приложения
+
+Chibi может обслуживать локальные клиенты по версионированному локальному протоколу JSONL:
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+Команда предназначена для запуска клиентским приложением, а не для интерактивного использования. Chibi владеет протоколом `v1` и поддерживает совместимые клиенты, согласующие ту же версию. Процесс stdio выводит кадры протокола только в stdout, а диагностические сообщения — в stderr. Существующие механизмы Chibi для команд, инструментов, разрешений и модерации остаются определяющими; клиент не добавляет собственного слоя политик для инструментов.
+
+---
 ## 🚀 Быстрый старт (Docker)
 
 Создайте `docker-compose.yml`:
@@ -154,10 +186,10 @@ docker-compose up -d
 
 Каждый провайдер требует свой API-ключ. Вот прямые ссылки:
 
-**Основные провайдеры:**
+**Поставщики собственных моделей:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
-- **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
+- **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
 - **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **Alibaba** (Qwen, Wan): [modelstudio.console.alibabacloud.com](https://modelstudio.console.alibabacloud.com?tab=playground#/api-key)
@@ -165,10 +197,26 @@ docker-compose up -d
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
-- **OpenRouter** (унифицированный доступ ко многим моделям): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 
-**Креативные инструменты:**
+**Реселлеры моделей и агрегаторы инференса:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
+
+**Творческие инструменты:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
 - **Suno** (Music, unofficial): [sunoapi.org](https://sunoapi.org/)
 
@@ -205,6 +253,7 @@ Chibi сохраняет контекст при переключении меж
 - **Доступ к файловой системе:** чтение, запись, поиск и организация файлов
 - **Терминал:** выполнение команд с модерацией безопасности через LLM
 - **Постоянная память:** история диалога сохраняется после перезапуска благодаря управлению контекстом и суммаризации
+- **Навыки:** многоразовые модули инструкций, которые агент может по запросу загрузить в системный промпт (`load_builtin_skill`)
 
 ### 🔌 Расширяемость через MCP (Model Context Protocol)
 Подключайте Chibi к внешним инструментам и сервисам (или создавайте свои):
@@ -218,9 +267,9 @@ Chibi сохраняет контекст при переключении меж
 Если инструмент можно подключить через MCP, Chibi сможет научиться им пользоваться.
 
 ### 🎨 Генерация контента
-- **Изображения:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Изображения:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Музыка:** Suno (включая custom mode: стиль/текст/вокал)
-- **Голос:** транскрибация + синтез речи (ElevenLabs, MiniMax, OpenAI)
+- **Голос:** транскрибация + синтез речи (ElevenLabs, OpenAI)
 
 ---
 
@@ -262,6 +311,30 @@ Chibi: *анализирует изменения, предлагает улуч
 
 ---
 
+### `MAX_HISTORY_TOKENS` — порог суммаризации контекста (изменение значения по умолчанию, нарушающее совместимость)
+
+`MAX_HISTORY_TOKENS` — порог, при достижении которого Chibi автоматически суммаризирует диалог, чтобы контекст оставался управляемым. Его **семантика изменилась**: теперь значение сравнивается с **реальным числом токенов промпта, сообщаемым провайдером** (весь исходящий запрос: системный промпт + активированные навыки + схемы инструментов + аргументы вызовов инструментов + структурные накладные расходы на сообщение + содержимое диалога), а не со старой эвристикой, измерявшей только `content` + `role` диалога. Для одного и того же диалога реальная величина примерно в **4,8 раза больше** прежней оценки (измеренная разбивка приведена в `fix_context_size/context_size_accounting_analysis.md`).
+
+- **Новая база по умолчанию:** `64000` → `100000`. Новое значение защищает наименьшее из распространённых окон контекста (128k токенов): `100000` — около 78 % окна в 128k (суммаризация запускается *до* переполнения модели с 128k) и около 50 % окна в 200k (с комфортным запасом). Старое `64000` было оценкой только истории и не достигалось до реального переполнения, поскольку она примерно вдвое недооценивает кириллицу и исключает постоянные накладные расходы на ход (системный промпт ~3,7k, схемы инструментов ~6,8k, активированные навыки ~5,9k, `user_info` ~0,75–3k) — поэтому модель с окном 128k переполнялась примерно на 128k реальных токенов, пока эвристика всё ещё показывала значительно меньше 64k.
+- **Миграция:** если вы явно задали `MAX_HISTORY_TOKENS` в `.env`, прежнее значение было настроено под старую оценку лишь истории, а теперь сравнивается с правдивой величиной, которая для того же диалога примерно в 4,8 раза больше. Перенастройте его на масштаб **около 100k** (например, `64000` → `100000`), чтобы суммаризация происходила до переполнения окна контекста вашей наименьшей модели, а не после. Если вы ничего не задавали, новое значение по умолчанию применяется автоматически.
+- Резервный механизм холодного старта (первый ход после перезапуска процесса, когда данные провайдера ещё не закешированы) по-прежнему использует старую эвристику, поэтому суммаризация продолжает работать.
+
+### `REACTIVE_CONTEXT_RECOVERY` — однократная повторная попытка после переполнения контекста
+
+`REACTIVE_CONTEXT_RECOVERY` (по умолчанию: `true`) — реактивная защита, дополняющая проактивный порог `MAX_HISTORY_TOKENS`. Когда провайдер отклоняет запрос с типизированной ошибкой `context_length_exceeded`, Chibi автоматически суммаризирует историю и повторяет ход **ровно один раз**. При успехе пользователь получает обычный ответ (с коротким уведомлением, что контекст был сжат). Если повторная попытка снова переполняет контекст или восстановление по любой причине не удаётся, ход переходит к существующему пути с извинением — цикл суммаризации и повтора никогда не запускается больше одного раза для исходного хода. Установите `false`, чтобы отключить реактивное восстановление и оставить прежнее поведение (лог + извинение, без повтора).
+
+### Рабочий каталог привязан к треду (`WORKING_DIR`)
+
+Рабочий каталог агента — используемый для команд терминала и сообщаемый модели как её текущий CWD — привязан к треду, как и выбранная LLM-модель.
+
+- **По умолчанию:** берётся из настройки `WORKING_DIR` (по умолчанию `~/chibi`) через устаревшее пользовательское значение; новые развёртывания наследуют настройку напрямую.
+- **Переопределение для треда:** любой тред/диалог может изолированно переопределить рабочий каталог с помощью инструмента агента `set_working_dir` (только по инициативе LLM — slash-команды нет; инструмент доступен при включённом `FILESYSTEM_ACCESS`). Это позволяет двум агентам в разных тредах одновременно работать с разными проектами, не мешая друг другу.
+- **Порядок разрешения:** переопределение треда → устаревший пользовательский каталог → настройка `WORKING_DIR`.
+- **Нормализация пути:** заданные значения при сохранении разворачиваются в абсолютные (`~/x` становится `/abs/x`); нетронутые значения по умолчанию сохраняют исходный вид.
+- **Субагенты**, созданные в треде, используют его рабочий каталог — тот же действующий путь передаётся в их системные промпты и вызовы инструментов.
+- Переопределения **сохраняются при клонировании треда**: `/new_thread_with_current_context` переносит рабочий каталог вместе с сообщениями и настройками модели.
+
+---
 ## Документация
 
 - **Начните здесь:** https://chibi.bot

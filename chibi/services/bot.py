@@ -11,6 +11,7 @@ from chibi.services.interface import UserInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools import ToolResponseSchema
 from chibi.services.providers.utils import get_usage_msg
+from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     check_history_and_summarize,
@@ -136,6 +137,11 @@ async def handle_user_prompt(interface: UserInterface) -> None:
 
     setattr(interface, "response_model", chat_response.model)
     setattr(interface, "response_provider", chat_response.provider)
+    # Carry the provider-reported usage of this request so transports that
+    # build result frames (IDE stdio) can expose real token counts. Interfaces
+    # without the attribute simply ignore it.
+    if chat_response.usage is not None:
+        setattr(interface, "response_usage", chat_response.usage)
     usage = chat_response.usage
     usage_message = get_usage_msg(usage)
 
@@ -175,6 +181,10 @@ async def handle_reset(interface: UserInterface) -> None:
 
     await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
     task_manager.kill_all_user_tasks(user_id=interface.storage_id, thread_id=interface.thread_id)
+    # Placed after the kill sequence on purpose: the flush reflects the
+    # authoritative post-kill state, and retiring the counters here turns
+    # the cleanup-path events of individually killed subagents into no-ops.
+    subagent_tracker.kill_flush(interface.thread_id)
     await interface.send_message(message="Done!", reply=False)
 
 
@@ -182,6 +192,8 @@ async def handle_stop(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: stopping everything...")
 
     task_manager.kill_all_user_tasks(user_id=interface.storage_id, thread_id=interface.thread_id)
+    # Same placement rationale as in handle_reset.
+    subagent_tracker.kill_flush(interface.thread_id)
     await interface.send_message(message="Everything stopped.", reply=False)
 
 

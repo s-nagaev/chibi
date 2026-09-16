@@ -53,18 +53,36 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ### LLM sağlayıcıları
 
-- **OpenAI** (GPT modelleri)
-- **Anthropic** (Claude)
-- **Google** (Gemini)
-- **DeepSeek**
+**Birinci taraf model sağlayıcıları:**
 - **Alibaba Cloud** (Qwen)
-- **xAI** (Grok)
+- **Anthropic** (Claude)
+- **DeepSeek**
+- **Google** (Gemini)
+- **MiniMax**
 - **Mistral AI**
 - **Moonshot AI**
-- **MiniMax**
-- **Cloudflare Workers AI** (birçok açık kaynak model)
-- **OpenRouter** (birçok modele birleşik erişim)
+- **OpenAI** (GPT modelleri)
+- **Xiaomi** (MiMo modelleri)
+- **xAI** (Grok)
 - **ZhipuAI** (GLM modelleri)
+
+**Model satıcıları ve çıkarım toplayıcıları:**
+- **Baseten**
+- **Cheaper Inference**
+- **Cloudflare Workers AI**
+- **DeepInfra**
+- **Featherless**
+- **Fireworks AI**
+- **GreenPT**
+- **Lyceum**
+- **Melious**
+- **Nebius**
+- **Novita AI**
+- **OpenRouter**
+- **Parasail**
+- **SambaNova**
+- **SiliconFlow**
+- **Together AI**
 
 ### OpenAI uyumlu endpoint’ler (self-host / local)
 
@@ -75,9 +93,9 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 
 ### Multimodal sağlayıcılar (opsiyonel)
 
-- **Görseller:** Google (Imagen, Nano Banana), OpenAI (DALL·E), Alibaba (Qwen Image), xAI (Grok Image), Wan, ZhipuAI (CogView), MiniMax
-- **Müzik:** Suno
-- **Ses:** ElevenLabs, MiniMax, OpenAI (Whisper)
+- **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), ve görüntü oluşturma modellerine erişim sağlayan herhangi bir satıcı-toplayıcı
+- **Müzik:** Suno, ElevenLabs Music
+- **Ses (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
 > Model erişilebilirliği, yapılandırdığınız sağlayıcı anahtarlarına ve etkinleştirdiğiniz özelliklere bağlıdır.
 
@@ -99,6 +117,33 @@ chibi start
 ```
 
 Bot arka plan hizmeti olarak çalışır. Yönetmek için CLI komutlarını kullanın.
+
+### CLI Komutları
+
+| Komut           | Açıklama                                |
+|-----------------|-----------------------------------------|
+| `chibi start`   | Botu arka plan hizmeti olarak başlatır  |
+| `chibi stop`    | Çalışan botu durdurur                   |
+| `chibi restart` | Botu yeniden başlatır                   |
+| `chibi config`  | Yapılandırma oluşturur veya düzenler    |
+| `chibi logs`    | Bot günlüklerini görüntüler             |
+
+---
+
+## Yerel istemci arayüzleri
+
+Chibi, yerel istemcilerine sürümlü yerel JSONL protokolü üzerinden hizmet verebilir:
+
+```bash
+chibi stdio --tui
+chibi stdio --vscode
+chibi stdio --pycharm
+chibi stdio --neovim
+```
+
+Komut etkileşimli kullanım için değil, istemci arayüzü tarafından başlatılmak üzere tasarlanmıştır. Chibi `v1` protokolünün sahibidir ve aynı sürümü görüşen uyumlu istemcileri destekler. stdio işlemi stdout'a yalnızca protokol çerçevelerini, stderr'e ise tanıları yazar. Chibi'nin mevcut komut, araç, izin ve moderasyon davranışı yetkili olmaya devam eder; istemci herhangi bir araç politikası katmanı eklemez.
+
+---
 ## 🚀 Hızlı başlangıç (Docker)
 
 `docker-compose.yml` oluşturun:
@@ -141,7 +186,7 @@ Sonraki adımlar:
 
 Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantılar:
 
-**Ana Sağlayıcılar:**
+**Birinci taraf model sağlayıcıları:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
@@ -151,9 +196,25 @@ Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantıl
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **MiniMax** (Voice, MiniMax-M2.x): [minimax.io](https://www.minimax.io)
-- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-- **OpenRouter** (birçok modele birleşik erişim): [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
+
+**Model satıcıları ve çıkarım toplayıcıları:**
+- **Baseten**: [baseten.co](https://baseten.co/)
+- **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
+- **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+- **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Featherless**: [featherless.ai](https://featherless.ai/)
+- **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
+- **GreenPT**: [greenpt.com](https://greenpt.com/)
+- **Lyceum**: [lyceum.technology](https://lyceum.technology/)
+- **Melious**: [melious.ai](https://melious.ai/)
+- **Nebius**: [nebius.com](https://nebius.com/)
+- **Novita AI**: [novita.ai](https://novita.ai/)
+- **OpenRouter**: [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+- **Parasail**: [parasail.io](https://parasail.io/)
+- **SambaNova**: [sambanova.ai](https://sambanova.ai/)
+- **SiliconFlow**: [siliconflow.com](https://siliconflow.com/)
+- **Together AI**: [together.ai](https://together.ai/)
 
 **Yaratıcı Araçlar:**
 - **ElevenLabs** (Voice): [elevenlabs.io](https://elevenlabs.io/)
@@ -192,6 +253,7 @@ Chibi, aynı konuşma içinde sağlayıcı değiştirirken bağlamı koruyabilir
 - **Dosya sistemi erişimi:** dosyaları oku/yaz/ara/düzenle
 - **Terminal çalıştırma:** komutları LLM tarafından denetlenen güvenlikle çalıştır
 - **Kalıcı bellek:** konuşma geçmişi, bağlam yönetimi/özetleme ile yeniden başlatmalarda korunur
+- **Skills:** ajanın gerektiğinde sistem promptuna yükleyebileceği yeniden kullanılabilir yönerge modülleri (`load_builtin_skill`)
 
 ### 🔌 MCP (Model Context Protocol) ile genişletilebilir
 Chibi’yi harici araçlara ve servislere bağlayın (ya da kendinizinkini yazın):
@@ -205,9 +267,9 @@ Chibi’yi harici araçlara ve servislere bağlayın (ya da kendinizinkini yazı
 Bir araç MCP üzerinden sunulabiliyorsa, Chibi onu kullanmayı öğrenebilir.
 
 ### 🎨 Zengin içerik üretimi
-- **Görseller:** Nano Banana, Imagen, Qwen, Wan, DALL·E, Grok
+- **Görseller:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
 - **Müzik:** Suno (custom mode dahil: stil/şarkı sözü/vokal)
-- **Ses:** transkripsiyon + metinden sese (ElevenLabs, MiniMax, OpenAI)
+- **Ses:** transkripsiyon + metinden sese (ElevenLabs, OpenAI)
 
 ---
 
@@ -246,6 +308,31 @@ Chibi: *değişiklikleri analiz eder, iyileştirme önerir, MCP ile dokümanlar�
 - **Erişim kontrolü:** kullanıcı/grup/model whitelist
 - **Depolama seçenekleri:** yerel volume’lar, Redis veya DynamoDB
 - **Araç güvenliği:** ajan araçları yapılandırılabilir; terminal çalıştırma denetlenir ve kısıtlanabilir
+
+---
+
+### `MAX_HISTORY_TOKENS` — bağlam özetleme eşiği (varsayılanda geriye dönük uyumsuz değişiklik)
+
+`MAX_HISTORY_TOKENS`, bağlamı yönetilebilir tutmak için Chibi'nin bir konuşmayı otomatik olarak özetlediği eşiktir. **Anlamı değişti**: artık eski yalnızca konuşma `content` + `role` sezgiseli yerine, **sağlayıcının bildirdiği gerçek prompt token sayısıyla** (sistem promptu + etkin Skills + araç şemaları + araç çağrısı bağımsız değişkenleri + ileti başına yapısal ek yük + konuşma içeriği dahil tüm giden istek) karşılaştırılır. Gerçek sayı, aynı konuşma için eski tahminden yaklaşık **4,8 kat daha büyüktür** (ölçülen döküm için `fix_context_size/context_size_accounting_analysis.md` dosyasına bakın).
+
+- **Varsayılan yeniden tabanlandı:** `64000` → `100000`. Yeni değer, yaygın olarak desteklenen en küçük bağlam penceresini (128k token) korur: `100000`, 128k pencerenin ~%78'idir (özetleme 128k model taşmadan *önce* çalışır) ve 200k pencerenin ~%50'sidir (rahat pay bırakır). Eski `64000`, gerçek taşmadan önce asla ulaşılmayan yalnızca geçmiş tahminiydi; çünkü Kiril alfabesini ~2 kat eksik sayar ve tur başına sabit ek yükü hariç tutar (sistem promptu ~3,7k, araç şemaları ~6,8k, etkin Skills ~5,9k, `user_info` ~0,75–3k).
+- **Geçiş:** `.env` dosyanızda `MAX_HISTORY_TOKENS` değerini açıkça ayarladıysanız eski değeriniz yalnızca geçmişe dayalı tahmine göre ayarlanmıştı ve artık aynı konuşma için ~4,8 kat büyük gerçek bir sayıyla karşılaştırılır. Özetlemenin en küçük modelinizin bağlam penceresi taştıktan sonra değil önce tetiklenmesi için değeri **~100k ölçeğine** yeniden ayarlayın (ör. `64000` → `100000`). Hiç ayarlamadıysanız yeni varsayılan otomatik olarak uygulanır.
+- Soğuk başlangıç yedeği (işlem yeniden başladıktan sonraki ilk turda, henüz önbelleğe alınmış sağlayıcı verisi yokken) özetlemenin çalışmaya devam etmesi için eski sezgiseli kullanır.
+
+### `REACTIVE_CONTEXT_RECOVERY` — bağlam taşmasından sonra tek seferlik yeniden deneme
+
+`REACTIVE_CONTEXT_RECOVERY` (varsayılan: `true`), proaktif `MAX_HISTORY_TOKENS` eşiğini tamamlayan reaktif güvenlik ağıdır. Sağlayıcı, istekleri `context_length_exceeded` türünde bir hatayla reddettiğinde Chibi geçmişi otomatik özetler ve turu **tam olarak bir kez** yeniden dener. Başarılı olursa normal bir yanıt alırsınız (bağlamın sıkıştırıldığına dair kısa notla). Yeniden taşarsa veya kurtarma herhangi bir nedenle başarısız olursa tur mevcut özür yoluna döner — özetle+yeniden dene döngüsü özgün tur başına asla birden fazla çalışmaz. Devre dışı bırakmak ve önceki davranışı korumak için `false` yapın (günlük + özür, yeniden deneme yok).
+
+### Çalışma dizini thread kapsamındadır (`WORKING_DIR`)
+
+Ajanın terminal komutlarında kullanılan ve modele mevcut CWD olarak bildirilen çalışma dizini, seçili LLM modelinin de her thread'e bağlı olması gibi **thread kapsamındadır**.
+
+- **Varsayılan:** eski kullanıcı düzeyi değer aracılığıyla `WORKING_DIR` ayarından gelir (varsayılan `~/chibi`); yeni kurulumlar ayarı doğrudan devralır.
+- **Thread başına geçersiz kılma:** herhangi bir thread/konuşma, `set_working_dir` ajan aracıyla çalışma dizinini **izole şekilde** geçersiz kılabilir (yalnızca LLM yönlendirmeli; slash komutu yoktur, `FILESYSTEM_ACCESS` etkin olduğunda kullanılabilir). Böylece farklı thread'lerde iki ajan birbirini etkilemeden farklı projelerde eşzamanlı çalışabilir.
+- **Çözümleme sırası:** thread geçersiz kılması → eski kullanıcı düzeyi dizin → `WORKING_DIR` ayarı.
+- **Yol normalleştirme:** ayarladığınız değerler kaydedilirken mutlak yollara genişletilir (`~/x`, `/abs/x` olur); dokunulmayan varsayılanlar ham biçimlerini korur.
+- Bir thread içinde oluşturulan **alt ajanlar** o thread'in çalışma dizinini paylaşır; aynı etkin yol, sistem promptlarına ve araç çağrılarına eklenir.
+- Geçersiz kılmalar **thread klonlamasında korunur**: `/new_thread_with_current_context`, çalışma dizinini iletiler ve model tercihleriyle birlikte taşır.
 
 ---
 
