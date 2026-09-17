@@ -533,7 +533,7 @@ async def send_images(
 
     if isinstance(images[0], str):
         logger.info(f"Downloading {len(images)} images for {user_data(update)} via URLs...")
-        image_files = [await download_image(image_url=cast(str, url)) for url in images]
+        image_files = [await download_image(image_url=str(url)) for url in images]
         try:
             logger.info(f"Uploading {len(images)} images to {user_data(update)} in the {chat_data(update)}")
             await context.bot.send_media_group(
@@ -549,7 +549,7 @@ async def send_images(
                 f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
                 f"due to exception: {e}. Trying to send it via text message..."
             )
-            image_urls = cast(list[str], images)
+            image_urls = [str(url) for url in images]
             await send_message(
                 update=update,
                 context=context,
