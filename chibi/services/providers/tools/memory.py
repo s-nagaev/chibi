@@ -1,4 +1,3 @@
-import os
 from typing import Any, Unpack
 
 from loguru import logger
@@ -21,6 +20,7 @@ from chibi.services.user import (
     set_thread_notes,
     set_thread_working_dir,
 )
+from chibi.utils.app import get_skill_path
 
 THREAD_NOTES_MAX_LENGTH = 16000
 
@@ -262,13 +262,13 @@ class SummarizeHistoryTool(ChibiTool):
         return {"status": "ok"}
 
 
-class LoadBuiltinSkillTool(ChibiTool):
+class LoadSkillTool(ChibiTool):
     register = True
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
-            name="load_builtin_skill",
-            description="Load built-in skill to system prompt.",
+            name="load_skill",
+            description="Load skill to system prompt.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -278,7 +278,7 @@ class LoadBuiltinSkillTool(ChibiTool):
             },
         ),
     )
-    name = "load_builtin_skill"
+    name = "load_skill"
 
     @classmethod
     async def function(cls, skill_name: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
@@ -289,8 +289,8 @@ class LoadBuiltinSkillTool(ChibiTool):
             "TOOL",
             f"[{kwargs.get('caller_model', 'unknown model')}] Loading '{skill_name}' skill for user {user_id}...",
         )
-        skill_path = os.path.join(application_settings.skills_dir, skill_name)
-        if not os.path.exists(skill_path):
+        skill_path = get_skill_path(skill_name)
+        if skill_path is None:
             raise ToolException(f"Skill '{skill_name}' does not exist.")
 
         with open(skill_path, "rt", encoding="utf-8") as skill_file:

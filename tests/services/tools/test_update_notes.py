@@ -245,7 +245,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -262,7 +262,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -279,7 +279,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -296,7 +296,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -314,7 +314,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -331,7 +331,7 @@ class TestPromptThreadNotesInjection:
 
         with (
             patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-            patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         ):
             prompt_json = await prepare_system_prompt("base", 1, None, thread_id=9)
 

@@ -253,7 +253,7 @@ Chibi dapat menjaga konteks sambil berpindah penyedia di tengah thread, atau mem
 - **Akses filesystem:** baca/tulis/cari/rapikan file
 - **Eksekusi terminal:** menjalankan perintah dengan keamanan yang dimoderasi LLM
 - **Memori persisten:** riwayat percakapan tetap ada setelah restart dengan manajemen konteks/ringkasan
-- **Skills:** modul instruksi yang dapat digunakan kembali dan dimuat agen ke system prompt-nya sesuai kebutuhan (`load_builtin_skill`)
+- **Skills:** skill bawaan disertakan dalam paket dan langsung bisa digunakan setelah instalasi; tambahkan file `.md` Anda sendiri di `skills_dir` untuk skill kustom (file dengan nama sama menimpa skill bawaan) — agen dapat memuatnya ke system prompt sesuai kebutuhan (`load_skill`)
 
 ### 🔌 Dapat diperluas via MCP (Model Context Protocol)
 Hubungkan Chibi ke tools dan layanan eksternal (atau buat sendiri):

@@ -97,7 +97,7 @@ services:
       - redis
     volumes:
       - chibi_data:/app/data
-      - ./skills:/app/skills:ro    # Custom skills (optional, read-only)
+      - ./skills:/app/skills:ro    # Custom user skills only (optional, read-only) — built-in skills ship inside the image
     environment:
       # Required
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
@@ -174,7 +174,7 @@ For the full list of environment variables (50+), see the [Configuration Referen
 | Mount Point | Purpose | Required? |
 |-------------|---------|-----------|
 | `/app/data` | Conversations, user data, settings | **Yes** — use a named volume |
-| `/app/skills` | Custom skills directory | No — mount read-only if used |
+| `/app/skills` | Custom user skills only (built-in skills ship inside the package) | No — mount read-only if used |
 
 ```bash
 # Backup data volume
@@ -251,7 +251,7 @@ FROM pysergio/chibi:latest
 # Install additional dependencies
 RUN pip install some-package
 
-# Add custom skills
+# Add custom skills (built-in skills are already bundled in the image)
 COPY skills/ /app/skills/
 ```
 

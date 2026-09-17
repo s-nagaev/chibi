@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 packages = [{include = "chibi"}]
-include = ["data/.keep", "skills"]
+include = ["data/.keep", "chibi/skills/*.md"]
 exclude = ["tests", "docs", "scripts", "examples", ".project", "data/*.pkl", "data/*.md", "data/old", "data/scripts"]
 
 [tool.poetry.urls]

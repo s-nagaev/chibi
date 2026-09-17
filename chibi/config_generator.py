@@ -1,5 +1,4 @@
 import os
-import shutil
 from pathlib import Path
 
 CHIBI_BOT_DIR = Path.home() / "chibi-bot"
@@ -228,7 +227,9 @@ HOME_DIR={HOME_DIR.absolute()}
 # AI agent working directory (default: ~/chibi-bot/home)
 WORKING_DIR={HOME_DIR.absolute()}
 
-# Absolute path to directory with skills
+# Absolute path to directory with USER custom skills
+# (built-in skills ship inside the package and are loaded automatically;
+#  this directory is only for your own custom skill files)
 SKILLS_DIR={SKILLS_DIR.absolute()}
 
 
@@ -526,19 +527,3 @@ def generate_default_config() -> None:
                 print(f"Created directory: {directory}")
     except IOError as e:
         print(f"Error creating directories: {e}")
-
-    # Sync Skills
-    package_skills_dir = Path(__file__).parent.parent / "skills"
-    if package_skills_dir.exists():
-        try:
-            synced_count = 0
-            for skill_file in package_skills_dir.iterdir():
-                if skill_file.is_file():
-                    target_path = SKILLS_DIR / skill_file.name
-                    if not target_path.exists():
-                        shutil.copy2(skill_file, target_path)
-                        synced_count += 1
-            if synced_count > 0:
-                print(f"Synced {synced_count} skills to {SKILLS_DIR}")
-        except IOError as e:
-            print(f"Error syncing skills: {e}")

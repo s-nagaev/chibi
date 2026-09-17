@@ -348,20 +348,70 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def get_builtin_skill_names() -> dict[str, str]:
+PACKAGE_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+
+def _read_skill_description(path: Path) -> str:
+    """Read the first heading line of a skill file as its description."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            first_line = fh.readline()
+        return first_line.lstrip("# ").strip() if first_line.startswith("#") else path.stem
+    except (UnicodeDecodeError, OSError):
+        return path.stem
+
+
+def get_package_skills() -> dict[str, str]:
+    """Return skills shipped inside the chibi package as {filename: description}."""
+    result: dict[str, str] = {}
+    if not PACKAGE_SKILLS_DIR.is_dir():
+        return result
+    for f in PACKAGE_SKILLS_DIR.iterdir():
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        result[f.name] = _read_skill_description(f)
+    return result
+
+
+def get_user_skills() -> dict[str, str]:
+    """Return user skills from the optional external skills directory as {filename: description}.
+
+    The directory is optional: a missing or invalid path yields an empty dict, not an error.
+    """
     path = Path(application_settings.skills_dir)
-    result = {}
+    result: dict[str, str] = {}
+    if not path.is_dir():
+        return result
     for f in path.iterdir():
         if not f.is_file() or f.name.startswith("."):
             continue
-        try:
-            with f.open(encoding="utf-8") as fh:
-                first_line = fh.readline()
-            desc = first_line.lstrip("# ").strip() if first_line.startswith("#") else f.stem
-            result[f.name] = desc
-        except (UnicodeDecodeError, OSError):
-            continue
+        result[f.name] = _read_skill_description(f)
     return result
+
+
+def get_available_skills() -> dict[str, str]:
+    """Return the merged view of package and user skills as {filename: description}.
+
+    A user skill with the same filename overrides the package skill (user wins).
+    """
+    skills = get_package_skills()
+    skills.update(get_user_skills())
+    return skills
+
+
+def get_skill_path(name: str) -> Path | None:
+    """Resolve a skill filename to its actual path.
+
+    User skills take precedence over package skills with the same name.
+    Returns None if the skill is not found in either source.
+    """
+    user_path = Path(application_settings.skills_dir) / name
+    if user_path.is_file():
+        return user_path
+    package_path = PACKAGE_SKILLS_DIR / name
+    if package_path.is_file():
+        return package_path
+    return None
 
 
 def convert_list_of_models_to_str(models: list[ModelChangeSchema]) -> str:

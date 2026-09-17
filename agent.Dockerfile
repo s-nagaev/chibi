@@ -45,6 +45,8 @@ COPY . .
 # Default environment variables
 ENV FILESYSTEM_ACCESS=true
 ENV ENABLE_MCP_STDIO=true
-ENV SKILLS_DIR=/app/skills
+# NOTE: builtin skills now ship inside the package at chibi/skills (copied via `COPY . .`).
+# SKILLS_DIR is intentionally NOT set to chibi/skills (it must not point into the package);
+# the old /app/skills dir no longer exists — skill resolution reads package skills directly.
 
 CMD ["python", "main.py"]

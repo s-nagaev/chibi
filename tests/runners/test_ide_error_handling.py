@@ -181,7 +181,7 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
     user = User(id=1, working_dir="/tmp", info="", llm_skills={})
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.services.providers.utils.get_file_storage") as get_file_storage,
         patch("chibi.services.providers.utils.application_settings.selected_file_storage", selected_file_storage),
     ):
