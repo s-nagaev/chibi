@@ -23,7 +23,7 @@ from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import get_chibi_user
 from chibi.storage.files import get_file_storage
 from chibi.storage.files.file_storage import FileStorage
-from chibi.utils.app import convert_list_of_models_to_str, get_builtin_skill_names
+from chibi.utils.app import convert_list_of_models_to_str, get_available_skills
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -90,7 +90,7 @@ async def prepare_system_prompt(
     session_thread_id = interface.thread_id if interface else thread_id
     prompt: dict[str, Any] = {
         "system_prompt": base_system_prompt,
-        "available_builtin_skills": get_builtin_skill_names(),
+        "available_skills": get_available_skills(),
         "client": application_settings.client,
     }
 

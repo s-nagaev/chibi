@@ -267,7 +267,7 @@ Please, visit the [examples](examples) directory of the current repository for m
 | `HIDE_MODELS`     | Hide model options in UI.           | `False`       |
 | `HIDE_IMAGINE`    | Hide imagine commands.              | `False`       |
 | `WORKING_DIR`     | The default working directory for the AI agent's filesystem tools. | `~/chibi` || `HOME_DIR`        | The directory considered as the "home" for the AI agent. | `~/chibi`     |
-| `SKILLS_DIR`      | Absolute path to the directory containing LLM skills/prompts. | `./skills`    |
+| `SKILLS_DIR`      | Absolute path to the directory containing custom user skills (built-in skills ship inside the package). | `./skills`    |
 ### Storage Settings
 | Variable              | Description                                                                                             | Default Value |
 |:----------------------|:--------------------------------------------------------------------------------------------------------|:--------------|

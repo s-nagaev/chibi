@@ -65,7 +65,7 @@ This workflow is designed to maximize work efficiency and strictly economize the
 
 2.  **Delegation to Executor:**
     *   The PM calls `delegate_task`.
-    *   **MANDATORY REQUIREMENT:** The PM must instruct the delegate to load the `executor_workflow_skill.md` built-in skill as the first step (via `load_builtin_skill`).
+    *   **MANDATORY REQUIREMENT:** The PM must instruct the delegate to load the `executor_workflow_skill.md` built-in skill as the first step (via `load_skill`).
     *   **Prompt:** A BRIEF description of the goal and the path to the task file. Do NOT copy task contents into the prompt.
     *   **Instruction to Executor:** "1. Load the built-in skill `executor_workflow_skill.md`. 2. Read the task at path [Path] and execute it strictly according to the skill's regulations."
 
@@ -76,7 +76,7 @@ This workflow is designed to maximize work efficiency and strictly economize the
 
 4.  **Review Assignment:**
     *   The PM calls `delegate_task` for the Reviewer.
-    *   **MANDATORY REQUIREMENT:** The PM must instruct the delegate to load the `reviewer_workflow_skill.md` built-in skill as the first step (via `load_builtin_skill`).
+    *   **MANDATORY REQUIREMENT:** The PM must instruct the delegate to load the `reviewer_workflow_skill.md` built-in skill as the first step (via `load_skill`).
     *   **Prompt:** Paths to the task file and the executor's report file. Nothing else.
     *   **Instruction to Reviewer:** "1. Load the built-in skill `reviewer_workflow_skill.md`. 2. Perform a review of task [Task_Path] and report [Report_Path] strictly according to the skill's regulations."
 
