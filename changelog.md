@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.15.0] - 2026-09-14
+## [1.15.0] - 2026-09-17
 
 ### Added
 - **LLM reasoning in IDE result frames:** result frames now carry an optional `thoughts` string with the model's reasoning whenever the provider surfaced it and the client declared `capabilities.thoughts: true` in the `initialize` handshake; reasoning is capped at 256 KB, keeping the tail closest to the answer and prepending a `\n[... LLM reasoning truncated: 256 KB limit reached ...]` marker at the head, is delivered on the final result frame only (never on background message frames), and is never persisted to thread history: clients that do not declare the capability, and providers that expose no reasoning (Gemini, Anthropic, MiniMax), see no change at all.
