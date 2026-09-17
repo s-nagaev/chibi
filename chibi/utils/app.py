@@ -352,7 +352,15 @@ PACKAGE_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
 def _read_skill_description(path: Path) -> str:
-    """Read the first heading line of a skill file as its description."""
+    """Read the first heading line of a skill file as its description.
+
+    Args:
+        path: Path to the skill file to read.
+
+    Returns:
+        The first heading line with leading ``#`` characters stripped, or the
+        file stem if the file has no heading or cannot be read.
+    """
     try:
         with path.open(encoding="utf-8") as fh:
             first_line = fh.readline()
@@ -403,7 +411,14 @@ def get_skill_path(name: str) -> Path | None:
     """Resolve a skill filename to its actual path.
 
     User skills take precedence over package skills with the same name.
-    Returns None if the skill is not found in either source.
+
+    Args:
+        name: Filename of the skill to resolve.
+
+    Returns:
+        The resolved path to the skill file, or None if the skill is not
+        found in either the user skills directory or the package skills
+        directory.
     """
     user_path = Path(application_settings.skills_dir) / name
     if user_path.is_file():
