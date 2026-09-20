@@ -41,7 +41,7 @@ async def test_prepare_system_prompt_context_size_na_when_store_empty() -> None:
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
 
@@ -62,7 +62,7 @@ async def test_prepare_system_prompt_context_size_shows_real_value_and_percentag
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.config.gpt.gpt_settings.max_history_tokens", 200000),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
@@ -86,7 +86,7 @@ async def test_prepare_system_prompt_warning_fires_above_threshold() -> None:
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
@@ -113,7 +113,7 @@ async def test_prepare_system_prompt_warning_silent_at_or_below_threshold(stored
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.config.gpt.gpt_settings.max_history_tokens", 100000),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
@@ -137,7 +137,7 @@ async def test_prepare_system_prompt_warning_threshold_from_config() -> None:
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 25),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
@@ -159,7 +159,7 @@ async def test_prepare_system_prompt_uses_correct_key_matching_write_side() -> N
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
 
@@ -187,7 +187,7 @@ async def test_prepare_system_prompt_includes_active_client(client: ClientType) 
 
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_builtin_skill_names", return_value=[]),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
     ):
         prompt_json = await prepare_system_prompt("base", 1, interface)
 

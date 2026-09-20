@@ -257,7 +257,7 @@ Chibi can keep context while switching providers mid-thread, or choose the best 
 - **Filesystem access:** read/write/search/organize files
 - **Terminal execution:** run commands with LLM-moderated security
 - **Persistent memory:** conversation history survives restarts with context management/summarization
-- **Skills:** reusable instruction modules the agent can load into its system prompt on demand (`load_builtin_skill`)
+- **Skills:** built-in skills ship inside the package and work out of the box after install; drop your own `.md` files into the `skills_dir` to add custom ones (a same-name file overrides a built-in) — the agent can load them into its system prompt on demand (`load_skill`)
 
 ### 🔌 Extensible via MCP (Model Context Protocol)
 Connect Chibi to external tools and services (or build your own):

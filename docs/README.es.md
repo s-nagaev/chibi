@@ -253,7 +253,7 @@ Chibi puede mantener el contexto mientras cambia de proveedor a mitad de hilo, o
 - **Acceso al sistema de archivos:** leer/escribir/buscar/organizar archivos
 - **Ejecución en terminal:** ejecutar comandos con seguridad moderada por LLM
 - **Memoria persistente:** el historial de conversación sobrevive reinicios con gestión de contexto/resumen
-- **Skills:** módulos de instrucciones reutilizables que el agente puede cargar en su prompt del sistema bajo demanda (`load_builtin_skill`)
+- **Skills:** las habilidades integradas se incluyen en el paquete y funcionan nada más instalar; añade tus propios archivos `.md` en `skills_dir` para crear habilidades personalizadas (un archivo con el mismo nombre anula la integrada) — el agente puede cargarlas en su prompt del sistema bajo demanda (`load_skill`)
 
 ### 🔌 Extensible vía MCP (Model Context Protocol)
 Conecta Chibi a herramientas y servicios externos (o crea los tuyos):

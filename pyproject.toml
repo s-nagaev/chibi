@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "chibi-bot"
-version = "1.15.0"
+version = "1.16.0"
 description = "Your Digital Companion. Self-hosted Telegram bot orchestrating multiple AI providers (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Alibaba, MiniMax) with autonomous agent capabilities, MCP integrations, and async task execution. Not a tool. A partner."
 authors = ["Sergei Nagaev <nagaev.sv@gmail.com>"]
 license = "MIT"
@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 packages = [{include = "chibi"}]
-include = ["data/.keep", "skills"]
+include = ["data/.keep", "chibi/skills/*.md"]
 exclude = ["tests", "docs", "scripts", "examples", ".project", "data/*.pkl", "data/*.md", "data/old", "data/scripts"]
 
 [tool.poetry.urls]

@@ -253,7 +253,7 @@ Chibi, aynı konuşma içinde sağlayıcı değiştirirken bağlamı koruyabilir
 - **Dosya sistemi erişimi:** dosyaları oku/yaz/ara/düzenle
 - **Terminal çalıştırma:** komutları LLM tarafından denetlenen güvenlikle çalıştır
 - **Kalıcı bellek:** konuşma geçmişi, bağlam yönetimi/özetleme ile yeniden başlatmalarda korunur
-- **Skills:** ajanın gerektiğinde sistem promptuna yükleyebileceği yeniden kullanılabilir yönerge modülleri (`load_builtin_skill`)
+- **Skills:** yerleşik beceriler paketin içinde gelir ve kurulumdan hemen sonra çalışır; özel beceri eklemek için kendi `.md` dosyalarınızı `skills_dir` içine koyun (aynı adda bir dosya yerleşik olanı geçersiz kılar) — ajan bunları gerektiğinde sistem promptuna yükleyebilir (`load_skill`)
 
 ### 🔌 MCP (Model Context Protocol) ile genişletilebilir
 Chibi’yi harici araçlara ve servislere bağlayın (ya da kendinizinkini yazın):

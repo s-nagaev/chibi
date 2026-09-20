@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-09-20
+
+### Fixed
+- Built-in skills now ship inside the Python package (`chibi/skills/`) and are available out of the box after `pip install` (previously missing from wheels).
+
+### Changed
+- `load_builtin_skill` tool renamed to `load_skill`; `skills_dir` setting is now for custom user skills only (same-name user skill overrides the built-in).
+
 ## [1.15.0] - 2026-09-17
 
 ### Added
