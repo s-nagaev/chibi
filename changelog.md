@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-09-22
+
+### Fixed
+- Unified MITM-aware retry policy across all provider families: `get_chat_response` on anthropic, gemini and mistral now retries connection failures with exponential backoff (`wait_exponential`, 4 attempts, ~30/60/120s waits), matching the openai family; the openai family's fixed 10/25/45s waits were replaced with the same exponential schedule. Long single-shot requests killed by TLS-inspecting corporate proxies (WinError 64 / connection reset) are now retried automatically instead of failing on the first attempt.
+- Rate limits (429) and transient server errors (5xx) are now retried on all provider families: anthropic retries `RateLimitError`/`InternalServerError`, gemini retries `ServerError` (5xx) via the decorator (its internal 429 loop with Retry-Info delays is unchanged), mistral retries `SDKError` with status 429/>=500. After retries are exhausted the user gets a clear "connection interrupted" message instead of a generic error.
+
 ## [1.16.0] - 2026-09-20
 
 ### Fixed
