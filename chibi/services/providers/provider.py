@@ -14,6 +14,8 @@ from urllib.parse import urljoin
 import httpx
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
+from anthropic import InternalServerError as AnthropicInternalServerError
+from anthropic import RateLimitError as AnthropicRateLimitError
 from anthropic.types import (
     CacheControlEphemeralParam,
     MessageParam,
@@ -1006,7 +1008,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
-        retry=retry_if_exception_type((ConnectionError, AnthropicAPIConnectionError)),
+        retry=retry_if_exception_type(
+            (ConnectionError, AnthropicAPIConnectionError, AnthropicRateLimitError, AnthropicInternalServerError)
+        ),
         reraise=True,
     )
     async def get_chat_response(

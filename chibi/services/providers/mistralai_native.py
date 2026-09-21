@@ -6,18 +6,25 @@ from typing import Union
 
 import httpx
 from loguru import logger
-from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
+from mistralai import (
+    ChatCompletionResponse,
+    JSONSchemaTypedDict,
+    Mistral,
+    ResponseFormatTypedDict,
+    TextChunk,
+)
 from mistralai.models import (
     AssistantMessage,
     DocumentURLChunk,
     FunctionCall,
+    SDKError,
     SystemMessage,
     ToolCall,
     ToolMessage,
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
@@ -38,6 +45,21 @@ from chibi.services.providers.utils import (
 from chibi.services.usage_cache import UsageCacheStore
 
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
+
+
+def _is_retryable_mistral_error(exception: BaseException) -> bool:
+    """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
+
+    The mistral SDK (1.x) does not expose distinct rate-limit / server-error classes:
+    any failed HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
+    the raw ``httpx.Response``, so the status code is inspected instead.
+    """
+    if isinstance(exception, (ConnectionError, httpx.TransportError)):
+        return True
+    if isinstance(exception, SDKError):
+        status_code = exception.raw_response.status_code
+        return status_code == 429 or status_code >= 500
+    return False
 
 
 class MistralAI(RestApiFriendlyProvider):
@@ -127,7 +149,7 @@ class MistralAI(RestApiFriendlyProvider):
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
-        retry=retry_if_exception_type((ConnectionError, httpx.TransportError)),
+        retry=retry_if_exception(_is_retryable_mistral_error),
         reraise=True,
     )
     async def get_chat_response(

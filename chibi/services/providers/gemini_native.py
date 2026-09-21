@@ -12,6 +12,7 @@ from uuid import uuid4
 import httpx
 from google.genai.client import Client
 from google.genai.errors import APIError
+from google.genai.errors import ServerError as GeminiServerError
 from google.genai.types import (
     ContentDict,
     ContentListUnion,
@@ -186,7 +187,11 @@ class Gemini(RestApiFriendlyProvider):
         return retry_delay
 
     async def _generate_content(
-        self, model: str, contents: ContentListUnion | ContentListUnionDict, config: GenerateContentConfig
+        self,
+        model: str,
+        contents: ContentListUnion | ContentListUnionDict,
+        config: GenerateContentConfig,
+        retry_server_errors: bool = False,
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
             try:
@@ -213,6 +218,15 @@ class Gemini(RestApiFriendlyProvider):
 
                 elif err.code == 403:
                     raise NotAuthorizedError(provider=self.name, model=model, detail=err.details)
+
+                elif retry_server_errors and isinstance(err.code, int) and err.code >= 500:
+                    # Transient server error (5xx): re-raise the raw SDK error so the tenacity
+                    # decorator on ``get_chat_response`` can retry it with exponential backoff.
+                    # Scoped to the chat path (retry_server_errors=True): undecorated callers
+                    # (moderation, speech, STT, vision, OCR) keep converting 5xx into
+                    # ServiceResponseError, so users still get the specific provider-error
+                    # message via ``handle_gpt_exceptions`` instead of the raw SDK exception.
+                    raise
 
                 else:
                     raise ServiceResponseError(provider=self.name, model=model, detail=err.details)
@@ -270,6 +284,7 @@ class Gemini(RestApiFriendlyProvider):
             model=model_name,
             contents=cast(ContentListUnionDict, messages),
             config=generation_config,
+            retry_server_errors=True,
         )
         answer = self._get_text(response)
         usage = get_usage_from_google_response(response_message=response)
@@ -375,7 +390,7 @@ class Gemini(RestApiFriendlyProvider):
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
-        retry=retry_if_exception_type((ConnectionError, httpx.TransportError)),
+        retry=retry_if_exception_type((ConnectionError, httpx.TransportError, GeminiServerError)),
         reraise=True,
     )
     async def get_chat_response(
