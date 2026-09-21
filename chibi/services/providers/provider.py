@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Generic, Literal, Optional, ParamSp
 from urllib.parse import urljoin
 
 import httpx
+from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
 from anthropic.types import (
     CacheControlEphemeralParam,
@@ -51,7 +52,7 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
-from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -532,11 +533,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
     @retry(
         stop=stop_after_attempt(4),
-        wait=wait_chain(
-            wait_fixed(10),
-            wait_fixed(25),
-            wait_fixed(45),
-        ),
+        wait=wait_exponential(multiplier=20, min=30, max=180),
         reraise=True,
     )
     async def get_chat_response(
@@ -1006,6 +1003,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
 
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=20, min=30, max=180),
+        retry=retry_if_exception_type((ConnectionError, AnthropicAPIConnectionError)),
+        reraise=True,
+    )
     async def get_chat_response(
         self,
         messages: list[Message],

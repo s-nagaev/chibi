@@ -340,6 +340,12 @@ The agent's working directory - used for terminal commands and reported to the m
 
 ---
 
+### Corporate proxies / TLS inspection: connection resets (`WinError 64`)
+
+On corporate networks with TLS-inspecting (MITM) proxies, long single-shot LLM requests (30–120 s with no visible traffic) can be killed as "idle" — you see `ConnectionResetError` / `WinError 64` in the logs or a generic connection error in the chat. Chibi automatically retries such failures **4 times with growing waits (~30 s → 180 s)** on every provider family and, if all retries fail, reports a clear "connection was interrupted" message instead of a generic error. If the problem persists, set `HTTPS_PROXY` to your corporate proxy (if it whitelists the AI API hosts) or ask IT to whitelist the provider hosts (`api.openai.com`, `api.anthropic.com`, `*.googleapis.com`, `api.mistral.ai`).
+
+---
+
 ## Documentation
 
 - **Start here:** https://chibi.bot

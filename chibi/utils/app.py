@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
 import httpx
+from anthropic import APIConnectionError
 from loguru import logger
 from telegram.ext import ContextTypes
 
@@ -18,6 +19,7 @@ from chibi.exceptions import (
     NoResponseError,
     NotAuthorizedError,
     RecursionLimitExceeded,
+    ServiceConnectionError,
     ServiceRateLimitError,
     ServiceResponseError,
 )
@@ -333,6 +335,23 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
                 f"({e.exceeded_limit}) and was stopped. The model has likely entered an infinite loop of tool "
                 f"calls. Please check the logs. If the model was functioning as intended, you should either "
                 f"rephrase the task or increase the value of the `MAX_CONSECUTIVE_TOOL_CALLS` setting."
+            )
+
+        except (
+            ConnectionError,
+            APIConnectionError,
+            ServiceConnectionError,
+            httpx.TransportError,
+        ) as e:
+            logger.error(f"{error_msg_prefix}: connection to the model provider failed after retries: {e!r}")
+            _set_ide_error(
+                interface,
+                "provider_error",
+                "The connection to the model provider was interrupted. Please try again.",
+            )
+            text = (
+                "The connection to the model provider was interrupted (possibly by a corporate proxy or firewall) "
+                "after several automatic retries. Please try again."
             )
 
         except Exception as e:

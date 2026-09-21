@@ -9,6 +9,7 @@ from io import BytesIO
 from typing import Any, cast
 from uuid import uuid4
 
+import httpx
 from google.genai.client import Client
 from google.genai.errors import APIError
 from google.genai.types import (
@@ -33,6 +34,7 @@ from google.genai.types import (
     VoiceConfig,
 )
 from loguru import logger
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
@@ -370,6 +372,12 @@ class Gemini(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
         )
 
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=20, min=30, max=180),
+        retry=retry_if_exception_type((ConnectionError, httpx.TransportError)),
+        reraise=True,
+    )
     async def get_chat_response(
         self,
         messages: list[Message],

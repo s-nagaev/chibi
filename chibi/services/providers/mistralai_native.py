@@ -4,6 +4,7 @@ import random
 from asyncio import sleep
 from typing import Union
 
+import httpx
 from loguru import logger
 from mistralai import ChatCompletionResponse, JSONSchemaTypedDict, Mistral, ResponseFormatTypedDict, TextChunk
 from mistralai.models import (
@@ -16,6 +17,7 @@ from mistralai.models import (
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
@@ -122,6 +124,12 @@ class MistralAI(RestApiFriendlyProvider):
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
 
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=20, min=30, max=180),
+        retry=retry_if_exception_type((ConnectionError, httpx.TransportError)),
+        reraise=True,
+    )
     async def get_chat_response(
         self,
         messages: list[Message],
