@@ -9,6 +9,7 @@ from io import BytesIO
 from typing import Any, cast
 from uuid import uuid4
 
+import aiohttp
 import httpx
 from google.genai.client import Client
 from google.genai.errors import APIError
@@ -97,6 +98,23 @@ class Gemini(RestApiFriendlyProvider):
 
     def __init__(self, token: str) -> None:
         super().__init__(token=token)
+
+    @property
+    def client_http_options(self) -> HttpOptions:
+        """Build client-level HTTP options that force the httpx async backend.
+
+        The google-genai SDK switches its async transport to aiohttp whenever aiohttp is
+        importable and no client-level ``httpx_async_client`` is supplied. Config-level
+        ``HttpOptions`` (e.g. inside ``GenerateContentConfig``) is consulted only for
+        per-request retry settings and never selects the transport, so these options MUST
+        be passed to every ``Client(...)`` constructor. A fresh ``httpx.AsyncClient`` is
+        built on every access: an httpx client is stateful and cannot be reused after its
+        context manager has closed it.
+
+        Returns:
+            Fresh ``HttpOptions`` carrying a new MITM-aware ``httpx.AsyncClient``.
+        """
+        return HttpOptions(httpx_async_client=self.get_async_httpx_client())
 
     @property
     def tools_list(self) -> list[Tool]:
@@ -195,7 +213,7 @@ class Gemini(RestApiFriendlyProvider):
     ) -> GenerateContentResponse:
         for attempt in range(gpt_settings.retries):
             try:
-                async with Client(api_key=gpt_settings.gemini_key).aio as client:
+                async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as client:
                     response: GenerateContentResponse = await client.models.generate_content(
                         model=model,
                         contents=contents,
@@ -268,8 +286,6 @@ class Gemini(RestApiFriendlyProvider):
         else:
             temperature = self.temperature
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
-
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
             temperature=temperature,
@@ -277,7 +293,6 @@ class Gemini(RestApiFriendlyProvider):
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             tools=self.tools_list if "gemini" in model_name else None,
-            http_options=http_options,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -390,7 +405,9 @@ class Gemini(RestApiFriendlyProvider):
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
-        retry=retry_if_exception_type((ConnectionError, httpx.TransportError, GeminiServerError)),
+        retry=retry_if_exception_type(
+            (ConnectionError, aiohttp.ServerDisconnectedError, httpx.TransportError, GeminiServerError)
+        ),
         reraise=True,
     )
     async def get_chat_response(
@@ -431,8 +448,6 @@ class Gemini(RestApiFriendlyProvider):
             gpt_settings.image_size_nano_banana if "flash" not in model else None
         )  # flash-models don't support it
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
-
         generation_config = GenerateContentConfig(
             image_config=ImageConfig(
                 aspect_ratio=gpt_settings.image_aspect_ratio,
@@ -440,7 +455,7 @@ class Gemini(RestApiFriendlyProvider):
             )
         )
 
-        async with Client(api_key=gpt_settings.gemini_key, http_options=http_options).aio as client:
+        async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as client:
             response: GenerateContentResponse = await client.models.generate_content(
                 model=model,
                 contents=cast(ContentListUnion, [prompt]),
@@ -457,8 +472,6 @@ class Gemini(RestApiFriendlyProvider):
         prompt: str,
         model: str,
     ) -> list[Image]:
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
-
         if "preview" in model or "fast" in model:
             image_size = None
         else:
@@ -467,10 +480,9 @@ class Gemini(RestApiFriendlyProvider):
         generation_config = GenerateImagesConfig(
             aspect_ratio=gpt_settings.image_aspect_ratio,
             number_of_images=gpt_settings.image_n_choices,
-            http_options=http_options,
             image_size=image_size,
         )
-        async with Client(api_key=gpt_settings.gemini_key).aio as client:
+        async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as client:
             response: GenerateImagesResponse = await client.models.generate_images(
                 model=model,
                 prompt=prompt,
@@ -483,14 +495,12 @@ class Gemini(RestApiFriendlyProvider):
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
         moderator_model = model or self.default_moderation_model or self.default_model
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
             system_instruction=MODERATOR_PROMPT,
             temperature=0.1,
             max_output_tokens=1024,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
-            http_options=http_options,
             response_schema=ModeratorsAnswer,
         )
         messages = [
@@ -550,7 +560,7 @@ class Gemini(RestApiFriendlyProvider):
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
         try:
-            async with Client(api_key=gpt_settings.gemini_key).aio as aclient:
+            async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as aclient:
                 models = await aclient.models.list()
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
@@ -573,7 +583,6 @@ class Gemini(RestApiFriendlyProvider):
         model = model or self.tts_model
         logger.info(f"Recording a voice message with model {model}...")
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=SpeechConfig(
@@ -583,7 +592,6 @@ class Gemini(RestApiFriendlyProvider):
                     )
                 )
             ),
-            http_options=http_options,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -630,10 +638,7 @@ class Gemini(RestApiFriendlyProvider):
         model = model or self.default_stt_model
         logger.info(f"Transcribing audio with model {model}...")
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
-        generation_config = GenerateContentConfig(
-            http_options=http_options,
-        )
+        generation_config = GenerateContentConfig()
 
         response = await self._generate_content(
             model=model,
@@ -669,9 +674,7 @@ class Gemini(RestApiFriendlyProvider):
         prompt = prompt or "Describe the image in detail"
         logger.info(f"[{self.name}] Analyzing image with model {model}...")
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
-            http_options=http_options,
             response_schema=VisionResultSchema,
         )
 
@@ -724,9 +727,7 @@ class Gemini(RestApiFriendlyProvider):
         model = model or self.default_ocr_model
         logger.info(f"[{self.name}] Extracting text from PDF with model {model}...")
 
-        http_options = HttpOptions(httpx_async_client=self.get_async_httpx_client())
         generation_config = GenerateContentConfig(
-            http_options=http_options,
             response_schema=VisionResultSchema,
         )
         response = await self._generate_content(
