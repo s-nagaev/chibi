@@ -13,16 +13,25 @@ Covers:
 No real sleeps happen: tenacity's ``sleep`` hook is monkeypatched in every retry test.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 from unittest.mock import AsyncMock
 
+import aiohttp
 import httpx
 import pytest
 from anthropic import APIConnectionError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 from google.genai.errors import ServerError as GeminiServerError
-from google.genai.types import GenerateContentConfig
+from google.genai.types import (
+    Candidate,
+    Content,
+    GenerateContentConfig,
+    GenerateContentResponse,
+    GenerateImagesResponse,
+    HttpOptions,
+    Part,
+)
 from mistralai.models import SDKError
 
 from chibi.exceptions import ServiceConnectionError, ServiceRateLimitError, ServiceResponseError
@@ -159,6 +168,7 @@ def test_retry_predicates_match_connection_shaped_errors() -> None:
 
     gemini_exceptions = _retry_policy(Gemini).retry.exception_types
     assert ConnectionError in gemini_exceptions
+    assert aiohttp.ServerDisconnectedError in gemini_exceptions
     assert httpx.TransportError in gemini_exceptions
     assert GeminiServerError in gemini_exceptions
 
@@ -322,3 +332,154 @@ async def test_gemini_5xx_reraise_is_scoped_to_the_chat_path(monkeypatch: pytest
             contents="hi",
             config=GenerateContentConfig(),
         )
+
+
+def _make_gemini_text_response(text: str) -> GenerateContentResponse:
+    """Build a minimal successful Gemini response carrying a single text part.
+
+    Args:
+        text: The answer text to place into the response.
+
+    Returns:
+        A ``GenerateContentResponse`` whose first candidate contains the text.
+    """
+    return GenerateContentResponse(candidates=[Candidate(content=Content(role="model", parts=[Part(text=text)]))])
+
+
+class _RecordingModels:
+    """Fake ``client.aio.models`` that answers every call with a harmless success."""
+
+    async def generate_content(self, *args: Any, **kwargs: Any) -> Any:
+        return _make_gemini_text_response("ok")
+
+    async def generate_images(self, *args: Any, **kwargs: Any) -> Any:
+        return GenerateImagesResponse()
+
+    def list(self) -> "_RecordingModels":
+        return self
+
+    def __aiter__(self) -> "_RecordingModels":
+        return self
+
+    async def __anext__(self) -> Any:
+        raise StopAsyncIteration
+
+
+class _RecordingAio:
+    """Fake async namespace of the google-genai client."""
+
+    def __init__(self) -> None:
+        self.models = _RecordingModels()
+
+    async def __aenter__(self) -> "_RecordingAio":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+
+class _RecordingGenaiClient:
+    """Fake ``google.genai.client.Client`` that records its constructor kwargs."""
+
+    init_kwargs: ClassVar[list[dict[str, Any]]] = []
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        _RecordingGenaiClient.init_kwargs.append(kwargs)
+        self.aio = _RecordingAio()
+
+
+class _FlakyServerDisconnectedModels:
+    """Fake models API raising ``aiohttp.ServerDisconnectedError`` on the first attempts."""
+
+    def __init__(self, attempts: dict[str, int]) -> None:
+        self._attempts = attempts
+
+    async def generate_content(self, *args: Any, **kwargs: Any) -> Any:
+        self._attempts["count"] += 1
+        if self._attempts["count"] < 3:
+            raise aiohttp.ServerDisconnectedError()
+        return _make_gemini_text_response("recovered")
+
+
+class _FlakyServerDisconnectedAio:
+    """Fake async namespace hosting the flaky models API."""
+
+    def __init__(self, attempts: dict[str, int]) -> None:
+        self.models = _FlakyServerDisconnectedModels(attempts)
+
+    async def __aenter__(self) -> "_FlakyServerDisconnectedAio":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+
+class _FlakyServerDisconnectedGenaiClient:
+    """Fake google-genai ``Client`` simulating a MITM proxy killing keep-alive connections."""
+
+    attempts: ClassVar[dict[str, int]] = {"count": 0}
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.aio = _FlakyServerDisconnectedAio(_FlakyServerDisconnectedGenaiClient.attempts)
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the shared attempt counter between tests."""
+        cls.attempts = {"count": 0}
+
+
+def test_client_http_options_property_builds_a_fresh_client_per_access() -> None:
+    """Every access must yield a new HttpOptions with a brand-new httpx client (no reuse after close)."""
+    provider = Gemini(token="test-token")
+
+    first = provider.client_http_options
+    second = provider.client_http_options
+
+    assert isinstance(first, HttpOptions)
+    assert isinstance(second, HttpOptions)
+    assert first is not second
+    assert first.httpx_async_client is not None
+    assert first.httpx_async_client is not second.httpx_async_client
+
+
+@pytest.mark.asyncio
+async def test_all_gemini_client_construction_sites_receive_http_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All Client() constructor sites get client-level http_options (which alone selects the httpx backend)."""
+    provider = Gemini(token="test-token")
+    monkeypatch.setattr("chibi.services.providers.gemini_native.Client", _RecordingGenaiClient)
+    _RecordingGenaiClient.init_kwargs = []
+
+    await provider._generate_content(model="models/gemini-3.8-flash", contents="hi", config=GenerateContentConfig())
+    await provider._generate_image_by_imagen(prompt="a cat", model="models/imagen-4.0-fast-generate-001")
+    await provider.get_available_models()
+
+    assert len(_RecordingGenaiClient.init_kwargs) == 3
+    for kwargs in _RecordingGenaiClient.init_kwargs:
+        assert isinstance(kwargs["http_options"], HttpOptions)
+        assert isinstance(kwargs["http_options"].httpx_async_client, httpx.AsyncClient)
+
+
+@pytest.mark.asyncio
+async def test_gemini_server_disconnected_error_is_retried_then_succeeds_through_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: ServerDisconnectedError raised inside the SDK is retried by the chat decorator, then succeeds."""
+    provider = Gemini(token="test-token")
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(_retry_policy(Gemini), "sleep", sleep_mock)
+    monkeypatch.setattr(
+        "chibi.services.providers.gemini_native.prepare_system_prompt", AsyncMock(return_value="system-prompt")
+    )
+    monkeypatch.setattr("chibi.services.providers.gemini_native.Client", _FlakyServerDisconnectedGenaiClient)
+    _FlakyServerDisconnectedGenaiClient.reset()
+
+    chat_response, updated_messages = await provider.get_chat_response(
+        messages=_test_messages(), user=_test_user(), caller_storage_id=1, caller_thread_id=1
+    )
+
+    assert _FlakyServerDisconnectedGenaiClient.attempts["count"] == 3
+    assert sleep_mock.await_count == 2  # no real sleeps happened
+    assert chat_response.answer == "recovered"
+    assert [msg.content for msg in updated_messages] == ["recovered"]
