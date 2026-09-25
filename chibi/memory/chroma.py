@@ -926,6 +926,10 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                 return None
             if any((message.tool_name, message.tool_calls, message.tool_call_id)):
                 return None
+            # Caller explicitly opted this message out of semantic-memory archival
+            # (e.g. a summarization pair that would duplicate the original context).
+            if getattr(message, "excluded_from_memory", False):
+                return None
 
             if message.role == "user":
                 try:

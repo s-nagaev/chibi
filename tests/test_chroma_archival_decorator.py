@@ -175,3 +175,40 @@ class TestWithChromaArchival:
             # The inner add_message should be hit exactly once, not multiple times
             assert mock_inner.add_message_called is True
             mock_task_manager.run_task.assert_called_once()
+
+
+    @pytest.mark.asyncio
+    async def test_excluded_from_memory_skips_archival(self, mock_inner, mock_memory, user):
+        """Messages with excluded_from_memory=True must be persisted but not archived to Chroma.
+
+        Used to prevent duplicates in semantic memory when re-inserting synthesized
+        messages (e.g. summarization pair) whose content is already covered by
+        the original messages that remain in the collection.
+        """
+        excluded_msg = Message(role="user", content="What we were talking about?", excluded_from_memory=True)
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            await wrapped.add_message(user, excluded_msg, thread_id=3)
+
+            # Primary write must still happen (exclusion only affects Chroma)
+            assert mock_inner.add_message_called is True
+            assert mock_inner.add_message_kwargs == {"ttl": None, "thread_id": 3}
+            # Archive must NOT be scheduled
+            mock_task_manager.run_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_default_excluded_from_memory_is_false(self, mock_inner, mock_memory, user):
+        """A regular Message (no flag) must still be archived — default must be opt-in."""
+        regular_msg = Message(role="assistant", content="Some answer")
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            await wrapped.add_message(user, regular_msg)
+
+            assert mock_inner.add_message_called is True
+            mock_task_manager.run_task.assert_called_once()
