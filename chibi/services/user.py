@@ -61,8 +61,8 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
         caller_storage_id=storage_id,
         caller_thread_id=thread_id,
     )
-    initial_message = Message(role="user", content="What we were talking about?")
-    answer_message = Message(role="assistant", content=response.answer)
+    initial_message = Message(role="user", content="What we were talking about?", excluded_from_memory=True)
+    answer_message = Message(role="assistant", content=response.answer, excluded_from_memory=True)
     await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
     await db.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
