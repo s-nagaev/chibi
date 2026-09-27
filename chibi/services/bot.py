@@ -85,7 +85,6 @@ def _is_ack_answer(answer: str) -> bool:
     return "<chibi>ack</chibi>" in answer.lower() and len(answer) <= 27
 
 
-@handle_gpt_exceptions
 async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: UserInterface) -> None:
     """Wake the agent with a scheduler trigger and deliver or suppress its answer.
 
@@ -102,8 +101,11 @@ async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: Us
             SchedulerInterface).
 
     Raises:
-        GptException: If the LLM chain fails with a provider error (handled
-            by the decorator).
+        GptException: If the LLM chain fails with a provider error. The
+            exception propagates to the caller on purpose: the agent job
+            dispatcher owns scheduler failure reporting (design §6.6) and
+            applies the anti-flood notification policy itself, so provider
+            errors must not be swallowed here.
     """
     time_start = time.time()
     logger.bind(user_id=interface.user_id).info(

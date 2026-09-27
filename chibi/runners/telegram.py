@@ -45,6 +45,7 @@ from chibi.services.bot import (
     handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
+from chibi.services.jobs import recover_agent_jobs
 from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools.topic import RenameThreadTool
@@ -792,6 +793,7 @@ class ChibiBot:
         scheduler = ChibiScheduler()
         scheduler.start()
         _register_retention_cleanup_job(scheduler)
+        await recover_agent_jobs(scheduler)
 
     def run(self) -> None:
         builder = (
