@@ -86,9 +86,8 @@ def fresh_scheduler_singleton():
     SingletonMeta._instances.pop(ChibiScheduler, None)
 
 
-async def test_interval_self_job_end_to_end(
-    fresh_scheduler_singleton, redis_scheduler_settings, tool_settings, interface
-) -> None:
+@pytest.mark.usefixtures("fresh_scheduler_singleton")
+async def test_interval_self_job_end_to_end(redis_scheduler_settings, tool_settings, interface) -> None:
     """A tool-created interval job survives the job store, fires twice and delivers on the second tick."""
     ack_response = ChatResponseSchema(answer="<chibi>ACK</chibi>", provider="OpenAI", model="m", usage=None)
     report_response = ChatResponseSchema(answer="All systems nominal", provider="OpenAI", model="m", usage=None)

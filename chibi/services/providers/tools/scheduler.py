@@ -342,16 +342,7 @@ class ScheduleTaskTool(ChibiTool):
             raise ToolException("Task title cannot be empty.")
 
         action_type = action.get("type") if isinstance(action, dict) else None
-        if action_type == "notify" and not application_settings.scheduler_notify_enabled:
-            raise ToolException(
-                "The 'notify' action is disabled by the scheduler_notify_enabled setting. "
-                "Use the 'self' action so the agent wakes up and handles the task itself."
-            )
-        if action_type == "command" and not application_settings.scheduler_agent_commands_enabled:
-            raise ToolException(
-                "Shell commands in scheduled tasks are disabled by the scheduler_agent_commands_enabled setting. "
-                "Ask the administrator to enable them, or use the 'self' action instead."
-            )
+        cls._validate_action_gates(action_type=action_type)
 
         user_id, storage_id, thread_id, chat_id = cls._resolve_job_context(**kwargs)
         scheduler = ChibiScheduler()
@@ -381,23 +372,108 @@ class ScheduleTaskTool(ChibiTool):
         except ValidationError as e:
             raise ToolException(f"Invalid task parameters: {e}") from e
 
-        if isinstance(payload.action, CommandActionPayload):
-            moderation_provider = await get_moderation_provider(user_id=user_id)
-            logger.log("MODERATOR", f"[{caller_model}] Pre-moderating scheduled command: '{payload.action.command}'")
-            moderator_answer = await moderation_provider.moderate_command(
-                cmd=payload.action.command, model=gpt_settings.moderation_model
-            )
-            if moderator_answer.verdict == "declined":
-                raise ToolException(
-                    f"Moderator declined the scheduled command '{payload.action.command}'. "
-                    f"Reason: {moderator_answer.reason}"
-                )
+        await cls._moderate_scheduled_command(payload=payload, user_id=user_id, caller_model=caller_model)
 
+        job_kwargs = {"job_id": full_job_id, **payload.model_dump(exclude={"job_id"})}
+        cls._register_scheduled_job(
+            scheduler=scheduler,
+            schedule=schedule,
+            full_job_id=full_job_id,
+            job_kwargs=job_kwargs,
+            replace=replace,
+        )
+
+        logger.log(
+            "TOOL",
+            (
+                f"[{caller_model}] Scheduled task '{full_job_id}' ('{payload.title}', "
+                f"action: {payload.action.type}) for user #{user_id}"
+            ),
+        )
+        job_infos = scheduler.list_jobs(prefix=full_job_id)
+        next_run_time = job_infos[0].next_run_time if job_infos else None
+        return {
+            "status": "ok",
+            "job_id": full_job_id,
+            "title": payload.title,
+            "action_type": payload.action.type,
+            "next_run_time": next_run_time.isoformat() if next_run_time else None,
+            "message": f"Scheduled task '{payload.title}' ({full_job_id}) created.",
+        }
+
+    @classmethod
+    def _validate_action_gates(cls, action_type: str | None) -> None:
+        """Reject action types that are disabled by server settings.
+
+        Args:
+            action_type: The requested action type (``self`` / ``notify`` / ``command``).
+
+        Raises:
+            ToolException: If the requested action type is disabled by configuration.
+        """
+        if action_type == "notify" and not application_settings.scheduler_notify_enabled:
+            raise ToolException(
+                "The 'notify' action is disabled by the scheduler_notify_enabled setting. "
+                "Use the 'self' action so the agent wakes up and handles the task itself."
+            )
+        if action_type == "command" and not application_settings.scheduler_agent_commands_enabled:
+            raise ToolException(
+                "Shell commands in scheduled tasks are disabled by the scheduler_agent_commands_enabled setting. "
+                "Ask the administrator to enable them, or use the 'self' action instead."
+            )
+
+    @classmethod
+    async def _moderate_scheduled_command(cls, payload: AgentJobPayload, user_id: int, caller_model: str) -> None:
+        """Pre-moderate shell commands before a scheduled task is created.
+
+        Args:
+            payload: The validated job payload.
+            user_id: Owner of the task (used to select the moderation provider).
+            caller_model: Name of the model that requested the task (for logs).
+
+        Raises:
+            ToolException: If the moderator declines the command.
+        """
+        if not isinstance(payload.action, CommandActionPayload):
+            return
+
+        moderation_provider = await get_moderation_provider(user_id=user_id)
+        logger.log("MODERATOR", f"[{caller_model}] Pre-moderating scheduled command: '{payload.action.command}'")
+        moderator_answer = await moderation_provider.moderate_command(
+            cmd=payload.action.command, model=gpt_settings.moderation_model
+        )
+        if moderator_answer.verdict == "declined":
+            raise ToolException(
+                f"Moderator declined the scheduled command '{payload.action.command}'. "
+                f"Reason: {moderator_answer.reason}"
+            )
+
+    @classmethod
+    def _register_scheduled_job(
+        cls,
+        scheduler: ChibiScheduler,
+        schedule: dict[str, Any],
+        full_job_id: str,
+        job_kwargs: dict[str, Any],
+        replace: bool,
+    ) -> None:
+        """Register the agent job on the scheduler according to the schedule kind.
+
+        Args:
+            scheduler: The scheduler singleton to register the job on.
+            schedule: Schedule specification (``interval`` / ``cron`` / ``once``).
+            full_job_id: Fully qualified job id (``agent:<user_id>:<suffix>``).
+            job_kwargs: Keyword arguments passed to ``run_agent_job`` when the job fires.
+            replace: Whether to overwrite an existing job with the same id.
+
+        Raises:
+            ToolException: If the schedule kind or its parameters are invalid, the
+                scheduler rejects the job, or the job id was concurrently taken.
+        """
         from chibi.services.jobs.agent_task import (
             run_agent_job,
         )  # Circular import avoidance: agent_task imports chibi.services.bot, which imports this tools package.
 
-        job_kwargs = {"job_id": full_job_id, **payload.model_dump(exclude={"job_id"})}
         schedule_kind = schedule.get("kind") if isinstance(schedule, dict) else None
         try:
             if schedule_kind == "interval":
@@ -432,24 +508,6 @@ class ScheduleTaskTool(ChibiTool):
                 f"Job id '{full_job_id}' was taken while creating the task. "
                 "List the existing tasks and retry with replace=true if the user wants to overwrite."
             ) from e
-
-        logger.log(
-            "TOOL",
-            (
-                f"[{caller_model}] Scheduled task '{full_job_id}' ('{payload.title}', "
-                f"action: {payload.action.type}) for user #{user_id}"
-            ),
-        )
-        job_infos = scheduler.list_jobs(prefix=full_job_id)
-        next_run_time = job_infos[0].next_run_time if job_infos else None
-        return {
-            "status": "ok",
-            "job_id": full_job_id,
-            "title": payload.title,
-            "action_type": payload.action.type,
-            "next_run_time": next_run_time.isoformat() if next_run_time else None,
-            "message": f"Scheduled task '{payload.title}' ({full_job_id}) created.",
-        }
 
 
 class ListScheduledTasksTool(ChibiTool):

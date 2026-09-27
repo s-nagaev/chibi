@@ -327,9 +327,8 @@ async def _schedule_agent_job(scheduler: ChibiScheduler, job_id: str, user_id: i
     )
 
 
-async def test_recovery_removes_broken_and_unknown_jobs_keeps_valid(
-    scheduler, local_db: LocalStorage, database_settings
-) -> None:
+@pytest.mark.usefixtures("database_settings")
+async def test_recovery_removes_broken_and_unknown_jobs_keeps_valid(scheduler, local_db: LocalStorage) -> None:
     """Startup recovery drops invalid-payload and foreign-function agent jobs, keeps valid ones."""
     await local_db.get_or_create_user(user_id=1)
     await _schedule_agent_job(
@@ -348,7 +347,8 @@ async def test_recovery_removes_broken_and_unknown_jobs_keeps_valid(
     assert remaining == {"agent:1:valid"}
 
 
-async def test_recovery_removes_jobs_of_deleted_users(scheduler, local_db: LocalStorage, database_settings) -> None:
+@pytest.mark.usefixtures("database_settings")
+async def test_recovery_removes_jobs_of_deleted_users(scheduler, local_db: LocalStorage) -> None:
     """Orphan cleanup removes agent jobs of users missing from the storage."""
     await local_db.get_or_create_user(user_id=1)
     await _schedule_agent_job(
@@ -364,7 +364,8 @@ async def test_recovery_removes_jobs_of_deleted_users(scheduler, local_db: Local
     assert remaining == {"agent:1:alive"}
 
 
-async def test_recovery_tolerates_empty_store(scheduler, database_settings) -> None:
+@pytest.mark.usefixtures("database_settings")
+async def test_recovery_tolerates_empty_store(scheduler) -> None:
     """Recovery on a job store without agent jobs is a no-op."""
     scheduler.add_job(async_foreign_function, trigger="interval", seconds=3600, id="system:legacy")
 

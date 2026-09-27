@@ -41,10 +41,9 @@ def make_bot() -> tuple[ChibiBot, MagicMock]:
 class TestPostInitSchedulerLifecycle:
     """Tests for scheduler startup and retention job registration in post_init."""
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_post_init_starts_scheduler_and_registers_retention_job(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_post_init_starts_scheduler_and_registers_retention_job(self, sqlite_scheduler_settings) -> None:
         """post_init must always start the scheduler and register the retention job."""
         bot, telegram_bot_mock = make_bot()
         application = MagicMock()
@@ -66,10 +65,9 @@ class TestPostInitSchedulerLifecycle:
 
             scheduler.shutdown(wait=False)
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_repeated_post_init_does_not_duplicate_retention_job(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_repeated_post_init_does_not_duplicate_retention_job(self, sqlite_scheduler_settings) -> None:
         """Running post_init twice must leave exactly one retention job (fixed id + replace_existing)."""
         bot, telegram_bot_mock = make_bot()
         application = MagicMock()
@@ -89,10 +87,9 @@ class TestPostInitSchedulerLifecycle:
 
             scheduler.shutdown(wait=False)
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_retention_job_registered_even_without_memory(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_retention_job_registered_even_without_memory(self, sqlite_scheduler_settings) -> None:
         """Registration must not depend on the chroma memory being configured."""
         bot, telegram_bot_mock = make_bot()
         application = MagicMock()
@@ -114,10 +111,9 @@ class TestPostInitSchedulerLifecycle:
 class TestRegisterRetentionCleanupJob:
     """Tests for the retention job registration helper."""
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_registering_twice_yields_single_job(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_registering_twice_yields_single_job(self, sqlite_scheduler_settings) -> None:
         """The helper relies on a fixed id + replace_existing and stays idempotent."""
         with patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings):
             scheduler = ChibiScheduler()
@@ -173,10 +169,9 @@ class TestShutdown:
 class TestShutdownGuard:
     """Tests for the never-started scheduler guard in the shutdown wrapper."""
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_shutdown_wrapper_skips_never_started_scheduler(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_shutdown_wrapper_skips_never_started_scheduler(self, sqlite_scheduler_settings) -> None:
         """A scheduler that never started (failed post_init) must not raise on shutdown."""
         with (
             patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
@@ -189,10 +184,9 @@ class TestShutdownGuard:
 
             mock_task_manager.shutdown.assert_awaited_once()
 
+    @pytest.mark.usefixtures("fresh_scheduler_singleton")
     @pytest.mark.asyncio
-    async def test_shutdown_wrapper_shuts_down_running_scheduler(
-        self, fresh_scheduler_singleton, sqlite_scheduler_settings
-    ) -> None:
+    async def test_shutdown_wrapper_shuts_down_running_scheduler(self, sqlite_scheduler_settings) -> None:
         """A running scheduler is shut down by the wrapper and ends up stopped."""
         with (
             patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
