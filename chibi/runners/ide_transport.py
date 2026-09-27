@@ -9,9 +9,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, TypedDict
 
+from apscheduler.schedulers.base import STATE_STOPPED
 from loguru import logger
 from openai.types import CompletionUsage
 
+from chibi.config import application_settings
 from chibi.config.gpt import gpt_settings
 from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
@@ -20,6 +22,8 @@ from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.cwd_events import cwd_tracker
 from chibi.services.interface import EditorContextProvider, UserInterface
+from chibi.services.jobs import recover_agent_jobs
+from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
@@ -499,6 +503,8 @@ class IDEStdioRunner:
         self._cwd_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
+        self._scheduler: StdioScheduler | None = None
+        self._scheduler_started = False
         self.exit_code = 0
         self._stdout_lock = asyncio.Lock()
 
@@ -1234,6 +1240,41 @@ class IDEStdioRunner:
         else:
             await self._error("unknown_message", f"Unknown message type: {message_type}.", request_id)
 
+    async def _start_scheduler(self) -> None:
+        """Start the stdio scheduler and register its lifecycle jobs.
+
+        Mirrors the Telegram ``post_init`` pattern: start the scheduler, register
+        the semantic memory retention cleanup and recover persisted agent jobs.
+        A no-op when the scheduler tool is disabled — stdio sessions then run
+        without any scheduler at all.
+        """
+        if not application_settings.scheduler_tool_enabled:
+            logger.info("Scheduler tool disabled: stdio scheduler not started.")
+            return
+        scheduler = get_stdio_scheduler()
+        scheduler.start()
+        register_retention_cleanup_job(scheduler)
+        await recover_agent_jobs(scheduler)
+        self._scheduler = scheduler
+        self._scheduler_started = True
+
+    async def _shutdown_scheduler(self) -> None:
+        """Stop the stdio scheduler before the task manager shuts down.
+
+        Idempotent: safe to call when the scheduler was never started (disabled
+        gate or a failed startup) and guards against double shutdown.
+        """
+        scheduler = self._scheduler
+        if scheduler is None or not self._scheduler_started:
+            return
+        self._scheduler_started = False
+        if scheduler.state != STATE_STOPPED:
+            scheduler.shutdown(wait=False)
+            # AsyncIOScheduler defers its state transition through
+            # ``loop.call_soon``; yield one tick so the scheduler is fully
+            # stopped before the task manager is shut down.
+            await asyncio.sleep(0)
+
     async def run(self) -> int:
         """Run until shutdown or stdin EOF, then clean up in-flight work."""
         from chibi.config.logging import use_stderr_logging
@@ -1241,6 +1282,7 @@ class IDEStdioRunner:
         # stdout is the JSONL protocol channel; loguru must never write there.
         use_stderr_logging()
         try:
+            await self._start_scheduler()
             while not self._stopping:
                 line = await self._read_line()
                 if not line:
@@ -1257,5 +1299,6 @@ class IDEStdioRunner:
             self._stopping = True
             subagent_tracker.release(self)
             cwd_tracker.release(self)
+            await self._shutdown_scheduler()
             await task_manager.shutdown()
         return self.exit_code

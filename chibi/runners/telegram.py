@@ -1,7 +1,6 @@
 import io
 import json
 import sys
-from datetime import datetime
 from typing import TypeVar, cast
 
 from apscheduler.schedulers.base import STATE_STOPPED
@@ -47,10 +46,9 @@ from chibi.services.bot import (
 )
 from chibi.services.interface import TelegramInterface
 from chibi.services.jobs import recover_agent_jobs
-from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools.topic import RenameThreadTool
-from chibi.services.scheduler import RETENTION_CLEANUP_JOB_ID, ChibiScheduler
+from chibi.services.scheduler import ChibiScheduler, register_retention_cleanup_job
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
@@ -71,26 +69,10 @@ from chibi.utils.telegram import (
 _T = TypeVar("_T")
 RenameThreadTool.register = True
 
-
-def _register_retention_cleanup_job(scheduler: ChibiScheduler) -> None:
-    """Register the semantic memory retention cleanup job with a stable id.
-
-    The fixed job id combined with ``replace_existing=True`` keeps the persistent
-    job store free of duplicates across Chibi restarts. The job function itself
-    no-ops when semantic memory is not configured, so the registration is safe
-    regardless of memory settings.
-
-    Args:
-        scheduler: Scheduler instance to register the job with.
-    """
-    scheduler.schedule_interval_job(
-        job_id=RETENTION_CLEANUP_JOB_ID,
-        func=perform_retention_cleanup,
-        interval_seconds=application_settings.chroma_history_retention_days * 86400,
-        replace=True,
-        next_run_time=datetime.now(),
-    )
-    logger.info("Semantic memory cleanup: job scheduled")
+# The retention-cleanup registration helper lives in ``chibi.services.scheduler``
+# so that every runner flavor (Telegram, stdio/IDE) shares one implementation.
+# The alias keeps the historical private name importable from this module.
+_register_retention_cleanup_job = register_retention_cleanup_job
 
 
 async def _shutdown_scheduler_and_tasks(application: Application) -> None:

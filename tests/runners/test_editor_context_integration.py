@@ -15,6 +15,7 @@ import os
 import selectors
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from typing import Any
@@ -82,12 +83,19 @@ class EditorContextProcess:
     """Manage a real ``chibi stdio --tui`` process with editor_context capture."""
 
     def __init__(self) -> None:
+        env = dict(os.environ)
+        # The stdio runner starts the SQLite-backed scheduler under
+        # ``local_data_path`` (default ``/app/data``), which does not exist on
+        # the host. Point it at a throwaway directory.
+        self._data_dir = tempfile.TemporaryDirectory()
+        env["LOCAL_DATA_PATH"] = self._data_dir.name
         self.process = subprocess.Popen(
             [sys.executable, "-c", _BOOTSTRAP],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
+            env=env,
         )
         assert self.process.stdout is not None
         self._selector = selectors.DefaultSelector()

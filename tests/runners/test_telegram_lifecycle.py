@@ -19,7 +19,12 @@ from chibi.utils.app import SingletonMeta
 @pytest.fixture()
 def sqlite_scheduler_settings(tmp_path):
     """Return scheduler settings patched onto the scheduler module."""
-    return SimpleNamespace(redis=None, local_data_path=str(tmp_path), scheduler_misfire_grace_time=3600)
+    return SimpleNamespace(
+        redis=None,
+        local_data_path=str(tmp_path),
+        scheduler_misfire_grace_time=3600,
+        chroma_history_retention_days=7,
+    )
 
 
 @pytest.fixture()
@@ -98,7 +103,7 @@ class TestPostInitSchedulerLifecycle:
         with (
             patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
             patch("chibi.runners.telegram.Bot", return_value=telegram_bot_mock),
-            patch("chibi.runners.telegram.perform_retention_cleanup", new_callable=MagicMock),
+            patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
         ):
             await bot.post_init(application)
 
