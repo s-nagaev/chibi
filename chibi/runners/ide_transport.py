@@ -1209,6 +1209,7 @@ class IDEStdioRunner:
                 await handle_user_prompt(interface=interface)
             content = "\n".join(responses)
             if interface.error_code is not None:
+                self._drop_deltas(request_id)
                 await self._error(interface.error_code, interface.error_message or "Request failed.", request_id)
                 return
             result: dict[str, Any] = {"type": "result", "request_id": request_id, "content": content}

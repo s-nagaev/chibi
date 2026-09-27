@@ -24,7 +24,6 @@ STREAM_CHUNKS = ["Hello ", "brave ", "new ", "streaming ", "world"]
 CADENCE_CHUNKS = ["a", "b", "c", "d", "e"]
 
 _gate: asyncio.Event | None = None
-_midpoint: asyncio.Event | None = None
 
 
 async def fake_streaming_prompt(interface: Any) -> None:
@@ -54,6 +53,13 @@ async def fake_single_chunk_prompt(interface: Any) -> None:
     """Emit one pending chunk and finish before the flush interval."""
     await interface.send_delta("only chunk")
     await interface.send_message("answer")
+
+
+async def fake_errored_prompt(interface: Any) -> None:
+    """Buffer one pending chunk, then fail via the in-request error path."""
+    await interface.send_delta("pending chunk")
+    interface.error_code = "request_failed"
+    interface.error_message = "Request failed."
 
 
 class OutputRecorder:
@@ -206,7 +212,7 @@ async def wait_for_frame(output: list[dict[str, Any]], request_id: str, frame_ty
 RUNNERS: list[IDEStdioRunner] = []
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True, scope="function")
 async def delta_state_cleanup() -> Any:
     """Cancel leftover flush timers and settle runner state after each test."""
     yield
@@ -371,6 +377,47 @@ class TestErrorAndCancellation:
             assert deltas(recorder.frames) == []
         finally:
             _gate.set()
+
+    @pytest.mark.asyncio
+    async def test_errored_request_drops_pending_deltas_before_error(self) -> None:
+        """A contended error write cannot be followed by a timer-driven delta.
+
+        Mirrors the production race: the ``interface.error_code`` path writes
+        the terminal ``error`` frame while a delta flush timer is pending. A
+        contended stdout lock suspends the error write; without dropping the
+        delta state first, the timer fires during the suspension and queues
+        its ``delta`` write behind the ``error`` write.
+        """
+        instance, recorder = runner()
+        RUNNERS.append(instance)
+        original_write = instance._write
+
+        async def contended_write(message: dict[str, Any]) -> None:
+            """Hold the stdout lock across the interval for error frames.
+
+            Args:
+                message: Emitted JSON-compatible protocol frame.
+            """
+            if message.get("type") == "error":
+                async with instance._stdout_lock:
+                    await asyncio.sleep(DELTA_FLUSH_INTERVAL + 0.1)
+                    await instance._write_line(message)
+                return
+            await original_write(message)
+
+        with (
+            patch("chibi.runners.ide_transport.handle_user_prompt", fake_errored_prompt),
+            patch.object(instance, "_write", contended_write),
+        ):
+            await instance._handle_message(initialize({"streaming": True}))
+            await instance._handle_message(request("r1", 42))
+            await wait_for_frame(recorder.frames, "r1", "error")
+            await asyncio.sleep(DELTA_FLUSH_INTERVAL + 0.1)
+
+        frame_types = [frame["type"] for frame in recorder.frames]
+        assert "error" in frame_types
+        assert deltas(recorder.frames) == []
+        assert frame_types.index("error") == len(frame_types) - 1
 
     @pytest.mark.asyncio
     async def test_dropped_state_blocks_late_emission(self) -> None:
