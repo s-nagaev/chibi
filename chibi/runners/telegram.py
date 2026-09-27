@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 from typing import TypeVar, cast
 
+from apscheduler.schedulers.base import STATE_STOPPED
 from loguru import logger
 from telegram import (
     Bot,
@@ -82,16 +83,12 @@ def _register_retention_cleanup_job(scheduler: ChibiScheduler) -> None:
     Args:
         scheduler: Scheduler instance to register the job with.
     """
-    scheduler.add_job(
-        perform_retention_cleanup,
-        trigger="interval",
-        days=application_settings.chroma_history_retention_days,
-        id=RETENTION_CLEANUP_JOB_ID,
-        replace_existing=True,
+    scheduler.schedule_interval_job(
+        job_id=RETENTION_CLEANUP_JOB_ID,
+        func=perform_retention_cleanup,
+        interval_seconds=application_settings.chroma_history_retention_days * 86400,
+        replace=True,
         next_run_time=datetime.now(),
-        misfire_grace_time=application_settings.scheduler_misfire_grace_time,
-        coalesce=True,
-        max_instances=1,
     )
     logger.info("Semantic memory cleanup: job scheduled")
 
@@ -99,11 +96,16 @@ def _register_retention_cleanup_job(scheduler: ChibiScheduler) -> None:
 async def _shutdown_scheduler_and_tasks(application: Application) -> None:
     """Shut down the scheduler first, then the background task manager.
 
+    The scheduler shutdown is skipped when it was never started (e.g. a failed
+    ``post_init``), otherwise APScheduler would raise ``SchedulerNotRunningError``
+    and mask the original startup error.
+
     Args:
         application: The PTB application being shut down (unused).
     """
     scheduler = ChibiScheduler()
-    scheduler.shutdown(wait=False)
+    if scheduler.state != STATE_STOPPED:
+        scheduler.shutdown(wait=False)
     await task_manager.shutdown()
 
 

@@ -134,6 +134,15 @@ class ChibiScheduler(metaclass=SingletonMeta):
         """
         self._scheduler.shutdown(wait=wait)
 
+    @property
+    def state(self) -> int:
+        """Return the current state of the underlying APScheduler instance.
+
+        Use :data:`apscheduler.schedulers.base.STATE_STOPPED` (and the other
+        ``STATE_*`` constants) to interpret the value.
+        """
+        return self._scheduler.state
+
     def add_job(
         self,
         func: Callable[..., Coroutine[Any, Any, None]],
@@ -177,6 +186,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
         kwargs: dict[str, Any] | None = None,
         replace: bool = False,
         misfire_grace_time: int | None = None,
+        next_run_time: datetime | None = None,
     ) -> str:
         """Schedule a recurring job on a fixed interval.
 
@@ -191,6 +201,9 @@ class ChibiScheduler(metaclass=SingletonMeta):
             replace: Whether to replace an existing job with the same id.
             misfire_grace_time: Grace period in seconds for catching up missed
                 runs. None (default) uses ``application_settings.scheduler_misfire_grace_time``.
+            next_run_time: Time of the first run. None (default) lets the
+                trigger compute it (i.e. one full interval from now). Naive
+                datetimes are interpreted in the scheduler's local timezone.
 
         Returns:
             The scheduled job identifier.
@@ -200,6 +213,11 @@ class ChibiScheduler(metaclass=SingletonMeta):
         """
         _validate_job_id(job_id)
         grace = application_settings.scheduler_misfire_grace_time if misfire_grace_time is None else misfire_grace_time
+        options: dict[str, Any] = {}
+        if next_run_time is not None:
+            # Passing next_run_time=None to APScheduler's add_job would pause the job;
+            # the default (`undefined`) must be used instead so the trigger computes it.
+            options["next_run_time"] = next_run_time
         self._scheduler.add_job(
             func,
             trigger="interval",
@@ -210,6 +228,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             misfire_grace_time=grace,
             coalesce=True,
             max_instances=1,
+            **options,
         )
         logger.info("Scheduled interval job {} every {}s (misfire_grace_time={})", job_id, interval_seconds, grace)
         return job_id

@@ -156,6 +156,10 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
     Args:
         payload: Validated payload with a `command` action.
         action: The narrowed command action from the payload.
+
+    Raises:
+        OSError: If the subprocess cannot be created (propagates to the
+            dispatcher's anti-flooded failure notification).
     """
     if not application_settings.scheduler_agent_commands_enabled:
         logger.bind(user_id=payload.user_id).warning(

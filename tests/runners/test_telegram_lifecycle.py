@@ -1,9 +1,11 @@
 """Tests for the Telegram runner scheduler lifecycle (post_init / post_shutdown)."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from apscheduler.schedulers.base import STATE_STOPPED
 
 from chibi.runners.telegram import (
     ChibiBot,
@@ -166,3 +168,42 @@ class TestShutdown:
 
         registered = builder.post_shutdown.call_args.args[0]
         assert registered is _shutdown_scheduler_and_tasks
+
+
+class TestShutdownGuard:
+    """Tests for the never-started scheduler guard in the shutdown wrapper."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_wrapper_skips_never_started_scheduler(
+        self, fresh_scheduler_singleton, sqlite_scheduler_settings
+    ) -> None:
+        """A scheduler that never started (failed post_init) must not raise on shutdown."""
+        with (
+            patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
+            patch("chibi.runners.telegram.task_manager") as mock_task_manager,
+        ):
+            mock_task_manager.shutdown = AsyncMock()
+            ChibiScheduler()
+
+            await _shutdown_scheduler_and_tasks(MagicMock())
+
+            mock_task_manager.shutdown.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_wrapper_shuts_down_running_scheduler(
+        self, fresh_scheduler_singleton, sqlite_scheduler_settings
+    ) -> None:
+        """A running scheduler is shut down by the wrapper and ends up stopped."""
+        with (
+            patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
+            patch("chibi.runners.telegram.task_manager") as mock_task_manager,
+        ):
+            mock_task_manager.shutdown = AsyncMock()
+            scheduler = ChibiScheduler()
+            scheduler.start()
+
+            await _shutdown_scheduler_and_tasks(MagicMock())
+
+            mock_task_manager.shutdown.assert_awaited_once()
+            await asyncio.sleep(0)
+            assert scheduler.state == STATE_STOPPED

@@ -1,11 +1,13 @@
 """Tests for the ChibiScheduler core."""
 
+import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from apscheduler.jobstores.base import ConflictingIdError, JobLookupError
+from apscheduler.schedulers.base import STATE_RUNNING, STATE_STOPPED
 
 from chibi.exceptions import SchedulerJobError
 from chibi.services.jobs.archive import perform_retention_cleanup
@@ -131,6 +133,47 @@ class TestScheduleIntervalJob:
     def test_invalid_job_id_rejected(self, scheduler):
         with pytest.raises(SchedulerJobError):
             scheduler.schedule_interval_job(job_id="no-namespace", func=dummy_job, interval_seconds=60)
+
+    @pytest.mark.asyncio
+    async def test_omitted_next_run_time_leaves_job_runnable(self, scheduler):
+        """Without an explicit next_run_time the job must not end up paused."""
+        scheduler.start()
+        try:
+            scheduler.schedule_interval_job(job_id="system:tick", func=dummy_job, interval_seconds=60)
+            job = scheduler.get_jobs()[0]
+            assert job.next_run_time is not None
+        finally:
+            scheduler.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_explicit_next_run_time_is_honored(self, scheduler):
+        """An explicit next_run_time overrides the trigger-computed first run."""
+        run_at = datetime.now().astimezone()
+        scheduler.start()
+        try:
+            scheduler.schedule_interval_job(
+                job_id="system:tick", func=dummy_job, interval_seconds=3600, next_run_time=run_at
+            )
+            job = scheduler.get_jobs()[0]
+            assert job.next_run_time is not None
+            assert abs((job.next_run_time - run_at).total_seconds()) < 1
+        finally:
+            scheduler.shutdown(wait=False)
+
+
+class TestStateProperty:
+    """Tests for the ChibiScheduler.state property."""
+
+    @pytest.mark.asyncio
+    async def test_state_reflects_scheduler_lifecycle(self, scheduler):
+        assert scheduler.state == STATE_STOPPED
+        scheduler.start()
+        try:
+            assert scheduler.state == STATE_RUNNING
+        finally:
+            scheduler.shutdown(wait=False)
+            await asyncio.sleep(0)
+        assert scheduler.state == STATE_STOPPED
 
 
 class TestScheduleCronJob:

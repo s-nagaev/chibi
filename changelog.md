@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-09-27
+
+### Added
+- **Internal scheduler v1** — the agent can now schedule recurring and one-time tasks that survive restarts:
+  - The scheduler core is rebuilt as a singleton `ChibiScheduler` with a typed scheduling API (`schedule_interval_job` / `schedule_cron_job` / `schedule_once_job`, plus job listing and removal), a job-id namespace contract (`system:*` for built-in jobs, `agent:<user_id>:*` for agent-created ones) and a persistent job store: Redis when configured, local SQLite otherwise.
+  - Misfire policy: bounded catch-up with `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600` seconds), `coalesce=true`, `max_instances=1`. One-time reminders keep an unlimited grace period, so a reminder always fires after a wake-up no matter how late the process is.
+  - Six new settings: `SCHEDULER_TOOL_ENABLED` (default `true`), `SCHEDULER_NOTIFY_ENABLED` (default `false`), `SCHEDULER_AGENT_COMMANDS_ENABLED` (default `false`), `SCHEDULER_COMMAND_TIMEOUT_MAX` (default `900`), `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600`) and `SCHEDULER_FAILURE_NOTIFY` (default `true`).
+  - Three new agent tools: `schedule_task`, `list_scheduled_tasks` and `delete_scheduled_task`. Every task fixes its delivery context (chat/thread) at creation time and runs one of three action types: `self` (wake the agent in the fixed thread — the answer is delivered to the user, or nothing is sent when the agent replies with the internal silence marker), `notify` (static message, zero LLM usage) and `command` (shell command, pre-moderated at creation and re-moderated before every run, killed by process group on timeout). The tools are available in Telegram sessions only; `notify` and `command` are disabled by default and must be enabled explicitly.
+  - Startup recovery: agent jobs with broken payloads or unexpected job functions, and jobs of users that no longer exist, are removed at startup; a corrupt job store never prevents Chibi from starting.
+  - Failed scheduled jobs notify the user with a per-job anti-flood cooldown (at most one notification per job per hour), governed by `SCHEDULER_FAILURE_NOTIFY`.
+
+### Changed
+- The scheduler now always starts together with the bot (previously only when semantic memory was configured) and is shut down by a single combined `post_shutdown` handler.
+- The semantic memory retention cleanup job is registered with a fixed job id, so restarting Chibi no longer leaves duplicate cleanup jobs in the persistent job store.
+
+### Fixed
+- `REDIS_PASSWORD` is now correctly applied to the scheduler's Redis job store connection when the `REDIS` URL has no embedded password (a password embedded in the URL takes priority when both are set).
+
+### Known limitations (v1)
+- The scheduler runs in-process: while the machine is asleep, interval jobs do not tick. On wake-up, missed interval/cron runs fire at most once (coalesced) within the grace window; one-time reminders always fire.
+- Scheduler tools are registered for Telegram sessions only; IDE/stdio sessions have no access to them.
+- There is no per-user limit on the number of scheduled jobs in v1.
+- Cron schedules accept 5-field crontab expressions only (`minute hour day-of-month month day-of-week`); expressions with a seconds field are rejected.
+- Scheduled deliveries use a dedicated Telegram `Bot` instance built from the token only; custom `TELEGRAM_BASE_URL` / `TELEGRAM_BASE_FILE_URL` (e.g. a local Bot API server) are ignored on that path.
+
 ## [1.16.1] - 2026-09-22
 
 ### Fixed
