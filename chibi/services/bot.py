@@ -73,35 +73,79 @@ async def handle_tool_response(tool_response: ToolResponseSchema, interface: Use
     )
 
 
-# async def handle_scheduled_event(
-#     message: str,
-#     event_id: UUID,
-#     interface: UserInterface,
-# ) -> None:
-#     chat_response: ChatResponseSchema = await send_scheduled_message_to_llm(
-#         user_id=interface.user_id, event_id=event_id, message=message, interface=interface
-#     )
-#     usage_message = get_usage_msg(chat_response.usage)
-#
-#     if "<chibi>ack</chibi>" in chat_response.answer.lower():
-#         logger.info(
-#             f"[{interface.user_data}-{interface.chat_data}] LLM silently received scheduled message "
-#             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
-#         )
-#         return None
-#
-#     if application_settings.log_prompt_data:
-#         answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
-#         logged_answer = f"Answer: {answer_to_log}"
-#     else:
-#         logged_answer = ""
-#
-#     logger.info(
-#         f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer in "
-#         f"the {interface.chat_data}. {logged_answer} {usage_message}"
-#     )
-#     await interface.send_message(message=chat_response.answer)
-#     return None
+def _is_ack_answer(answer: str) -> bool:
+    """Check whether the agent's answer is a pure ACK marker (silence convention).
+
+    Args:
+        answer: The agent's answer text.
+
+    Returns:
+        True if the answer consists of the ACK marker only, False otherwise.
+    """
+    return "<chibi>ack</chibi>" in answer.lower() and len(answer) <= 27
+
+
+@handle_gpt_exceptions
+async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: UserInterface) -> None:
+    """Wake the agent with a scheduler trigger and deliver or suppress its answer.
+
+    The trigger goes through the same LLM chain as user turns (with the
+    third-type "scheduled_trigger" prompt and the "not a user" guardrail).
+    If the agent answers with a pure ACK marker, nothing is delivered to the
+    user; otherwise the answer is sent to the chat/thread fixed in the job
+    context via the provided interface.
+
+    Args:
+        trigger_text: Trigger text from the fired scheduler job payload.
+        job_id: Identifier of the scheduler job that fired.
+        interface: Interface bound to the job's chat/thread context (e.g.
+            SchedulerInterface).
+
+    Raises:
+        GptException: If the LLM chain fails with a provider error (handled
+            by the decorator).
+    """
+    time_start = time.time()
+    logger.bind(user_id=interface.user_id).info(
+        f"{interface.user_data} scheduler trigger fired (job '{job_id}') in the {interface.chat_data}"
+        f"{': ' + trigger_text if application_settings.log_prompt_data else ''}"
+    )
+
+    async with indicator(coro_func=interface.send_action_typing):
+        chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
+            storage_id=interface.storage_id,
+            interface=interface,
+            scheduler_trigger_text=trigger_text,
+            scheduler_job_id=job_id,
+        )
+    usage_message = get_usage_msg(chat_response.usage)
+
+    if application_settings.log_prompt_data:
+        answer_to_log = chat_response.answer.replace("\r", " ").replace("\n", " ")
+        logged_answer = f"Answer: {answer_to_log}"
+    else:
+        logged_answer = ""
+
+    if _is_ack_answer(chat_response.answer):
+        logger.bind(user_id=interface.user_id).info(
+            f"[{interface.user_data}-{interface.chat_data}] LLM silently acknowledged scheduler trigger "
+            f"'{job_id}' (answer: {chat_response.answer}). No user notification required. {usage_message}"
+        )
+        return None
+
+    completion_time = time.time() - time_start
+    logger.bind(user_id=interface.user_id).info(
+        f"{interface.user_data} got {chat_response.provider} ({chat_response.model}) answer for the scheduler "
+        f"trigger '{job_id}' in the {interface.chat_data}. {logged_answer} {usage_message} "
+        f"[{'%.2f' % completion_time}s]"
+    )
+    await interface.send_message(message=chat_response.answer)
+    history_is_summarized = await check_history_and_summarize(
+        storage_id=interface.storage_id, thread_id=interface.thread_id
+    )
+    if history_is_summarized:
+        logger.bind(user_id=interface.user_id).info(f"{interface.user_data}: history successfully summarized.")
+    return None
 
 
 @handle_gpt_exceptions
