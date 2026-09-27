@@ -14,7 +14,9 @@ from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.scheduler import (
     RETENTION_CLEANUP_JOB_ID,
     ChibiScheduler,
+    StdioScheduler,
     _validate_job_id,
+    get_stdio_scheduler,
 )
 from chibi.utils.app import SingletonMeta
 
@@ -361,3 +363,93 @@ class TestDocumentedLimitations:
         assert ChibiScheduler.__doc__ is not None
         assert "blocking" in ChibiScheduler.__doc__
         assert "SQLAlchemy" in ChibiScheduler.__doc__
+
+
+class TestStdioJobStore:
+    """Tests for the stdio-specific job store (design decision D2)."""
+
+    @staticmethod
+    def _pop_singletons() -> None:
+        SingletonMeta._instances.pop(ChibiScheduler, None)
+        SingletonMeta._instances.pop(StdioScheduler, None)
+
+    def _stdio_settings(self, tmp_path, redis: str | None = None) -> SimpleNamespace:
+        return SimpleNamespace(
+            redis=redis,
+            redis_password="envpass",
+            local_data_path=str(tmp_path),
+            scheduler_misfire_grace_time=3600,
+        )
+
+    def test_uses_dedicated_sqlite_path_even_with_redis(self, tmp_path):
+        """Redis settings must be ignored: stdio always gets scheduler_stdio.db."""
+        self._pop_singletons()
+        with (
+            patch(
+                "chibi.services.scheduler.application_settings",
+                self._stdio_settings(tmp_path, redis="redis://redis-host:6380/2"),
+            ),
+            patch("chibi.services.scheduler.RedisJobStore") as mock_redis_store,
+        ):
+            scheduler = StdioScheduler()
+            job_store = scheduler._scheduler._jobstores["default"]
+            assert str(job_store.engine.url).endswith("scheduler_stdio.db")
+            assert mock_redis_store.call_args is None
+        self._pop_singletons()
+
+    @pytest.mark.asyncio
+    async def test_stdio_db_file_created_and_telegram_db_untouched(self, tmp_path):
+        """Starting the stdio scheduler must materialize only scheduler_stdio.db."""
+        self._pop_singletons()
+        try:
+            with patch(
+                "chibi.services.scheduler.application_settings",
+                self._stdio_settings(tmp_path, redis="redis://localhost:6379/0"),
+            ):
+                scheduler = StdioScheduler()
+                scheduler.start()
+                try:
+                    assert (tmp_path / "scheduler_stdio.db").exists()
+                    assert not (tmp_path / "scheduler.db").exists()
+                finally:
+                    scheduler.shutdown(wait=False)
+        finally:
+            self._pop_singletons()
+
+    def test_stdio_scheduler_is_own_singleton(self, tmp_path):
+        """StdioScheduler and ChibiScheduler must be independent singletons."""
+        self._pop_singletons()
+        with patch("chibi.services.scheduler.application_settings", self._stdio_settings(tmp_path)):
+            stdio = StdioScheduler()
+            assert StdioScheduler() is stdio
+            assert get_stdio_scheduler() is stdio
+            assert ChibiScheduler() is not stdio
+        self._pop_singletons()
+
+    @pytest.mark.asyncio
+    async def test_stdio_and_telegram_schedulers_do_not_share_jobs(self, tmp_path):
+        """Each scheduler must see only the jobs of its own job store."""
+        self._pop_singletons()
+        try:
+            with patch("chibi.services.scheduler.application_settings", self._stdio_settings(tmp_path)):
+                telegram = ChibiScheduler()
+                stdio = StdioScheduler()
+                telegram.schedule_interval_job(job_id="system:tick", func=dummy_job, interval_seconds=60)
+                stdio.schedule_interval_job(job_id="agent:123:stdio-only", func=dummy_job, interval_seconds=60)
+
+                assert [job.id for job in telegram.get_jobs()] == ["system:tick"]
+                assert [job.id for job in stdio.get_jobs()] == ["agent:123:stdio-only"]
+
+                telegram_url = str(telegram._scheduler._jobstores["default"].engine.url)
+                stdio_url = str(stdio._scheduler._jobstores["default"].engine.url)
+                assert telegram_url.endswith("scheduler.db")
+                assert stdio_url.endswith("scheduler_stdio.db")
+                assert telegram_url != stdio_url
+        finally:
+            self._pop_singletons()
+
+    def test_documented_isolation(self):
+        """The intentional isolation must be documented on the class."""
+        assert StdioScheduler.__doc__ is not None
+        assert "isolated" in StdioScheduler.__doc__
+        assert "scheduler_stdio.db" in StdioScheduler.__doc__

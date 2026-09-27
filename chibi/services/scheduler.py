@@ -29,7 +29,26 @@ if TYPE_CHECKING:
 SYSTEM_JOB_PREFIX = "system:"
 AGENT_JOB_PREFIX = "agent:"
 RETENTION_CLEANUP_JOB_ID = "system:retention_cleanup"
+TELEGRAM_SCHEDULER_DB_FILENAME = "scheduler.db"
+STDIO_SCHEDULER_DB_FILENAME = "scheduler_stdio.db"
 _JOB_ID_SUFFIX_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _build_sqlite_job_store(db_filename: str, label: str = "Scheduler") -> SQLAlchemyJobStore:
+    """Build a SQLite-backed SQLAlchemy job store under the local data path.
+
+    Args:
+        db_filename: Name of the SQLite database file inside
+            ``application_settings.local_data_path``.
+        label: Prefix used in the log message to identify the scheduler flavor.
+
+    Returns:
+        A persistent SQLAlchemy job store rooted at the given database file.
+    """
+    db_path = Path(application_settings.local_data_path) / db_filename
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("{}: using SQLite job store ({})", label, db_path)
+    return SQLAlchemyJobStore(url=f"sqlite:///{db_path}")
 
 
 def _validate_job_id(job_id: str) -> None:
@@ -123,10 +142,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             )
             logger.info("Scheduler: using Redis job store ({}:{})", parsed.hostname, parsed.port)
         else:
-            db_path = Path(application_settings.local_data_path) / "scheduler.db"
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            job_store = SQLAlchemyJobStore(url=f"sqlite:///{db_path}")
-            logger.info("Scheduler: using SQLite job store ({})", db_path)
+            job_store = _build_sqlite_job_store(TELEGRAM_SCHEDULER_DB_FILENAME)
 
         self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
 
@@ -401,3 +417,44 @@ class ChibiScheduler(metaclass=SingletonMeta):
             The list of scheduled APScheduler jobs.
         """
         return self._scheduler.get_jobs()
+
+
+class StdioScheduler(ChibiScheduler):
+    """Scheduler dedicated to the stdio runner (IDE/TUI sessions).
+
+    Intentionally isolated from the Telegram scheduler: the stdio process gets
+    its own SQLite job store at ``{local_data_path}/scheduler_stdio.db`` and
+    never reads or writes the Telegram scheduler's store — stdio jobs are
+    invisible to the Telegram process and vice versa. This eliminates
+    cross-process double-fire of shared job ids and keeps each runner's job
+    lifecycle self-contained.
+
+    Redis settings are deliberately ignored here: the stdio job store is ALWAYS
+    SQLite so that both scheduler flavors stay addressable as plain local
+    files and cannot collide on a shared Redis namespace.
+
+    Like ``ChibiScheduler``, this class is a per-class singleton (``SingletonMeta``
+    keys instances by concrete class), so ``ChibiScheduler()`` (Telegram) and
+    ``StdioScheduler()`` (stdio) coexist as two distinct instances with two
+    distinct job stores.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the scheduler with its dedicated stdio job store."""
+        if hasattr(self, "_scheduler"):
+            return
+        job_store = _build_sqlite_job_store(STDIO_SCHEDULER_DB_FILENAME, label="Scheduler (stdio)")
+        self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
+
+
+def get_stdio_scheduler() -> StdioScheduler:
+    """Return the process-wide stdio scheduler singleton.
+
+    Convenience accessor for the stdio runner. The returned scheduler uses the
+    dedicated ``scheduler_stdio.db`` SQLite job store (see :class:`StdioScheduler`)
+    and shares no state with the Telegram scheduler.
+
+    Returns:
+        The stdio scheduler singleton instance.
+    """
+    return StdioScheduler()
