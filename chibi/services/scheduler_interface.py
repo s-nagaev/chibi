@@ -172,7 +172,11 @@ class SchedulerInterface(UserInterface):
         No-op: there is no incoming message to take a caption from.
 
         Args:
-            caption: Ignored.
+            caption: The caption text to associate with the next media message.
+
+        Note:
+            No-op in scheduler context: there is no incoming message to take
+            a caption from.
         """
         return None
 
@@ -192,7 +196,7 @@ class SchedulerInterface(UserInterface):
         """Sends a reaction to the user's message. No-op in scheduler context.
 
         Args:
-            reaction: Ignored.
+            reaction: The reaction to send.
         """
         logger.debug(f"SchedulerInterface: reaction '{reaction}' skipped — no user message to react to.")
         return None
@@ -209,8 +213,10 @@ class SchedulerInterface(UserInterface):
 
         Args:
             message: The text content to send.
-            reply: Ignored — there is no incoming message to reply to.
-            **kwargs: Additional arguments (ignored).
+            reply: Whether to reply to the user's message; has no effect in
+                scheduler context because there is no incoming message to
+                reply to.
+            **kwargs: Additional arguments for the message sending function.
         """
         bot = await _get_scheduler_bot()
         message_thread_id = self._thread_id or None
@@ -253,15 +259,15 @@ class SchedulerInterface(UserInterface):
         """Sends an audio file to the user.
 
         Args:
-            audio: Ignored.
-            reply: Ignored.
-            title: Ignored.
-            caption: Ignored.
-            performer: Ignored.
-            duration: Ignored.
-            thumbnail: Ignored.
-            filename: Ignored.
-            **kwargs: Ignored.
+            audio: The audio data or path to send.
+            reply: Whether to reply to the user's message.
+            title: The title of the audio.
+            caption: The caption for the audio.
+            performer: The performer of the audio.
+            duration: The duration of the audio in seconds.
+            thumbnail: The thumbnail data for the audio.
+            filename: The filename for the audio.
+            **kwargs: Additional arguments for the audio sending function.
 
         Raises:
             NotImplementedError: Media delivery is not supported in scheduler
@@ -283,14 +289,14 @@ class SchedulerInterface(UserInterface):
         """Sends a video file to the user.
 
         Args:
-            video: Ignored.
-            reply: Ignored.
-            title: Ignored.
-            caption: Ignored.
-            duration: Ignored.
-            thumbnail: Ignored.
-            filename: Ignored.
-            **kwargs: Ignored.
+            video: The video data or path to send.
+            reply: Whether to reply to the user's message.
+            title: The title of the video.
+            caption: The caption for the video.
+            duration: The duration of the video in seconds.
+            thumbnail: The thumbnail data for the video.
+            filename: The filename for the video.
+            **kwargs: Additional arguments for the video sending function.
 
         Raises:
             NotImplementedError: Media delivery is not supported in scheduler
@@ -302,9 +308,9 @@ class SchedulerInterface(UserInterface):
         """Sends a list of images to the user.
 
         Args:
-            images: Ignored.
-            reply: Ignored.
-            **kwargs: Ignored.
+            images: A list of image data or paths to send.
+            reply: Whether to reply to the user's message.
+            **kwargs: Additional arguments for the image sending function.
 
         Raises:
             NotImplementedError: Media delivery is not supported in scheduler
@@ -323,11 +329,11 @@ class SchedulerInterface(UserInterface):
         """Sends a document file to the user.
 
         Args:
-            document: Ignored.
-            filename: Ignored.
-            caption: Ignored.
-            thumbnail: Ignored.
-            **kwargs: Ignored.
+            document: The document data to send.
+            filename: The filename for the document.
+            caption: The caption for the document.
+            thumbnail: The thumbnail data for the document.
+            **kwargs: Additional arguments for the document sending function.
 
         Raises:
             NotImplementedError: Media delivery is not supported in scheduler
