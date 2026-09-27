@@ -30,6 +30,7 @@ VALID_PAYLOAD = {
 def dispatcher_settings():
     """Dispatcher-related application settings with all gates enabled."""
     settings = SimpleNamespace(
+        client="telegram",
         scheduler_notify_enabled=True,
         scheduler_agent_commands_enabled=True,
         scheduler_command_timeout_max=900,

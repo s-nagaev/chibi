@@ -25,10 +25,11 @@ from chibi.schemas.scheduler import (
     SelfActionPayload,
 )
 from chibi.services.bot import handle_scheduler_trigger
+from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.cmd import _decode_output
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler
-from chibi.services.scheduler_interface import SchedulerInterface
+from chibi.services.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
 from chibi.services.user import get_moderation_provider
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
@@ -41,8 +42,14 @@ FAILURE_NOTIFY_COOLDOWN_SECONDS = 3600
 _failure_notify_timestamps: dict[str, float] = {}
 
 
-def _build_interface(payload: AgentJobPayload) -> SchedulerInterface:
-    """Build a SchedulerInterface bound to the job's chat context.
+def _build_interface(payload: AgentJobPayload) -> UserInterface:
+    """Build the runner-appropriate delivery interface for a fired job.
+
+    The switch is keyed on ``application_settings.client``: the Telegram
+    process keeps delivering through the shared Bot of
+    :class:`SchedulerInterface`, while stdio/IDE clients deliver through
+    :class:`StdioSchedulerInterface`, which hands messages to the session-level
+    emitter registered by the stdio runner at handshake.
 
     Args:
         payload: Validated payload of the fired job.
@@ -50,7 +57,14 @@ def _build_interface(payload: AgentJobPayload) -> SchedulerInterface:
     Returns:
         Interface delivering messages to the chat/thread fixed in the payload.
     """
-    return SchedulerInterface(
+    if application_settings.client == "telegram":
+        return SchedulerInterface(
+            user_id=payload.user_id,
+            storage_id=payload.storage_id,
+            chat_id=payload.chat_id,
+            thread_id=payload.thread_id,
+        )
+    return StdioSchedulerInterface(
         user_id=payload.user_id,
         storage_id=payload.storage_id,
         chat_id=payload.chat_id,

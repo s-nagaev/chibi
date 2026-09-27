@@ -24,6 +24,7 @@ from chibi.services.cwd_events import cwd_tracker
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
+from chibi.services.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
@@ -500,6 +501,7 @@ class IDEStdioRunner:
         self._subagent_events_enabled = False
         self._cwd_updates_enabled = False
         self._cwd_emitted_threads: set[int] = set()
+        self._session_threads: set[int] = set()
         self._cwd_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
@@ -582,6 +584,40 @@ class IDEStdioRunner:
             await self._write(frame)
         except Exception:
             logger.exception("Failed to deliver a background message for thread {}", thread_id)
+
+    async def _emit_scheduler_message(self, thread_id: int, content: str) -> None:
+        """Deliver one scheduled-job message as an unsolicited message frame.
+
+        Session-level delivery sink registered at handshake for
+        :class:`chibi.services.scheduler_interface.StdioSchedulerInterface`:
+        scheduler jobs fire outside any request context, so the emitter is
+        session-level rather than request-scoped. The frame reuses the regular
+        background-message machinery (same frame shape, same stdout write
+        lock), so scheduler emissions serialize with request frames on the
+        wire. Delivery is dropped when the client did not declare the
+        ``background_messages`` capability, and per the stale-thread policy it
+        is skipped when the payload thread has not been seen in this session
+        (threads are client-minted per session, so a thread id surviving from
+        a previous session's persisted job store is stale). The job itself
+        still ran — only the answer delivery is skipped.
+
+        Args:
+            thread_id: Payload thread the job is bound to.
+            content: Text to deliver (agent answer, notify text, or failure note).
+        """
+        if not self._background_messages_enabled:
+            logger.debug(
+                "Dropping scheduled job message for thread {}: client did not declare background_messages",
+                thread_id,
+            )
+            return
+        if thread_id not in self._session_threads:
+            logger.info(
+                "Skipping scheduled job delivery for thread {}: the thread does not exist in the current session.",
+                thread_id,
+            )
+            return
+        await self._emit_background_message(thread_id, content)
 
     def _spawn_agent_event(
         self,
@@ -996,6 +1032,9 @@ class IDEStdioRunner:
         request_id = message["request_id"]
         thread_id = message["thread_id"]
         prompt = message["prompt"].strip()
+        # The thread has been seen in this session: scheduler jobs bound to it
+        # are deliverable (stale-thread policy in _emit_scheduler_message).
+        self._session_threads.add(thread_id)
         responses: list[str] = []
         background_emit = self._emit_background_message if self._background_messages_enabled else None
         interface = IDEInterface(thread_id, prompt, message, responses.append, background_emit=background_emit)
@@ -1175,6 +1214,11 @@ class IDEStdioRunner:
                 cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
                 if self._cwd_updates_enabled:
                     logger.debug("client declared the cwd_updates capability")
+                # Session-level scheduler delivery sink: registered at handshake
+                # so fired scheduler jobs (self/notify/failure) can reach this
+                # client as message frames outside any request context. The
+                # emitter itself enforces the background_messages capability.
+                set_stdio_delivery_emitter(self._emit_scheduler_message)
                 logger.info(
                     "client_handshake name={} version={} protocol_version={}",
                     self.client_name or "<unknown>",
@@ -1299,6 +1343,7 @@ class IDEStdioRunner:
             self._stopping = True
             subagent_tracker.release(self)
             cwd_tracker.release(self)
+            clear_stdio_delivery_emitter()
             await self._shutdown_scheduler()
             await task_manager.shutdown()
         return self.exit_code
