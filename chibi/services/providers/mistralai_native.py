@@ -329,7 +329,9 @@ class MistralAI(RestApiFriendlyProvider):
         else:
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages[1:]
 
-        response: ChatCompletionResponse = await self._generate_content(model=model, messages=messages)
+        response: ChatCompletionResponse = await self._generate_content(
+            model=model, messages=messages, interface=interface
+        )
         usage = get_usage_from_mistral_response(response_message=response)
         if track_prompt_size:
             UsageCacheStore().store(

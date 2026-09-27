@@ -426,6 +426,7 @@ class Gemini(RestApiFriendlyProvider):
             contents=cast(ContentListUnionDict, messages),
             config=generation_config,
             retry_server_errors=True,
+            interface=interface,
         )
         answer = self._get_text(response)
         usage = get_usage_from_google_response(response_message=response)

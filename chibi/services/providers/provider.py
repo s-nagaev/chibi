@@ -709,17 +709,36 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             The aggregated final ChatCompletion.
 
         Raises:
-            OpenAIError: When the API request fails mid-stream after live
-                deltas were already emitted (the retry latch forbids a
+            BadRequestError: When the API rejects the streaming request after
+                live deltas were already emitted (the retry latch forbids a
                 transparent re-request at that point).
+            NotFoundError: When the API reports an unknown model after live
+                deltas were already emitted.
         """
         stream_kwargs: dict[str, Any] = {**completion_kwargs, "stream": True}
         if self.stream_include_usage:
             stream_kwargs["stream_options"] = {"include_usage": True}
-        stream = cast(
-            AsyncStream[ChatCompletionChunk],
-            await self.client.chat.completions.create(**stream_kwargs),
-        )
+        try:
+            stream = cast(
+                AsyncStream[ChatCompletionChunk],
+                await self.client.chat.completions.create(**stream_kwargs),
+            )
+        except (BadRequestError, NotFoundError) as stream_error:
+            # Some OpenAI-compatible gateways reject the streaming request
+            # (e.g. unknown ``stream_options``) with a 400/404. The fallback to
+            # a non-streaming request is handled here — inside the helper —
+            # because the class-level ``__getattribute__`` error-conversion
+            # wrapper turns raw SDK errors into ServiceResponseError before
+            # they can reach any outer handler.
+            if delta_latched(interface):
+                raise
+            if isinstance(stream_error, BadRequestError) and stream_error.code == "context_length_exceeded":
+                raise
+            logger.warning(
+                f"{self.name}/{completion_kwargs.get('model', 'unknown')} rejected the streaming request "
+                f"({stream_error}). Falling back to a non-streaming request."
+            )
+            return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
         accumulator = _OpenAIChatStreamAccumulator()
         try:
             async for chunk in stream:
@@ -770,16 +789,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         }
         response: ChatCompletion
         if delta_streaming_allowed(interface):
-            try:
-                response = await self._stream_chat_completion(completion_kwargs=completion_kwargs, interface=interface)
-            except (BadRequestError, NotFoundError) as stream_error:
-                if delta_latched(interface):
-                    raise
-                logger.warning(
-                    f"{self.name}/{model} rejected streaming request ({stream_error}). "
-                    "Falling back to a non-streaming request."
-                )
-                response = await self.client.chat.completions.create(**completion_kwargs)
+            # The streaming helper handles its own pre-first-delta fallback to a
+            # non-streaming request: raw SDK errors (BadRequestError/NotFoundError)
+            # are converted into ServiceResponseError by the ``__getattribute__``
+            # wrapper on the way out of any method call, so they can only be
+            # handled inside the helper itself.
+            response = await self._stream_chat_completion(completion_kwargs=completion_kwargs, interface=interface)
         else:
             response = await self.client.chat.completions.create(**completion_kwargs)
         choices: list[Choice] = response.choices
@@ -1317,6 +1332,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             model=model,
             system_prompt=prepared_system_prompt,
             messages=messages,
+            interface=interface,
         )
         usage = get_usage_from_anthropic_response(response_message=response_message)
         if track_prompt_size:

@@ -193,21 +193,37 @@ class OpenAI(OpenAIFriendlyProvider):
             The final aggregated Response object.
 
         Raises:
-            BadRequestError: When the API rejects the streaming request
-                after live deltas were already emitted.
+            BadRequestError: When the API rejects the streaming request after
+                live deltas were already emitted (the retry latch forbids a
+                transparent re-request at that point).
             NotFoundError: When the API reports an unknown model after live
                 deltas were already emitted.
         """
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
-        async with self.get_client().responses.stream(**stream_kwargs) as stream:
-            async for event in stream:
-                if isinstance(event, ResponseTextDeltaEvent):
-                    if not tool_call_signal and event.delta:
-                        await emit_delta(interface=interface, text=event.delta)
-                elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
-                    tool_call_signal = True
-            return await stream.get_final_response()
+        try:
+            async with self.get_client().responses.stream(**stream_kwargs) as stream:
+                async for event in stream:
+                    if isinstance(event, ResponseTextDeltaEvent):
+                        if not tool_call_signal and event.delta:
+                            await emit_delta(interface=interface, text=event.delta)
+                    elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
+                        tool_call_signal = True
+                return await stream.get_final_response()
+        except (BadRequestError, NotFoundError) as stream_error:
+            # Some gateways reject the streaming Responses request with a
+            # 400/404. The fallback to a non-streaming request is handled
+            # here — inside the helper — because the class-level
+            # ``__getattribute__`` error-conversion wrapper turns raw SDK
+            # errors into ServiceResponseError before they can reach any
+            # outer handler.
+            if delta_latched(interface):
+                raise
+            logger.warning(
+                f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
+                f"({stream_error}). Falling back to a non-streaming request."
+            )
+            return await self.get_client().responses.create(**request_kwargs)
 
     async def _get_response_completion_response(
         self,
@@ -276,19 +292,12 @@ class OpenAI(OpenAIFriendlyProvider):
             request_kwargs["reasoning"] = {"effort": reasoning_effort}
 
         if delta_streaming_allowed(interface):
-            try:
-                response = await self._stream_response_completion(
-                    request_kwargs=request_kwargs,
-                    interface=interface,
-                )
-            except (BadRequestError, NotFoundError) as stream_error:
-                if delta_latched(interface):
-                    raise
-                logger.warning(
-                    f"Responses API streaming rejected for {model} ({stream_error}). "
-                    "Falling back to a non-streaming request."
-                )
-                response = await self.get_client().responses.create(**request_kwargs)
+            # The streaming helper handles its own pre-first-delta fallback to a
+            # non-streaming request: raw SDK errors (BadRequestError/NotFoundError)
+            # are converted into ServiceResponseError by the ``__getattribute__``
+            # wrapper on the way out of any method call, so they can only be
+            # handled inside the helper itself.
+            response = await self._stream_response_completion(request_kwargs=request_kwargs, interface=interface)
         else:
             response = await self.get_client().responses.create(**request_kwargs)
 
