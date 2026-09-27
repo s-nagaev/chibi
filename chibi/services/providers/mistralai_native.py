@@ -2,7 +2,8 @@ import base64
 import json
 import random
 from asyncio import sleep
-from typing import Union
+from typing import Union, cast
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -15,12 +16,15 @@ from mistralai import (
 )
 from mistralai.models import (
     AssistantMessage,
+    ChatCompletionChoice,
     DocumentURLChunk,
     FunctionCall,
     SDKError,
     SystemMessage,
+    Tool,
     ToolCall,
     ToolMessage,
+    UsageInfo,
     UserMessage,
 )
 from openai.types.chat import ChatCompletionToolParam
@@ -33,6 +37,7 @@ from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsA
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
+from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -120,18 +125,39 @@ class MistralAI(RestApiFriendlyProvider):
         self,
         model: str,
         messages: list[MistralMessageParam],
+        interface: UserInterface | None = None,
     ) -> ChatCompletionResponse:
-        """Generate content with retry logic."""
+        """Generate Mistral content with empty-response retries.
+
+        When live delta streaming is allowed for the request, the completion
+        is requested via ``chat.stream_async`` and body-text deltas are
+        emitted per chunk; the retry latch on the interface makes every
+        attempt after the first emitted delta non-streaming.
+
+        Args:
+            model: The Mistral model identifier.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+
+        Returns:
+            The final aggregated Mistral response.
+
+        Raises:
+            NoResponseError: When every attempt returns an empty response.
+        """
         for attempt in range(gpt_settings.retries):
-            response = await self.client.chat.complete_async(
-                model=model,
-                messages=messages,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                tools=self.tools_list,  # type: ignore[arg-type]
-                tool_choice="auto",
-                http_headers={"Cache-Control": "max-age=86400"},
-            )
+            if delta_streaming_allowed(interface):
+                response = await self._stream_generate_content(model=model, messages=messages, interface=interface)
+            else:
+                response = await self.client.chat.complete_async(
+                    model=model,
+                    messages=messages,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    tools=self.tools_list,  # type: ignore[arg-type]
+                    tool_choice="auto",
+                    http_headers={"Cache-Control": "max-age=86400"},
+                )
 
             if response.choices and len(response.choices) > 0:
                 return response
@@ -145,6 +171,103 @@ class MistralAI(RestApiFriendlyProvider):
             )
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
+
+    async def _stream_generate_content(
+        self,
+        model: str,
+        messages: list[MistralMessageParam],
+        interface: UserInterface | None,
+    ) -> ChatCompletionResponse:
+        """Stream a Mistral completion and aggregate it into a final response.
+
+        Emits one live delta per non-empty content chunk via the interface
+        until the earliest tool-call signal in the stream (the full
+        ``tool_calls`` typically arrive only on the final chunk). The chunks
+        are rebuilt into a ChatCompletionResponse equivalent to the
+        non-streaming response (fragmented tool-call arguments, parallel
+        tool calls and usage included). The stream is always closed
+        explicitly, also on cancellation.
+
+        Args:
+            model: The Mistral model identifier.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+
+        Returns:
+            The aggregated final ChatCompletionResponse.
+        """
+        content_parts: list[str] = []
+        tool_call_slots: dict[int, dict[str, str]] = {}
+        tool_call_signal = False
+        finish_reason: str | None = None
+        usage: UsageInfo | None = None
+        completion_id = ""
+        response_model = ""
+        created = 0
+        async with await self.client.chat.stream_async(
+            model=model,
+            messages=messages,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            tools=cast(list[Tool], self.tools_list),
+            tool_choice="auto",
+            http_headers={"Cache-Control": "max-age=86400"},
+        ) as stream:
+            async for event in stream:
+                chunk = event.data
+                completion_id = chunk.id or completion_id
+                response_model = chunk.model or response_model
+                created = chunk.created or created
+                if chunk.usage:
+                    usage = chunk.usage
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
+                if delta.content:
+                    content_parts.append(delta.content)
+                    if not tool_call_signal:
+                        await emit_delta(interface=interface, text=delta.content)
+                for tool_call_delta in delta.tool_calls or []:
+                    tool_call_signal = True
+                    index = tool_call_delta.index or 0
+                    slot = tool_call_slots.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    if tool_call_delta.id:
+                        slot["id"] = tool_call_delta.id
+                    if tool_call_delta.function:
+                        if tool_call_delta.function.name:
+                            slot["name"] = tool_call_delta.function.name
+                        arguments = tool_call_delta.function.arguments
+                        if isinstance(arguments, str):
+                            slot["arguments"] += arguments
+                        elif arguments:
+                            slot["arguments"] = json.dumps(arguments)
+        tool_calls = [
+            ToolCall(
+                id=slot["id"] or str(uuid4()),
+                function=FunctionCall(
+                    name=slot["name"],
+                    arguments=slot["arguments"] or "{}",
+                ),
+            )
+            for _, slot in sorted(tool_call_slots.items())
+        ]
+        message = AssistantMessage(content="".join(content_parts) or None, tool_calls=tool_calls or None)
+        choice = ChatCompletionChoice(
+            index=0,
+            message=message,
+            finish_reason=finish_reason or "stop",
+        )
+        return ChatCompletionResponse(
+            id=completion_id or "streamed-completion",
+            object="chat.completion",
+            model=response_model,
+            usage=usage,
+            created=created or 0,
+            choices=[choice],
+        )
 
     @retry(
         stop=stop_after_attempt(4),
