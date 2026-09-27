@@ -66,16 +66,29 @@ class AgentJobPayload(BaseModel):
     """Full payload of an agent-created scheduler job stored in the job kwargs."""
 
     job_id: str = Field(description="Fully qualified job identifier, e.g. `agent:134604548:daily-report`.")
-    user_id: int = Field(description="Telegram user id of the job owner (namespace owner `agent:{user_id}:*`).")
+    user_id: int = Field(
+        description=(
+            "Integer id of the job owner (namespace owner `agent:{user_id}:*`). Positive for Telegram users; "
+            "IDE/stdio sessions use the negative reserved `IDE_STORAGE_ID`."
+        )
+    )
     thread_id: int = Field(
-        description="Telegram message thread the job lives in (0 for non-threaded chats). Mandatory for all jobs."
+        description=(
+            "Message thread the job lives in (0 for non-threaded chats). Mandatory for all jobs. "
+            "For IDE/stdio sessions this is the client-minted session thread id."
+        )
     )
     storage_id: int = Field(
         description=(
             "Storage key of the conversation the job belongs to (user_id for private chats, "
-            "chat_id for groups/forum topics)."
+            "chat_id for groups/forum topics). IDE/stdio sessions use the negative reserved `IDE_STORAGE_ID`."
         )
     )
-    chat_id: int = Field(description="Telegram chat the job delivers its output to.")
+    chat_id: int = Field(
+        description=(
+            "Chat the job delivers its output to. Positive for Telegram chats; "
+            "IDE/stdio sessions use the negative reserved `IDE_STORAGE_ID`."
+        )
+    )
     title: str = Field(description="Human-readable job name shown to the user.")
     action: AgentJobActionPayload = Field(description="Action performed on every job run.")

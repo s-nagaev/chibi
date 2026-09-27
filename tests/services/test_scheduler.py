@@ -57,6 +57,8 @@ class TestJobIdValidation:
             "system:a-b_c1",
             "agent:134604548:daily-report",
             "agent:1:x",
+            "agent:-1:x",
+            "agent:-10000000000000000:daily-report",
         ],
     )
     def test_valid_job_ids(self, job_id):
@@ -74,14 +76,22 @@ class TestJobIdValidation:
             "agent:123",
             "agent:123:",
             "agent:abc:x",
+            "agent:1.5:x",
+            "agent:+1:x",
+            "agent:007:x",
+            "agent: 1:x",
             "agent:1:2:x",
-            "agent:-1:x",
             "",
         ],
     )
     def test_invalid_job_ids(self, job_id):
         with pytest.raises(SchedulerJobError):
             _validate_job_id(job_id)
+
+    def test_ide_storage_id_job_id_is_valid(self):
+        from chibi.constants import IDE_STORAGE_ID
+
+        _validate_job_id(f"agent:{IDE_STORAGE_ID}:daily-report")
 
     def test_retention_constant_is_valid(self):
         assert RETENTION_CLEANUP_JOB_ID == "system:retention_cleanup"

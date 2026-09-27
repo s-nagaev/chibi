@@ -36,8 +36,10 @@ def _validate_job_id(job_id: str) -> None:
     """Validate a fully qualified job identifier against the namespace contract.
 
     Allowed formats are ``system:<suffix>`` for built-in Chibi jobs and
-    ``agent:<user_id>:<suffix>`` for agent-created jobs, where ``<user_id>`` is
-    a numeric Telegram user id and ``<suffix>`` matches
+    ``agent:<signed_int>:<suffix>`` for agent-created jobs, where
+    ``<signed_int>`` is the runner's integer identity in canonical decimal form
+    (a positive Telegram user id, or a negative reserved id such as
+    ``IDE_STORAGE_ID`` for IDE/stdio sessions) and ``<suffix>`` matches
     ``^[a-z0-9][a-z0-9_-]{0,63}$``.
 
     Args:
@@ -50,8 +52,20 @@ def _validate_job_id(job_id: str) -> None:
         suffix = job_id.removeprefix(SYSTEM_JOB_PREFIX)
     elif job_id.startswith(AGENT_JOB_PREFIX):
         parts = job_id.split(":", 2)
-        if len(parts) != 3 or not parts[1].isdigit():
-            raise SchedulerJobError(f"Invalid agent job_id {job_id!r}: expected format 'agent:<user_id>:<suffix>'")
+        if len(parts) != 3:
+            raise SchedulerJobError(f"Invalid agent job_id {job_id!r}: expected format 'agent:<signed_int>:<suffix>'")
+        try:
+            _user_id = int(parts[1])
+        except ValueError as exc:
+            raise SchedulerJobError(
+                f"Invalid agent job_id {job_id!r}: user id segment {parts[1]!r} is not a signed integer "
+                "(expected format 'agent:<signed_int>:<suffix>')"
+            ) from exc
+        if str(_user_id) != parts[1]:
+            raise SchedulerJobError(
+                f"Invalid agent job_id {job_id!r}: user id segment {parts[1]!r} is not in canonical signed "
+                "integer form (expected format 'agent:<signed_int>:<suffix>')"
+            )
         suffix = parts[2]
     else:
         raise SchedulerJobError(
@@ -91,7 +105,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
 
     All new jobs must use the namespace contract enforced by the
     ``schedule_*_job`` methods: ``system:<suffix>`` for built-in jobs and
-    ``agent:<user_id>:<suffix>`` for agent-created jobs.
+    ``agent:<signed_int>:<suffix>`` for agent-created jobs.
     """
 
     def __init__(self) -> None:
