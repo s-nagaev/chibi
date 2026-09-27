@@ -33,6 +33,12 @@ class ApplicationSettings(BaseSettings):
         heartbeat_retry_calls: Number of retries for heartbeat.
         heartbeat_proxy: Proxy URL for heartbeat.
         client: Client frontend served by this process (telegram, tui, vscode, pycharm, neovim).
+        scheduler_tool_enabled: Whether the agent scheduling tool is enabled.
+        scheduler_notify_enabled: Whether the `notify` scheduled action type is allowed.
+        scheduler_agent_commands_enabled: Whether shell commands are allowed in scheduled jobs.
+        scheduler_command_timeout_max: Upper limit for a scheduled shell command timeout in seconds.
+        scheduler_misfire_grace_time: Default grace period in seconds for catching up missed job runs.
+        scheduler_failure_notify: Whether the user is notified when a scheduled job fails.
     """
 
     model_config = SettingsConfigDict(
@@ -88,6 +94,14 @@ class ApplicationSettings(BaseSettings):
 
     # Other settings
     log_prompt_data: bool = Field(default=False)
+
+    # Scheduler settings
+    scheduler_tool_enabled: bool = Field(default=True)
+    scheduler_notify_enabled: bool = Field(default=False)
+    scheduler_agent_commands_enabled: bool = Field(default=False)
+    scheduler_command_timeout_max: int = Field(default=900)
+    scheduler_misfire_grace_time: int = Field(default=3600)
+    scheduler_failure_notify: bool = Field(default=True)
 
     # Agent settings
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory

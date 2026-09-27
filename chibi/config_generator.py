@@ -503,6 +503,31 @@ SHOW_LLM_THOUGHTS=false
 
 # Enable public mode (default: false)
 PUBLIC_MODE=false
+
+
+# ============================================================================
+# 18. SCHEDULER
+# ============================================================================
+
+# Enable the AI agent scheduling tool (creating and managing scheduled jobs)
+SCHEDULER_TOOL_ENABLED=true
+
+# Allow scheduled jobs to send static notify messages to you without waking
+# up the agent (default: false)
+SCHEDULER_NOTIFY_ENABLED=false
+
+# Allow shell commands to be executed by scheduled jobs (default: false)
+SCHEDULER_AGENT_COMMANDS_ENABLED=false
+
+# Upper limit for a per-job shell command timeout in seconds (default: 900)
+SCHEDULER_COMMAND_TIMEOUT_MAX=900
+
+# Default misfire grace time in seconds: a missed run is executed once if it is
+# at most this many seconds late (default: 3600)
+SCHEDULER_MISFIRE_GRACE_TIME=3600
+
+# Notify you when a scheduled job fails (default: true)
+SCHEDULER_FAILURE_NOTIFY=true
 """
 
 

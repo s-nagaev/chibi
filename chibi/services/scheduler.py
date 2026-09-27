@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.base import STATE_STOPPED
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
@@ -28,7 +29,6 @@ if TYPE_CHECKING:
 SYSTEM_JOB_PREFIX = "system:"
 AGENT_JOB_PREFIX = "agent:"
 RETENTION_CLEANUP_JOB_ID = "system:retention_cleanup"
-DEFAULT_MISFIRE_GRACE_TIME = 3600
 _JOB_ID_SUFFIX_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -117,7 +117,13 @@ class ChibiScheduler(metaclass=SingletonMeta):
         self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
 
     def start(self) -> None:
-        """Start the scheduler."""
+        """Start the scheduler.
+
+        No-op when the scheduler is already running, so repeated calls (e.g.
+        from a repeated ``post_init``) are safe.
+        """
+        if self._scheduler.state != STATE_STOPPED:
+            return
         self._scheduler.start()
 
     def shutdown(self, wait: bool = True) -> None:
@@ -184,7 +190,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             kwargs: Keyword arguments passed to the job function.
             replace: Whether to replace an existing job with the same id.
             misfire_grace_time: Grace period in seconds for catching up missed
-                runs. None (default) uses ``DEFAULT_MISFIRE_GRACE_TIME``.
+                runs. None (default) uses ``application_settings.scheduler_misfire_grace_time``.
 
         Returns:
             The scheduled job identifier.
@@ -193,7 +199,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             SchedulerJobError: If the job_id violates the namespace contract.
         """
         _validate_job_id(job_id)
-        grace = DEFAULT_MISFIRE_GRACE_TIME if misfire_grace_time is None else misfire_grace_time
+        grace = application_settings.scheduler_misfire_grace_time if misfire_grace_time is None else misfire_grace_time
         self._scheduler.add_job(
             func,
             trigger="interval",
@@ -231,7 +237,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             kwargs: Keyword arguments passed to the job function.
             replace: Whether to replace an existing job with the same id.
             misfire_grace_time: Grace period in seconds for catching up missed
-                runs. None (default) uses ``DEFAULT_MISFIRE_GRACE_TIME``.
+                runs. None (default) uses ``application_settings.scheduler_misfire_grace_time``.
 
         Returns:
             The scheduled job identifier.
@@ -251,7 +257,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
             trigger = CronTrigger.from_crontab(cron)
         except ValueError as error:
             raise SchedulerJobError(f"Invalid cron expression {cron!r}: {error}") from error
-        grace = DEFAULT_MISFIRE_GRACE_TIME if misfire_grace_time is None else misfire_grace_time
+        grace = application_settings.scheduler_misfire_grace_time if misfire_grace_time is None else misfire_grace_time
         self._scheduler.add_job(
             func,
             trigger=trigger,

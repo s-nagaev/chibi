@@ -64,3 +64,40 @@ class TestGenerateDefaultConfig:
                             config_generator.generate_default_config()
 
         assert dirs["config_path"].read_text(encoding="utf-8") == "existing"
+
+
+class TestSchedulerConfigTemplate:
+    """Tests for the scheduler section of the generated config template."""
+
+    @pytest.fixture
+    def temp_dirs(self, tmp_path: Path) -> dict[str, Path]:
+        """Return patched paths for config generator."""
+        return {
+            "chibi_bot_dir": tmp_path / "chibi-bot",
+            "data_dir": tmp_path / "chibi-bot" / "data",
+            "skills_dir": tmp_path / "chibi-bot" / "skills",
+            "home_dir": tmp_path / "chibi-bot" / "home",
+            "config_path": tmp_path / "chibi-bot" / "settings",
+        }
+
+    @patch("chibi.config_generator.print")
+    def test_contains_scheduler_settings(self, _mock_print, temp_dirs):
+        """Generated config template must document all scheduler settings with defaults."""
+        dirs = temp_dirs
+        with patch.object(config_generator, "CHIBI_BOT_DIR", dirs["chibi_bot_dir"]):
+            with patch.object(config_generator, "DATA_DIR", dirs["data_dir"]):
+                with patch.object(config_generator, "SKILLS_DIR", dirs["skills_dir"]):
+                    with patch.object(config_generator, "HOME_DIR", dirs["home_dir"]):
+                        with patch.object(config_generator, "CONFIG_PATH", dirs["config_path"]):
+                            config_generator.generate_default_config()
+
+        content = dirs["config_path"].read_text(encoding="utf-8")
+        for line in (
+            "SCHEDULER_TOOL_ENABLED=true",
+            "SCHEDULER_NOTIFY_ENABLED=false",
+            "SCHEDULER_AGENT_COMMANDS_ENABLED=false",
+            "SCHEDULER_COMMAND_TIMEOUT_MAX=900",
+            "SCHEDULER_MISFIRE_GRACE_TIME=3600",
+            "SCHEDULER_FAILURE_NOTIFY=true",
+        ):
+            assert line in content

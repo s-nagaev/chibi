@@ -8,8 +8,8 @@ import pytest
 from apscheduler.jobstores.base import ConflictingIdError, JobLookupError
 
 from chibi.exceptions import SchedulerJobError
+from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.scheduler import (
-    DEFAULT_MISFIRE_GRACE_TIME,
     RETENTION_CLEANUP_JOB_ID,
     ChibiScheduler,
     _validate_job_id,
@@ -24,7 +24,7 @@ async def dummy_job(**kwargs) -> None:
 @pytest.fixture()
 def scheduler(tmp_path):
     """Provide a fresh ChibiScheduler backed by a temporary SQLite job store."""
-    settings = SimpleNamespace(redis=None, local_data_path=str(tmp_path))
+    settings = SimpleNamespace(redis=None, local_data_path=str(tmp_path), scheduler_misfire_grace_time=3600)
     SingletonMeta._instances.pop(ChibiScheduler, None)
     with patch("chibi.services.scheduler.application_settings", settings):
         yield ChibiScheduler()
@@ -94,9 +94,19 @@ class TestScheduleIntervalJob:
         assert job_id == "system:tick"
         job = scheduler.get_jobs()[0]
         assert job.id == "system:tick"
-        assert job.misfire_grace_time == DEFAULT_MISFIRE_GRACE_TIME
+        assert job.misfire_grace_time == 3600
         assert job.coalesce is True
         assert job.max_instances == 1
+
+    def test_default_grace_time_comes_from_config(self, tmp_path):
+        """The interval misfire grace default must follow the configured setting."""
+        settings = SimpleNamespace(redis=None, local_data_path=str(tmp_path), scheduler_misfire_grace_time=60)
+        SingletonMeta._instances.pop(ChibiScheduler, None)
+        with patch("chibi.services.scheduler.application_settings", settings):
+            scheduler = ChibiScheduler()
+            scheduler.schedule_interval_job(job_id="system:tick", func=dummy_job, interval_seconds=60)
+            assert scheduler.get_jobs()[0].misfire_grace_time == 60
+        SingletonMeta._instances.pop(ChibiScheduler, None)
 
     def test_misfire_grace_time_override(self, scheduler):
         scheduler.schedule_interval_job(
@@ -130,7 +140,7 @@ class TestScheduleCronJob:
         job_id = scheduler.schedule_cron_job(job_id="agent:123:morning", func=dummy_job, cron="0 9 * * *")
         assert job_id == "agent:123:morning"
         job = scheduler.get_jobs()[0]
-        assert job.misfire_grace_time == DEFAULT_MISFIRE_GRACE_TIME
+        assert job.misfire_grace_time == 3600
         assert job.coalesce is True
         assert job.max_instances == 1
 
@@ -234,6 +244,31 @@ class TestLegacyAddJob:
             next_run_time=datetime.now(),
         )
         assert [job.id for job in scheduler.get_jobs()] == [legacy_id]
+
+
+class TestRetentionJobRegistration:
+    """Tests for the retention cleanup job registration contract (design §1.3)."""
+
+    @pytest.mark.asyncio
+    async def test_registration_with_fixed_id_is_idempotent(self, scheduler):
+        """Re-registering the retention job must never accumulate duplicates."""
+        scheduler.start()
+        try:
+            for _ in range(2):
+                scheduler.add_job(
+                    perform_retention_cleanup,
+                    trigger="interval",
+                    days=180,
+                    id=RETENTION_CLEANUP_JOB_ID,
+                    replace_existing=True,
+                    next_run_time=datetime.now(),
+                    misfire_grace_time=3600,
+                    coalesce=True,
+                    max_instances=1,
+                )
+            assert [job.id for job in scheduler.get_jobs()] == [RETENTION_CLEANUP_JOB_ID]
+        finally:
+            scheduler.shutdown(wait=False)
 
 
 class TestRedisPasswordMerge:

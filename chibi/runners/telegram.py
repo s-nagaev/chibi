@@ -30,7 +30,6 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
-from chibi.memory.chroma import memory
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -49,7 +48,7 @@ from chibi.services.interface import TelegramInterface
 from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools.topic import RenameThreadTool
-from chibi.services.scheduler import ChibiScheduler
+from chibi.services.scheduler import RETENTION_CLEANUP_JOB_ID, ChibiScheduler
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
@@ -69,6 +68,43 @@ from chibi.utils.telegram import (
 
 _T = TypeVar("_T")
 RenameThreadTool.register = True
+
+
+def _register_retention_cleanup_job(scheduler: ChibiScheduler) -> None:
+    """Register the semantic memory retention cleanup job with a stable id.
+
+    The fixed job id combined with ``replace_existing=True`` keeps the persistent
+    job store free of duplicates across Chibi restarts. The job function itself
+    no-ops when semantic memory is not configured, so the registration is safe
+    regardless of memory settings.
+
+    Args:
+        scheduler: Scheduler instance to register the job with.
+    """
+    scheduler.add_job(
+        perform_retention_cleanup,
+        trigger="interval",
+        days=application_settings.chroma_history_retention_days,
+        id=RETENTION_CLEANUP_JOB_ID,
+        replace_existing=True,
+        next_run_time=datetime.now(),
+        misfire_grace_time=application_settings.scheduler_misfire_grace_time,
+        coalesce=True,
+        max_instances=1,
+    )
+    logger.info("Semantic memory cleanup: job scheduled")
+
+
+async def _shutdown_scheduler_and_tasks(application: Application) -> None:
+    """Shut down the scheduler first, then the background task manager.
+
+    Args:
+        application: The PTB application being shut down (unused).
+    """
+    scheduler = ChibiScheduler()
+    scheduler.shutdown(wait=False)
+    await task_manager.shutdown()
+
 
 base_commands = [
     BotCommand(command="help", description="Show this help message"),
@@ -753,19 +789,9 @@ class ChibiBot:
 
         await application.bot.set_my_commands(bot_commands)
 
-        if memory:
-            # Register retention cleanup job if memory is configured
-            scheduler = ChibiScheduler()
-            scheduler.add_job(
-                perform_retention_cleanup,
-                trigger="interval",
-                days=application_settings.chroma_history_retention_days,
-                id=f"retention_cleanup-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                replace_existing=False,
-                next_run_time=datetime.now(),
-            )
-            scheduler.start()
-            logger.info("Semantic memory cleanup: job scheduled")
+        scheduler = ChibiScheduler()
+        scheduler.start()
+        _register_retention_cleanup_job(scheduler)
 
     def run(self) -> None:
         builder = (
@@ -774,7 +800,7 @@ class ChibiBot:
             .base_file_url(telegram_settings.telegram_base_file_url)
             .token(self.telegram_token)
             .post_init(self.post_init)
-            .post_shutdown(task_manager.shutdown)
+            .post_shutdown(_shutdown_scheduler_and_tasks)
         )
 
         if telegram_settings.proxy:
