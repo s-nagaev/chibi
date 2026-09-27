@@ -36,6 +36,19 @@ async def fake_reset(interface: Any) -> None:
     await interface.send_message("Done!")
 
 
+STREAMING_HEAD = "Streaming chunk. " * 36
+STREAMING_TAIL = " Final tail."
+
+
+async def fake_streaming_session_prompt(interface: Any) -> None:
+    """Emit deterministic live chunks before the canonical answer."""
+    interface.response_model = "gpt-example"
+    interface.response_provider = "openai"
+    await interface.send_delta(STREAMING_HEAD)
+    await interface.send_delta(STREAMING_TAIL)
+    await interface.send_message("This function `foo` returns the integer `42`.")
+
+
 async def fake_imagine(prompt: str, interface: Any) -> None:
     """Return a deterministic image reference."""
     await interface.send_images(["fake_image_url.png"])
@@ -117,6 +130,25 @@ async def wait_for(output: list[dict[str, Any]], request_id: str, frame_type: st
     raise AssertionError(f"Missing {frame_type} for {request_id}: {output}")
 
 
+def terminal_index(output: list[dict[str, Any]], request_id: str) -> int:
+    """Return the index of the terminal frame of a request.
+
+    Args:
+        output: Captured frame list.
+        request_id: Request whose terminal frame is located.
+
+    Returns:
+        The index of the result or error frame.
+
+    Raises:
+        AssertionError: When no terminal frame exists for the request.
+    """
+    for index, frame in enumerate(output):
+        if frame.get("request_id") == request_id and frame.get("type") in ("result", "error"):
+            return index
+    raise AssertionError(f"No terminal frame for {request_id}: {output}")
+
+
 def request(request_id: str, thread_id: int, prompt: str = "hello") -> dict[str, Any]:
     """Build a valid request."""
     return {
@@ -146,6 +178,37 @@ async def test_canonical_session_output() -> None:
             await instance._handle_message(message)
         await wait_for(output, "01HXY9K1ABCDEFGH", "result")
         assert output == fixture("valid_session_output.jsonl")
+    finally:
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_canonical_streaming_session_output() -> None:
+    """Replay the canonical streaming session and compare every frame."""
+    active: list[Any] = [
+        patch("chibi.runners.ide_transport.handle_user_prompt", fake_streaming_session_prompt),
+        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
+        patch("chibi.runners.ide_transport.handle_image_generation", fake_imagine),
+        patch("chibi.runners.ide_transport.get_models_available", fake_models),
+        patch("chibi.runners.ide_transport.set_active_model", fake_select),
+        patch("chibi.runners.ide_transport.get_info", fake_info),
+    ]
+    for item in active:
+        item.start()
+    try:
+        instance, output = runner()
+        for message in fixture("valid_streaming_session_input.jsonl"):
+            await instance._handle_message(message)
+        await wait_for(output, "01HXY9K4STREAM01", "result")
+        await instance.drain_deltas()
+        assert output == fixture("valid_streaming_session_output.jsonl")
+        request_id = "01HXY9K4STREAM01"
+        delta_frames = [frame for frame in output if frame.get("type") == "delta"]
+        assert [frame["text"] for frame in delta_frames] == [STREAMING_HEAD, STREAMING_TAIL]
+        assert all(frame["request_id"] == request_id and frame["thread_id"] == 3 for frame in delta_frames)
+        terminal = terminal_index(output, request_id)
+        assert output.index(delta_frames[0]) < terminal and output.index(delta_frames[1]) < terminal
     finally:
         for item in active:
             item.stop()

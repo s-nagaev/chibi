@@ -43,10 +43,12 @@ from openai.types.chat.chat_completion import Choice
 from openai.types.completion_usage import CompletionUsage
 from openai.types.responses import ResponseTextDeltaEvent
 
+from chibi.config import gpt_settings
 from chibi.exceptions import ServiceResponseError
 from chibi.models import Message, User
 from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.gemini_native import Gemini
+from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import (
@@ -761,3 +763,69 @@ class TestLatch:
         assert delta_streaming_allowed(None) is False
         assert delta_latched(None) is False
         await emit_delta(None, "chunk")
+
+
+class TestAnthropicFamilyStreamFallback:
+    """D7: the Anthropic family (incl. the MiniMax Anthropic-compatible gateway)
+    falls back to the non-streaming call after the latch, never re-emitting."""
+
+    @staticmethod
+    def _final(text: str) -> AnthropicMessage:
+        return AnthropicMessage(
+            id="msg-1",
+            content=[TextBlock(text=text, type="text")],
+            model="claude-sonnet-5",
+            role="assistant",
+            stop_reason="end_turn",
+            stop_sequence=None,
+            type="message",
+            usage=AnthropicUsage(input_tokens=1, output_tokens=2),
+        )
+
+    @classmethod
+    async def _run_generate(cls, provider: Any, fake_client: Any, interface: Any) -> AnthropicMessage:
+        with patch.object(type(provider), "client", new_callable=PropertyMock, return_value=fake_client):
+            with patch.object(gpt_settings, "retries", 2):
+                with patch("chibi.services.providers.provider.sleep", new=AsyncMock()):
+                    return await provider._generate_content(
+                        model="claude-sonnet-5",
+                        system_prompt="sp",
+                        messages=[],
+                        interface=interface,
+                    )
+
+    async def test_empty_stream_after_delta_retries_non_streaming(self) -> None:
+        """An empty streamed answer latches the request; the retry is non-streaming."""
+        text_event = RawContentBlockDeltaEvent(
+            type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="Hel")
+        )
+        fake_stream = _FakeAnthropicStream([text_event], SimpleNamespace(content=[]))
+        create_mock = AsyncMock(return_value=self._final("ok"))
+        fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: fake_stream, create=create_mock))
+        provider = Anthropic(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        result = await self._run_generate(provider, fake_client, interface)
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Hel"]
+        assert interface.delta_emitted is True
+        assert create_mock.await_count == 1
+        assert cast(TextBlock, result.content[0]).text == "ok"
+
+    async def test_minimax_gateway_latched_retry_is_non_streaming(self) -> None:
+        """The MiniMax Anthropic-compatible gateway follows the same fallback policy."""
+        text_event = RawContentBlockDeltaEvent(
+            type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="Mi")
+        )
+        fake_stream = _FakeAnthropicStream([text_event], SimpleNamespace(content=[]))
+        create_mock = AsyncMock(return_value=self._final("minimax ok"))
+        fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: fake_stream, create=create_mock))
+        provider = Minimax(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        result = await self._run_generate(provider, fake_client, interface)
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Mi"]
+        assert interface.delta_emitted is True
+        assert create_mock.await_count == 1
+        assert cast(TextBlock, result.content[0]).text == "minimax ok"
