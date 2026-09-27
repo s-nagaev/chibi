@@ -4,10 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.16.1] - 2026-09-22
+## [1.16.2] - 2026-09-24
 
 ### Fixed
 - Gemini async traffic now always runs on Chibi's MITM-aware httpx client instead of a bare aiohttp session: all `google.genai.Client` constructions in the Gemini provider receive client-level `HttpOptions(httpx_async_client=...)` (the only level at which the google-genai SDK selects the transport), and the inert config-level `http_options` were removed from `GenerateContentConfig`/`GenerateImagesConfig`. On TLS-inspecting corporate proxies this eliminates raw `aiohttp.client_exceptions.ServerDisconnectedError` tracebacks on `generateContent` (aiohttp is always importable in Chibi installs — it arrives as a hard dependency via both `dashscope` and `chromadb → kubernetes`). The Gemini chat retry policy additionally covers `aiohttp.ServerDisconnectedError` as a safety net.
+
+## [1.16.1] - 2026-09-22
+
+### Fixed
 - Unified MITM-aware retry policy across all provider families: `get_chat_response` on anthropic, gemini and mistral now retries connection failures with exponential backoff (`wait_exponential`, 4 attempts, ~30/60/120s waits), matching the openai family; the openai family's fixed 10/25/45s waits were replaced with the same exponential schedule. Long single-shot requests killed by TLS-inspecting corporate proxies (WinError 64 / connection reset) are now retried automatically instead of failing on the first attempt.
 - Rate limits (429) and transient server errors (5xx) are now retried on all provider families: anthropic retries `RateLimitError`/`InternalServerError`, gemini retries `ServerError` (5xx) via the decorator (its internal 429 loop with Retry-Info delays is unchanged), mistral retries `SDKError` with status 429/>=500. After retries are exhausted the user gets a clear "connection interrupted" message instead of a generic error.
 
