@@ -20,7 +20,7 @@ from chibi.services.providers.tools.scheduler import (
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from chibi.services.scheduler import ChibiScheduler
+from chibi.services.scheduler import ChibiScheduler, StdioScheduler
 from chibi.utils.app import SingletonMeta
 
 TOOL_MODULE = "chibi.services.providers.tools.scheduler"
@@ -588,3 +588,62 @@ class TestRegisterGate:
             SimpleNamespace(scheduler_tool_enabled=True, client="vscode"),
         ):
             assert scheduler_tools_module._scheduler_tools_register() is True
+
+
+class TestResolveScheduler:
+    """Tests for the runner-aware scheduler resolution (``_resolve_scheduler``)."""
+
+    @pytest.fixture()
+    def scheduler_store_settings(self, tmp_path):
+        """Point the scheduler module at a temporary SQLite job store.
+
+        Pops both scheduler singletons around the test so ``_resolve_scheduler``
+        builds fresh instances against the temporary data path and never leaks
+        them into other tests.
+
+        Args:
+            tmp_path: Pytest temporary directory for the SQLite job store.
+
+        Yields:
+            The patched scheduler-module settings namespace.
+        """
+        settings = SimpleNamespace(
+            redis=None,
+            local_data_path=str(tmp_path),
+            scheduler_misfire_grace_time=3600,
+        )
+        SingletonMeta._instances.pop(ChibiScheduler, None)
+        SingletonMeta._instances.pop(StdioScheduler, None)
+        with patch(f"{SCHEDULER_MODULE}.application_settings", settings):
+            yield settings
+        SingletonMeta._instances.pop(ChibiScheduler, None)
+        SingletonMeta._instances.pop(StdioScheduler, None)
+
+    @pytest.mark.usefixtures("scheduler_store_settings")
+    @pytest.mark.parametrize(
+        ("client", "expected_type"),
+        [
+            ("telegram", ChibiScheduler),
+            ("tui", StdioScheduler),
+            ("vscode", StdioScheduler),
+            ("pycharm", StdioScheduler),
+            ("neovim", StdioScheduler),
+            ("terminal", ChibiScheduler),
+            ("fsck", ChibiScheduler),
+        ],
+    )
+    def test_resolves_scheduler_per_client(self, client, expected_type):
+        """Every client branch resolves to the matching scheduler singleton flavor."""
+        with patch(f"{TOOL_MODULE}.application_settings", SimpleNamespace(client=client)):
+            scheduler = scheduler_tools_module._resolve_scheduler()
+            assert type(scheduler) is expected_type
+            assert scheduler_tools_module._resolve_scheduler() is scheduler, (
+                "The returned singleton identity must be stable per client type"
+            )
+
+    @pytest.mark.usefixtures("scheduler_store_settings")
+    def test_resolves_to_telegram_scheduler_when_client_unset(self):
+        """A settings object without a ``client`` attribute falls back to the Telegram scheduler."""
+        with patch(f"{TOOL_MODULE}.application_settings", SimpleNamespace()):
+            scheduler = scheduler_tools_module._resolve_scheduler()
+        assert type(scheduler) is ChibiScheduler

@@ -9,6 +9,8 @@ and the runner shuts down cleanly (scheduler stopped, task manager drained).
 """
 
 import asyncio
+import json
+import queue
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -37,6 +39,44 @@ AGENT_TASK_MODULE = "chibi.services.jobs.agent_task"
 FIRE_TIMEOUT_SECONDS = 30.0
 THREAD_ID = 42
 JOB_ANSWER = "All systems nominal"
+STDIN_READ_TIMEOUT_SECONDS = 90.0
+
+
+class ScriptedStdin:
+    """Blocking fake stdin consumed by the runner's real ``_read_line`` path.
+
+    ``IDEStdioRunner._read_line`` calls ``sys.stdin.readline`` inside
+    ``asyncio.to_thread``, so ``readline`` must block the worker thread until
+    the next JSONL line (or EOF) is supplied from the test coroutine.
+    """
+
+    def __init__(self) -> None:
+        """Initialize an empty line queue."""
+        self._lines: queue.Queue[str] = queue.Queue()
+
+    def put_line(self, message: dict[str, Any]) -> None:
+        """Enqueue one protocol message as a JSONL line.
+
+        Args:
+            message: JSON-compatible protocol message to feed to the runner.
+        """
+        self._lines.put(json.dumps(message, ensure_ascii=False))
+
+    def close(self) -> None:
+        """Signal stdin EOF so the runner's event loop exits into its ``finally`` block."""
+        self._lines.put("")
+
+    def readline(self) -> str:
+        """Block until the next line is available.
+
+        Returns:
+            The next JSONL line, or an empty string at EOF.
+
+        Raises:
+            queue.Empty: If no line arrives before the read timeout, so a
+                broken test fails instead of hanging forever.
+        """
+        return self._lines.get(timeout=STDIN_READ_TIMEOUT_SECONDS)
 
 
 async def _wait_until(predicate: Any, timeout: float = FIRE_TIMEOUT_SECONDS, poll_interval: float = 0.05) -> None:
@@ -161,7 +201,12 @@ def _reset_anti_flood_state():
 async def test_once_self_job_end_to_end_over_stdio(
     stdio_scheduler_settings, tool_settings, agent_task_settings, tmp_path
 ) -> None:
-    """A tool-created one-time self job fires and the answer lands as a message frame."""
+    """A tool-created one-time self job fires and the answer lands as a message frame.
+
+    Drives a genuine ``IDEStdioRunner.run()`` session: the fake client's JSONL
+    lines flow through the real stdin reader path, and the runner's own
+    ``finally`` block performs the scheduler and task-manager shutdown.
+    """
     llm_calls: list[int] = []
 
     async def fake_llm_answer(**kwargs: Any) -> ChatResponseSchema:
@@ -185,6 +230,7 @@ async def test_once_self_job_end_to_end_over_stdio(
         await interface.send_message("Foreground answer")
 
     runner, output = make_runner()
+    fake_stdin = ScriptedStdin()
     with (
         patch(f"{SCHEDULER_MODULE}.application_settings", stdio_scheduler_settings),
         patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
@@ -193,28 +239,33 @@ async def test_once_self_job_end_to_end_over_stdio(
         patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
         patch(f"{TOOL_MODULE}.application_settings", tool_settings),
         patch(f"{AGENT_TASK_MODULE}.application_settings", agent_task_settings),
+        patch("chibi.config.logging.use_stderr_logging"),
+        patch("sys.stdin", fake_stdin),
+        patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
     ):
-        await runner._handle_message(
+        run_task = asyncio.create_task(runner.run())
+
+        fake_stdin.put_line(
             {"type": "initialize", "protocol_version": PROTOCOL_VERSION, "capabilities": {"background_messages": True}}
         )
-        await runner._start_scheduler()
+        await _wait_until(lambda: runner._initialized)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
-            await runner._handle_message(
-                {
-                    "type": "request",
-                    "request_id": "r1",
-                    "thread_id": THREAD_ID,
-                    "prompt": "hi",
-                    "workspace_root": "/tmp",
-                    "active_file": None,
-                    "selection": None,
-                    "cursor_position": None,
-                    "language_id": None,
-                }
-            )
-            request_task = runner._tasks.get("r1")
-            assert request_task is not None
+        fake_stdin.put_line(
+            {
+                "type": "request",
+                "request_id": "r1",
+                "thread_id": THREAD_ID,
+                "prompt": "hi",
+                "workspace_root": "/tmp",
+                "active_file": None,
+                "selection": None,
+                "cursor_position": None,
+                "language_id": None,
+            }
+        )
+        await _wait_until(lambda: any(frame.get("content") == "Foreground answer" for frame in output))
+        request_task = runner._tasks.get("r1")
+        if request_task is not None:
             await request_task
 
         interface = IDEInterface(thread_id=THREAD_ID, prompt="schedule", context={}, emit=lambda text: None)
@@ -253,10 +304,12 @@ async def test_once_self_job_end_to_end_over_stdio(
         )
         assert frame == {"type": "message", "thread_id": THREAD_ID, "content": JOB_ANSWER}
 
-        await runner._shutdown_scheduler()
-        await task_manager_module.task_manager.shutdown()
-        assert scheduler.state == STATE_STOPPED, "The stdio scheduler must be stopped after shutdown"
-        assert not task_manager_module.task_manager._task_to_user_id, "No background tasks may survive the shutdown"
+        fake_stdin.close()
+        exit_code = await run_task
+
+    assert exit_code == 0, "The runner session must end cleanly on stdin EOF"
+    assert scheduler.state == STATE_STOPPED, "run() must stop the stdio scheduler in its finally block"
+    assert not task_manager_module.task_manager._task_to_user_id, "No background tasks may survive the shutdown"
 
     assert Path(tmp_path, STDIO_SCHEDULER_DB_FILENAME).exists()
     assert not Path(tmp_path, "scheduler.db").exists(), "The tool must never touch the Telegram job store"
