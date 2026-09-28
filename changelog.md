@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-09-28
+
+### Added
+- **Scheduler support in the stdio runner (IDE/TUI clients):** the agent can now schedule tasks from JSONL stdio sessions (`tui`, `vscode`, `pycharm`, `neovim`) — previously Telegram-only (this supersedes the v1 limitation "Scheduler tools are registered for Telegram sessions only"):
+  - The `schedule_task`, `list_scheduled_tasks` and `delete_scheduled_task` agent tools are registered for every stdio client; jobs are keyed by the runner's negative reserved IDE identity and live in a dedicated SQLite job store at `{local_data_path}/scheduler_stdio.db` — fully isolated from the Telegram scheduler's store (Redis settings are deliberately ignored for the stdio store), so the two processes can never double-fire each other's jobs.
+  - `self` and `notify` deliveries (and per-job failure notifications) reach the client as unsolicited `{type: "message", thread_id, content}` frames, reusing the `background_messages` capability machinery (same frame shape, same serialized stdout pathway as background tool answers).
+
+### Changed
+- `SCHEDULER_AGENT_COMMANDS_ENABLED` now defaults to `true` (previously `false`): scheduled shell commands are allowed out of the box — premoderation at creation and re-moderation before every run still apply.
+- Scheduler tools are no longer registered in the terminal runner entrypoint (`chibi` REPL): the tool gate is runner-aware (Telegram and stdio clients only), and the terminal entrypoint additionally deregisters them explicitly, so terminal sessions never expose scheduling tools.
+- Scheduler tool calls in stdio sessions now resolve the stdio scheduler singleton: jobs created by an IDE/TUI client are registered on the started stdio scheduler instead of the Telegram-flavored one (which is never started in a stdio process, so jobs added to it silently never fired).
+
+### Known limitations (stdio scheduler, v1)
+- The stdio process lifetime equals the session lifetime: jobs persist in `scheduler_stdio.db`, and missed runs fire on the next launch — one-time jobs always fire no matter how late (unlimited grace), while interval/cron catch-up is bounded by `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600`).
+- Delivery requires the client to declare the `background_messages` capability at handshake; frames are dropped and logged otherwise.
+- A payload thread id that does not exist in the current session (stale, minted by a previous session) is skipped (deliver-if-exists-else-skip): the job itself still ran — only the answer delivery is skipped.
+- All stdio sessions share the single negative IDE identity/namespace (`IDE_STORAGE_ID`): there is no per-client or per-user isolation between different IDE installations on the same machine.
+- `command` actions require a configured moderation provider.
+
 ## [1.17.0] - 2026-09-27
 
 ### Added
