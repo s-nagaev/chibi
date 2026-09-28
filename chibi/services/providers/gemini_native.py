@@ -4,6 +4,8 @@ import math
 import random
 import wave
 from asyncio import sleep
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from copy import copy
 from io import BytesIO
 from typing import Any, cast
@@ -11,10 +13,12 @@ from uuid import uuid4
 
 import aiohttp
 import httpx
-from google.genai.client import Client
+from google.genai.client import AsyncClient, Client
 from google.genai.errors import APIError
 from google.genai.errors import ServerError as GeminiServerError
 from google.genai.types import (
+    Candidate,
+    Content,
     ContentDict,
     ContentListUnion,
     ContentListUnionDict,
@@ -23,6 +27,7 @@ from google.genai.types import (
     FunctionResponseDict,
     GenerateContentConfig,
     GenerateContentResponse,
+    GenerateContentResponseUsageMetadata,
     GenerateImagesConfig,
     GenerateImagesResponse,
     HttpOptions,
@@ -45,6 +50,7 @@ from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsA
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
+from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -210,15 +216,52 @@ class Gemini(RestApiFriendlyProvider):
         contents: ContentListUnion | ContentListUnionDict,
         config: GenerateContentConfig,
         retry_server_errors: bool = False,
+        interface: UserInterface | None = None,
     ) -> GenerateContentResponse:
+        """Generate Gemini content with empty-response retries.
+
+        When live delta streaming is allowed for the request, the completion
+        is requested as a stream (inside the same client context) and
+        body-text deltas are emitted per chunk; thought parts are never
+        streamed. The retry latch on the interface makes every attempt after
+        the first emitted delta non-streaming.
+
+        Args:
+            model: The Gemini model identifier.
+            contents: The conversation contents.
+            config: The generation config.
+            retry_server_errors: When True, transient 5xx API errors are
+                re-raised raw so the tenacity decorator on the chat path can
+                retry them.
+            interface: The active user interface, if any.
+
+        Returns:
+            The final aggregated Gemini response.
+
+        Raises:
+            NotAuthorizedError: When the API rejects the credentials.
+            ServiceRateLimitError: When the API reports a per-day quota
+                exhaustion.
+            ServiceResponseError: When the API reports another error.
+            NoResponseError: When every attempt returns an empty response.
+        """
         for attempt in range(gpt_settings.retries):
             try:
                 async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as client:
-                    response: GenerateContentResponse = await client.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=config,
-                    )
+                    if delta_streaming_allowed(interface):
+                        response: GenerateContentResponse = await self._generate_content_streamed(
+                            client=client,
+                            model=model,
+                            contents=contents,
+                            config=config,
+                            interface=interface,
+                        )
+                    else:
+                        response = await client.models.generate_content(
+                            model=model,
+                            contents=contents,
+                            config=config,
+                        )
                 answer = self._get_text(response)
                 if answer is not None or response.function_calls:
                     return response
@@ -258,6 +301,89 @@ class Gemini(RestApiFriendlyProvider):
             )
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
+
+    async def _generate_content_streamed(
+        self,
+        client: AsyncClient,
+        model: str,
+        contents: ContentListUnion | ContentListUnionDict,
+        config: GenerateContentConfig,
+        interface: UserInterface | None,
+    ) -> GenerateContentResponse:
+        """Stream a Gemini completion inside an open client and aggregate it.
+
+        The ``Client`` context stays open across the whole stream iteration.
+        Emits one live delta per non-empty non-thought text part until the
+        earliest function-call signal in the stream; thought parts are
+        filtered out and never streamed. The chunks are rebuilt into a
+        single GenerateContentResponse equivalent to the non-streaming
+        response (body text, parallel function calls, thought signature,
+        usage metadata and model version included). The stream is always
+        closed explicitly, also on cancellation.
+
+        Args:
+            client: The open async Gemini client.
+            model: The Gemini model identifier.
+            contents: The conversation contents.
+            config: The generation config.
+            interface: The active user interface, if any.
+
+        Returns:
+            The aggregated final GenerateContentResponse.
+
+        Raises:
+            APIError: When the API request fails mid-stream.
+        """
+        parts: list[Part] = []
+        tool_call_signal = False
+        thought_signature: bytes | None = None
+        usage_metadata: GenerateContentResponseUsageMetadata | None = None
+        model_version: str | None = None
+        stream = await client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        async with aclosing(cast(AsyncGenerator[GenerateContentResponse, None], stream)) as chunks:
+            async for chunk in chunks:
+                if chunk.usage_metadata:
+                    usage_metadata = chunk.usage_metadata
+                if chunk.model_version:
+                    model_version = chunk.model_version
+                chunk_parts = self._get_stream_parts(response=chunk)
+                for part in chunk_parts:
+                    if part.function_call:
+                        tool_call_signal = True
+                    if signature := part.thought_signature:
+                        thought_signature = signature
+                    if part.function_call is None and (part.text is None or part.thought):
+                        continue
+                    parts.append(part)
+                    if part.text and not part.function_call and not tool_call_signal:
+                        await emit_delta(interface=interface, text=part.text)
+        if thought_signature:
+            for part in parts:
+                if part.function_call and not part.thought_signature:
+                    part.thought_signature = thought_signature
+        return GenerateContentResponse(
+            candidates=[Candidate(content=Content(role="model", parts=parts))],
+            usage_metadata=usage_metadata,
+            model_version=model_version,
+        )
+
+    def _get_stream_parts(self, response: GenerateContentResponse) -> list[Part]:
+        """Extract content parts from a stream chunk.
+
+        Args:
+            response: A single Gemini stream chunk.
+
+        Returns:
+            The parts carried by the chunk's first candidate, or an empty
+            list when the chunk carries no parts.
+        """
+        if not response.candidates or not response.candidates[0].content or not response.candidates[0].content.parts:
+            return []
+        return list(response.candidates[0].content.parts)
 
     async def _get_chat_completion_response(
         self,
@@ -300,6 +426,7 @@ class Gemini(RestApiFriendlyProvider):
             contents=cast(ContentListUnionDict, messages),
             config=generation_config,
             retry_server_errors=True,
+            interface=interface,
         )
         answer = self._get_text(response)
         usage = get_usage_from_google_response(response_message=response)

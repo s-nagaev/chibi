@@ -26,6 +26,8 @@ class EditorContextProvider(Protocol):
 
 class UserInterface(ABC):
     captures_llm_thoughts: bool = False
+    delta_emitted: bool = False
+    streaming_enabled: bool = False
 
     @property
     def chat_id(self) -> str | int:
@@ -291,6 +293,19 @@ class UserInterface(ABC):
             True if the thread was successfully deleted, False otherwise.
         """
         raise NotImplementedError
+
+    async def send_delta(self, text: str) -> None:
+        """Send a live partial response chunk (delta) to the user.
+
+        Default implementation is a no-op: runners that do not support
+        streaming (Telegram, terminal) inherit it unchanged and discard
+        deltas. IDE/transport interfaces override this method to forward
+        the chunk over the wire.
+
+        Args:
+            text: The partial text chunk to send.
+        """
+        return None
 
     async def send_llm_thoughts(self, thoughts: str) -> None:
         """Send LLM thinking/thoughts to the user.
