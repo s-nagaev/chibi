@@ -21,7 +21,7 @@ BASE_URL_PROVIDERS: list[type[Provider]] = [
     provider_cls for provider_cls in ALL_PROVIDERS if getattr(provider_cls, "base_url", None) is not None
 ]
 
-EXPECTED_PROVIDER_COUNT = 30
+EXPECTED_PROVIDER_COUNT = 31
 
 KNOWN_EMPTY_DEFAULT_MODEL = frozenset({"CustomOpenAI"})
 KNOWN_MISSING_TTS_DEFAULTS = frozenset({"CustomOpenAI"})
