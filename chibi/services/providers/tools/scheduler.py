@@ -24,7 +24,7 @@ from chibi.schemas.scheduler import AgentJobPayload, CommandActionPayload
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
-from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler
+from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler, StdioScheduler
 from chibi.services.user import get_moderation_provider
 
 _JOB_SUFFIX_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -47,6 +47,28 @@ _SCHEDULER_CLIENTS = frozenset({"telegram", "tui", "vscode", "pycharm", "neovim"
 # setting still holds its "telegram" default, so the tools register at import time and the
 # runner must drop them explicitly (see TerminalRunner.run_chibi).
 SCHEDULER_AGENT_TOOL_NAMES: tuple[str, ...] = ("schedule_task", "list_scheduled_tasks", "delete_scheduled_task")
+
+# Client frontends served by the stdio runner: their agent jobs must live in the
+# dedicated StdioScheduler job store that the stdio runner starts (scheduler_stdio.db).
+_STDIO_SCHEDULER_CLIENTS = frozenset(_SCHEDULER_CLIENTS - {"telegram"})
+
+
+def _resolve_scheduler() -> ChibiScheduler:
+    """Return the scheduler singleton matching the active runner.
+
+    The stdio runner starts :class:`StdioScheduler` (dedicated ``scheduler_stdio.db``
+    job store), so jobs created by a stdio client must be registered there — the
+    Telegram-flavored singleton is never started in a stdio process, and a job
+    added to it would never fire. The Telegram process keeps the classic
+    :class:`ChibiScheduler` (Redis when configured, ``scheduler.db`` otherwise).
+
+    Returns:
+        The scheduler singleton of the active runner flavor.
+    """
+    client = getattr(application_settings, "client", "telegram")
+    if client in _STDIO_SCHEDULER_CLIENTS:
+        return StdioScheduler()
+    return ChibiScheduler()
 
 
 def _scheduler_tools_register() -> bool:
@@ -377,7 +399,7 @@ class ScheduleTaskTool(ChibiTool):
         cls._validate_action_gates(action_type=action_type)
 
         user_id, storage_id, thread_id, chat_id = cls._resolve_job_context(**kwargs)
-        scheduler = ChibiScheduler()
+        scheduler = _resolve_scheduler()
         prefix = f"{AGENT_JOB_PREFIX}{user_id}:"
         existing_job_ids = [info.job_id for info in scheduler.list_jobs(prefix=prefix)]
 
@@ -575,7 +597,7 @@ class ListScheduledTasksTool(ChibiTool):
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
 
-        scheduler = ChibiScheduler()
+        scheduler = _resolve_scheduler()
         prefix = f"{AGENT_JOB_PREFIX}{user_id}:"
         details: dict[str, dict[str, Any]] = {}
         for job in scheduler.get_jobs():
@@ -657,7 +679,7 @@ class DeleteScheduledTaskTool(ChibiTool):
             )
 
         try:
-            ChibiScheduler().remove_scheduled_job(job_id)
+            _resolve_scheduler().remove_scheduled_job(job_id)
         except JobLookupError as e:
             raise ToolException(f"No scheduled task with id '{job_id}'. Use list_scheduled_tasks to check ids.") from e
 
