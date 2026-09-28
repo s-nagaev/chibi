@@ -71,6 +71,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Cheaper Inference**
 - **Cloudflare Workers AI**
 - **DeepInfra**
+- **Entrim**
 - **Featherless**
 - **Fireworks AI**
 - **GreenPT**
@@ -203,6 +204,7 @@ Cada proveedor requiere su propia clave API. Aquí están los enlaces directos:
 - **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 - **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Entrim**: [entrim.ai](https://entrim.ai/)
 - **Featherless**: [featherless.ai](https://featherless.ai/)
 - **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
 - **GreenPT**: [greenpt.com](https://greenpt.com/)

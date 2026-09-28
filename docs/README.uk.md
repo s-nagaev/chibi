@@ -69,6 +69,7 @@ Chibi поддерживает множество провайдерів в ра
 - **Cheaper Inference**
 - **Cloudflare Workers AI**
 - **DeepInfra**
+- **Entrim**
 - **Featherless**
 - **Fireworks AI**
 - **GreenPT**
@@ -201,6 +202,7 @@ docker-compose up -d
 - **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 - **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Entrim**: [entrim.ai](https://entrim.ai/)
 - **Featherless**: [featherless.ai](https://featherless.ai/)
 - **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
 - **GreenPT**: [greenpt.com](https://greenpt.com/)

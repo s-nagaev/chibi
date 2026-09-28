@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Live response streaming to IDE clients:** the `chibi stdio --tui` transport can now stream the model's answer as it is generated instead of delivering it only at the end. IDE clients opt in by declaring `capabilities.streaming: true` in the `initialize` handshake (protocol v1 unchanged — additive, no version bump); they then receive `delta` frames (`{"type": "delta", "request_id", "thread_id", "text"}`) carrying partial answer text, followed by the authoritative final `result` frame as before, so existing renderers can simply overwrite the partial text. Deltas are coalesced by the transport (flushed at most every ~200 ms or 512 chars) to keep frame rates sane; deltas strictly precede the terminal frame on the wire; cancelling a request or hitting an error drops any buffered deltas — a `delta` frame never follows a terminal one. Deltas are in-memory only: they are never persisted to thread history. Clients that do not declare the capability see no protocol change at all (VS Code extension and other v1 consumers are unaffected; thinking/reasoning tokens are never streamed as body text).
+- **New LLM provider: Entrim** (`https://api.entrim.ai/v1`) — an OpenAI-compatible endpoint serving DeepSeek, GLM and other open models, with defaults `deepseek-ai/DeepSeek-V4.1-Flash` for chat and `zai-org/GLM-5.3-Flash` for vision and moderation; activated by setting the `ENTRIM_API_KEY` environment variable.
 
 ## [1.16.2] - 2026-09-24
 
