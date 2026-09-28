@@ -262,6 +262,26 @@ async def test_command_action_gate_disabled_skips_execution(dispatcher_settings)
     send_mock.assert_not_awaited()
 
 
+async def test_command_action_passes_gate_with_production_defaults(database_settings) -> None:
+    """With the shipped configuration (D5: commands enabled by default) a `command` job executes."""
+    from chibi.config.app import ApplicationSettings
+
+    process = MagicMock()
+    process.returncode = 0
+    process.pid = 4242
+    process.communicate = AsyncMock(return_value=(b"hello-scheduler\n", b""))
+    with (
+        patch("chibi.services.jobs.agent_task.application_settings", ApplicationSettings()),
+        patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock()),
+        patch(
+            "chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)
+        ) as subprocess_mock,
+    ):
+        await run_agent_job("agent:1:cmd", **VALID_PAYLOAD, action={"type": "command", "command": "echo hi"})
+
+    subprocess_mock.assert_awaited_once()
+
+
 async def test_failure_notify_sent_once_within_cooldown(dispatcher_settings) -> None:
     """A failing job triggers a single anti-flooded user notification per hour."""
     with (

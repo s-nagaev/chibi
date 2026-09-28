@@ -9,7 +9,7 @@ from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ClientType = Literal["telegram", "tui", "vscode", "pycharm", "neovim"]
+ClientType = Literal["telegram", "tui", "vscode", "pycharm", "neovim", "terminal"]
 
 
 class ApplicationSettings(BaseSettings):
@@ -32,10 +32,13 @@ class ApplicationSettings(BaseSettings):
         heartbeat_frequency_call: Interval between heartbeat calls.
         heartbeat_retry_calls: Number of retries for heartbeat.
         heartbeat_proxy: Proxy URL for heartbeat.
-        client: Client frontend served by this process (telegram, tui, vscode, pycharm, neovim).
+        client: Client frontend served by this process (telegram, tui, vscode, pycharm, neovim, terminal).
         scheduler_tool_enabled: Whether the agent scheduling tool is enabled.
         scheduler_notify_enabled: Whether the `notify` scheduled action type is allowed.
-        scheduler_agent_commands_enabled: Whether shell commands are allowed in scheduled jobs.
+        scheduler_agent_commands_enabled: Whether shell commands are allowed in scheduled jobs. Enabled by
+            default (design decision D5): the agent can schedule itself and run arbitrary commands through its
+            terminal tool anyway, so gating only scheduled commands adds no security. Every command is still
+            pre-moderated before it is accepted and re-moderated before every run.
         scheduler_command_timeout_max: Upper limit for a scheduled shell command timeout in seconds.
         scheduler_misfire_grace_time: Default grace period in seconds for catching up missed job runs.
         scheduler_failure_notify: Whether the user is notified when a scheduled job fails.
@@ -98,7 +101,9 @@ class ApplicationSettings(BaseSettings):
     # Scheduler settings
     scheduler_tool_enabled: bool = Field(default=True)
     scheduler_notify_enabled: bool = Field(default=False)
-    scheduler_agent_commands_enabled: bool = Field(default=False)
+    # D5: default True — the agent can already run arbitrary commands via its terminal tool,
+    # so blocking only *scheduled* commands adds no real protection. Premoderation stays.
+    scheduler_agent_commands_enabled: bool = Field(default=True)
     scheduler_command_timeout_max: int = Field(default=900)
     scheduler_misfire_grace_time: int = Field(default=3600)
     scheduler_failure_notify: bool = Field(default=True)

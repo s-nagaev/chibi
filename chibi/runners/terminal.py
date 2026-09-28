@@ -15,6 +15,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
+from chibi.config import application_settings
 from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
 from chibi.services.terminal_interface import TerminalInterface
@@ -307,6 +308,7 @@ async def run_chibi(user_id: int = 1) -> None:
     Args:
         user_id: The user ID to use for this session. Default is 1.
     """
+    application_settings.client = "terminal"
     setup_logging()
 
     try:

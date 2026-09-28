@@ -50,7 +50,7 @@ class TestSchedulerSettings:
         settings = ApplicationSettings()
         assert settings.scheduler_tool_enabled is True
         assert settings.scheduler_notify_enabled is False
-        assert settings.scheduler_agent_commands_enabled is False
+        assert settings.scheduler_agent_commands_enabled is True
         assert settings.scheduler_command_timeout_max == 900
         assert settings.scheduler_misfire_grace_time == 3600
         assert settings.scheduler_failure_notify is True
@@ -61,6 +61,7 @@ class TestSchedulerSettings:
             ("SCHEDULER_TOOL_ENABLED", "false"),
             ("SCHEDULER_NOTIFY_ENABLED", "true"),
             ("SCHEDULER_AGENT_COMMANDS_ENABLED", "true"),
+            ("SCHEDULER_AGENT_COMMANDS_ENABLED", "false"),
             ("SCHEDULER_FAILURE_NOTIFY", "false"),
         ],
     )

@@ -1,8 +1,6 @@
 """Tests for the agent-facing scheduler tools (design §5, §6)."""
 
 import importlib
-import sys
-import types
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,6 +9,7 @@ import pytest
 
 import chibi.services.providers.tools.scheduler as scheduler_tools_module
 from chibi.config import gpt_settings
+from chibi.constants import IDE_STORAGE_ID
 from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.jobs.agent_task import run_agent_job
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -113,6 +112,34 @@ class TestScheduleTaskTool:
         assert payload_kwargs["chat_id"] == 555
         assert payload_kwargs["title"] == "Health heartbeat"
         assert payload_kwargs["action"] == {"type": "self", "trigger_text": "Check the state and report"}
+
+    @pytest.mark.asyncio
+    async def test_ide_session_creates_job_with_negative_identity(self, scheduler, tool_settings):
+        """A tool call in an IDE session pins the negative IDE identity and the session thread."""
+        ide_interface = MagicMock()
+        ide_interface.user_id = IDE_STORAGE_ID
+        ide_interface.storage_id = IDE_STORAGE_ID
+        ide_interface.chat_id = IDE_STORAGE_ID
+        ide_interface.thread_id = 7
+
+        run_at = datetime.now().astimezone() + timedelta(hours=1)
+        result = await ScheduleTaskTool.function(
+            title="IDE reminder",
+            schedule={"kind": "once", "at": run_at.isoformat()},
+            action={"type": "self", "trigger_text": "Summarize the open PR"},
+            user_id=IDE_STORAGE_ID,
+            caller_model="test-model",
+            interface=ide_interface,
+        )
+
+        assert result["status"] == "ok"
+        assert result["job_id"].startswith(f"agent:{IDE_STORAGE_ID}:")
+        job = scheduler.get_jobs()[0]
+        payload_kwargs = job.kwargs
+        assert payload_kwargs["user_id"] == IDE_STORAGE_ID
+        assert payload_kwargs["storage_id"] == IDE_STORAGE_ID
+        assert payload_kwargs["chat_id"] == IDE_STORAGE_ID
+        assert payload_kwargs["thread_id"] == 7
 
     @pytest.mark.asyncio
     async def test_cron_fields_build_five_field_expression(self, scheduler, tool_settings, interface):
@@ -461,22 +488,12 @@ class TestDeleteScheduledTaskTool:
 
 
 class TestRegisterGate:
-    """Tests for the tool registration gate (design §1.5, §6.4)."""
+    """Tests for the runner-aware tool registration gate (design §1.5, §6.4)."""
 
-    def test_gate_requires_telegram_runner_and_setting(self, monkeypatch):
-        fake_runner = types.ModuleType("chibi.runners.telegram")
-        monkeypatch.setitem(sys.modules, "chibi.runners.telegram", fake_runner)
-
-        with patch("chibi.config.application_settings", SimpleNamespace(scheduler_tool_enabled=False)):
-            reloaded = importlib.reload(scheduler_tools_module)
-            assert reloaded.ScheduleTaskTool.register is False
-            assert reloaded.ListScheduledTasksTool.register is False
-            assert reloaded.DeleteScheduledTaskTool.register is False
-            RegisteredChibiTools.deregister_tools(TOOL_NAMES)
-            for tool_name in TOOL_NAMES:
-                assert tool_name not in RegisteredChibiTools.tools_map
-
-        with patch("chibi.config.application_settings", SimpleNamespace(scheduler_tool_enabled=True)):
+    @pytest.mark.parametrize("client", ["telegram", "tui", "vscode", "pycharm", "neovim"])
+    def test_gate_registers_for_supported_runners(self, client):
+        """Scheduler tools register for the telegram bot and every stdio client."""
+        with patch("chibi.config.application_settings", SimpleNamespace(scheduler_tool_enabled=True, client=client)):
             reloaded = importlib.reload(scheduler_tools_module)
             assert reloaded.ScheduleTaskTool.register is True
             assert reloaded.ListScheduledTasksTool.register is True
@@ -486,7 +503,42 @@ class TestRegisterGate:
             assert RegisteredChibiTools.tools_map["delete_scheduled_task"] is reloaded.DeleteScheduledTaskTool
 
         RegisteredChibiTools.deregister_tools(TOOL_NAMES)
-        monkeypatch.delitem(sys.modules, "chibi.runners.telegram", raising=False)
-        importlib.reload(scheduler_tools_module)
         for tool_name in TOOL_NAMES:
             assert tool_name not in RegisteredChibiTools.tools_map
+
+    def test_gate_excludes_terminal_client(self):
+        """The terminal REPL (client='terminal') never registers the scheduler tools."""
+        with patch(
+            "chibi.config.application_settings", SimpleNamespace(scheduler_tool_enabled=True, client="terminal")
+        ):
+            reloaded = importlib.reload(scheduler_tools_module)
+            assert reloaded.ScheduleTaskTool.register is False
+            assert reloaded.ListScheduledTasksTool.register is False
+            assert reloaded.DeleteScheduledTaskTool.register is False
+            for tool_name in TOOL_NAMES:
+                assert tool_name not in RegisteredChibiTools.tools_map
+
+    def test_gate_requires_setting(self):
+        """Scheduler tools stay unregistered when scheduler_tool_enabled is False."""
+        with patch(
+            "chibi.config.application_settings", SimpleNamespace(scheduler_tool_enabled=False, client="telegram")
+        ):
+            reloaded = importlib.reload(scheduler_tools_module)
+            assert reloaded.ScheduleTaskTool.register is False
+            assert reloaded.ListScheduledTasksTool.register is False
+            assert reloaded.DeleteScheduledTaskTool.register is False
+            for tool_name in TOOL_NAMES:
+                assert tool_name not in RegisteredChibiTools.tools_map
+
+    def test_predicate_rejects_unknown_client(self):
+        """The predicate itself rejects any client value outside the supported set."""
+        with patch(
+            "chibi.services.providers.tools.scheduler.application_settings",
+            SimpleNamespace(scheduler_tool_enabled=True, client="fsck"),
+        ):
+            assert scheduler_tools_module._scheduler_tools_register() is False
+        with patch(
+            "chibi.services.providers.tools.scheduler.application_settings",
+            SimpleNamespace(scheduler_tool_enabled=True, client="vscode"),
+        ):
+            assert scheduler_tools_module._scheduler_tools_register() is True

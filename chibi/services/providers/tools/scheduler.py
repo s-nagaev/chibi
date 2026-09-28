@@ -9,7 +9,6 @@ current request is fixed in the job payload at creation time.
 from __future__ import annotations
 
 import re
-import sys
 from datetime import datetime
 from typing import Any, Unpack
 
@@ -39,6 +38,24 @@ _ACTION_TYPE_DESCRIPTIONS = (
     "command — runs a pre-moderated shell command on schedule and reports its output."
 )
 
+# Client frontends where the scheduler agent tools are exposed: the Telegram bot and every
+# JSONL stdio client (served by the same runner). The terminal REPL is intentionally excluded.
+_SCHEDULER_CLIENTS = frozenset({"telegram", "tui", "vscode", "pycharm", "neovim"})
+
+
+def _scheduler_tools_register() -> bool:
+    """Decide whether the scheduler agent tools register in this process.
+
+    Runner-aware replacement for the former ``sys.modules`` check: the gate is
+    keyed on the configured client frontend instead of import side effects.
+
+    Returns:
+        True when the scheduler tool gate is enabled AND the active client is a
+        supported runner (``telegram`` or one of the stdio clients). The
+        terminal REPL (``client='terminal'``) never registers the tools.
+    """
+    return application_settings.scheduler_tool_enabled and application_settings.client in _SCHEDULER_CLIENTS
+
 
 def _slugify(value: str) -> str:
     """Convert a free-form title or suffix into a valid job_id suffix.
@@ -64,7 +81,7 @@ def _slugify(value: str) -> str:
 
 
 class ScheduleTaskTool(ChibiTool):
-    register = bool(sys.modules.get("chibi.runners.telegram")) and application_settings.scheduler_tool_enabled
+    register = _scheduler_tools_register()
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -511,7 +528,7 @@ class ScheduleTaskTool(ChibiTool):
 
 
 class ListScheduledTasksTool(ChibiTool):
-    register = bool(sys.modules.get("chibi.runners.telegram")) and application_settings.scheduler_tool_enabled
+    register = _scheduler_tools_register()
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -574,7 +591,7 @@ class ListScheduledTasksTool(ChibiTool):
 
 
 class DeleteScheduledTaskTool(ChibiTool):
-    register = bool(sys.modules.get("chibi.runners.telegram")) and application_settings.scheduler_tool_enabled
+    register = _scheduler_tools_register()
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
