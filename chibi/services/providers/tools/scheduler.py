@@ -42,6 +42,12 @@ _ACTION_TYPE_DESCRIPTIONS = (
 # JSONL stdio client (served by the same runner). The terminal REPL is intentionally excluded.
 _SCHEDULER_CLIENTS = frozenset({"telegram", "tui", "vscode", "pycharm", "neovim"})
 
+# Names of the agent-facing scheduler tools. Shared with the terminal runner so it can
+# deregister them at startup: the terminal entrypoint imports this module while the client
+# setting still holds its "telegram" default, so the tools register at import time and the
+# runner must drop them explicitly (see TerminalRunner.run_chibi).
+SCHEDULER_AGENT_TOOL_NAMES: tuple[str, ...] = ("schedule_task", "list_scheduled_tasks", "delete_scheduled_task")
+
 
 def _scheduler_tools_register() -> bool:
     """Decide whether the scheduler agent tools register in this process.
@@ -49,10 +55,19 @@ def _scheduler_tools_register() -> bool:
     Runner-aware replacement for the former ``sys.modules`` check: the gate is
     keyed on the configured client frontend instead of import side effects.
 
+    The decision is evaluated once, when this module is first imported. Every
+    supported entrypoint has the correct client value by then: ``chibi.cli
+    stdio`` sets it before importing the stdio runner, and the Telegram bot
+    relies on the ``"telegram"`` default. The terminal REPL is the exception —
+    its entrypoint imports this module (via ``chibi.services.bot``) while the
+    client still holds the ``"telegram"`` default, so the tools register and
+    ``TerminalRunner.run_chibi`` deregisters them explicitly right after
+    flipping the client to ``"terminal"``.
+
     Returns:
         True when the scheduler tool gate is enabled AND the active client is a
         supported runner (``telegram`` or one of the stdio clients). The
-        terminal REPL (``client='terminal'``) never registers the tools.
+        terminal REPL (``client='terminal'``) never keeps the tools registered.
     """
     return application_settings.scheduler_tool_enabled and application_settings.client in _SCHEDULER_CLIENTS
 

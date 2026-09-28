@@ -1,5 +1,6 @@
 """Tests for the agent-facing scheduler tools (design §5, §6)."""
 
+import asyncio
 import importlib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import chibi.services.providers.tools.scheduler as scheduler_tools_module
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.constants import IDE_STORAGE_ID
 from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.jobs.agent_task import run_agent_job
@@ -517,6 +518,51 @@ class TestRegisterGate:
             assert reloaded.DeleteScheduledTaskTool.register is False
             for tool_name in TOOL_NAMES:
                 assert tool_name not in RegisteredChibiTools.tools_map
+
+    def test_terminal_entrypoint_deregisters_scheduler_tools(self):
+        """End-to-end: the real terminal entrypoint must not expose the scheduler tools.
+
+        Regression guard for the review round 1 finding: importing
+        ``chibi.runners.terminal`` transitively imports the tools module while
+        ``application_settings.client`` still holds the ``"telegram"`` default,
+        so the tools register at import time — ``run_chibi`` must deregister
+        them before the REPL starts. This test exercises the actual
+        ``run_chibi`` path instead of only reloading the tools module.
+        """
+        import chibi.runners.terminal as terminal_module
+
+        # Simulate the real import order: the gate saw client="telegram", so all
+        # three tools ended up in the registry.
+        original_client = application_settings.client
+        snapshot = dict(RegisteredChibiTools.tools_map)
+        RegisteredChibiTools.register(ScheduleTaskTool)
+        RegisteredChibiTools.register(ListScheduledTasksTool)
+        RegisteredChibiTools.register(DeleteScheduledTaskTool)
+        assert set(TOOL_NAMES) <= set(RegisteredChibiTools.tools_map)
+
+        class _StubRunner:
+            """Stand-in for TerminalRunner so run_chibi never starts the REPL."""
+
+            def __init__(self, user_id: int) -> None:
+                self.user_id = user_id
+
+            async def run(self) -> None:
+                return None
+
+        try:
+            with (
+                patch.object(terminal_module, "TerminalRunner", _StubRunner),
+                patch.object(terminal_module, "setup_logging"),
+            ):
+                asyncio.run(terminal_module.run_chibi(user_id=1))
+
+            assert application_settings.client == "terminal"
+            for tool_name in TOOL_NAMES:
+                assert tool_name not in RegisteredChibiTools.tools_map
+        finally:
+            application_settings.client = original_client
+            RegisteredChibiTools.tools_map.clear()
+            RegisteredChibiTools.tools_map.update(snapshot)
 
     def test_gate_requires_setting(self):
         """Scheduler tools stay unregistered when scheduler_tool_enabled is False."""
