@@ -35,6 +35,19 @@ Subagent lifecycle events (requires the `capabilities.subagents` opt-in):
 The final zero-active `finished` is the client's signal to hide its subagent spinner line; the result frame stays
 the implicit end of the request and no agent_event ever follows it.
 
+### `valid_streaming_session_input.jsonl` / `valid_streaming_session_output.jsonl`
+Live response-delta streaming (requires the `capabilities.streaming` opt-in):
+`initialize(streaming)` → `ready` (identical to the canonical one — the server never advertises
+`streaming` in `ready.capabilities`; the client opt-in is the only gate) → `request` →
+`status(running)` → `delta` (head chunk flushed inline: it reached the ≥512-char
+`DELTA_FLUSH_CHARS` threshold) → `delta` (short tail chunk flushed by `drain_deltas`
+before the terminal write) → `result`.
+
+The final `result` frame stays authoritative: clients render it over the streamed partial
+text, making reconciliation idempotent. A session without `capabilities.streaming` in the
+`initialize` handshake is exactly the canonical `valid_session_*` scenario — no `delta`
+frames are ever emitted to a client that did not opt in.
+
 ## Invalid / edge cases
 
 ### `invalid_cases.jsonl`

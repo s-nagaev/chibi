@@ -71,6 +71,7 @@ Model resellers and inference aggregators:
 - **Cheaper Inference**
 - **Cloudflare Workers AI**
 - **DeepInfra**
+- **Entrim**
 - **Featherless**
 - **Fireworks AI**
 - **GreenPT**
@@ -207,6 +208,7 @@ Each provider requires its own API key. Here are the direct links:
 - **Cheaper Inference**: [cheaperinference.com](https://cheaperinference.com/)
 - **Cloudflare Workers AI**: [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
 - **DeepInfra**: [deepinfra.com](https://deepinfra.com/)
+- **Entrim**: [entrim.ai](https://entrim.ai/)
 - **Featherless**: [featherless.ai](https://featherless.ai/)
 - **Fireworks AI**: [fireworks.ai](https://fireworks.ai/)
 - **GreenPT**: [greenpt.com](https://greenpt.com/)

@@ -1,6 +1,7 @@
 """JSONL stdio transport for IDE clients."""
 
 import asyncio
+import functools
 import inspect
 import json
 import sys
@@ -51,6 +52,8 @@ COMMANDS = [
 ]
 MAX_THOUGHTS_BYTES = 256 * 1024
 THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
+DELTA_FLUSH_INTERVAL = 0.2
+DELTA_FLUSH_CHARS = 512
 
 
 class _SubagentRequestState(TypedDict):
@@ -214,6 +217,7 @@ class IDEInterface(UserInterface, EditorContextProvider):
         context: dict[str, Any],
         emit: Callable[[str], Any],
         background_emit: Callable[[int, str, str | None, str | None, str | None], Any] | None = None,
+        delta_emit: Callable[[str], Any] | None = None,
     ) -> None:
         """Initialize an IDE request interface.
 
@@ -225,13 +229,19 @@ class IDEInterface(UserInterface, EditorContextProvider):
             background_emit: Optional session-level callback delivering
                 assistant text as out-of-band background message frames
                 after the owning request has finished.
+            delta_emit: Optional session-level callback delivering live
+                response chunks as coalesced ``delta`` frames while the
+                owning request is still running.
         """
         self._thread_id = thread_id
         self._prompt = prompt
         self._context = context
         self._emit = emit
         self._background_emit = background_emit
+        self._delta_emit = delta_emit
         self._closed = False
+        self.streaming_enabled = delta_emit is not None
+        self.delta_emitted = False
         self.response_model: str | None = None
         self.response_provider: str | None = None
         self.response_usage: UsageSchema | CompletionUsage | None = None
@@ -417,6 +427,26 @@ class IDEInterface(UserInterface, EditorContextProvider):
         if inspect.isawaitable(result):
             await result
 
+    async def send_delta(self, text: str) -> None:
+        """Forward a live response chunk to the transport's delta buffer.
+
+        The chunk is handed to the session-level ``delta_emit`` callback,
+        which appends it to the transport-owned coalescing buffer keyed by
+        this request. Chunks arriving after the owning request has finished
+        (or from an interface created for a non-streaming client) are
+        dropped silently: a late delta must never surface as a ``delta``
+        frame after the terminal one, and it must never be routed into the
+        background emitter.
+
+        Args:
+            text: The partial text chunk to stream.
+        """
+        if self._closed or self._delta_emit is None or not text:
+            return
+        result = self._delta_emit(text)
+        if inspect.isawaitable(result):
+            await result
+
     async def send_audio(
         self,
         audio: bytes | str,
@@ -500,11 +530,17 @@ class IDEStdioRunner:
         self._thoughts_enabled = False
         self._subagent_events_enabled = False
         self._cwd_updates_enabled = False
+        self._streaming_enabled = False
         self._cwd_emitted_threads: set[int] = set()
         self._session_threads: set[int] = set()
         self._cwd_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
+        self._delta_requests: dict[str, int] = {}
+        self._delta_buffers: dict[str, list[str]] = {}
+        self._delta_last_flush: dict[str, float] = {}
+        self._delta_timers: dict[str, asyncio.Task[None]] = {}
+        self._delta_flush_locks: dict[str, asyncio.Lock] = {}
         self._scheduler: StdioScheduler | None = None
         self._scheduler_started = False
         self.exit_code = 0
@@ -894,6 +930,116 @@ class IDEStdioRunner:
         if self._cwd_emissions:
             await asyncio.gather(*list(self._cwd_emissions), return_exceptions=True)
 
+    async def _emit_delta(self, request_id: str, thread_id: int, text: str) -> None:
+        """Append one live response chunk to the request's delta buffer.
+
+        The chunk is buffered per request and flushed to the wire either
+        once the coalescing interval has elapsed since the last flush, once
+        the buffered text reaches the character threshold, or from the
+        trailing flush timer — whichever happens first. Emission is gated
+        on the ``streaming`` capability: clients that never declared it
+        never see ``delta`` frames. Chunks for a request that has already
+        been retired (dropped before a terminal frame) are discarded.
+
+        Args:
+            request_id: Identifier of the request the chunk belongs to.
+            thread_id: Thread the request runs on.
+            text: The partial text chunk to buffer.
+        """
+        if not self._streaming_enabled or request_id not in self._delta_requests:
+            return
+        self._delta_buffers.setdefault(request_id, []).append(text)
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        last = self._delta_last_flush.get(request_id, now)
+        elapsed = now - last
+        chars = sum(len(chunk) for chunk in self._delta_buffers[request_id])
+        if chars >= DELTA_FLUSH_CHARS or elapsed >= DELTA_FLUSH_INTERVAL:
+            self._cancel_delta_timer(request_id)
+            await self._flush_delta(request_id)
+        elif request_id not in self._delta_timers:
+            self._delta_timers[request_id] = loop.create_task(
+                self._delta_timer_flush(request_id, DELTA_FLUSH_INTERVAL - elapsed)
+            )
+
+    async def _delta_timer_flush(self, request_id: str, delay: float) -> None:
+        """Flush a request's delta buffer once the coalescing interval elapses.
+
+        Args:
+            request_id: Identifier of the request whose buffer is flushed.
+            delay: Seconds to wait before the flush.
+        """
+        try:
+            await asyncio.sleep(delay)
+            self._delta_timers.pop(request_id, None)
+            await self._flush_delta(request_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to deliver a delta frame for request {}", request_id)
+
+    def _cancel_delta_timer(self, request_id: str) -> None:
+        """Cancel the pending flush timer of a request, if any.
+
+        Args:
+            request_id: Identifier of the request whose timer is cancelled.
+        """
+        timer = self._delta_timers.pop(request_id, None)
+        if timer is not None and not timer.done():
+            timer.cancel()
+
+    async def _flush_delta(self, request_id: str) -> None:
+        """Write one ``delta`` frame with the request's buffered chunks.
+
+        The per-request flush lock serializes flushes so the joined chunks
+        keep their arrival order on the wire even when an inline flush and
+        the trailing timer contend. An empty buffer is a no-op: the write
+        then already happened or was dropped.
+
+        Args:
+            request_id: Identifier of the request whose buffer is flushed.
+        """
+        lock = self._delta_flush_locks.setdefault(request_id, asyncio.Lock())
+        async with lock:
+            chunks = self._delta_buffers.pop(request_id, None)
+            if not chunks:
+                return
+            thread_id = self._delta_requests.get(request_id)
+            if thread_id is None:
+                return
+            text = "".join(chunks)
+            await self._write({"type": "delta", "request_id": request_id, "thread_id": thread_id, "text": text})
+            self._delta_last_flush[request_id] = asyncio.get_running_loop().time()
+
+    async def drain_deltas(self) -> None:
+        """Flush every pending delta buffer before a terminal frame.
+
+        Awaited next to the subagent-event and cwd-update drains so the
+        FIFO stdout pipe keeps deltas strictly ahead of the ``result``
+        frame; a pending flush timer would otherwise be able to fire after
+        the terminal write.
+        """
+        for request_id in list(self._delta_buffers):
+            self._cancel_delta_timer(request_id)
+            await self._flush_delta(request_id)
+
+    def _drop_deltas(self, request_id: str) -> None:
+        """Retire a request's delta state and close its emission gate.
+
+        Called before ``error``/``cancelled`` frames and on request
+        teardown: the flush timer is cancelled, the buffer is dropped
+        without a write, and the request is removed from the emission gate
+        so a late ``send_delta`` from a background continuation is a no-op.
+
+        Args:
+            request_id: Identifier of the request whose deltas are dropped.
+        """
+        self._cancel_delta_timer(request_id)
+        self._delta_buffers.pop(request_id, None)
+        self._delta_last_flush.pop(request_id, None)
+        self._delta_flush_locks.pop(request_id, None)
+        self._delta_requests.pop(request_id, None)
+
     async def emit_rate_limited(self, message: str, retry_after: int, request_id: str | None = None) -> None:
         """Emit a canonical rate-limited error frame with a retry hint.
 
@@ -1037,7 +1183,13 @@ class IDEStdioRunner:
         self._session_threads.add(thread_id)
         responses: list[str] = []
         background_emit = self._emit_background_message if self._background_messages_enabled else None
-        interface = IDEInterface(thread_id, prompt, message, responses.append, background_emit=background_emit)
+        delta_emit = None
+        if self._streaming_enabled:
+            self._delta_requests[request_id] = thread_id
+            delta_emit = functools.partial(self._emit_delta, request_id, thread_id)
+        interface = IDEInterface(
+            thread_id, prompt, message, responses.append, background_emit=background_emit, delta_emit=delta_emit
+        )
         self.begin_request(thread_id, request_id)
         await self._write({"type": "status", "request_id": request_id, "state": "running"})
         if self._cwd_updates_enabled and thread_id not in self._cwd_emitted_threads:
@@ -1102,6 +1254,7 @@ class IDEStdioRunner:
                 await handle_user_prompt(interface=interface)
             content = "\n".join(responses)
             if interface.error_code is not None:
+                self._drop_deltas(request_id)
                 await self._error(interface.error_code, interface.error_message or "Request failed.", request_id)
                 return
             result: dict[str, Any] = {"type": "result", "request_id": request_id, "content": content}
@@ -1128,14 +1281,18 @@ class IDEStdioRunner:
             if current_task is None or current_task.cancelling() == 0:
                 await self.drain_subagent_events()
                 await self.drain_cwd_updates()
+                await self.drain_deltas()
+            self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
             await self._write(result)
         except asyncio.CancelledError:
+            self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
             await self._error("cancelled", "Request cancelled.", request_id)
             raise
         except StorageError as exc:
             logger.exception("IDE request failed")
+            self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
@@ -1145,6 +1302,7 @@ class IDEStdioRunner:
             )
         except ConfigurationError as exc:
             logger.exception("IDE request failed")
+            self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
@@ -1154,6 +1312,7 @@ class IDEStdioRunner:
             )
         except Exception as exc:
             logger.exception("IDE request failed")
+            self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
             await self._error(
                 "request_failed",
@@ -1165,6 +1324,7 @@ class IDEStdioRunner:
         finally:
             self.end_request(thread_id, request_id)
             interface.mark_closed()
+            self._drop_deltas(request_id)
             self._tasks.pop(request_id, None)
             remaining = self._thread_requests.get(thread_id, 1) - 1
             if remaining <= 0:
@@ -1214,6 +1374,9 @@ class IDEStdioRunner:
                 cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
                 if self._cwd_updates_enabled:
                     logger.debug("client declared the cwd_updates capability")
+                self._streaming_enabled = capabilities.get("streaming") is True
+                if self._streaming_enabled:
+                    logger.debug("client declared the streaming capability")
                 # Session-level scheduler delivery sink: registered at handshake
                 # so fired scheduler jobs (self/notify/failure) can reach this
                 # client as message frames outside any request context. The

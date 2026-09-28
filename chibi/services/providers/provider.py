@@ -21,6 +21,7 @@ from anthropic.types import (
     MessageParam,
     TextBlock,
     TextBlockParam,
+    TextDelta,
     ToolChoiceToolParam,
     ToolParam,
     ToolResultBlockParam,
@@ -36,8 +37,10 @@ from loguru import logger
 from openai import (
     APIConnectionError,
     AsyncOpenAI,
+    AsyncStream,
     AuthenticationError,
     BadRequestError,
+    NotFoundError,
     OpenAIError,
     RateLimitError,
     omit,
@@ -47,6 +50,7 @@ from openai import Omit as OpenAIOmit
 from openai.types import Image, ImagesResponse, ReasoningEffort
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
+    ChatCompletionChunk,
     ChatCompletionFunctionToolParam,
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCall,
@@ -54,6 +58,9 @@ from openai.types.chat import (
     ChatCompletionToolMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from openai.types.chat.chat_completion_message_tool_call import Function
+from openai.types.completion_usage import CompletionUsage
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
@@ -72,6 +79,7 @@ from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
+from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
@@ -466,6 +474,113 @@ class Provider(ABC):
         return filtered_models
 
 
+class _OpenAIChatStreamAccumulator:
+    """Aggregate OpenAI Chat Completions stream chunks into a final response.
+
+    Rebuilds fragmented ``delta.tool_calls`` (function arguments arrive in
+    pieces, several parallel tool calls are keyed by index), keeps the
+    ``reasoning_content`` split out of the body text, captures the usage
+    carried by the usage-only final chunk (which has empty ``choices``) and
+    tracks the earliest tool-call signal so the consumer can stop emitting
+    live deltas for the rest of the turn (plan D2).
+    """
+
+    def __init__(self) -> None:
+        """Initialize empty accumulation state."""
+        self.content_parts: list[str] = []
+        self.reasoning_parts: list[str] = []
+        self.tool_call_signal: bool = False
+        self._tool_calls: dict[int, dict[str, str]] = {}
+        self._finish_reason: str | None = None
+        self._usage: CompletionUsage | None = None
+        self._completion_id: str = ""
+        self._model: str = ""
+        self._created: int = 0
+
+    def process_chunk(self, chunk: ChatCompletionChunk) -> str:
+        """Consume one stream chunk and return the body-text delta to emit.
+
+        Args:
+            chunk: A single ChatCompletionChunk from the stream.
+
+        Returns:
+            The non-empty body text delta carried by the chunk, or an empty
+            string when the chunk carries no body text (e.g. the usage-only
+            final chunk).
+        """
+        self._completion_id = chunk.id or self._completion_id
+        self._model = chunk.model or self._model
+        self._created = chunk.created or self._created
+        if chunk.usage:
+            self._usage = chunk.usage
+        if not chunk.choices:
+            return ""
+        choice = chunk.choices[0]
+        if choice.finish_reason:
+            self._finish_reason = choice.finish_reason
+        delta = choice.delta
+        reasoning_content = getattr(delta, "reasoning_content", None)
+        if reasoning_content:
+            self.reasoning_parts.append(reasoning_content)
+        if delta.tool_calls:
+            self.tool_call_signal = True
+            for tool_call_delta in delta.tool_calls:
+                slot = self._tool_calls.setdefault(tool_call_delta.index, {"id": "", "name": "", "arguments": ""})
+                if tool_call_delta.id:
+                    slot["id"] = tool_call_delta.id
+                if tool_call_delta.function:
+                    if tool_call_delta.function.name:
+                        slot["name"] = tool_call_delta.function.name
+                    if tool_call_delta.function.arguments:
+                        slot["arguments"] += tool_call_delta.function.arguments
+        text_delta = delta.content or ""
+        if text_delta:
+            self.content_parts.append(text_delta)
+        return text_delta
+
+    def build_tool_calls(self) -> list[ChatCompletionMessageToolCall]:
+        """Build complete tool calls from the accumulated fragments.
+
+        Returns:
+            Tool calls ordered by their stream index.
+        """
+        return [
+            ChatCompletionMessageToolCall(
+                id=slot["id"],
+                type="function",
+                function=Function(name=slot["name"], arguments=slot["arguments"]),
+            )
+            for _, slot in sorted(self._tool_calls.items())
+        ]
+
+    def build_response(self) -> ChatCompletion:
+        """Build the aggregated final ChatCompletion.
+
+        Returns:
+            A ChatCompletion equivalent to a non-streaming response, carrying
+            the usage from the usage-only final chunk when the API sent one.
+        """
+        tool_calls = self.build_tool_calls()
+        extra_fields: dict[str, Any] = {}
+        if self.reasoning_parts:
+            extra_fields["reasoning_content"] = "".join(self.reasoning_parts)
+        message = ChatCompletionMessage(
+            role="assistant",
+            content="".join(self.content_parts) or None,
+            tool_calls=tool_calls or None,
+            **extra_fields,
+        )
+        choice = Choice(index=0, finish_reason=self._finish_reason or "stop", message=message)
+        return ChatCompletion(
+            id=self._completion_id or "streamed-completion",
+            choices=[choice],
+            created=self._created or 0,
+            model=self._model,
+            object="chat.completion",
+            usage=self._usage,
+        )
+
+
 class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     temperature: float | OpenAINotGiven | None = gpt_settings.temperature
     max_tokens: int | OpenAINotGiven | None = gpt_settings.max_tokens
@@ -475,6 +590,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     image_size: IMAGE_SIZE_OPENAI_LITERAL | None = gpt_settings.image_size_openai
     base_url: str
     image_n_choices: int = gpt_settings.image_n_choices
+    stream_include_usage: bool = True
 
     def __getattribute__(self, name: str) -> object:
         attr = super().__getattribute__(name)
@@ -569,6 +685,70 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             [Message.from_openai(msg) for msg in new_messages],
         )
 
+    async def _stream_chat_completion(
+        self,
+        completion_kwargs: dict[str, Any],
+        interface: UserInterface | None,
+    ) -> ChatCompletion:
+        """Request a streamed Chat Completions completion and aggregate it.
+
+        Emits one live delta per non-empty body-text chunk via the interface
+        until the earliest tool-call signal in the stream; the accumulated
+        chunks are rebuilt into a ChatCompletion equivalent to the
+        non-streaming response (fragmented tool-call arguments, parallel
+        tool calls, ``reasoning_content`` split and the usage-only final
+        chunk included). The stream is always closed explicitly, also on
+        cancellation.
+
+        Args:
+            completion_kwargs: Non-streaming request parameters shared with
+                the fallback path.
+            interface: The active user interface, if any.
+
+        Returns:
+            The aggregated final ChatCompletion.
+
+        Raises:
+            BadRequestError: When the API rejects the streaming request after
+                live deltas were already emitted (the retry latch forbids a
+                transparent re-request at that point).
+            NotFoundError: When the API reports an unknown model after live
+                deltas were already emitted.
+        """
+        stream_kwargs: dict[str, Any] = {**completion_kwargs, "stream": True}
+        if self.stream_include_usage:
+            stream_kwargs["stream_options"] = {"include_usage": True}
+        try:
+            stream = cast(
+                AsyncStream[ChatCompletionChunk],
+                await self.client.chat.completions.create(**stream_kwargs),
+            )
+        except (BadRequestError, NotFoundError) as stream_error:
+            # Some OpenAI-compatible gateways reject the streaming request
+            # (e.g. unknown ``stream_options``) with a 400/404. The fallback to
+            # a non-streaming request is handled here — inside the helper —
+            # because the class-level ``__getattribute__`` error-conversion
+            # wrapper turns raw SDK errors into ServiceResponseError before
+            # they can reach any outer handler.
+            if delta_latched(interface):
+                raise
+            if isinstance(stream_error, BadRequestError) and stream_error.code == "context_length_exceeded":
+                raise
+            logger.warning(
+                f"{self.name}/{completion_kwargs.get('model', 'unknown')} rejected the streaming request "
+                f"({stream_error}). Falling back to a non-streaming request."
+            )
+            return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
+        accumulator = _OpenAIChatStreamAccumulator()
+        try:
+            async for chunk in stream:
+                text_delta = accumulator.process_chunk(chunk=chunk)
+                if text_delta and not accumulator.tool_call_signal:
+                    await emit_delta(interface=interface, text=text_delta)
+        finally:
+            await stream.close()
+        return accumulator.build_response()
+
     async def _get_chat_completion_response(
         self,
         messages: list[ChatCompletionMessageParam],
@@ -595,18 +775,28 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
 
-        response: ChatCompletion = await self.client.chat.completions.create(  # type: ignore
-            model=model,
-            messages=dialog,
-            temperature=self._get_temperature_value(model_name=model),
-            max_tokens=self._get_max_tokens_value(model_name=model),
-            presence_penalty=self.presence_penalty,
-            frequency_penalty=self.frequency_penalty,
-            timeout=self.timeout,
-            tools=RegisteredChibiTools.get_tool_definitions(),
-            tool_choice="auto",
-            reasoning_effort=self.get_reasoning_effort_value(model_name=model),
-        )
+        completion_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": dialog,
+            "temperature": self._get_temperature_value(model_name=model),
+            "max_tokens": self._get_max_tokens_value(model_name=model),
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "timeout": self.timeout,
+            "tools": RegisteredChibiTools.get_tool_definitions(),
+            "tool_choice": "auto",
+            "reasoning_effort": self.get_reasoning_effort_value(model_name=model),
+        }
+        response: ChatCompletion
+        if delta_streaming_allowed(interface):
+            # The streaming helper handles its own pre-first-delta fallback to a
+            # non-streaming request: raw SDK errors (BadRequestError/NotFoundError)
+            # are converted into ServiceResponseError by the ``__getattribute__``
+            # wrapper on the way out of any method call, so they can only be
+            # handled inside the helper itself.
+            response = await self._stream_chat_completion(completion_kwargs=completion_kwargs, interface=interface)
+        else:
+            response = await self.client.chat.completions.create(**completion_kwargs)
         choices: list[Choice] = response.choices
 
         if len(choices) == 0:
@@ -974,23 +1164,53 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         model: str,
         system_prompt: str,
         messages: list[MessageParam],
+        interface: UserInterface | None = None,
     ) -> AnthropicMessage:
-        for attempt in range(gpt_settings.retries):
-            response_message: AnthropicMessage = await self.client.messages.create(
-                model=model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                timeout=self.timeout,
-                tools=self.tools_list,
-                system=[
-                    TextBlockParam(
-                        text=system_prompt,
-                        type="text",
-                        cache_control=CacheControlEphemeralParam(type="ephemeral"),
-                    )
-                ],
-                messages=messages,
+        """Generate an Anthropic message with empty-response retries.
+
+        When live delta streaming is allowed for the request, the completion
+        is requested as a stream and body-text deltas are emitted per chunk
+        (thinking deltas are never streamed); otherwise the plain
+        non-streaming call is used. The retry latch on the interface makes
+        every attempt after the first emitted delta non-streaming.
+
+        Args:
+            model: The Anthropic model identifier.
+            system_prompt: The system prompt to send.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+
+        Returns:
+            The final aggregated Anthropic message.
+
+        Raises:
+            NoResponseError: When every attempt returns an empty response.
+        """
+        system_blocks = [
+            TextBlockParam(
+                text=system_prompt,
+                type="text",
+                cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
+        ]
+        for attempt in range(gpt_settings.retries):
+            if delta_streaming_allowed(interface):
+                response_message: AnthropicMessage = await self._stream_generate_content(
+                    model=model,
+                    system=system_blocks,
+                    messages=messages,
+                    interface=interface,
+                )
+            else:
+                response_message = await self.client.messages.create(
+                    model=model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    timeout=self.timeout,
+                    tools=self.tools_list,
+                    system=system_blocks,
+                    messages=messages,
+                )
 
             if response_message.content and len(response_message.content) > 0:
                 return response_message
@@ -1004,6 +1224,48 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             )
             await sleep(total_delay)
         raise NoResponseError(provider=self.name, model=model, detail="Unexpected (empty) response received")
+
+    async def _stream_generate_content(
+        self,
+        model: str,
+        system: list[TextBlockParam],
+        messages: list[MessageParam],
+        interface: UserInterface | None,
+    ) -> AnthropicMessage:
+        """Request a streamed Anthropic completion and return the final message.
+
+        Emits one live delta per non-empty text delta via the interface until
+        the earliest tool-use block signal in the stream; thinking deltas are
+        accumulated by the SDK and never streamed. The stream is always
+        closed explicitly, also on cancellation.
+
+        Args:
+            model: The Anthropic model identifier.
+            system: The system prompt blocks.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+
+        Returns:
+            The final aggregated Anthropic message.
+        """
+        async with self.client.messages.stream(
+            model=model,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            timeout=self.timeout,
+            tools=self.tools_list,
+            system=system,
+            messages=messages,
+        ) as stream:
+            tool_call_signal = False
+            async for event in stream:
+                if event.type == "content_block_start":
+                    if isinstance(event.content_block, ToolUseBlock):
+                        tool_call_signal = True
+                elif event.type == "content_block_delta" and not tool_call_signal:
+                    if isinstance(event.delta, TextDelta) and event.delta.text:
+                        await emit_delta(interface=interface, text=event.delta.text)
+            return await stream.get_final_message()
 
     @retry(
         stop=stop_after_attempt(4),
@@ -1070,6 +1332,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             model=model,
             system_prompt=prepared_system_prompt,
             messages=messages,
+            interface=interface,
         )
         usage = get_usage_from_anthropic_response(response_message=response_message)
         if track_prompt_size:

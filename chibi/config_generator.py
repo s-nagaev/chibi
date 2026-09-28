@@ -129,6 +129,9 @@ PARASAIL_API_KEY=
 # Llama and open-model inference. https://featherless.ai
 FEATHERLESS_API_KEY=
 
+# DeepSeek, GLM and other open models. https://entrim.ai
+ENTRIM_API_KEY=
+
 # Open-source models from Cloudflare. Chat-only. https://dash.cloudflare.com/profile/api-tokens
 CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.

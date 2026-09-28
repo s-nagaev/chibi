@@ -8,6 +8,12 @@ from openai.types import ImagesResponse, ReasoningEffort
 from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionUserMessageParam
 from openai.types.chat.chat_completion_content_part_param import File, FileFile
 from openai.types.chat.parsed_chat_completion import ParsedChatCompletion
+from openai.types.responses import (
+    Response,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionToolCall,
+    ResponseTextDeltaEvent,
+)
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoModelSelectedError, ServiceResponseError
@@ -16,6 +22,7 @@ from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchem
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
+from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import get_usage_msg, prepare_system_prompt, send_llm_thoughts
@@ -104,6 +111,12 @@ class OpenAI(OpenAIFriendlyProvider):
                     logger.warning(f"Responses-only model {model} failed: {e}. Not falling back.")
                     raise
 
+            if delta_latched(interface):
+                logger.warning(
+                    f"Responses API failed for {model} after live deltas were emitted: {e}. Not falling back."
+                )
+                raise
+
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
             response, updated_messages = await super().get_chat_response(
                 messages=messages,
@@ -156,6 +169,61 @@ class OpenAI(OpenAIFriendlyProvider):
         if model_name.startswith("gpt-5"):
             return omit
         return getattr(self, "temperature", gpt_settings.temperature)
+
+    async def _stream_response_completion(
+        self,
+        request_kwargs: dict[str, Any],
+        interface: UserInterface | None,
+    ) -> Response:
+        """Stream a Responses API completion and return the final response.
+
+        Emits one live delta per output-text delta event via the interface
+        until the earliest function-call-arguments delta in the stream;
+        reasoning summary deltas are never streamed. The final aggregated
+        Response is obtained from the stream itself, so the downstream
+        non-streaming processing stays unchanged. The stream is always
+        closed explicitly, also on cancellation.
+
+        Args:
+            request_kwargs: Non-streaming request parameters shared with the
+                fallback path.
+            interface: The active user interface, if any.
+
+        Returns:
+            The final aggregated Response object.
+
+        Raises:
+            BadRequestError: When the API rejects the streaming request after
+                live deltas were already emitted (the retry latch forbids a
+                transparent re-request at that point).
+            NotFoundError: When the API reports an unknown model after live
+                deltas were already emitted.
+        """
+        stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
+        tool_call_signal = False
+        try:
+            async with self.get_client().responses.stream(**stream_kwargs) as stream:
+                async for event in stream:
+                    if isinstance(event, ResponseTextDeltaEvent):
+                        if not tool_call_signal and event.delta:
+                            await emit_delta(interface=interface, text=event.delta)
+                    elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
+                        tool_call_signal = True
+                return await stream.get_final_response()
+        except (BadRequestError, NotFoundError) as stream_error:
+            # Some gateways reject the streaming Responses request with a
+            # 400/404. The fallback to a non-streaming request is handled
+            # here — inside the helper — because the class-level
+            # ``__getattribute__`` error-conversion wrapper turns raw SDK
+            # errors into ServiceResponseError before they can reach any
+            # outer handler.
+            if delta_latched(interface):
+                raise
+            logger.warning(
+                f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
+                f"({stream_error}). Falling back to a non-streaming request."
+            )
+            return await self.get_client().responses.create(**request_kwargs)
 
     async def _get_response_completion_response(
         self,
@@ -223,7 +291,15 @@ class OpenAI(OpenAIFriendlyProvider):
         if reasoning_effort not in (omit, None):
             request_kwargs["reasoning"] = {"effort": reasoning_effort}
 
-        response = await self.get_client().responses.create(**request_kwargs)
+        if delta_streaming_allowed(interface):
+            # The streaming helper handles its own pre-first-delta fallback to a
+            # non-streaming request: raw SDK errors (BadRequestError/NotFoundError)
+            # are converted into ServiceResponseError by the ``__getattribute__``
+            # wrapper on the way out of any method call, so they can only be
+            # handled inside the helper itself.
+            response = await self._stream_response_completion(request_kwargs=request_kwargs, interface=interface)
+        else:
+            response = await self.get_client().responses.create(**request_kwargs)
 
         if not response.output:
             raise ServiceResponseError(
@@ -262,7 +338,7 @@ class OpenAI(OpenAIFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
 
-        tool_call_items = [item for item in response.output if getattr(item, "type", None) == "function_call"]
+        tool_call_items = [item for item in response.output if isinstance(item, ResponseFunctionToolCall)]
 
         if not tool_call_items:
             messages.append(Message(role="assistant", content=answer))
