@@ -262,7 +262,8 @@ async def test_command_action_gate_disabled_skips_execution(dispatcher_settings)
     send_mock.assert_not_awaited()
 
 
-async def test_command_action_passes_gate_with_production_defaults(database_settings) -> None:
+@pytest.mark.usefixtures("database_settings")
+async def test_command_action_passes_gate_with_production_defaults() -> None:
     """With the shipped configuration (D5: commands enabled by default) a `command` job executes."""
     from chibi.config.app import ApplicationSettings
 
