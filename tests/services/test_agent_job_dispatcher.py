@@ -55,11 +55,32 @@ def local_db(tmp_path: Path) -> LocalStorage:
 
 
 @pytest.fixture
-def database_settings(tmp_path: Path):
-    """Point the DatabaseCache factory at a local backend inside a temp dir."""
+def database_settings(tmp_path: Path, local_db: LocalStorage):
+    """Point the DatabaseCache factory at the test's own local backend.
+
+    The module-level ``_db_provider`` singleton is replaced with a stub serving
+    the test's ``local_db`` instance, so injected-database calls (orphan
+    cleanup) never resolve to a stale global cache that a previous test may
+    have bound to a different storage backend or event loop.
+    """
     settings = SimpleNamespace(storage_backend="local", local_data_path=str(tmp_path))
-    with patch("chibi.storage.database.application_settings", settings):
+    with (
+        patch("chibi.storage.database.application_settings", settings),
+        patch("chibi.storage.database._db_provider", local_db_provider(local_db)),
+    ):
         yield settings
+
+
+def local_db_provider(db: LocalStorage) -> SimpleNamespace:
+    """Build a fake database provider serving one LocalStorage instance.
+
+    Args:
+        db: The storage instance the injected database calls resolve to.
+
+    Returns:
+        Provider namespace compatible with ``chibi.storage.database._db_provider``.
+    """
+    return SimpleNamespace(get_database=AsyncMock(return_value=db))
 
 
 async def test_self_action_routes_to_handle_scheduler_trigger(dispatcher_settings) -> None:
