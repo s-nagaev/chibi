@@ -105,11 +105,15 @@ def cwd_updates(output: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [frame for frame in output if frame.get("type") == "cwd_update"]
 
 
-async def wait_for_frame(output: list[dict[str, Any]], frame_type: str) -> dict[str, Any]:
-    """Wait until a frame of the given type is emitted and return it.
+async def wait_for_frame(output: list[dict[str, Any]], request_id: str, frame_type: str) -> dict[str, Any]:
+    """Wait until a frame of the given type for one request is emitted.
+
+    The wait is keyed by ``request_id`` so a later request's wait can never be
+    satisfied by an earlier request's stale frame.
 
     Args:
         output: Captured frame list.
+        request_id: Identifier of the request the frame must belong to.
         frame_type: Frame type to wait for.
 
     Returns:
@@ -117,24 +121,28 @@ async def wait_for_frame(output: list[dict[str, Any]], frame_type: str) -> dict[
     """
     for _ in range(300):
         for frame in output:
-            if frame.get("type") == frame_type:
+            if frame.get("type") == frame_type and frame.get("request_id") == request_id:
                 return frame
         await asyncio.sleep(0.01)
-    raise AssertionError(f"Missing {frame_type} frame: {output}")
+    raise AssertionError(f"Missing {frame_type} frame for {request_id}: {output}")
 
 
-async def wait_for_results(output: list[dict[str, Any]], count: int) -> None:
-    """Wait until ``count`` result frames have been emitted.
+async def wait_for_results(output: list[dict[str, Any]], request_ids: list[str]) -> None:
+    """Wait until every listed request has emitted its result frame.
 
     Args:
         output: Captured frame list.
-        count: Number of terminal result frames to wait for.
+        request_ids: Request identifiers that must all have result frames.
     """
+    pending = set(request_ids)
     for _ in range(300):
-        if len([frame for frame in output if frame.get("type") == "result"]) >= count:
+        answered = {
+            frame["request_id"] for frame in output if frame.get("type") == "result" and frame.get("request_id")
+        }
+        if pending <= answered:
             return
         await asyncio.sleep(0.01)
-    raise AssertionError(f"Expected {count} result frames: {output}")
+    raise AssertionError(f"Expected result frames for {sorted(pending)}: {output}")
 
 
 RUNNERS: list[IDEStdioRunner] = []
@@ -142,10 +150,17 @@ RUNNERS: list[IDEStdioRunner] = []
 
 @pytest.fixture(autouse=True)
 async def cwd_event_cleanup() -> Any:
-    """Release the tracker sink and settle emission tasks after each test."""
+    """Release the tracker sink, settle emission tasks and reap request tasks."""
     yield
     cwd_tracker.set_sink(None)
     for instance in RUNNERS:
+        # Cancel and await any request task still owned by the runner so no
+        # _run_request keeps executing after the test's patches are gone.
+        leaked = [task for task in instance._tasks.values() if not task.done()]
+        for task in leaked:
+            task.cancel()
+        if leaked:
+            await asyncio.gather(*leaked, return_exceptions=True)
         await instance.drain_cwd_updates()
     RUNNERS.clear()
 
@@ -235,7 +250,7 @@ class TestFirstRequestEmission:
         with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r1", "result")
 
         assert cwd_updates(output) == [{"type": "cwd_update", "thread_id": 42, "cwd": LAUNCH_CWD}]
 
@@ -251,9 +266,9 @@ class TestFirstRequestEmission:
         with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r1", "result")
             await run_request(instance, "r2", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r2", "result")
 
         assert len(cwd_updates(output)) == 1
 
@@ -270,7 +285,7 @@ class TestFirstRequestEmission:
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
             await run_request(instance, "r2", 7)
-            await wait_for_results(output, 2)
+            await wait_for_results(output, ["r1", "r2"])
 
         assert cwd_updates(output) == [
             {"type": "cwd_update", "thread_id": 42, "cwd": LAUNCH_CWD},
@@ -289,7 +304,7 @@ class TestFirstRequestEmission:
         with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r1", "result")
 
         assert cwd_updates(output) == []
 
@@ -311,7 +326,7 @@ class TestRuntimeChange:
         with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD, CHANGED_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r1", "result")
             await instance.drain_cwd_updates()
 
         assert cwd_updates(output) == [
@@ -333,7 +348,7 @@ class TestRuntimeChange:
         with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(CHANGED_CWD):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
-            await wait_for_frame(output, "result")
+            await wait_for_frame(output, "r1", "result")
             await instance.drain_cwd_updates()
 
         assert cwd_tracker._sink is None
@@ -417,7 +432,7 @@ class TestCloneEmission:
         ):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42, prompt="/new_thread_with_current_context 7")
-            await wait_for_results(output, 1)
+            await wait_for_results(output, ["r1"])
 
         clone_updates = [
             frame for frame in cwd_updates(output) if frame["thread_id"] == 42 and frame["cwd"] == CHANGED_CWD

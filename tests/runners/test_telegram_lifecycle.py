@@ -13,7 +13,23 @@ from chibi.runners.telegram import (
     _shutdown_scheduler_and_tasks,
 )
 from chibi.services.scheduler import RETENTION_CLEANUP_JOB_ID, ChibiScheduler
+from chibi.services.task_manager import task_manager
 from chibi.utils.app import SingletonMeta
+
+
+@pytest.fixture(autouse=True)
+async def reap_leaked_background_tasks():
+    """Cancel and await any task leaked into the global task manager.
+
+    A fire-and-forget task surviving the test would run outside the test's
+    patches and could touch real services (storage, providers).
+    """
+    yield
+    leaked = [task for tasks in task_manager._tasks.values() for task in tasks if not task.done()]
+    for task in leaked:
+        task.cancel()
+    if leaked:
+        await asyncio.gather(*leaked, return_exceptions=True)
 
 
 @pytest.fixture()

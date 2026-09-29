@@ -1,5 +1,6 @@
 """Tests for the stdio runner scheduler lifecycle (start / shutdown / gate)."""
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,7 +17,23 @@ from chibi.services.scheduler import (
     STDIO_SCHEDULER_DB_FILENAME,
     StdioScheduler,
 )
+from chibi.services.task_manager import task_manager
 from chibi.utils.app import SingletonMeta
+
+
+@pytest.fixture(autouse=True)
+async def reap_leaked_background_tasks():
+    """Cancel and await any task leaked into the global task manager.
+
+    A fire-and-forget request task surviving the test would run outside the
+    test's patches and could touch real services (storage, providers).
+    """
+    yield
+    leaked = [task for tasks in task_manager._tasks.values() for task in tasks if not task.done()]
+    for task in leaked:
+        task.cancel()
+    if leaked:
+        await asyncio.gather(*leaked, return_exceptions=True)
 
 
 @pytest.fixture()
