@@ -176,3 +176,17 @@ class TestStdioNotifyFailure:
                 {"job_id": "agent:-10000000000000000:broken", **STDIO_PAYLOAD_KWARGS}
             )
             await _notify_failure(payload, reason="RuntimeError: boom")
+
+
+class TestUploadedFileStorageFlag:
+    """Scheduler interfaces must opt out of uploaded-file storage lookups."""
+
+    async def test_scheduler_interface_disables_uploaded_file_storage(self) -> None:
+        """Self-wake turns have no update context, so get_file_storage must not be consulted."""
+        interface = SchedulerInterface(user_id=1, storage_id=1, chat_id=1)
+        assert interface.uses_uploaded_file_storage is False
+
+    async def test_stdio_scheduler_interface_disables_uploaded_file_storage(self) -> None:
+        """The stdio counterpart likewise declares no uploaded-files storage."""
+        interface = StdioSchedulerInterface(user_id=1, storage_id=1, chat_id=1)
+        assert interface.uses_uploaded_file_storage is False

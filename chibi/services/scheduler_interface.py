@@ -92,6 +92,8 @@ class SchedulerInterface(UserInterface):
     job creation time.
     """
 
+    uses_uploaded_file_storage = False
+
     def __init__(self, user_id: int, storage_id: int, chat_id: int, thread_id: int = 0) -> None:
         """Initialize the interface from scheduler job context identifiers.
 
@@ -393,6 +395,8 @@ class StdioSchedulerInterface(UserInterface):
     payload thread no longer exists in the current session, the message is
     logged and dropped by the emitter — the job itself still ran.
     """
+
+    uses_uploaded_file_storage = False
 
     def __init__(self, user_id: int, storage_id: int, chat_id: int, thread_id: int = 0) -> None:
         """Initialize the interface from scheduler job context identifiers.
