@@ -35,7 +35,8 @@ _ACTION_TYPE_DESCRIPTIONS = (
     "trigger_text and does the work with a live answer (a true autonomous heartbeat). "
     "notify — sends a dumb static message to the user without waking the agent (zero LLM usage; "
     "may be disabled by server settings). "
-    "command — runs a pre-moderated shell command on schedule and reports its output."
+    "command — runs a pre-moderated shell command on schedule; its output is delivered to the user "
+    "when stdout is non-empty, while failures are always notified."
 )
 
 # Client frontends where the scheduler agent tools are exposed: the Telegram bot and every
@@ -208,7 +209,8 @@ class ScheduleTaskTool(ChibiTool):
                                 "description": (
                                     "Action discriminator: 'self' wakes the agent in the fixed thread, "
                                     "'notify' sends a static message to the user, "
-                                    "'command' runs a pre-moderated shell command."
+                                    "'command' runs a pre-moderated shell command whose output is delivered "
+                                    "to the user when stdout is non-empty; failures are always notified."
                                 ),
                             },
                             "trigger_text": {
@@ -237,13 +239,6 @@ class ScheduleTaskTool(ChibiTool):
                                 "description": (
                                     "Per-run command timeout in seconds (type='command'), default 60, "
                                     "clamped from above by the server configuration."
-                                ),
-                            },
-                            "notify_on_nonempty_output": {
-                                "type": "boolean",
-                                "description": (
-                                    "type='command': when true (default) the user is notified only if the "
-                                    "command produced non-empty stdout."
                                 ),
                             },
                         },

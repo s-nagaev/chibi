@@ -165,7 +165,8 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
     The command is re-moderated before every run (design §6.4); on a declined
     verdict the run is skipped and the job is kept. Execution follows the
     ``cmd.py`` pattern: ``create_subprocess_shell`` with a fresh process group
-    and ``killpg`` on timeout.
+    and ``killpg`` on timeout. The output is delivered to the user only when
+    stdout is non-empty; job failures are always notified by the dispatcher.
 
     Args:
         payload: Validated payload with a `command` action.
@@ -230,21 +231,18 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
 
     stdout_text = _decode_output(stdout)
     stderr_text = _decode_output(stderr)
+    if not stdout_text.strip():
+        logger.bind(user_id=payload.user_id).info(
+            f"Scheduler: command of job '{payload.job_id}' produced empty stdout — user not notified."
+        )
+        return
     status = (
         f"Scheduled command of job '{payload.title}' ({payload.job_id}) finished with exit code {process.returncode}."
     )
-    if action.notify_on_nonempty_output:
-        if not stdout_text.strip():
-            logger.bind(user_id=payload.user_id).info(
-                f"Scheduler: command of job '{payload.job_id}' produced empty stdout — user not notified."
-            )
-            return
-        message = f"{status}\nCommand: `{action.command}`\nOutput:\n{_truncate_output(stdout_text)}"
-        if stderr_text.strip():
-            message += f"\nStderr:\n{_truncate_output(stderr_text)}"
-        await interface.send_message(message=message)
-        return
-    await interface.send_message(message=status)
+    message = f"{status}\nCommand: `{action.command}`\nOutput:\n{_truncate_output(stdout_text)}"
+    if stderr_text.strip():
+        message += f"\nStderr:\n{_truncate_output(stderr_text)}"
+    await interface.send_message(message=message)
 
 
 async def _dispatch(payload: AgentJobPayload) -> None:

@@ -146,7 +146,7 @@ async def test_command_action_delivers_nonempty_output(dispatcher_settings, tmp_
 
 
 async def test_command_action_empty_output_stays_silent(dispatcher_settings) -> None:
-    """With notify_on_nonempty_output=True an empty stdout produces no notification."""
+    """An empty stdout produces no notification — unconditionally, with no parameter to override."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     with (
@@ -156,31 +156,61 @@ async def test_command_action_empty_output_stays_silent(dispatcher_settings) -> 
         await run_agent_job(
             "agent:1:silent",
             **VALID_PAYLOAD,
-            action={"type": "command", "command": "true", "notify_on_nonempty_output": True},
+            action={"type": "command", "command": "true"},
         )
 
     send_mock.assert_not_awaited()
 
 
-async def test_command_action_brief_status_when_notify_disabled(dispatcher_settings) -> None:
-    """With notify_on_nonempty_output=False a brief status is always delivered."""
+async def test_command_action_nonempty_output_notified_once(dispatcher_settings) -> None:
+    """Non-empty stdout delivers the full report exactly once, including stderr when present."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
+    process = MagicMock()
+    process.returncode = 0
+    process.pid = 4242
+    process.communicate = AsyncMock(return_value=(b"hello-scheduler\n", b"warning line\n"))
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)),
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
-            "agent:1:status",
+            "agent:1:report",
             **VALID_PAYLOAD,
-            action={"type": "command", "command": "echo secret-output", "notify_on_nonempty_output": False},
+            action={"type": "command", "command": "echo hello-scheduler"},
         )
 
     send_mock.assert_awaited_once()
     assert send_mock.await_args is not None
     message = send_mock.await_args.kwargs["message"]
-    assert "exit code 0" in message
-    assert "secret-output" not in message
+    assert "hello-scheduler" in message
+    assert "warning line" in message
+
+
+async def test_command_action_failure_still_notified(dispatcher_settings) -> None:
+    """A command-action failure bypasses the non-empty-stdout gate and reaches _notify_failure."""
+    moderation = MagicMock()
+    moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
+    with (
+        patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch(
+            "chibi.services.jobs.agent_task.asyncio.create_subprocess_shell",
+            new=AsyncMock(side_effect=OSError("spawn failed")),
+        ),
+        patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
+        patch("chibi.services.jobs.agent_task._notify_failure", new=AsyncMock()) as failure_mock,
+    ):
+        await run_agent_job(
+            "agent:1:broken",
+            **VALID_PAYLOAD,
+            action={"type": "command", "command": "echo hi"},
+        )
+
+    failure_mock.assert_awaited_once()
+    assert failure_mock.await_args is not None
+    assert "OSError" in failure_mock.await_args.kwargs["reason"]
+    send_mock.assert_not_awaited()
 
 
 async def test_command_action_timeout_kills_process_group(dispatcher_settings) -> None:

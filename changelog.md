@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `self` and `notify` deliveries (and per-job failure notifications) reach the client as unsolicited `{type: "message", thread_id, content}` frames, reusing the `background_messages` capability machinery (same frame shape, same serialized stdout pathway as background tool answers).
 
 ### Changed
+- Scheduled `command` actions now deliver their output to the user only when the command produced non-empty stdout (empty runs stay silent); job failures are always notified. The `notify_on_nonempty_output` action parameter was removed from the `schedule_task` tool before release — it existed only on the unreleased branch, so no upgrade action is needed.
 - `SCHEDULER_AGENT_COMMANDS_ENABLED` now defaults to `true` (previously `false`): scheduled shell commands are allowed out of the box — premoderation at creation and re-moderation before every run still apply.
 - Scheduler tools are no longer registered in the terminal runner entrypoint (`chibi` REPL): the tool gate is runner-aware (Telegram and stdio clients only), and the terminal entrypoint additionally deregisters them explicitly, so terminal sessions never expose scheduling tools.
 - Scheduler tool calls in stdio sessions now resolve the stdio scheduler singleton: jobs created by an IDE/TUI client are registered on the started stdio scheduler instead of the Telegram-flavored one (which is never started in a stdio process, so jobs added to it silently never fired).

@@ -47,13 +47,6 @@ class CommandActionPayload(BaseModel):
             "`scheduler_command_timeout_max`."
         ),
     )
-    notify_on_nonempty_output: bool = Field(
-        default=True,
-        description=(
-            "When True, the user is notified only if the command produced non-empty stdout; "
-            "when False, a brief status is delivered after every run."
-        ),
-    )
 
 
 AgentJobActionPayload = Annotated[
