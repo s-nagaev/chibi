@@ -93,6 +93,12 @@ def _should_notify_failure(job_id: str) -> bool:
 async def _notify_failure(payload: AgentJobPayload, reason: str) -> None:
     """Deliver a single anti-flooded notification about a failed job.
 
+    This is the direct-user-delivery fallback of the dispatcher: it is called
+    only when the agent itself cannot learn about what happened — a wake-up
+    (a `self` trigger or a command result delivery) failed with a provider/LLM
+    error, or a non-command action raised. Failures of the command itself are
+    not reported here: the agent is woken with the failure context instead.
+
     Args:
         payload: Validated payload of the failed job.
         reason: Short human-readable failure reason.
@@ -159,22 +165,85 @@ def _truncate_output(text: str, limit: int = CMD_STDOUT_LIMIT) -> str:
     return f"{text[:limit]}\n...truncated ({len(text)} characters total)..."
 
 
+def _build_command_result_trigger(
+    payload: AgentJobPayload,
+    action: CommandActionPayload,
+    *,
+    exit_code: int | None = None,
+    stdout_text: str = "",
+    stderr_text: str = "",
+    error_note: str | None = None,
+) -> str:
+    """Compose the structured trigger text carrying a command result to the agent.
+
+    Args:
+        payload: Validated payload of the fired job.
+        action: The narrowed command action from the payload.
+        exit_code: Process exit code, or None when the command never ran.
+        stdout_text: Decoded stdout (truncated for delivery).
+        stderr_text: Decoded stderr (truncated for delivery).
+        error_note: Extra failure context (timeout or spawn error description).
+
+    Returns:
+        Structured trigger text for the scheduler wake-up.
+    """
+    lines = [
+        f"Scheduled command job '{payload.title}' ({payload.job_id}) result.",
+        f"Command: `{action.command}`",
+    ]
+    if error_note is not None:
+        lines.append(error_note)
+    if exit_code is not None:
+        lines.append(f"Exit code: {exit_code}")
+    lines.append(f"Output:\n{_truncate_output(stdout_text) if stdout_text.strip() else '(empty)'}")
+    if stderr_text.strip():
+        lines.append(f"Stderr:\n{_truncate_output(stderr_text)}")
+    return "\n".join(lines)
+
+
+async def _wake_agent_with_command_result(
+    payload: AgentJobPayload, trigger_text: str, interface: UserInterface
+) -> None:
+    """Wake the agent with a command result, falling back to a direct user notification.
+
+    The wake goes through the normal self-wake pipeline
+    (:func:`handle_scheduler_trigger`): the agent sees the result context and
+    decides itself what — if anything — to tell the user. A failure of the wake
+    step itself (LLM/provider error) means the agent never learned about the
+    result, so the user is notified directly through the interface, guarded by
+    the anti-flood cooldown. Failures of the command itself never reach this
+    fallback: they arrive as part of the trigger text.
+
+    Args:
+        payload: Validated payload of the fired job.
+        trigger_text: Structured command-result context for the agent.
+        interface: Interface bound to the job's chat/thread context.
+    """
+    try:
+        await handle_scheduler_trigger(trigger_text=trigger_text, job_id=payload.job_id, interface=interface)
+    except Exception as e:
+        logger.bind(user_id=payload.user_id).exception(
+            f"Scheduler: agent wake for command job '{payload.job_id}' failed: {type(e).__name__}: {e}"
+        )
+        await _notify_failure(
+            payload, reason=f"agent wake failed ({type(e).__name__}: {e}); command result not delivered"
+        )
+
+
 async def _run_command_action(payload: AgentJobPayload, action: CommandActionPayload) -> None:
-    """Run the pre-moderated shell command of a `command` action and report the result.
+    """Run the pre-moderated shell command of a `command` action and wake the agent.
 
     The command is re-moderated before every run (design §6.4); on a declined
     verdict the run is skipped and the job is kept. Execution follows the
     ``cmd.py`` pattern: ``create_subprocess_shell`` with a fresh process group
-    and ``killpg`` on timeout. The output is delivered to the user only when
-    stdout is non-empty; job failures are always notified by the dispatcher.
+    and ``killpg`` on timeout. The agent is ALWAYS woken with the result —
+    success or failure, empty or non-empty output — through the self-wake
+    pipeline; it owns communication with the user. Only a failed wake (LLM
+    error) falls back to a direct, anti-flooded user notification.
 
     Args:
         payload: Validated payload with a `command` action.
         action: The narrowed command action from the payload.
-
-    Raises:
-        OSError: If the subprocess cannot be created (propagates to the
-            dispatcher's anti-flooded failure notification).
     """
     if not application_settings.scheduler_agent_commands_enabled:
         logger.bind(user_id=payload.user_id).warning(
@@ -219,30 +288,43 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
             logger.bind(user_id=payload.user_id).warning(
                 f"Scheduler: command of job '{payload.job_id}' timed out after {timeout}s, process group killed."
             )
-            await interface.send_message(
-                message=(
-                    f"⏱ Scheduled command of job '{payload.title}' ({payload.job_id}) timed out "
-                    f"after {timeout}s. The process group was killed."
-                )
+            await _wake_agent_with_command_result(
+                payload,
+                _build_command_result_trigger(
+                    payload,
+                    action,
+                    error_note=f"The command was killed after {timeout}s (the process group was killed).",
+                ),
+                interface,
             )
             return
     except OSError as e:
-        raise OSError(f"Failed to run command '{action.command}': {e}") from e
+        await _wake_agent_with_command_result(
+            payload,
+            _build_command_result_trigger(
+                payload, action, error_note=f"The command could not be started: {type(e).__name__}: {e}"
+            ),
+            interface,
+        )
+        return
 
     stdout_text = _decode_output(stdout)
     stderr_text = _decode_output(stderr)
-    if not stdout_text.strip():
-        logger.bind(user_id=payload.user_id).info(
-            f"Scheduler: command of job '{payload.job_id}' produced empty stdout — user not notified."
-        )
-        return
-    status = (
-        f"Scheduled command of job '{payload.title}' ({payload.job_id}) finished with exit code {process.returncode}."
+    logger.bind(user_id=payload.user_id).info(
+        f"Scheduler: command of job '{payload.job_id}' finished with exit code {process.returncode} "
+        f"— waking the agent with the result."
     )
-    message = f"{status}\nCommand: `{action.command}`\nOutput:\n{_truncate_output(stdout_text)}"
-    if stderr_text.strip():
-        message += f"\nStderr:\n{_truncate_output(stderr_text)}"
-    await interface.send_message(message=message)
+    await _wake_agent_with_command_result(
+        payload,
+        _build_command_result_trigger(
+            payload,
+            action,
+            exit_code=process.returncode,
+            stdout_text=stdout_text,
+            stderr_text=stderr_text,
+        ),
+        interface,
+    )
 
 
 async def _dispatch(payload: AgentJobPayload) -> None:

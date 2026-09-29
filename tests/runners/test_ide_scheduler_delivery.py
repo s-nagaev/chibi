@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -317,6 +317,47 @@ class TestDispatcherStdioDelivery:
             )
 
         assert {"type": "message", "thread_id": 42, "content": "Time to drink water"} in output
+
+    @pytest.mark.asyncio
+    async def test_command_action_wakes_agent_through_stdio_interface(self) -> None:
+        """A fired command job wakes the agent via the stdio interface; no direct message frame."""
+        instance, output = runner()
+        await instance._handle_message(initialize({"background_messages": True}))
+        instance._session_threads.add(42)
+        settings = SimpleNamespace(
+            client="vscode",
+            scheduler_agent_commands_enabled=True,
+            scheduler_command_timeout_max=900,
+            scheduler_failure_notify=True,
+        )
+        process = MagicMock()
+        process.returncode = 0
+        process.pid = 4242
+        process.communicate = AsyncMock(return_value=(b"git output\n", b""))
+        with (
+            patch("chibi.services.jobs.agent_task.application_settings", settings),
+            patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock()),
+            patch(
+                "chibi.services.jobs.agent_task.asyncio.create_subprocess_shell",
+                new=AsyncMock(return_value=process),
+            ),
+            patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
+        ):
+            await run_agent_job(
+                "agent:-10000000000000000:git-check",
+                user_id=IDE_STORAGE_ID,
+                storage_id=IDE_STORAGE_ID,
+                chat_id=IDE_STORAGE_ID,
+                thread_id=42,
+                title="Git check",
+                action={"type": "command", "command": "git status --short"},
+            )
+
+        trigger_mock.assert_awaited_once()
+        assert trigger_mock.await_args is not None
+        assert isinstance(trigger_mock.await_args.kwargs["interface"], StdioSchedulerInterface)
+        assert "git status --short" in trigger_mock.await_args.kwargs["trigger_text"]
+        assert not [frame for frame in output if frame.get("type") == "message"]
 
     @pytest.mark.asyncio
     async def test_failure_notification_delivered_as_message_frame(self) -> None:

@@ -35,8 +35,9 @@ _ACTION_TYPE_DESCRIPTIONS = (
     "trigger_text and does the work with a live answer (a true autonomous heartbeat). "
     "notify — sends a dumb static message to the user without waking the agent (zero LLM usage; "
     "may be disabled by server settings). "
-    "command — runs a pre-moderated shell command on schedule; its output is delivered to the user "
-    "when stdout is non-empty, while failures are always notified."
+    "command — runs a pre-moderated shell command on schedule; the agent is always woken with the full "
+    "result (exit code, stdout, stderr) and decides what, if anything, to tell the user. Only a failed "
+    "wake (LLM error) falls back to a direct, anti-flooded user notification."
 )
 
 # Client frontends where the scheduler agent tools are exposed: the Telegram bot and every
@@ -209,8 +210,9 @@ class ScheduleTaskTool(ChibiTool):
                                 "description": (
                                     "Action discriminator: 'self' wakes the agent in the fixed thread, "
                                     "'notify' sends a static message to the user, "
-                                    "'command' runs a pre-moderated shell command whose output is delivered "
-                                    "to the user when stdout is non-empty; failures are always notified."
+                                    "'command' runs a pre-moderated shell command; the agent is always woken "
+                                    "with the full result (exit code, stdout, stderr) and owns communication "
+                                    "with the user."
                                 ),
                             },
                             "trigger_text": {

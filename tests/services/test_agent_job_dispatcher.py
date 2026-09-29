@@ -144,12 +144,13 @@ async def test_invalid_payload_rejected_without_execution(dispatcher_settings) -
     send_mock.assert_not_awaited()
 
 
-async def test_command_action_delivers_nonempty_output(dispatcher_settings, tmp_path: Path) -> None:
-    """A `command` action with non-empty stdout delivers command, exit code and output."""
+async def test_command_action_nonempty_output_wakes_agent(dispatcher_settings, tmp_path: Path) -> None:
+    """A `command` action with non-empty stdout wakes the agent with the full result context."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
@@ -158,20 +159,23 @@ async def test_command_action_delivers_nonempty_output(dispatcher_settings, tmp_
             action={"type": "command", "command": "echo hello-scheduler", "cwd": str(tmp_path)},
         )
 
-    send_mock.assert_awaited_once()
-    assert send_mock.await_args is not None
-    message = send_mock.await_args.kwargs["message"]
-    assert "hello-scheduler" in message
-    assert "exit code 0" in message
-    assert "echo hello-scheduler" in message
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "hello-scheduler" in trigger_text
+    assert "exit code: 0" in trigger_text.lower()
+    assert "echo hello-scheduler" in trigger_text
+    assert isinstance(trigger_mock.await_args.kwargs["interface"], SchedulerInterface)
+    send_mock.assert_not_awaited()
 
 
-async def test_command_action_empty_output_stays_silent(dispatcher_settings) -> None:
-    """An empty stdout produces no notification — unconditionally, with no parameter to override."""
+async def test_command_action_empty_output_still_wakes_agent(dispatcher_settings) -> None:
+    """An empty stdout still wakes the agent, with an explicit '(empty)' output context."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
@@ -180,11 +184,16 @@ async def test_command_action_empty_output_stays_silent(dispatcher_settings) -> 
             action={"type": "command", "command": "true"},
         )
 
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "(empty)" in trigger_text
+    assert "exit code: 0" in trigger_text.lower()
     send_mock.assert_not_awaited()
 
 
-async def test_command_action_nonempty_output_notified_once(dispatcher_settings) -> None:
-    """Non-empty stdout delivers the full report exactly once, including stderr when present."""
+async def test_command_action_wake_carries_stdout_and_stderr(dispatcher_settings) -> None:
+    """The wake trigger text contains stdout and stderr of the finished command."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     process = MagicMock()
@@ -194,6 +203,7 @@ async def test_command_action_nonempty_output_notified_once(dispatcher_settings)
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
         patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
@@ -202,15 +212,46 @@ async def test_command_action_nonempty_output_notified_once(dispatcher_settings)
             action={"type": "command", "command": "echo hello-scheduler"},
         )
 
-    send_mock.assert_awaited_once()
-    assert send_mock.await_args is not None
-    message = send_mock.await_args.kwargs["message"]
-    assert "hello-scheduler" in message
-    assert "warning line" in message
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "hello-scheduler" in trigger_text
+    assert "warning line" in trigger_text
+    send_mock.assert_not_awaited()
 
 
-async def test_command_action_failure_still_notified(dispatcher_settings) -> None:
-    """A command-action failure bypasses the non-empty-stdout gate and reaches _notify_failure."""
+async def test_command_action_nonzero_exit_wakes_agent_without_user_message(dispatcher_settings) -> None:
+    """A non-zero exit code is a command failure, not a wake failure: the agent is woken, the user is not."""
+    moderation = MagicMock()
+    moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
+    process = MagicMock()
+    process.returncode = 3
+    process.pid = 4242
+    process.communicate = AsyncMock(return_value=(b"", b"git: fatal: not a repository\n"))
+    with (
+        patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
+        patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
+        patch("chibi.services.jobs.agent_task._notify_failure", new=AsyncMock()) as failure_mock,
+    ):
+        await run_agent_job(
+            "agent:1:git-fail",
+            **VALID_PAYLOAD,
+            action={"type": "command", "command": "git status"},
+        )
+
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "exit code: 3" in trigger_text.lower()
+    assert "not a repository" in trigger_text
+    failure_mock.assert_not_awaited()
+    send_mock.assert_not_awaited()
+
+
+async def test_command_action_spawn_failure_wakes_agent_with_error_context(dispatcher_settings) -> None:
+    """A spawn failure wakes the agent with the error context instead of notifying the user directly."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     with (
@@ -219,6 +260,7 @@ async def test_command_action_failure_still_notified(dispatcher_settings) -> Non
             "chibi.services.jobs.agent_task.asyncio.create_subprocess_shell",
             new=AsyncMock(side_effect=OSError("spawn failed")),
         ),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
         patch("chibi.services.jobs.agent_task._notify_failure", new=AsyncMock()) as failure_mock,
     ):
@@ -228,19 +270,56 @@ async def test_command_action_failure_still_notified(dispatcher_settings) -> Non
             action={"type": "command", "command": "echo hi"},
         )
 
-    failure_mock.assert_awaited_once()
-    assert failure_mock.await_args is not None
-    assert "OSError" in failure_mock.await_args.kwargs["reason"]
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "could not be started" in trigger_text
+    assert "OSError" in trigger_text
+    failure_mock.assert_not_awaited()
     send_mock.assert_not_awaited()
 
 
+async def test_command_wake_failure_falls_back_to_user_notification(dispatcher_settings) -> None:
+    """A failed wake (LLM error) falls back to a single anti-flooded direct user notification."""
+    moderation = MagicMock()
+    moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
+    process = MagicMock()
+    process.returncode = 0
+    process.pid = 4242
+    process.communicate = AsyncMock(return_value=(b"hello-scheduler\n", b""))
+    with (
+        patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
+        patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
+    ):
+        trigger_mock.side_effect = RuntimeError("provider exploded")
+        await run_agent_job(
+            "agent:1:wake-fail",
+            **VALID_PAYLOAD,
+            action={"type": "command", "command": "echo hi"},
+        )
+        await run_agent_job(
+            "agent:1:wake-fail",
+            **VALID_PAYLOAD,
+            action={"type": "command", "command": "echo hi"},
+        )
+
+    assert send_mock.await_count == 1
+    assert send_mock.await_args is not None
+    message = send_mock.await_args.kwargs["message"]
+    assert "agent:1:wake-fail" in message
+    assert "wake failed" in message
+
+
 async def test_command_action_timeout_kills_process_group(dispatcher_settings) -> None:
-    """A command exceeding its per-job timeout is killed via its process group and reported."""
+    """A command exceeding its per-job timeout is killed via its process group and reported to the agent."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     started = time.monotonic()
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
@@ -251,11 +330,11 @@ async def test_command_action_timeout_kills_process_group(dispatcher_settings) -
     elapsed = time.monotonic() - started
 
     assert elapsed < 20
-    send_mock.assert_awaited_once()
-    assert send_mock.await_args is not None
-    message = send_mock.await_args.kwargs["message"]
-    assert "timed out" in message
-    assert "killed" in message
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    trigger_text = trigger_mock.await_args.kwargs["trigger_text"]
+    assert "timed out" in trigger_text or "killed" in trigger_text
+    send_mock.assert_not_awaited()
 
 
 async def test_command_action_timeout_clamped_to_configured_maximum(dispatcher_settings) -> None:
@@ -265,6 +344,7 @@ async def test_command_action_timeout_clamped_to_configured_maximum(dispatcher_s
     moderation.moderate_command = AsyncMock(return_value=ModeratorsAnswer(verdict="accepted", status="ok"))
     with (
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
     ):
         await run_agent_job(
@@ -273,14 +353,14 @@ async def test_command_action_timeout_clamped_to_configured_maximum(dispatcher_s
             action={"type": "command", "command": "sleep 30", "timeout_seconds": 5000},
         )
 
-    send_mock.assert_awaited_once()
-    assert send_mock.await_args is not None
-    message = send_mock.await_args.kwargs["message"]
-    assert "after 2s" in message
+    trigger_mock.assert_awaited_once()
+    assert trigger_mock.await_args is not None
+    assert "after 2s" in trigger_mock.await_args.kwargs["trigger_text"]
+    send_mock.assert_not_awaited()
 
 
 async def test_command_action_moderation_declined_skips_run(dispatcher_settings) -> None:
-    """A declined re-moderation skips the run; the job is not removed nor reported as failed."""
+    """A declined re-moderation skips the run; the job is not removed, run nor woken."""
     moderation = MagicMock()
     moderation.moderate_command = AsyncMock(
         return_value=ModeratorsAnswer(verdict="declined", reason="dangerous", status="ok")
@@ -289,12 +369,14 @@ async def test_command_action_moderation_declined_skips_run(dispatcher_settings)
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock(return_value=moderation)),
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
         patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock()) as subprocess_mock,
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
         patch("chibi.services.jobs.agent_task._notify_failure", new=AsyncMock()) as failure_mock,
     ):
         await run_agent_job("agent:1:moderated", **VALID_PAYLOAD, action={"type": "command", "command": "rm -rf /"})
 
     subprocess_mock.assert_not_awaited()
     send_mock.assert_not_awaited()
+    trigger_mock.assert_not_awaited()
     failure_mock.assert_not_awaited()
 
 
@@ -305,12 +387,14 @@ async def test_command_action_gate_disabled_skips_execution(dispatcher_settings)
         patch("chibi.services.jobs.agent_task.get_moderation_provider", new=AsyncMock()) as moderation_mock,
         patch("chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock()) as subprocess_mock,
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
     ):
         await run_agent_job("agent:1:cmd", **VALID_PAYLOAD, action={"type": "command", "command": "echo hi"})
 
     moderation_mock.assert_not_awaited()
     subprocess_mock.assert_not_awaited()
     send_mock.assert_not_awaited()
+    trigger_mock.assert_not_awaited()
 
 
 @pytest.mark.usefixtures("database_settings")
@@ -328,10 +412,12 @@ async def test_command_action_passes_gate_with_production_defaults() -> None:
         patch(
             "chibi.services.jobs.agent_task.asyncio.create_subprocess_shell", new=AsyncMock(return_value=process)
         ) as subprocess_mock,
+        patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock,
     ):
         await run_agent_job("agent:1:cmd", **VALID_PAYLOAD, action={"type": "command", "command": "echo hi"})
 
     subprocess_mock.assert_awaited_once()
+    trigger_mock.assert_awaited_once()
 
 
 async def test_failure_notify_sent_once_within_cooldown(dispatcher_settings) -> None:

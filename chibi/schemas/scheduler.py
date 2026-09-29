@@ -34,7 +34,7 @@ class NotifyActionPayload(BaseModel):
 
 
 class CommandActionPayload(BaseModel):
-    """Action that runs a shell command and reports the result to the user."""
+    """Action that runs a shell command and wakes the agent with the result."""
 
     type: Literal["command"] = Field(description="Action type discriminator: run a pre-moderated shell command.")
     command: str = Field(description="Shell command to execute on every job run.")
