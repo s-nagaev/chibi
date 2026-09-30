@@ -135,7 +135,9 @@ class ScheduleTaskTool(ChibiTool):
                 "plus trigger_text and does the work with a live answer (a true autonomous heartbeat); "
                 "type='notify' — sends a dumb static message to the user without waking the agent (zero LLM "
                 "usage, may be disabled by server settings); type='command' — runs a pre-moderated shell "
-                "command and reports its output. Use list_scheduled_tasks to inspect existing tasks and "
+                "command and wakes the agent with the full result (the agent reports to the user when "
+                "warranted; failures of the wake itself notify the user directly). "
+                "Use list_scheduled_tasks to inspect existing tasks and "
                 "delete_scheduled_task to remove one."
             ),
             parameters={
