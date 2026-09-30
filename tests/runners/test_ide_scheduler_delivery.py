@@ -235,7 +235,7 @@ class TestSchedulerMessageFrames:
 
     @pytest.mark.asyncio
     async def test_stale_thread_id_is_skipped_without_crash(self) -> None:
-        """A payload thread unseen in this session is logged and skipped (D4)."""
+        """A payload thread unseen in this session is logged and skipped."""
         instance, output = runner()
         await instance._handle_message(initialize({"background_messages": True}))
         emitter = get_stdio_delivery_emitter()

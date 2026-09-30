@@ -103,7 +103,7 @@ async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: Us
     Raises:
         GptException: If the LLM chain fails with a provider error. The
             exception propagates to the caller on purpose: the agent job
-            dispatcher owns scheduler failure reporting (design §6.6) and
+            dispatcher owns scheduler failure reporting and
             applies the anti-flood notification policy itself, so provider
             errors must not be swallowed here.
     """

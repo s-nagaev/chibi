@@ -1,4 +1,4 @@
-"""Tests for the agent-facing scheduler tools (design §5, §6)."""
+"""Tests for the agent-facing scheduler tools."""
 
 import asyncio
 import importlib
@@ -642,7 +642,7 @@ class TestDeleteScheduledTaskTool:
 
 
 class TestRegisterGate:
-    """Tests for the runner-aware tool registration gate (design §1.5, §6.4)."""
+    """Tests for the runner-aware tool registration gate."""
 
     @pytest.mark.parametrize("client", ["telegram", "tui", "vscode", "pycharm", "neovim"])
     def test_gate_registers_for_supported_runners(self, client):
@@ -675,12 +675,12 @@ class TestRegisterGate:
     def test_terminal_entrypoint_deregisters_scheduler_tools(self):
         """End-to-end: the real terminal entrypoint must not expose the scheduler tools.
 
-        Regression guard for the review round 1 finding: importing
-        ``chibi.runners.terminal`` transitively imports the tools module while
-        ``application_settings.client`` still holds the ``"telegram"`` default,
-        so the tools register at import time — ``run_chibi`` must deregister
-        them before the REPL starts. This test exercises the actual
-        ``run_chibi`` path instead of only reloading the tools module.
+        Regression guard: importing ``chibi.runners.terminal`` transitively
+        imports the tools module while ``application_settings.client`` still
+        holds the ``"telegram"`` default, so the tools register at import
+        time — ``run_chibi`` must deregister them before the REPL starts.
+        This test exercises the actual ``run_chibi`` path instead of only
+        reloading the tools module.
         """
         import chibi.runners.terminal as terminal_module
 

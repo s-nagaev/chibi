@@ -36,7 +36,7 @@ class ApplicationSettings(BaseSettings):
         scheduler_tool_enabled: Whether the agent scheduling tool is enabled.
         scheduler_notify_enabled: Whether the `notify` scheduled action type is allowed.
         scheduler_agent_commands_enabled: Whether shell commands are allowed in scheduled jobs. Enabled by
-            default (design decision D5): the agent can schedule itself and run arbitrary commands through its
+            default: the agent can schedule itself and run arbitrary commands through its
             terminal tool anyway, so gating only scheduled commands adds no security. Every command is still
             pre-moderated before it is accepted and re-moderated before every run.
         scheduler_command_timeout_max: Upper limit for a scheduled shell command timeout in seconds.
@@ -101,7 +101,7 @@ class ApplicationSettings(BaseSettings):
     # Scheduler settings
     scheduler_tool_enabled: bool = Field(default=True)
     scheduler_notify_enabled: bool = Field(default=False)
-    # D5: default True — the agent can already run arbitrary commands via its terminal tool,
+    # Enabled by default: the agent can already run arbitrary commands via its terminal tool,
     # so blocking only *scheduled* commands adds no real protection. Premoderation stays.
     scheduler_agent_commands_enabled: bool = Field(default=True)
     scheduler_command_timeout_max: int = Field(default=900)

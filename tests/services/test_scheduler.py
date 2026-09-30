@@ -324,7 +324,7 @@ class TestLegacyAddJob:
 
 
 class TestRetentionJobRegistration:
-    """Tests for the retention cleanup job registration contract (design §1.3)."""
+    """Tests for the retention cleanup job registration contract."""
 
     @pytest.mark.asyncio
     async def test_registration_with_fixed_id_is_idempotent(self, scheduler):
@@ -349,7 +349,7 @@ class TestRetentionJobRegistration:
 
 
 class TestRedisPasswordMerge:
-    """Tests for the redis_password env fallback (design doc §3.2)."""
+    """Tests for the redis_password env fallback."""
 
     def test_env_password_used_when_url_has_none(self):
         settings = SimpleNamespace(redis="redis://redis-host:6380/2", redis_password="envpass")
@@ -388,7 +388,7 @@ class TestDocumentedLimitations:
 
 
 class TestStdioJobStore:
-    """Tests for the stdio-specific job store (design decision D2)."""
+    """Tests for the stdio-specific job store."""
 
     @staticmethod
     def _pop_singletons() -> None:

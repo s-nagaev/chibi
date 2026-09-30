@@ -1,4 +1,4 @@
-"""Stable dispatcher for all agent-created scheduler jobs (design §3.3).
+"""Stable dispatcher for all agent-created scheduler jobs.
 
 This module is contractually frozen: persistent jobs survive restarts because
 APScheduler unpickles a reference to :func:`run_agent_job` from the job store,
@@ -233,7 +233,7 @@ async def _wake_agent_with_command_result(
 async def _run_command_action(payload: AgentJobPayload, action: CommandActionPayload) -> None:
     """Run the pre-moderated shell command of a `command` action and wake the agent.
 
-    The command is re-moderated before every run (design §6.4); on a declined
+    The command is re-moderated before every run; on a declined
     verdict the run is skipped and the job is kept. Execution follows the
     ``cmd.py`` pattern: ``create_subprocess_shell`` with a fresh process group
     and ``killpg`` on timeout. The agent is ALWAYS woken with the result —
@@ -443,7 +443,7 @@ def _remove_job(scheduler: ChibiScheduler, job_id: str) -> None:
 
 
 async def recover_agent_jobs(scheduler: ChibiScheduler) -> None:
-    """Startup recovery pass over the persistent job store (design §3.3/§3.4).
+    """Startup recovery pass over the persistent job store.
 
     Removes broken agent jobs (invalid payload or unexpected job function) and
     orphans (agent jobs of users that no longer exist in the storage). System

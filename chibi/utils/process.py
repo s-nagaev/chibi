@@ -46,26 +46,34 @@ async def kill_process_tree(process: asyncio.subprocess.Process) -> None:
                 check=False,
                 timeout=10,
             )
+        # Best-effort cleanup during a timeout: taskkill may fail because the
+        # process is already gone (or the tool is unavailable). Swallowing is
+        # safe here — a failed kill must not mask the original timeout error,
+        # and the fallback ``process.kill()`` below still runs.
         except (OSError, subprocess.SubprocessError):
             pass
 
         try:
             process.kill()
+        # The child may already be dead (e.g. killed by taskkill above).
         except ProcessLookupError:
             pass
 
         try:
             await process.wait()
+        # The child may already have been reaped by the fallback kill.
         except ProcessLookupError:
             pass
     else:
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        # The whole process group may already be gone — nothing to kill.
         except ProcessLookupError:
             pass
 
         try:
             process.kill()
             await process.wait()
+        # The child may have exited between the killpg call and here.
         except ProcessLookupError:
             pass

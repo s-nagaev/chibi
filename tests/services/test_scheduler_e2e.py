@@ -1,4 +1,4 @@
-"""End-to-end tests for the scheduler v1 pipeline (design §3.3, §5.2, §6.5).
+"""End-to-end tests for the scheduler v1 pipeline.
 
 Covers the full path in a single scenario: a job created through the agent
 tool → persistence in the Redis job store (fakeredis) → firing by schedule →

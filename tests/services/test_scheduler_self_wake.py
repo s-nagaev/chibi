@@ -1,4 +1,4 @@
-"""Integration tests for the scheduler self-wake infrastructure (design §5.2, §6.5)."""
+"""Integration tests for the scheduler self-wake infrastructure."""
 
 import json
 from pathlib import Path

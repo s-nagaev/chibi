@@ -1,4 +1,4 @@
-"""Agent-facing scheduler tools (design §5.1).
+"""Agent-facing scheduler tools.
 
 Expose the internal ``ChibiScheduler`` to the LLM so it can plan periodic and
 one-time tasks on behalf of the user. All jobs are owned by the creating user
@@ -280,10 +280,10 @@ class ScheduleTaskTool(ChibiTool):
 
     @classmethod
     def _check_job_limit(cls, user_id: int, existing_job_ids: list[str]) -> None:
-        """Extension point for a per-user job limit (design §6.1).
+        """Extension point for a per-user job limit.
 
-        Intentionally not implemented in v1: the owner decided that no job
-        limit is needed yet. Future implementations should raise a
+        Intentionally not implemented in v1: no per-user job limit is
+        enforced yet. A future implementation should raise a
         ``ToolException`` here when the user exceeds their quota.
 
         Args:

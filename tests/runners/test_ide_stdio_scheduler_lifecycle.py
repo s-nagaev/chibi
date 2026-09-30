@@ -76,7 +76,9 @@ def scheduler_gate_disabled():
 def make_runner() -> IDEStdioRunner:
     """Build a stdio runner whose event loop ends immediately (stdin EOF)."""
     runner = IDEStdioRunner()
-    runner._read_line = AsyncMock(return_value="")  # type: ignore[method-assign]
+    # ``_read_line`` is a regular method, so mypy would flag a direct Mock
+    # assignment as method-assign; bypass the typed attribute access.
+    object.__setattr__(runner, "_read_line", AsyncMock(return_value=""))
     return runner
 
 

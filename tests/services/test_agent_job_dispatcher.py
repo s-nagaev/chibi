@@ -1,4 +1,4 @@
-"""Tests for the agent job dispatcher (design §3.3, §3.4, §5.2, §6.4–6.6)."""
+"""Tests for the agent job dispatcher."""
 
 import time
 from pathlib import Path
@@ -399,7 +399,7 @@ async def test_command_action_gate_disabled_skips_execution(dispatcher_settings)
 
 @pytest.mark.usefixtures("database_settings")
 async def test_command_action_passes_gate_with_production_defaults() -> None:
-    """With the shipped configuration (D5: commands enabled by default) a `command` job executes."""
+    """With the shipped configuration (commands enabled by default) a `command` job executes."""
     from chibi.config.app import ApplicationSettings
 
     process = MagicMock()
