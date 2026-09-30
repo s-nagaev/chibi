@@ -31,9 +31,9 @@ async def kill_process_tree(process: asyncio.subprocess.Process) -> None:
     """Force-kill a subprocess together with all of its descendants.
 
     POSIX: sends ``SIGKILL`` to the whole process group, then falls back to
-    killing the process itself. Windows: runs ``taskkill /F /T`` against the
-    process tree, then falls back to killing the process itself. Missing
-    processes are ignored, and the call always waits for the process to exit.
+    killing the process itself and awaiting its exit; missing processes are
+    ignored. Windows: runs ``taskkill /F /T`` against the process tree, then
+    falls back to killing the process itself and always waits for it to exit.
 
     Args:
         process: The subprocess to terminate.
@@ -48,18 +48,24 @@ async def kill_process_tree(process: asyncio.subprocess.Process) -> None:
             )
         except (OSError, subprocess.SubprocessError):
             pass
+
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+        try:
+            await process.wait()
+        except ProcessLookupError:
+            pass
     else:
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             pass
 
-    try:
-        process.kill()
-    except ProcessLookupError:
-        pass
-
-    try:
-        await process.wait()
-    except ProcessLookupError:
-        pass
+        try:
+            process.kill()
+            await process.wait()
+        except ProcessLookupError:
+            pass

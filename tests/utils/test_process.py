@@ -69,7 +69,7 @@ class TestKillProcessTreePosix:
         mock_process.wait.assert_awaited_once()
 
     async def test_swallows_process_lookup_error_on_kill_and_wait(self, mock_process):
-        """A process disappearing between killpg and kill() does not raise."""
+        """A process disappearing between killpg and kill() does not raise, and wait() is skipped."""
         mock_process.kill.side_effect = ProcessLookupError
         mock_process.wait.side_effect = ProcessLookupError
 
@@ -82,7 +82,36 @@ class TestKillProcessTreePosix:
             await kill_process_tree(mock_process)
 
         mock_process.kill.assert_called_once()
+        mock_process.wait.assert_not_awaited()
+
+    async def test_swallows_process_lookup_error_on_wait(self, mock_process):
+        """A process disappearing between kill() and wait() does not raise."""
+        mock_process.wait.side_effect = ProcessLookupError
+
+        with (
+            patch("chibi.utils.process.sys") as sys_mock,
+            patch("os.getpgid", return_value=1234),
+            patch("os.killpg"),
+        ):
+            sys_mock.platform = "linux"
+            await kill_process_tree(mock_process)
+
+        mock_process.kill.assert_called_once()
         mock_process.wait.assert_awaited_once()
+
+    async def test_permission_error_on_killpg_propagates(self, mock_process):
+        """PermissionError from killpg is not swallowed — the exception propagates to the caller."""
+        with (
+            patch("chibi.utils.process.sys") as sys_mock,
+            patch("os.getpgid", return_value=1234),
+            patch("os.killpg", side_effect=PermissionError),
+        ):
+            sys_mock.platform = "linux"
+            with pytest.raises(PermissionError):
+                await kill_process_tree(mock_process)
+
+        mock_process.kill.assert_not_called()
+        mock_process.wait.assert_not_awaited()
 
 
 class TestKillProcessTreeWindows:
