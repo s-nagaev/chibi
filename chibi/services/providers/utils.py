@@ -14,7 +14,7 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import PERSISTENT_MEMORY_PROMPT
+from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT
 from chibi.models import Message
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
@@ -59,6 +59,23 @@ def escape_and_truncate(message: str | dict[str, Any] | list[dict[str, Any]] | N
     return f"{escaped_message[:limit]}... (truncated)"
 
 
+def _scheduler_hint_applicable() -> bool:
+    """Check whether the scheduler hint belongs into the system prompt.
+
+    Delegates to the same predicate that registers the scheduler agent tools,
+    so the hint can never drift away from the actual tool availability: it is
+    shown only when the scheduler tool gate is enabled AND the active client
+    runner keeps the tools registered (the terminal REPL never does).
+
+    Returns:
+        True when the scheduler tools are registered in this process.
+    """
+    # Circular import avoidance: the tools package imports this module transitively via ChibiTool.
+    from chibi.services.providers.tools.scheduler import _scheduler_tools_register
+
+    return _scheduler_tools_register()
+
+
 async def prepare_system_prompt(
     base_system_prompt: str,
     user_id: int,
@@ -96,6 +113,9 @@ async def prepare_system_prompt(
 
     if application_settings.is_chroma_configured:
         prompt["system_prompt"] += PERSISTENT_MEMORY_PROMPT
+
+    if _scheduler_hint_applicable():
+        prompt["system_prompt"] += SCHEDULER_HINT_PROMPT
 
     if gpt_settings.filesystem_access:
         system_data = {

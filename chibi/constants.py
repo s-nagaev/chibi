@@ -333,6 +333,14 @@ will be handled by the moderator).
 or `clear_tool_call_history` to keep context clean.
 """
 
+SCHEDULER_HINT_PROMPT = """
+# Proactive Scheduling (schedule_task)
+
+If your work may stall waiting on background tasks, do NOT chain sleep-in-terminal background calls: instead
+schedule a heartbeat with `schedule_task` (kind='interval' + schedule.max_fires): on each wake, check the
+pending state, do the due work, and reply ACK if there is nothing to do yet.
+"""
+
 PERSISTENT_MEMORY_PROMPT = f"""
 # Persistent Memory
 
