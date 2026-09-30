@@ -85,3 +85,19 @@ class AgentJobPayload(BaseModel):
     )
     title: str = Field(description="Human-readable job name shown to the user.")
     action: AgentJobActionPayload = Field(description="Action performed on every job run.")
+    max_fires: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Optional interval stop condition: the dispatcher removes the job automatically after this many "
+            "fires. Only meaningful for interval schedules (validated at the tool layer)."
+        ),
+    )
+    fires_done: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Number of completed fires, persisted in the job store kwargs so the max_fires counter "
+            "survives process restarts."
+        ),
+    )

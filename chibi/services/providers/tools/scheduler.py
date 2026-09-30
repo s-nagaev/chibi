@@ -199,6 +199,21 @@ class ScheduleTaskTool(ChibiTool):
                                     "e.g. '2026-10-01T09:00:00+02:00'."
                                 ),
                             },
+                            "stop_at": {
+                                "type": "string",
+                                "description": (
+                                    "Optional ISO8601 datetime after which an interval task stops running "
+                                    "(kind='interval' only, must be in the future), e.g. '2026-10-01T18:00:00+02:00'."
+                                ),
+                            },
+                            "max_fires": {
+                                "type": "integer",
+                                "description": (
+                                    "Optional stop condition (kind='interval' only): the task is removed "
+                                    "automatically after this many runs, must be >= 1. If both stop_at and "
+                                    "max_fires are given, whichever limit is reached first wins."
+                                ),
+                            },
                         },
                         "required": ["kind"],
                     },
@@ -359,6 +374,47 @@ class ScheduleTaskTool(ChibiTool):
         return run_at
 
     @classmethod
+    def _parse_stop_conditions(
+        cls, schedule_kind: Any, stop_at: Any, max_fires: Any
+    ) -> tuple[datetime | None, int | None]:
+        """Validate the interval stop conditions of a schedule.
+
+        Args:
+            schedule_kind: Requested schedule kind (``interval`` / ``cron`` / ``once``).
+            stop_at: Raw ``schedule.stop_at`` value (ISO8601 datetime or None).
+            max_fires: Raw ``schedule.max_fires`` value (positive integer or None).
+
+        Returns:
+            A ``(end_date, max_fires)`` tuple: the parsed stop datetime (or
+            None) and the validated fire limit (or None).
+
+        Raises:
+            ToolException: If the stop conditions are requested for a non-interval
+                kind, ``stop_at`` is not a valid ISO8601 datetime or is not in
+                the future, or ``max_fires`` is not a positive integer.
+        """
+        if stop_at is None and max_fires is None:
+            return None, None
+        if schedule_kind != "interval":
+            raise ToolException("schedule.stop_at and schedule.max_fires are only supported for kind='interval'.")
+        end_date: datetime | None = None
+        if stop_at is not None:
+            try:
+                parsed_stop_at = datetime.fromisoformat(str(stop_at))
+            except (TypeError, ValueError) as e:
+                raise ToolException(f"Invalid ISO8601 datetime for schedule.stop_at: {stop_at!r}.") from e
+            now = datetime.now(tz=parsed_stop_at.tzinfo)
+            if parsed_stop_at <= now:
+                raise ToolException(f"The schedule.stop_at datetime must be in the future (got {stop_at!r}).")
+            end_date = parsed_stop_at
+        validated_max_fires: int | None = None
+        if max_fires is not None:
+            if isinstance(max_fires, bool) or not isinstance(max_fires, int) or max_fires < 1:
+                raise ToolException("schedule.max_fires must be a positive integer (>= 1).")
+            validated_max_fires = max_fires
+        return end_date, validated_max_fires
+
+    @classmethod
     async def function(
         cls,
         title: str,
@@ -404,6 +460,13 @@ class ScheduleTaskTool(ChibiTool):
 
         cls._check_job_limit(user_id=user_id, existing_job_ids=existing_job_ids)
 
+        schedule_kind = schedule.get("kind") if isinstance(schedule, dict) else None
+        end_date, max_fires = cls._parse_stop_conditions(
+            schedule_kind=schedule_kind,
+            stop_at=schedule.get("stop_at") if isinstance(schedule, dict) else None,
+            max_fires=schedule.get("max_fires") if isinstance(schedule, dict) else None,
+        )
+
         full_job_id = cls._build_job_id(user_id=user_id, job_id=job_id, title=title)
         if not replace and full_job_id in existing_job_ids:
             raise ToolException(
@@ -421,6 +484,7 @@ class ScheduleTaskTool(ChibiTool):
                 chat_id=chat_id,
                 title=title.strip(),
                 action=action,
+                max_fires=max_fires,
             )
         except ValidationError as e:
             raise ToolException(f"Invalid task parameters: {e}") from e
@@ -434,6 +498,7 @@ class ScheduleTaskTool(ChibiTool):
             full_job_id=full_job_id,
             job_kwargs=job_kwargs,
             replace=replace,
+            end_date=end_date,
         )
 
         logger.log(
@@ -509,6 +574,7 @@ class ScheduleTaskTool(ChibiTool):
         full_job_id: str,
         job_kwargs: dict[str, Any],
         replace: bool,
+        end_date: datetime | None = None,
     ) -> None:
         """Register the agent job on the scheduler according to the schedule kind.
 
@@ -518,6 +584,8 @@ class ScheduleTaskTool(ChibiTool):
             full_job_id: Fully qualified job id (``agent:<user_id>:<suffix>``).
             job_kwargs: Keyword arguments passed to ``run_agent_job`` when the job fires.
             replace: Whether to overwrite an existing job with the same id.
+            end_date: Interval stop condition mapped to the trigger ``end_date``
+                (None for non-interval schedules or when no stop_at was given).
 
         Raises:
             ToolException: If the schedule kind or its parameters are invalid, the
@@ -539,6 +607,7 @@ class ScheduleTaskTool(ChibiTool):
                     interval_seconds=int(every_seconds),
                     kwargs=job_kwargs,
                     replace=replace,
+                    end_date=end_date,
                 )
             elif schedule_kind == "cron":
                 cron = " ".join(str(schedule.get(field, "*")) for field in _CRON_FIELD_ORDER)
@@ -570,8 +639,9 @@ class ListScheduledTasksTool(ChibiTool):
         function=FunctionDefinition(
             name="list_scheduled_tasks",
             description=(
-                "List the scheduled tasks of the current user (title, id, schedule, action type and next run). "
-                "Only tasks created under this user's own 'agent:<user_id>:' namespace are visible."
+                "List the scheduled tasks of the current user (title, id, schedule, action type, next run and "
+                "stop conditions when set: stop_at / remaining_fires). Only tasks created under this user's "
+                "own 'agent:<user_id>:' namespace are visible."
             ),
             parameters={"type": "object", "properties": {}},
         ),
@@ -605,9 +675,17 @@ class ListScheduledTasksTool(ChibiTool):
                 continue
             job_kwargs = job.kwargs or {}
             action = job_kwargs.get("action")
+            stop_at = getattr(job.trigger, "end_date", None)
+            max_fires = job_kwargs.get("max_fires")
+            fires_done = job_kwargs.get("fires_done")
+            remaining_fires = None
+            if isinstance(max_fires, int):
+                remaining_fires = max_fires - (fires_done if isinstance(fires_done, int) else 0)
             details[job_id] = {
                 "title": job_kwargs.get("title"),
                 "action_type": action.get("type") if isinstance(action, dict) else None,
+                "stop_at": stop_at.isoformat() if stop_at else None,
+                "remaining_fires": remaining_fires,
             }
 
         jobs = [
@@ -617,6 +695,8 @@ class ListScheduledTasksTool(ChibiTool):
                 "schedule": info.trigger,
                 "action_type": details.get(info.job_id, {}).get("action_type"),
                 "next_run_time": info.next_run_time.isoformat() if info.next_run_time else None,
+                "stop_at": details.get(info.job_id, {}).get("stop_at"),
+                "remaining_fires": details.get(info.job_id, {}).get("remaining_fires"),
             }
             for info in scheduler.list_jobs(prefix=prefix)
         ]

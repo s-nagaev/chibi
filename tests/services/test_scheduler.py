@@ -173,6 +173,28 @@ class TestScheduleIntervalJob:
             scheduler.shutdown(wait=False)
 
 
+class TestScheduleIntervalStopConditions:
+    """Tests for the interval trigger end_date (stop_at) passthrough."""
+
+    @pytest.mark.asyncio
+    async def test_end_date_passed_to_interval_trigger(self, scheduler):
+        """An explicit end_date is mapped to the native interval trigger end_date."""
+        stop_at = datetime.now().astimezone() + timedelta(hours=2)
+        scheduler.start()
+        try:
+            scheduler.schedule_interval_job(job_id="system:tick", func=dummy_job, interval_seconds=60, end_date=stop_at)
+            trigger = scheduler.get_jobs()[0].trigger
+            assert trigger.end_date is not None
+            assert abs((trigger.end_date - stop_at).total_seconds()) < 1
+        finally:
+            scheduler.shutdown(wait=False)
+
+    def test_no_end_date_leaves_trigger_open(self, scheduler):
+        """Without an end_date the interval trigger has no stop condition."""
+        scheduler.schedule_interval_job(job_id="system:tick", func=dummy_job, interval_seconds=60)
+        assert scheduler.get_jobs()[0].trigger.end_date is None
+
+
 class TestStateProperty:
     """Tests for the ChibiScheduler.state property."""
 

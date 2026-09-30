@@ -474,6 +474,107 @@ def scheduler(tmp_path: Path):
     SingletonMeta._instances.pop(ChibiScheduler, None)
 
 
+def _schedule_limited_job(scheduler: ChibiScheduler, job_id: str, max_fires: int) -> None:
+    """Register an interval job with a max_fires stop condition on the scheduler."""
+    scheduler.add_job(
+        run_agent_job,
+        trigger="interval",
+        seconds=3600,
+        kwargs={
+            "job_id": job_id,
+            **VALID_PAYLOAD,
+            "action": {"type": "self", "trigger_text": "Heartbeat tick"},
+            "max_fires": max_fires,
+            "fires_done": 0,
+        },
+        id=job_id,
+        replace_existing=True,
+    )
+
+
+def _get_job_kwargs(scheduler: ChibiScheduler, job_id: str) -> dict:
+    """Return the persisted kwargs of a scheduled job without its job_id key."""
+    job = next(job for job in scheduler.get_jobs() if str(job.id) == job_id)
+    return {key: value for key, value in (job.kwargs or {}).items() if key != "job_id"}
+
+
+class TestMaxFiresStopCondition:
+    """Tests for the max_fires stop condition enforced by the dispatcher."""
+
+    async def test_counter_increments_and_persists_in_job_store(self, scheduler, dispatcher_settings) -> None:
+        """Each fire increments fires_done and persists it in the job store payload."""
+        _schedule_limited_job(scheduler, "agent:1:limited", max_fires=4)
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()):
+            for _ in range(2):
+                await run_agent_job("agent:1:limited", **_get_job_kwargs(scheduler, "agent:1:limited"))
+
+        job = next(job for job in scheduler.get_jobs() if str(job.id) == "agent:1:limited")
+        assert job.kwargs["fires_done"] == 2
+        assert job.kwargs["max_fires"] == 4
+
+    async def test_job_removed_at_limit_without_extra_fire(self, scheduler, dispatcher_settings) -> None:
+        """The N-th fire happens, the job is removed afterwards and never fires again."""
+        _schedule_limited_job(scheduler, "agent:1:limited", max_fires=3)
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock:
+            for _ in range(3):
+                await run_agent_job("agent:1:limited", **_get_job_kwargs(scheduler, "agent:1:limited"))
+
+            assert trigger_mock.await_count == 3
+            assert [str(job.id) for job in scheduler.get_jobs() if str(job.id) == "agent:1:limited"] == []
+
+            await run_agent_job(
+                "agent:1:limited",
+                **VALID_PAYLOAD,
+                action={"type": "self", "trigger_text": "Heartbeat tick"},
+                max_fires=3,
+                fires_done=3,
+            )
+
+        assert trigger_mock.await_count == 3
+
+    async def test_double_fire_guard_skips_run_and_removes_job(self, scheduler, dispatcher_settings) -> None:
+        """A fire arriving with a counter already at the limit is skipped and the job is removed."""
+        _schedule_limited_job(scheduler, "agent:1:limited", max_fires=2)
+        stale_kwargs = {**_get_job_kwargs(scheduler, "agent:1:limited"), "fires_done": 2}
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock:
+            await run_agent_job("agent:1:limited", **stale_kwargs)
+
+        trigger_mock.assert_not_awaited()
+        assert [str(job.id) for job in scheduler.get_jobs() if str(job.id) == "agent:1:limited"] == []
+
+    async def test_job_without_max_fires_is_never_removed(self, scheduler, dispatcher_settings) -> None:
+        """Without max_fires the dispatcher never touches the fire counter nor removes the job."""
+        scheduler.add_job(
+            run_agent_job,
+            trigger="interval",
+            seconds=3600,
+            kwargs={"job_id": "agent:1:eternal", **VALID_PAYLOAD, "action": {"type": "self", "trigger_text": "x"}},
+            id="agent:1:eternal",
+            replace_existing=True,
+        )
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock:
+            for _ in range(3):
+                await run_agent_job("agent:1:eternal", **_get_job_kwargs(scheduler, "agent:1:eternal"))
+
+        assert trigger_mock.await_count == 3
+        job = next(job for job in scheduler.get_jobs() if str(job.id) == "agent:1:eternal")
+        assert "fires_done" not in job.kwargs
+
+    async def test_counter_survives_payload_roundtrip(self, scheduler, dispatcher_settings) -> None:
+        """The persisted counter is a plain payload field, so a restarted process resumes the count."""
+        _schedule_limited_job(scheduler, "agent:1:limited", max_fires=3)
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()):
+            await run_agent_job("agent:1:limited", **_get_job_kwargs(scheduler, "agent:1:limited"))
+
+        persisted = _get_job_kwargs(scheduler, "agent:1:limited")
+        with patch("chibi.services.jobs.agent_task.handle_scheduler_trigger", new=AsyncMock()) as trigger_mock:
+            await run_agent_job("agent:1:limited", **persisted)
+            await run_agent_job("agent:1:limited", **_get_job_kwargs(scheduler, "agent:1:limited"))
+
+        assert trigger_mock.await_count == 2
+        assert [str(job.id) for job in scheduler.get_jobs() if str(job.id) == "agent:1:limited"] == []
+
+
 async def _schedule_agent_job(scheduler: ChibiScheduler, job_id: str, user_id: int, kwargs: dict) -> None:
     """Register an agent job pointing at the stable dispatcher function."""
     scheduler.add_job(

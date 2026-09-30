@@ -9,7 +9,7 @@ behavior of every job lives in its Pydantic payload stored in the job kwargs
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from apscheduler.jobstores.base import JobLookupError
 from loguru import logger
@@ -26,11 +26,12 @@ from chibi.services.bot import handle_scheduler_trigger
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.cmd import _decode_output
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
-from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler
+from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler, StdioScheduler
 from chibi.services.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
 from chibi.services.user import get_moderation_provider
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.utils.app import SingletonMeta
 from chibi.utils.process import get_new_process_group_kwargs, kill_process_tree
 
 if TYPE_CHECKING:
@@ -338,6 +339,57 @@ async def _dispatch(payload: AgentJobPayload) -> None:
         raise ValueError(f"Unknown agent job action type: {payload.action!r}")
 
 
+def _find_scheduled_job(job_id: str) -> tuple[ChibiScheduler, "Job"] | None:
+    """Locate a scheduled job across the scheduler singletons of this process.
+
+    The dispatcher is flavor-agnostic: a fired job may live in the Telegram
+    scheduler or in the stdio one, and exactly one of them owns the job id.
+
+    Args:
+        job_id: Fully qualified job identifier.
+
+    Returns:
+        A ``(scheduler, job)`` tuple for the scheduler instance holding the
+        job, or None when no scheduled job with this id exists anymore.
+    """
+    for scheduler_cls in (ChibiScheduler, StdioScheduler):
+        instance = SingletonMeta._instances.get(scheduler_cls)
+        if instance is None:
+            continue
+        scheduler = cast(ChibiScheduler, instance)
+        for job in scheduler.get_jobs():
+            if str(job.id) == job_id:
+                return scheduler, job
+    return None
+
+
+def _record_fire(payload: AgentJobPayload) -> None:
+    """Persist the fire counter in the job store and enforce the max_fires stop condition.
+
+    The counter lives in the job kwargs payload, so it survives process
+    restarts. Runs of the same job never overlap within a process
+    (``max_instances=1``), so the read-increment-write cycle is race-free;
+    the ``fires_done`` check in :func:`run_agent_job` is the source of truth
+    against a double-fire in the window between the increment and the removal.
+
+    Args:
+        payload: Validated payload of the fired job, carrying the pre-increment
+            counter values.
+    """
+    if payload.max_fires is None:
+        return
+    found = _find_scheduled_job(payload.job_id)
+    if found is None:
+        logger.debug(f"Scheduler: job '{payload.job_id}' is no longer scheduled, fire counter not persisted.")
+        return
+    scheduler, job = found
+    fires_done = payload.fires_done + 1
+    job.modify(kwargs={**(job.kwargs or {}), "fires_done": fires_done})
+    if fires_done >= payload.max_fires:
+        logger.info(f"Scheduler: agent job '{payload.job_id}' reached max_fires={payload.max_fires}, job removed.")
+        _remove_job(scheduler, payload.job_id)
+
+
 async def run_agent_job(job_id: str, **kwargs: Any) -> None:
     """Single stable job function for all agent-created scheduler jobs.
 
@@ -349,7 +401,7 @@ async def run_agent_job(job_id: str, **kwargs: Any) -> None:
     Args:
         job_id: Fully qualified job identifier.
         **kwargs: Payload fields (``user_id``, ``storage_id``, ``chat_id``,
-            ``thread_id``, ``title``, ``action``).
+            ``thread_id``, ``title``, ``action``, ``max_fires``, ``fires_done``).
     """
     try:
         payload = AgentJobPayload.model_validate({"job_id": job_id, **kwargs})
@@ -358,12 +410,22 @@ async def run_agent_job(job_id: str, **kwargs: Any) -> None:
         return None
 
     log = logger.bind(user_id=payload.user_id)
+    if payload.max_fires is not None and payload.fires_done >= payload.max_fires:
+        log.warning(
+            f"Scheduler: agent job '{payload.job_id}' already reached max_fires={payload.max_fires}, "
+            "run skipped (double-fire guard)."
+        )
+        found = _find_scheduled_job(payload.job_id)
+        if found is not None:
+            _remove_job(found[0], payload.job_id)
+        return None
     log.info(f"Scheduler: agent job '{payload.job_id}' ('{payload.title}') fired (action: {payload.action.type})")
     try:
         await _dispatch(payload)
     except Exception as e:
         log.exception(f"Scheduler: agent job '{payload.job_id}' failed: {type(e).__name__}: {e}")
         await _notify_failure(payload, reason=f"{type(e).__name__}: {e}")
+    _record_fire(payload)
     return None
 
 

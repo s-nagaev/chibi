@@ -217,6 +217,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
         replace: bool = False,
         misfire_grace_time: int | None = None,
         next_run_time: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> str:
         """Schedule a recurring job on a fixed interval.
 
@@ -234,6 +235,9 @@ class ChibiScheduler(metaclass=SingletonMeta):
             next_run_time: Time of the first run. None (default) lets the
                 trigger compute it (i.e. one full interval from now). Naive
                 datetimes are interpreted in the scheduler's local timezone.
+            end_date: Stop condition mapped to the native interval trigger
+                ``end_date``: the job stops firing after this datetime.
+                None (default) means the job runs indefinitely.
 
         Returns:
             The scheduled job identifier.
@@ -248,6 +252,8 @@ class ChibiScheduler(metaclass=SingletonMeta):
             # Passing next_run_time=None to APScheduler's add_job would pause the job;
             # the default (`undefined`) must be used instead so the trigger computes it.
             options["next_run_time"] = next_run_time
+        if end_date is not None:
+            options["end_date"] = end_date
         self._scheduler.add_job(
             func,
             trigger="interval",

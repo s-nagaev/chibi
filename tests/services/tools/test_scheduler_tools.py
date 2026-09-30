@@ -4,6 +4,7 @@ import asyncio
 import importlib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -407,6 +408,158 @@ class TestScheduleTaskTool:
         assert "Access denied" in str(exc_info.value)
         assert scheduler.list_jobs(prefix="agent:123:") == []
         assert scheduler.list_jobs(prefix="agent:999:") == []
+
+
+class TestScheduleStopConditions:
+    """Tests for the interval stop conditions (stop_at / max_fires)."""
+
+    @pytest.mark.asyncio
+    async def test_interval_with_stop_conditions_created(self, scheduler, tool_settings, interface):
+        """A valid stop_at/max_fires pair maps to trigger end_date and the payload fire limit."""
+        stop_at = datetime.now().astimezone() + timedelta(hours=2)
+        result = await ScheduleTaskTool.function(
+            title="Health heartbeat",
+            schedule={"kind": "interval", "every_seconds": 300, "stop_at": stop_at.isoformat(), "max_fires": 5},
+            action={"type": "self", "trigger_text": "Check the state"},
+            **_user_kwargs(interface),
+        )
+
+        assert result["status"] == "ok"
+        job = scheduler.get_jobs()[0]
+        assert job.trigger.end_date is not None
+        assert abs((job.trigger.end_date - stop_at).total_seconds()) < 1
+        assert job.kwargs["max_fires"] == 5
+        assert job.kwargs["fires_done"] == 0
+
+    @pytest.mark.asyncio
+    async def test_max_fires_only_created(self, scheduler, tool_settings, interface):
+        """max_fires alone is persisted; the trigger stays open-ended."""
+        await ScheduleTaskTool.function(
+            title="Bounded heartbeat",
+            schedule={"kind": "interval", "every_seconds": 300, "max_fires": 2},
+            action={"type": "self", "trigger_text": "x"},
+            **_user_kwargs(interface),
+        )
+
+        job = scheduler.get_jobs()[0]
+        assert job.trigger.end_date is None
+        assert job.kwargs["max_fires"] == 2
+
+    @pytest.mark.asyncio
+    async def test_stop_at_in_past_rejected(self, scheduler, tool_settings, interface):
+        with pytest.raises(ToolException) as exc_info:
+            await ScheduleTaskTool.function(
+                title="Late heartbeat",
+                schedule={
+                    "kind": "interval",
+                    "every_seconds": 300,
+                    "stop_at": (datetime.now() - timedelta(hours=1)).isoformat(),
+                },
+                action={"type": "self", "trigger_text": "x"},
+                **_user_kwargs(interface),
+            )
+
+        assert "future" in str(exc_info.value)
+        assert scheduler.list_jobs(prefix="agent:123:") == []
+
+    @pytest.mark.asyncio
+    async def test_invalid_stop_at_rejected(self, scheduler, tool_settings, interface):
+        with pytest.raises(ToolException) as exc_info:
+            await ScheduleTaskTool.function(
+                title="Broken heartbeat",
+                schedule={"kind": "interval", "every_seconds": 300, "stop_at": "not-a-date"},
+                action={"type": "self", "trigger_text": "x"},
+                **_user_kwargs(interface),
+            )
+
+        assert "ISO8601" in str(exc_info.value)
+        assert scheduler.list_jobs(prefix="agent:123:") == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_fires", [0, -1, True, "3", 1.5])
+    async def test_invalid_max_fires_rejected(self, scheduler, tool_settings, interface, max_fires):
+        with pytest.raises(ToolException) as exc_info:
+            await ScheduleTaskTool.function(
+                title="Broken heartbeat",
+                schedule={"kind": "interval", "every_seconds": 300, "max_fires": max_fires},
+                action={"type": "self", "trigger_text": "x"},
+                **_user_kwargs(interface),
+            )
+
+        assert "positive integer" in str(exc_info.value)
+        assert scheduler.list_jobs(prefix="agent:123:") == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("schedule_kind", ["once", "cron"])
+    @pytest.mark.parametrize("condition", ["stop_at", "max_fires"])
+    async def test_stop_conditions_rejected_for_non_interval_kinds(
+        self, scheduler, tool_settings, interface, schedule_kind, condition
+    ):
+        """Stop conditions are interval-only: cron and once schedules must reject them."""
+        run_at = datetime.now().astimezone() + timedelta(hours=1)
+        if schedule_kind == "once":
+            schedule: dict = {"kind": "once", "at": run_at.isoformat()}
+        else:
+            schedule = {"kind": "cron", "minute": "0", "hour": "9"}
+        schedule[condition] = (
+            (datetime.now().astimezone() + timedelta(hours=2)).isoformat() if (condition == "stop_at") else 3
+        )
+
+        with pytest.raises(ToolException) as exc_info:
+            await ScheduleTaskTool.function(
+                title="Wrong kind",
+                schedule=schedule,
+                action={"type": "self", "trigger_text": "x"},
+                **_user_kwargs(interface),
+            )
+
+        assert "only supported for kind='interval'" in str(exc_info.value)
+        assert scheduler.list_jobs(prefix="agent:123:") == []
+
+    @pytest.mark.asyncio
+    async def test_list_shows_stop_at_and_remaining_fires(self, scheduler, tool_settings, interface):
+        stop_at = datetime.now().astimezone() + timedelta(hours=2)
+        await ScheduleTaskTool.function(
+            title="Health heartbeat",
+            schedule={"kind": "interval", "every_seconds": 300, "stop_at": stop_at.isoformat(), "max_fires": 5},
+            action={"type": "self", "trigger_text": "x"},
+            **_user_kwargs(interface),
+        )
+        job = next(job for job in scheduler.get_jobs() if str(job.id).startswith("agent:123:"))
+        job.kwargs["fires_done"] = 2
+        job.modify(kwargs=job.kwargs)
+
+        result = await ListScheduledTasksTool.function(**_user_kwargs(interface))
+
+        job_entry = result["jobs"][0]
+        assert job_entry["remaining_fires"] == 3
+        assert job_entry["stop_at"] is not None
+        assert abs((datetime.fromisoformat(job_entry["stop_at"]) - stop_at).total_seconds()) < 1
+
+    @pytest.mark.asyncio
+    async def test_list_shows_none_without_stop_conditions(self, scheduler, tool_settings, interface):
+        await ScheduleTaskTool.function(
+            title="Eternal heartbeat",
+            schedule={"kind": "interval", "every_seconds": 300},
+            action={"type": "self", "trigger_text": "x"},
+            **_user_kwargs(interface),
+        )
+
+        result = await ListScheduledTasksTool.function(**_user_kwargs(interface))
+
+        job_entry = result["jobs"][0]
+        assert job_entry["stop_at"] is None
+        assert job_entry["remaining_fires"] is None
+
+    def test_tool_schema_exposes_stop_conditions(self):
+        """The schedule_task JSON schema advertises stop_at and max_fires."""
+        function = cast(dict[str, Any], ScheduleTaskTool.definition["function"])
+        parameters = cast(dict[str, Any], function["parameters"])
+        schedule_properties = cast(dict[str, Any], parameters["properties"]["schedule"]["properties"])
+        assert "stop_at" in schedule_properties
+        assert "max_fires" in schedule_properties
+        assert "interval" in schedule_properties["stop_at"]["description"]
+        assert "interval" in schedule_properties["max_fires"]["description"]
 
 
 class TestListScheduledTasksTool:
