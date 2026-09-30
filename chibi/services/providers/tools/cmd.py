@@ -1,7 +1,5 @@
 import asyncio
 import locale
-import os
-import signal
 import sys
 from typing import Any, Unpack
 
@@ -16,6 +14,7 @@ from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
 from chibi.services.user import get_chibi_user, get_moderation_provider
+from chibi.utils.process import get_new_process_group_kwargs, kill_process_tree
 
 
 def _decode_output(data: bytes) -> str:
@@ -126,20 +125,11 @@ class RunCommandInTerminalTool(ChibiTool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                start_new_session=True,
+                **get_new_process_group_kwargs(),
             )
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=float(timeout))
         except asyncio.TimeoutError:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-
-            try:
-                process.kill()
-                await process.wait()
-            except ProcessLookupError:
-                pass
+            await kill_process_tree(process)
 
             raise ToolException(f"Command execution timed out after {timeout} seconds. Process group killed.")
         except Exception as e:

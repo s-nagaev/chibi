@@ -8,8 +8,6 @@ behavior of every job lives in its Pydantic payload stored in the job kwargs
 """
 
 import asyncio
-import os
-import signal
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +31,7 @@ from chibi.services.scheduler_interface import SchedulerInterface, StdioSchedule
 from chibi.services.user import get_moderation_provider
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.utils.process import get_new_process_group_kwargs, kill_process_tree
 
 if TYPE_CHECKING:
     from apscheduler.job import Job
@@ -271,20 +270,12 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=action.cwd,
-            start_new_session=True,
+            **get_new_process_group_kwargs(),
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=float(timeout))
         except asyncio.TimeoutError:
-            try:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                process.kill()
-                await process.wait()
-            except ProcessLookupError:
-                pass
+            await kill_process_tree(process)
             logger.bind(user_id=payload.user_id).warning(
                 f"Scheduler: command of job '{payload.job_id}' timed out after {timeout}s, process group killed."
             )
