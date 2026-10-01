@@ -11,6 +11,7 @@ from anthropic.types import Message as AnthropicMessage
 
 from chibi.config import application_settings
 from chibi.config.app import ClientType
+from chibi.constants import SCHEDULER_HINT_PROMPT
 from chibi.models import Message, User
 from chibi.schemas.app import UsageSchema
 from chibi.services.interface import UserInterface
@@ -271,3 +272,49 @@ def test_get_usage_from_anthropic_response_missing_cache_fields() -> None:
         cache_read_input_tokens=0,
         total_tokens=30,
     )
+
+
+def _scheduler_tool_settings(scheduler_tool_enabled: bool, client: str) -> SimpleNamespace:
+    """Build a settings namespace for the scheduler tools registration gate."""
+    return SimpleNamespace(scheduler_tool_enabled=scheduler_tool_enabled, client=client)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scheduler_tool_enabled", "client", "expected"),
+    [
+        (True, "telegram", True),
+        (True, "vscode", True),
+        (True, "terminal", False),
+        (False, "telegram", False),
+    ],
+)
+async def test_prepare_system_prompt_scheduler_hint_follows_tool_gate(
+    scheduler_tool_enabled: bool, client: str, expected: bool
+) -> None:
+    """The hint is injected only when the scheduler tool gate + client runner allow the tools."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+        patch(
+            "chibi.services.providers.tools.scheduler.application_settings",
+            _scheduler_tool_settings(scheduler_tool_enabled, client),
+        ),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface)
+
+    prompt = json.loads(prompt_json)
+    hint_in_prompt = SCHEDULER_HINT_PROMPT in prompt["system_prompt"]
+    assert hint_in_prompt is expected
+
+
+def test_scheduler_hint_prompt_is_compact() -> None:
+    """The hint must stay a compact block (at most 4 non-empty lines)."""
+    content_lines = [line for line in SCHEDULER_HINT_PROMPT.strip().splitlines() if line.strip()]
+    assert 1 <= len(content_lines) <= 4
+    assert "schedule_task" in SCHEDULER_HINT_PROMPT
+    assert "max_fires" in SCHEDULER_HINT_PROMPT

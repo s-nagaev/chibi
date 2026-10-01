@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-09-29
+
+### Added
+- **Internal scheduler v1** — the agent can now schedule recurring and one-time tasks that survive restarts:
+  - The scheduler core is rebuilt as a singleton `ChibiScheduler` with a typed scheduling API (`schedule_interval_job` / `schedule_cron_job` / `schedule_once_job`, plus job listing and removal), a job-id namespace contract (`system:*` for built-in jobs, `agent:<user_id>:*` for agent-created ones) and a persistent job store: Redis when configured, local SQLite otherwise.
+  - Misfire policy: bounded catch-up with `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600` seconds), `coalesce=true`, `max_instances=1`. One-time reminders keep an unlimited grace period, so a reminder always fires after a wake-up no matter how late the process is.
+  - Six new settings: `SCHEDULER_TOOL_ENABLED` (default `true`), `SCHEDULER_NOTIFY_ENABLED` (default `false`), `SCHEDULER_AGENT_COMMANDS_ENABLED` (default `true`), `SCHEDULER_COMMAND_TIMEOUT_MAX` (default `900`), `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600`) and `SCHEDULER_FAILURE_NOTIFY` (default `true`).
+  - Three new agent tools: `schedule_task`, `list_scheduled_tasks` and `delete_scheduled_task`. Every task fixes its delivery context (chat/thread) at creation time and runs one of three action types: `self` (wake the agent in the fixed thread — the answer is delivered to the user, or nothing is sent when the agent replies with the internal silence marker), `notify` (static message, zero LLM usage) and `command` (shell command, pre-moderated at creation and re-moderated before every run, killed by process group on timeout; after every run the agent is woken with the full result and owns communication with the user). `notify` is disabled by default and must be enabled explicitly; `command` is enabled by default and gated by `SCHEDULER_AGENT_COMMANDS_ENABLED`, with every command pre-moderated.
+  - Startup recovery: agent jobs with broken payloads or unexpected job functions, and jobs of users that no longer exist, are removed at startup; a corrupt job store never prevents Chibi from starting.
+  - Failed scheduled jobs notify the user with a per-job anti-flood cooldown (at most one notification per job per hour), governed by `SCHEDULER_FAILURE_NOTIFY`; direct user notifications are the fallback for failed agent wake-ups (LLM/provider errors) and non-command action failures only.
+- **Scheduler support in the stdio runner (IDE/TUI clients):** the agent can now also schedule tasks from JSONL stdio sessions (`tui`, `vscode`, `pycharm`, `neovim`), in addition to Telegram:
+  - The `schedule_task`, `list_scheduled_tasks` and `delete_scheduled_task` agent tools are registered for every stdio client; jobs are keyed by the runner's negative reserved IDE identity and live in a dedicated SQLite job store at `{local_data_path}/scheduler_stdio.db` — fully isolated from the Telegram scheduler's store (Redis settings are deliberately ignored for the stdio store), so the two processes can never double-fire each other's jobs.
+  - `self` and `notify` deliveries (and per-job failure notifications) reach the client as unsolicited `{type: "message", thread_id, content}` frames, reusing the `background_messages` capability machinery (same frame shape, same serialized stdout pathway as background tool answers).
+- **Stop conditions for interval tasks (heartbeat support):** `schedule_task` now accepts optional `schedule.stop_at` (ISO8601 datetime after which the task stops running, mapped to the native interval trigger `end_date`) and `schedule.max_fires` (the task is removed automatically after this many runs; the fire counter is persisted in the job store, so it survives restarts, and a double-fire guard makes the counter the source of truth). Both are interval-only — `cron` and `once` schedules reject them with a clear error — and whichever limit is reached first wins. `list_scheduled_tasks` shows `stop_at` and `remaining_fires` when they are set, enabling the one-call heartbeat pattern (wake → check state → do due work → ACK) instead of chained sleep-in-terminal background tasks.
+- **Scheduler heartbeat hint in the system prompt:** when the scheduler tools are registered for the active runner, the system prompt gains a short conditional block telling the agent to prefer `schedule_task` heartbeats (interval + `max_fires`) over chaining sleep-in-terminal background calls; the hint is wired through the same registration predicate as the tools, so it never appears where the tools are unavailable (e.g. the terminal REPL).
+
+### Changed
+- Scheduled `command` actions no longer deliver anything to the user directly: after every run (success or failure, any exit code, empty or non-empty output) the agent is always woken in the fixed thread with the full result context (command, exit code, stdout, stderr — truncated), through the same self-wake pipeline as `self` actions, and decides itself what — if anything — to tell the user. Only a failed wake (LLM/provider error) falls back to a direct user notification, guarded by the existing per-job anti-flood cooldown. The `notify_on_nonempty_output` action parameter was removed from the `schedule_task` tool before release — it existed only on the unreleased branch, so no upgrade action is needed.
+- `SCHEDULER_AGENT_COMMANDS_ENABLED` now defaults to `true` (previously `false`): scheduled shell commands are allowed out of the box — premoderation at creation and re-moderation before every run still apply.
+- Scheduler tools are no longer registered in the terminal runner entrypoint (`chibi` REPL): the tool gate is runner-aware (Telegram and stdio clients only), and the terminal entrypoint additionally deregisters them explicitly, so terminal sessions never expose scheduling tools.
+- Scheduler tool calls in stdio sessions now resolve the stdio scheduler singleton: jobs created by an IDE/TUI client are registered on the started stdio scheduler instead of the Telegram-flavored one (which is never started in a stdio process, so jobs added to it silently never fired).
+- The scheduler now always starts together with the bot (previously only when semantic memory was configured) and is shut down by a single combined `post_shutdown` handler.
+- The semantic memory retention cleanup job is registered with a fixed job id, so restarting Chibi no longer leaves duplicate cleanup jobs in the persistent job store.
+
+### Fixed
+- `REDIS_PASSWORD` is now correctly applied to the scheduler's Redis job store connection when the `REDIS` URL has no embedded password (a password embedded in the URL takes priority when both are set).
+
+### Known limitations (scheduler, v1)
+- The scheduler runs in-process: while the machine is asleep, interval jobs do not tick. On wake-up, missed interval/cron runs fire at most once (coalesced) within the grace window; one-time reminders always fire.
+- The stdio process lifetime equals the session lifetime: jobs persist in `scheduler_stdio.db`, and missed runs fire on the next launch — one-time jobs always fire no matter how late (unlimited grace), while interval/cron catch-up is bounded by `SCHEDULER_MISFIRE_GRACE_TIME` (default `3600`).
+- Scheduled deliveries to Telegram use a dedicated Telegram `Bot` instance built from the token only; custom `TELEGRAM_BASE_URL` / `TELEGRAM_BASE_FILE_URL` (e.g. a local Bot API server) are ignored on that path. Scheduled deliveries to stdio clients require the client to declare the `background_messages` capability at handshake; frames are dropped and logged otherwise.
+- A payload thread id that does not exist in the current session (stale, minted by a previous session) is skipped (deliver-if-exists-else-skip): the job itself still ran — only the answer delivery is skipped.
+- All stdio sessions share the single negative IDE identity/namespace (`IDE_STORAGE_ID`): there is no per-client or per-user isolation between different IDE installations on the same machine.
+- There is no per-user limit on the number of scheduled jobs in v1.
+- Cron schedules accept 5-field crontab expressions only (`minute hour day-of-month month day-of-week`); expressions with a seconds field are rejected.
+- `command` actions require a configured moderation provider.
+
 ## [1.17.0] - 2026-09-28
 
 ### Added
@@ -18,10 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.16.1] - 2026-09-22
 
 ### Fixed
-- Unified MITM-aware retry policy across all provider families: `get_chat_response` on anthropic, gemini and mistral now retries connection failures with exponential backoff (`wait_exponential`, 4 attempts, ~30/60/120s waits), matching the openai family; the openai family's fixed 10/25/45s waits were replaced with the same exponential schedule. Long single-shot requests killed by TLS-inspecting corporate proxies (WinError 64 / connection reset) are now retried automatically instead of failing on the first attempt.
+- Unified MITM-aware retry policy across all provider families: `get_chat_response` on anthropic, gemini and mistral now retries connection failures with exponential backoff (`wait_exponential`, 4 attempts, ~30/60/120s waits), matching the openai family; the openai family's fixed 10/25/45s waits were replaced with the same exponential schedule. Long single-shot requests killed by TLS-inspecting corporate proxies (WinError 64 / connection reset) are retried automatically instead of failing on the first attempt.
 - Rate limits (429) and transient server errors (5xx) are now retried on all provider families: anthropic retries `RateLimitError`/`InternalServerError`, gemini retries `ServerError` (5xx) via the decorator (its internal 429 loop with Retry-Info delays is unchanged), mistral retries `SDKError` with status 429/>=500. After retries are exhausted the user gets a clear "connection interrupted" message instead of a generic error.
-
-## [1.16.0] - 2026-09-20
 
 ### Fixed
 - Built-in skills now ship inside the Python package (`chibi/skills/`) and are available out of the box after `pip install` (previously missing from wheels).

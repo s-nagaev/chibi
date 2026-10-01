@@ -115,3 +115,17 @@ class ConfigurationError(Exception):
     ) -> None:
         self.detail = detail
         super().__init__(detail)
+
+
+class SchedulerJobError(Exception):
+    """Invalid job definition passed to the scheduler."""
+
+    def __init__(self, detail: str = "Invalid scheduled job definition") -> None:
+        self.detail = detail
+        super().__init__(detail)
+
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}(detail={self.detail!r})"
+
+    def __repr__(self) -> str:
+        return self.__str__()

@@ -40,3 +40,51 @@ class TestClientSetting:
         monkeypatch.setenv("CLIENT", "tui")
 
         assert ApplicationSettings().client == "tui"
+
+
+class TestSchedulerSettings:
+    """Tests for the scheduler-related ApplicationSettings fields."""
+
+    def test_scheduler_defaults(self) -> None:
+        """Scheduler fields expose the documented defaults."""
+        settings = ApplicationSettings()
+        assert settings.scheduler_tool_enabled is True
+        assert settings.scheduler_notify_enabled is False
+        assert settings.scheduler_agent_commands_enabled is True
+        assert settings.scheduler_command_timeout_max == 900
+        assert settings.scheduler_misfire_grace_time == 3600
+        assert settings.scheduler_failure_notify is True
+
+    @pytest.mark.parametrize(
+        ("env_var", "expected"),
+        [
+            ("SCHEDULER_TOOL_ENABLED", "false"),
+            ("SCHEDULER_NOTIFY_ENABLED", "true"),
+            ("SCHEDULER_AGENT_COMMANDS_ENABLED", "true"),
+            ("SCHEDULER_AGENT_COMMANDS_ENABLED", "false"),
+            ("SCHEDULER_FAILURE_NOTIFY", "false"),
+        ],
+    )
+    def test_scheduler_bool_fields_are_env_driven(
+        self, monkeypatch: pytest.MonkeyPatch, env_var: str, expected: str
+    ) -> None:
+        """Boolean scheduler fields are bound to their environment variables."""
+        monkeypatch.setenv(env_var, expected)
+        settings = ApplicationSettings()
+        field_name = env_var.lower()
+        assert getattr(settings, field_name) == (expected == "true")
+
+    @pytest.mark.parametrize(
+        ("env_var", "expected"),
+        [
+            ("SCHEDULER_COMMAND_TIMEOUT_MAX", 1200),
+            ("SCHEDULER_MISFIRE_GRACE_TIME", 60),
+        ],
+    )
+    def test_scheduler_int_fields_are_env_driven(
+        self, monkeypatch: pytest.MonkeyPatch, env_var: str, expected: int
+    ) -> None:
+        """Integer scheduler fields are bound to their environment variables."""
+        monkeypatch.setenv(env_var, str(expected))
+        settings = ApplicationSettings()
+        assert getattr(settings, env_var.lower()) == expected

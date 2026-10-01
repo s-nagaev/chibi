@@ -7,6 +7,7 @@ import os
 import selectors
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 from typing import Any
@@ -71,6 +72,11 @@ class ProtocolProcess:
                 narrow console code page such as Windows ``cp1252``.
         """
         env = dict(os.environ)
+        # The stdio runner starts the SQLite-backed scheduler under
+        # ``local_data_path`` (default ``/app/data``), which does not exist on
+        # the host. Point it at a throwaway directory.
+        self._data_dir = tempfile.TemporaryDirectory()
+        env["LOCAL_DATA_PATH"] = self._data_dir.name
         if io_encoding is not None:
             env["PYTHONIOENCODING"] = io_encoding
         self.process = subprocess.Popen(
@@ -316,15 +322,19 @@ def test_real_cli_non_ascii_result_round_trips_on_narrow_console() -> None:
         client.close()
 
 
-def test_real_cli_stdout_is_pure_jsonl_and_logs_go_to_stderr() -> None:
+def test_real_cli_stdout_is_pure_jsonl_and_logs_go_to_stderr(tmp_path) -> None:
     """Every stdout line of a full session parses as protocol JSON; loguru goes to stderr."""
+    env = dict(os.environ)
+    # The stdio runner starts the SQLite-backed scheduler under
+    # ``local_data_path`` (default ``/app/data``), which does not exist on the host.
+    env["LOCAL_DATA_PATH"] = str(tmp_path)
     process = subprocess.Popen(
         [sys.executable, "-c", _BOOTSTRAP],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         bufsize=0,
-        env=dict(os.environ),
+        env=env,
     )
     try:
         session = [

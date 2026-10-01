@@ -1,9 +1,9 @@
 import io
 import json
 import sys
-from datetime import datetime
 from typing import TypeVar, cast
 
+from apscheduler.schedulers.base import STATE_STOPPED
 from loguru import logger
 from telegram import (
     Bot,
@@ -30,7 +30,6 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
-from chibi.memory.chroma import memory
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -46,10 +45,10 @@ from chibi.services.bot import (
     handle_user_prompt,
 )
 from chibi.services.interface import TelegramInterface
-from chibi.services.jobs.archive import perform_retention_cleanup
+from chibi.services.jobs import recover_agent_jobs
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools.topic import RenameThreadTool
-from chibi.services.scheduler import ChibiScheduler
+from chibi.services.scheduler import ChibiScheduler, register_retention_cleanup_job
 from chibi.services.task_manager import task_manager
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.app import log_application_settings, run_heartbeat
@@ -69,6 +68,28 @@ from chibi.utils.telegram import (
 
 _T = TypeVar("_T")
 RenameThreadTool.register = True
+
+# The retention-cleanup registration helper lives in ``chibi.services.scheduler``
+# so that every runner flavor (Telegram, stdio/IDE) shares one implementation.
+# The alias keeps the historical private name importable from this module.
+_register_retention_cleanup_job = register_retention_cleanup_job
+
+
+async def _shutdown_scheduler_and_tasks(application: Application) -> None:
+    """Shut down the scheduler first, then the background task manager.
+
+    The scheduler shutdown is skipped when it was never started (e.g. a failed
+    ``post_init``), otherwise APScheduler would raise ``SchedulerNotRunningError``
+    and mask the original startup error.
+
+    Args:
+        application: The PTB application being shut down (unused).
+    """
+    scheduler = ChibiScheduler()
+    if scheduler.state != STATE_STOPPED:
+        scheduler.shutdown(wait=False)
+    await task_manager.shutdown()
+
 
 base_commands = [
     BotCommand(command="help", description="Show this help message"),
@@ -753,19 +774,10 @@ class ChibiBot:
 
         await application.bot.set_my_commands(bot_commands)
 
-        if memory:
-            # Register retention cleanup job if memory is configured
-            scheduler = ChibiScheduler()
-            scheduler.add_job(
-                perform_retention_cleanup,
-                trigger="interval",
-                days=application_settings.chroma_history_retention_days,
-                id=f"retention_cleanup-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                replace_existing=False,
-                next_run_time=datetime.now(),
-            )
-            scheduler.start()
-            logger.info("Semantic memory cleanup: job scheduled")
+        scheduler = ChibiScheduler()
+        scheduler.start()
+        _register_retention_cleanup_job(scheduler)
+        await recover_agent_jobs(scheduler)
 
     def run(self) -> None:
         builder = (
@@ -774,7 +786,7 @@ class ChibiBot:
             .base_file_url(telegram_settings.telegram_base_file_url)
             .token(self.telegram_token)
             .post_init(self.post_init)
-            .post_shutdown(task_manager.shutdown)
+            .post_shutdown(_shutdown_scheduler_and_tasks)
         )
 
         if telegram_settings.proxy:
