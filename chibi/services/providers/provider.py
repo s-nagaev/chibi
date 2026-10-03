@@ -289,7 +289,27 @@ class Provider(ABC):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
+        """Request a chat completion.
+
+        Args:
+            messages: Conversation messages.
+            user: The user requesting the response.
+            caller_storage_id: Session storage ID propagated from a parent request.
+            caller_thread_id: Session thread ID propagated from a parent request.
+            model: Model to use; falls back to the provider default when None.
+            system_prompt: System prompt for the assistant.
+            interface: Optional user interface for sending thoughts.
+            track_prompt_size: When True, record the prompt size in UsageCacheStore.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value at the completion call only. When None,
+                the instance-level value (or the settings default) is used,
+                exactly as before.
+
+        Returns:
+            The chat response and the updated message list.
+        """
         raise NotImplementedError
 
     async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
@@ -664,6 +684,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
@@ -678,6 +699,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -760,6 +782,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
@@ -779,7 +802,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             "model": model,
             "messages": dialog,
             "temperature": self._get_temperature_value(model_name=model),
-            "max_tokens": self._get_max_tokens_value(model_name=model),
+            "max_tokens": max_tokens if max_tokens is not None else self._get_max_tokens_value(model_name=model),
             "presence_penalty": self.presence_penalty,
             "frequency_penalty": self.frequency_penalty,
             "timeout": self.timeout,
@@ -895,6 +918,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -1165,6 +1189,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str,
         messages: list[MessageParam],
         interface: UserInterface | None = None,
+        max_tokens: int | None = None,
     ) -> AnthropicMessage:
         """Generate an Anthropic message with empty-response retries.
 
@@ -1179,6 +1204,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             system_prompt: The system prompt to send.
             messages: The conversation messages.
             interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             The final aggregated Anthropic message.
@@ -1200,11 +1227,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     system=system_blocks,
                     messages=messages,
                     interface=interface,
+                    max_tokens=max_tokens,
                 )
             else:
                 response_message = await self.client.messages.create(
                     model=model,
-                    max_tokens=self.max_tokens,
+                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
                     timeout=self.timeout,
                     tools=self.tools_list,
@@ -1231,6 +1259,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system: list[TextBlockParam],
         messages: list[MessageParam],
         interface: UserInterface | None,
+        max_tokens: int | None = None,
     ) -> AnthropicMessage:
         """Request a streamed Anthropic completion and return the final message.
 
@@ -1244,13 +1273,15 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             system: The system prompt blocks.
             messages: The conversation messages.
             interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             The final aggregated Anthropic message.
         """
         async with self.client.messages.stream(
             model=model,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             temperature=self.temperature,
             timeout=self.timeout,
             tools=self.tools_list,
@@ -1285,6 +1316,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_anthropic() for msg in messages]
@@ -1302,6 +1334,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -1320,6 +1353,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -1333,6 +1367,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             system_prompt=prepared_system_prompt,
             messages=messages,
             interface=interface,
+            max_tokens=max_tokens,
         )
         usage = get_usage_from_anthropic_response(response_message=response_message)
         if track_prompt_size:
@@ -1429,6 +1464,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

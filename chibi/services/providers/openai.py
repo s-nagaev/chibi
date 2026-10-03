@@ -65,6 +65,7 @@ class OpenAI(OpenAIFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response with Responses API fallback to Chat Completions.
 
@@ -83,6 +84,8 @@ class OpenAI(OpenAIFriendlyProvider):
                 request without an interface, or None.
             caller_thread_id: Session thread ID propagated from a parent
                 request without an interface, or None.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -103,6 +106,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 track_prompt_size=track_prompt_size,
                 caller_storage_id=caller_storage_id,
                 caller_thread_id=caller_thread_id,
+                max_tokens=max_tokens,
             )
         except (BadRequestError, NotFoundError) as e:
             # Only fallback for 400/404 errors (unsupported model or parameter)
@@ -127,6 +131,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 track_prompt_size=track_prompt_size,
                 caller_storage_id=caller_storage_id,
                 caller_thread_id=caller_thread_id,
+                max_tokens=max_tokens,
             )
 
         new_messages = [msg for msg in updated_messages if msg not in messages]
@@ -235,6 +240,7 @@ class OpenAI(OpenAIFriendlyProvider):
         system_prompt: str | None = None,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -252,6 +258,8 @@ class OpenAI(OpenAIFriendlyProvider):
                 request without an interface, or None.
             caller_thread_id: Session thread ID propagated from a parent
                 request without an interface, or None.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             A tuple of the chat response schema and updated messages list.
@@ -282,7 +290,7 @@ class OpenAI(OpenAIFriendlyProvider):
             "input": input_items,
             "tools": tools,
             "tool_choice": "auto",
-            "max_output_tokens": self._get_max_tokens_value(model_name=model),
+            "max_output_tokens": max_tokens if max_tokens is not None else self._get_max_tokens_value(model_name=model),
             "temperature": self._get_temperature_value(model_name=model),
             "timeout": self.timeout,
             "stream": False,
@@ -403,6 +411,7 @@ class OpenAI(OpenAIFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

@@ -72,3 +72,16 @@ class UsageCacheStore(metaclass=SingletonMeta):
             The stored token count, or None if the key has never been written.
         """
         return self._data.get(self._make_key(user_id=user_id, thread_id=thread_id))
+
+    def invalidate(self, user_id: int, thread_id: int) -> None:
+        """Drop the cached prompt size for the given conversation key.
+
+        Used after a history-resetting operation (e.g. emergency
+        summarization): the stored value reflects the pre-reset prompt and
+        would immediately re-trigger summarization on the next turn.
+
+        Args:
+            user_id: The unique user identifier.
+            thread_id: The message thread identifier (0 for the main thread).
+        """
+        self._data.pop(self._make_key(user_id=user_id, thread_id=thread_id), None)
