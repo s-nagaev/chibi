@@ -35,13 +35,13 @@ DEFAULT_LOCAL_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-
 def fake_fastembed(monkeypatch):
     """Inject a fake ``fastembed`` module so TextEmbedding is never constructed."""
     fake_module = types.ModuleType("fastembed")
-    fake_module.TextEmbedding = MagicMock(name="TextEmbedding")
+    setattr(fake_module, "TextEmbedding", MagicMock(name="TextEmbedding"))
     monkeypatch.setitem(sys.modules, "fastembed", fake_module)
     return fake_module
 
 
 @pytest.fixture
-def no_fastembed(monkeypatch):
+def _no_fastembed(monkeypatch):
     """Make ``from fastembed import TextEmbedding`` raise ImportError."""
     monkeypatch.setitem(sys.modules, "fastembed", None)
 
@@ -101,7 +101,7 @@ class TestLocalSelection:
 
         fake_fastembed.TextEmbedding.assert_not_called()
 
-    def test_local_without_fastembed_disables_memory_with_loud_error(self, no_fastembed):
+    def test_local_without_fastembed_disables_memory_with_loud_error(self, _no_fastembed):
         """LOCAL + fastembed missing → memory disabled (None) + loud error log."""
         settings = make_settings()
         with (
@@ -118,7 +118,7 @@ class TestLocalSelection:
         assert "fastembed" in message
         assert "DISABLED" in message
 
-    def test_local_without_fastembed_does_not_construct_any_memory_class(self, no_fastembed):
+    def test_local_without_fastembed_does_not_construct_any_memory_class(self, _no_fastembed):
         """No fallback construction of any memory backend when fastembed is missing."""
         settings = make_settings(chroma_host="remote-host")  # external mode
         with (

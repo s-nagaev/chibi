@@ -15,6 +15,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from chromadb.errors import ChromaError
+from typing_extensions import override
 
 from chibi.exceptions import (
     ChromaArchiveError,
@@ -32,6 +33,15 @@ EF_CONFLICT_MSG = (
     "An embedding function already exists in the collection configuration "
     "with a different configuration. conflict: new: fastembed vs persisted: default"
 )
+
+
+class _TestChromaError(ChromaError):
+    """Concrete chromadb ``ChromaError`` for tests (``name`` is abstract upstream)."""
+
+    @classmethod
+    @override
+    def name(cls) -> str:
+        return "ChromaError"
 
 
 @pytest.fixture
@@ -69,7 +79,7 @@ class TestInternalExceptionChain:
     async def test_get_last_batch_id_returns_none_on_chroma_error(self, internal_memory):
         """Pre-existing behavior must be preserved: ChromaError still yields None."""
         collection = MagicMock()
-        collection.get.side_effect = ChromaError("boom")
+        collection.get.side_effect = _TestChromaError("boom")
         internal_memory._get_or_create_collection = AsyncMock(return_value=collection)
 
         result = await internal_memory._get_last_batch_id(user_id=1, thread_id=2)
@@ -88,7 +98,7 @@ class TestInternalExceptionChain:
     @pytest.mark.asyncio
     async def test_archive_message_wraps_chroma_error_from_add(self, internal_memory, message):
         collection = MagicMock()
-        collection.add.side_effect = ChromaError("add failed")
+        collection.add.side_effect = _TestChromaError("add failed")
         internal_memory._get_or_create_collection = AsyncMock(return_value=collection)
 
         with pytest.raises(ChromaArchiveError):

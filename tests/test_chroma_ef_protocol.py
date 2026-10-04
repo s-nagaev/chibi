@@ -20,7 +20,7 @@ TEST_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 def fake_fastembed(monkeypatch):
     """Inject a fake ``fastembed`` module so TextEmbedding is never constructed."""
     fake_module = types.ModuleType("fastembed")
-    fake_module.TextEmbedding = MagicMock(name="TextEmbedding")
+    setattr(fake_module, "TextEmbedding", MagicMock(name="TextEmbedding"))
     monkeypatch.setitem(sys.modules, "fastembed", fake_module)
     return fake_module
 
