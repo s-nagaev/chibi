@@ -12,6 +12,7 @@ from google.genai.types import (
     GenerateContentResponse,
     Part,
 )
+from mistralai.models import UserMessage
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
@@ -84,6 +85,7 @@ async def _run_openai_friendly_chat_completions(max_tokens: int | None) -> dict[
             system_prompt=None,
             max_tokens=max_tokens,
         )
+    assert create_mock.await_args is not None
     return dict(create_mock.await_args.kwargs)
 
 
@@ -102,7 +104,8 @@ async def _run_openai_responses(max_tokens: int | None) -> dict[str, Any]:
     response.output_text = "Hello"
     response.usage = None
     create_mock = AsyncMock(return_value=response)
-    provider.client = SimpleNamespace(responses=SimpleNamespace(create=create_mock))
+    mock_client: Any = SimpleNamespace(responses=SimpleNamespace(create=create_mock))
+    provider.client = mock_client
 
     await provider._get_response_completion_response(
         messages=[Message(role="user", content="Hi")],
@@ -113,6 +116,7 @@ async def _run_openai_responses(max_tokens: int | None) -> dict[str, Any]:
         system_prompt=None,
         max_tokens=max_tokens,
     )
+    assert create_mock.await_args is not None
     return dict(create_mock.await_args.kwargs)
 
 
@@ -127,7 +131,8 @@ async def _run_anthropic_non_stream(max_tokens: int | None) -> dict[str, Any]:
     """
     provider = Anthropic(token=TEST_TOKEN)
     create_mock = AsyncMock(return_value=_make_anthropic_message())
-    provider._client = SimpleNamespace(messages=SimpleNamespace(create=create_mock, stream=Mock()))
+    mock_client: Any = SimpleNamespace(messages=SimpleNamespace(create=create_mock, stream=Mock()))
+    provider._client = mock_client
 
     await provider._generate_content(
         model=TEST_MODEL,
@@ -136,6 +141,7 @@ async def _run_anthropic_non_stream(max_tokens: int | None) -> dict[str, Any]:
         interface=None,
         max_tokens=max_tokens,
     )
+    assert create_mock.await_args is not None
     return dict(create_mock.await_args.kwargs)
 
 
@@ -158,13 +164,11 @@ class _FakeAnthropicStream:
         """
         return self
 
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    async def __aexit__(self, *_exc_info: Any) -> bool:
         """Close the streaming context.
 
         Args:
-            exc_type: Exception type, if any.
-            exc: Exception value, if any.
-            tb: Exception traceback, if any.
+            *_exc_info: Exception type, value and traceback, if any.
 
         Returns:
             Always False, so exceptions propagate.
@@ -207,11 +211,12 @@ async def _run_anthropic_stream(max_tokens: int | None) -> dict[str, Any]:
     """
     provider = Anthropic(token=TEST_TOKEN)
     stream_mock = Mock(return_value=_FakeAnthropicStream(_make_anthropic_message()))
-    provider._client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(), stream=stream_mock))
+    mock_client: Any = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(), stream=stream_mock))
+    provider._client = mock_client
 
     await provider._stream_generate_content(
         model=TEST_MODEL,
-        system=[SimpleNamespace(text="sp", type="text")],
+        system=[{"type": "text", "text": "sp"}],
         messages=[{"role": "user", "content": "Hi"}],
         interface=None,
         max_tokens=max_tokens,
@@ -246,6 +251,7 @@ async def _run_gemini(max_tokens: int | None) -> dict[str, Any]:
             system_prompt="sp",
             max_tokens=max_tokens,
         )
+    assert generate_mock.await_args is not None
     config = generate_mock.await_args.kwargs["config"]
     return {"max_output_tokens": config.max_output_tokens}
 
@@ -262,14 +268,17 @@ async def _run_mistral_non_stream(max_tokens: int | None) -> dict[str, Any]:
     provider = MistralAI(token=TEST_TOKEN)
     response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Hello", tool_calls=None))])
     complete_mock = AsyncMock(return_value=response)
-    provider._client = SimpleNamespace(chat=SimpleNamespace(complete_async=complete_mock, stream_async=Mock()))
+    mock_client: Any = SimpleNamespace(chat=SimpleNamespace(complete_async=complete_mock, stream_async=Mock()))
+    provider._client = mock_client
+    user_message = UserMessage(role="user", content="Hi")
 
     await provider._generate_content(
         model=TEST_MODEL,
-        messages=[{"role": "user", "content": "Hi"}],
+        messages=[user_message],
         interface=None,
         max_tokens=max_tokens,
     )
+    assert complete_mock.await_args is not None
     return dict(complete_mock.await_args.kwargs)
 
 
