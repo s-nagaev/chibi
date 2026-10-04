@@ -121,6 +121,12 @@ warn_unused_ignores = true
 allow_untyped_calls = true
 plugins = [ "pydantic.mypy" ]
 
+# These tests stub bound methods with AsyncMock by design; precise fixture
+# annotations would otherwise trip method-assign/attr-defined on every stub.
+[[tool.mypy.overrides]]
+module = "tests.test_chroma_exception_handling"
+disable_error_code = ["method-assign", "attr-defined"]
+
 
 [tool.vulture]
 ignore_names = ["expected_type",]

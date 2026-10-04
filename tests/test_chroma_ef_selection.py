@@ -15,6 +15,7 @@ fastembed availability is simulated via ``sys.modules``:
 import inspect
 import sys
 import types
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,8 +32,8 @@ PROVIDERS = ["LOCAL", "OPENAI", "GEMINI", "MISTRALAI", "JINA"]
 DEFAULT_LOCAL_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
-@pytest.fixture
-def fake_fastembed(monkeypatch):
+@pytest.fixture(scope="function")
+def fake_fastembed(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     """Inject a fake ``fastembed`` module so TextEmbedding is never constructed."""
     fake_module = types.ModuleType("fastembed")
     setattr(fake_module, "TextEmbedding", MagicMock(name="TextEmbedding"))
@@ -40,13 +41,22 @@ def fake_fastembed(monkeypatch):
     return fake_module
 
 
-@pytest.fixture
-def _no_fastembed(monkeypatch):
+@pytest.fixture(scope="function")
+def _no_fastembed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make ``from fastembed import TextEmbedding`` raise ImportError."""
     monkeypatch.setitem(sys.modules, "fastembed", None)
 
 
-def make_settings(embedding_function: str = "LOCAL", **overrides) -> MagicMock:
+def make_settings(embedding_function: str = "LOCAL", **overrides: Any) -> MagicMock:
+    """Build a mocked application settings object for create_memory() tests.
+
+    Args:
+        embedding_function: Value for the configured embedding-function provider.
+        **overrides: Extra attribute overrides applied to the settings mock.
+
+    Returns:
+        A MagicMock emulating ``application_settings``.
+    """
     settings = MagicMock()
     settings.is_chroma_configured = True
     settings.chroma_host = ""  # embedded mode
@@ -58,7 +68,9 @@ def make_settings(embedding_function: str = "LOCAL", **overrides) -> MagicMock:
 
 
 class TestLocalSelection:
-    def test_local_with_fastembed_available_builds_fastembed_ef(self, fake_fastembed):
+    """Selecting LOCAL must build a FastEmbedEmbeddingFunction-backed memory."""
+
+    def test_local_with_fastembed_available_builds_fastembed_ef(self, fake_fastembed: types.ModuleType) -> None:
         """LOCAL + fastembed available → memory built around FastEmbedEmbeddingFunction."""
         settings = make_settings()
         with (
@@ -74,7 +86,8 @@ class TestLocalSelection:
         assert isinstance(ef, FastEmbedEmbeddingFunction)
         assert ef._model_name == DEFAULT_LOCAL_MODEL
 
-    def test_local_uses_configured_embedding_model(self, fake_fastembed):
+    def test_local_uses_configured_embedding_model(self, fake_fastembed: types.ModuleType) -> None:
+        """LOCAL must pass the configured embedding model to the EF, not a hardcoded default."""
         settings = make_settings(embedding_model="custom/embedding-model")
         with (
             patch("chibi.memory.chroma.application_settings", settings),
@@ -87,7 +100,7 @@ class TestLocalSelection:
         ef = memory_cls.call_args.kwargs["embedding_function"]
         assert ef._model_name == "custom/embedding-model"
 
-    def test_local_selection_does_not_load_onnx_model(self, fake_fastembed):
+    def test_local_selection_does_not_load_onnx_model(self, fake_fastembed: types.ModuleType) -> None:
         """Task 1's lazy model construction must be unaffected: selecting the EF
         must not construct TextEmbedding (the ONNX model loads on first embed)."""
         settings = make_settings()
@@ -134,7 +147,9 @@ class TestLocalSelection:
 
 
 class TestUnknownSelectionArm:
-    def test_unknown_embedding_function_disables_memory_with_loud_error(self):
+    """The ``_`` match arm in create_memory() must stay fail-closed."""
+
+    def test_unknown_embedding_function_disables_memory_with_loud_error(self) -> None:
         """The `_` match arm must refuse loudly instead of silently building a default EF.
 
         application_settings.embedding_function is a pydantic Literal, so this arm
@@ -157,11 +172,13 @@ class TestUnknownSelectionArm:
 
 
 class TestNoSilentDefaultEF:
-    def test_module_no_longer_imports_default_embedding_function(self):
+    """No code path in create_memory() may construct DefaultEmbeddingFunction."""
+
+    def test_module_no_longer_imports_default_embedding_function(self) -> None:
         """chibi.memory.chroma must not reference DefaultEmbeddingFunction at all."""
         assert not hasattr(chroma_module, "DefaultEmbeddingFunction")
 
-    def test_no_selection_arm_constructs_default_ef(self, fake_fastembed):
+    def test_no_selection_arm_constructs_default_ef(self, fake_fastembed: types.ModuleType) -> None:
         """Regression: for every configured provider value, EF selection must
         never construct DefaultEmbeddingFunction and must always produce memory."""
         with (
@@ -191,7 +208,11 @@ class TestConstructorsRequireEmbeddingFunction:
         "memory_class",
         [InternalChromaLongConversationMemory, ExternalChromaLongConversationMemory],
     )
-    def test_embedding_function_parameter_is_required(self, memory_class):
+    def test_embedding_function_parameter_is_required(
+        self,
+        memory_class: type[InternalChromaLongConversationMemory | ExternalChromaLongConversationMemory],
+    ) -> None:
+        """The constructor signature must not default embedding_function."""
         signature = inspect.signature(memory_class.__init__)
         parameter = signature.parameters["embedding_function"]
         assert parameter.default is inspect.Parameter.empty

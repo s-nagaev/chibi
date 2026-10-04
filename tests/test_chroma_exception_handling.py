@@ -11,6 +11,7 @@ EF-conflict validation ("new: fastembed vs persisted: default") from
 ``ChromaCollectionError`` so it cannot escape the archival chain raw.
 """
 
+import asyncio
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,6 +29,8 @@ from chibi.memory.chroma import (
     InternalChromaLongConversationMemory,
 )
 from chibi.models import Message
+from chibi.services.jobs import archive as archive_job
+from chibi.services.task_manager import task_manager
 
 EF_CONFLICT_MSG = (
     "An embedding function already exists in the collection configuration "
@@ -44,16 +47,21 @@ class _TestChromaError(ChromaError):
         return "ChromaError"
 
 
-@pytest.fixture
-def internal_memory():
+async def _boom() -> None:
+    """Raise ChromaCollectionError, simulating a failing background archival task."""
+    raise ChromaCollectionError("ef conflict")
+
+
+@pytest.fixture(scope="function")
+def internal_memory() -> InternalChromaLongConversationMemory:
     """InternalChromaLongConversationMemory without a real PersistentClient."""
     with patch("chromadb.PersistentClient"):
         memory = InternalChromaLongConversationMemory(embedding_function=MagicMock())
     return memory
 
 
-@pytest.fixture
-def external_memory():
+@pytest.fixture(scope="function")
+def external_memory() -> ExternalChromaLongConversationMemory:
     """ExternalChromaLongConversationMemory with a mocked async client."""
     memory = ExternalChromaLongConversationMemory(embedding_function=MagicMock())
     mock_client = MagicMock()
@@ -61,14 +69,20 @@ def external_memory():
     return memory
 
 
-@pytest.fixture
-def message():
+@pytest.fixture(scope="function")
+def message() -> Message:
+    """A plain user message used as archival payload."""
     return Message(role="user", content="Hello")
 
 
 class TestInternalExceptionChain:
+    """InternalChromaLongConversationMemory must wrap every archival/search failure."""
+
     @pytest.mark.asyncio
-    async def test_get_last_batch_id_returns_none_on_collection_error(self, internal_memory):
+    async def test_get_last_batch_id_returns_none_on_collection_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError from collection creation must yield None."""
         internal_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         result = await internal_memory._get_last_batch_id(user_id=1, thread_id=2)
@@ -76,7 +90,9 @@ class TestInternalExceptionChain:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_last_batch_id_returns_none_on_chroma_error(self, internal_memory):
+    async def test_get_last_batch_id_returns_none_on_chroma_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
         """Pre-existing behavior must be preserved: ChromaError still yields None."""
         collection = MagicMock()
         collection.get.side_effect = _TestChromaError("boom")
@@ -87,7 +103,10 @@ class TestInternalExceptionChain:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_archive_message_wraps_collection_error(self, internal_memory, message):
+    async def test_archive_message_wraps_collection_error(
+        self, internal_memory: InternalChromaLongConversationMemory, message: Message
+    ) -> None:
+        """A ChromaCollectionError during archival must surface as ChromaArchiveError."""
         internal_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         with pytest.raises(ChromaArchiveError):
@@ -96,7 +115,10 @@ class TestInternalExceptionChain:
             )
 
     @pytest.mark.asyncio
-    async def test_archive_message_wraps_chroma_error_from_add(self, internal_memory, message):
+    async def test_archive_message_wraps_chroma_error_from_add(
+        self, internal_memory: InternalChromaLongConversationMemory, message: Message
+    ) -> None:
+        """A ChromaError from collection.add must surface as ChromaArchiveError."""
         collection = MagicMock()
         collection.add.side_effect = _TestChromaError("add failed")
         internal_memory._get_or_create_collection = AsyncMock(return_value=collection)
@@ -107,7 +129,10 @@ class TestInternalExceptionChain:
             )
 
     @pytest.mark.asyncio
-    async def test_archive_message_success(self, internal_memory, message):
+    async def test_archive_message_success(
+        self, internal_memory: InternalChromaLongConversationMemory, message: Message
+    ) -> None:
+        """Archival with a healthy collection must call collection.add exactly once."""
         collection = MagicMock()
         internal_memory._get_or_create_collection = AsyncMock(return_value=collection)
 
@@ -118,14 +143,20 @@ class TestInternalExceptionChain:
         collection.add.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_semantic_search_wraps_collection_error(self, internal_memory):
+    async def test_semantic_search_wraps_collection_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError during search must surface as ChromaSearchError."""
         internal_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         with pytest.raises(ChromaSearchError):
             await internal_memory._semantic_search(user_id=1, query="q", n_results=1, thread_id=2)
 
     @pytest.mark.asyncio
-    async def test_get_batch_by_field_returns_empty_on_collection_error(self, internal_memory):
+    async def test_get_batch_by_field_returns_empty_on_collection_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError in get_batch_by_field must yield an empty list."""
         internal_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         result = await internal_memory._get_batch_by_field(user_id=1, batch_id="b1", thread_id=2)
@@ -133,7 +164,9 @@ class TestInternalExceptionChain:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_or_create_collection_wraps_value_error(self, internal_memory):
+    async def test_get_or_create_collection_wraps_value_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
         """chromadb raises a plain builtin ValueError for EF-conflict validation
         ("new: fastembed vs persisted: default") — it must be wrapped into
         ChromaCollectionError at the choke point, not escape raw."""
@@ -146,7 +179,9 @@ class TestInternalExceptionChain:
         assert not isinstance(exc_info.value, ValueError)
 
     @pytest.mark.asyncio
-    async def test_archive_message_wraps_value_error(self, internal_memory, message):
+    async def test_archive_message_wraps_value_error(
+        self, internal_memory: InternalChromaLongConversationMemory, message: Message
+    ) -> None:
         """Regression: a persisted known/default collection + our EF raises
         ValueError from get_or_create_collection — _archive_message must convert
         it to ChromaArchiveError, not let the raw ValueError escape."""
@@ -158,14 +193,20 @@ class TestInternalExceptionChain:
             )
 
     @pytest.mark.asyncio
-    async def test_semantic_search_wraps_value_error(self, internal_memory):
+    async def test_semantic_search_wraps_value_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
+        """A raw ValueError (EF-conflict) from collection creation must surface as ChromaSearchError."""
         internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
 
         with pytest.raises(ChromaSearchError):
             await internal_memory._semantic_search(user_id=1, query="q", n_results=1, thread_id=2)
 
     @pytest.mark.asyncio
-    async def test_get_last_batch_id_returns_none_on_value_error(self, internal_memory):
+    async def test_get_last_batch_id_returns_none_on_value_error(
+        self, internal_memory: InternalChromaLongConversationMemory
+    ) -> None:
+        """A raw ValueError (EF-conflict) in get_last_batch_id must yield None."""
         internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
 
         result = await internal_memory._get_last_batch_id(user_id=1, thread_id=2)
@@ -174,8 +215,13 @@ class TestInternalExceptionChain:
 
 
 class TestExternalExceptionChain:
+    """ExternalChromaLongConversationMemory must wrap every archival/search failure."""
+
     @pytest.mark.asyncio
-    async def test_get_last_batch_id_returns_none_on_collection_error(self, external_memory):
+    async def test_get_last_batch_id_returns_none_on_collection_error(
+        self, external_memory: ExternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError from collection creation must yield None."""
         external_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         result = await external_memory._get_last_batch_id(user_id=1, thread_id=2)
@@ -183,7 +229,10 @@ class TestExternalExceptionChain:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_archive_message_wraps_collection_error(self, external_memory, message):
+    async def test_archive_message_wraps_collection_error(
+        self, external_memory: ExternalChromaLongConversationMemory, message: Message
+    ) -> None:
+        """A ChromaCollectionError during archival must surface as ChromaArchiveError."""
         external_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         with pytest.raises(ChromaArchiveError):
@@ -192,14 +241,20 @@ class TestExternalExceptionChain:
             )
 
     @pytest.mark.asyncio
-    async def test_semantic_search_wraps_collection_error(self, external_memory):
+    async def test_semantic_search_wraps_collection_error(
+        self, external_memory: ExternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError during search must surface as ChromaSearchError."""
         external_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         with pytest.raises(ChromaSearchError):
             await external_memory._semantic_search(user_id=1, query="q", n_results=1, thread_id=2)
 
     @pytest.mark.asyncio
-    async def test_get_batch_by_id_returns_empty_on_collection_error(self, external_memory):
+    async def test_get_batch_by_id_returns_empty_on_collection_error(
+        self, external_memory: ExternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError in get_batch_by_id must yield an empty list."""
         external_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         result = await external_memory._get_batch_by_id(user_id=1, batch_id="b1", thread_id=2)
@@ -207,7 +262,10 @@ class TestExternalExceptionChain:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_next_batch_returns_empty_on_collection_error(self, external_memory):
+    async def test_get_next_batch_returns_empty_on_collection_error(
+        self, external_memory: ExternalChromaLongConversationMemory
+    ) -> None:
+        """A ChromaCollectionError in get_next_batch must yield an empty list."""
         external_memory._get_or_create_collection = AsyncMock(side_effect=ChromaCollectionError("ef conflict"))
 
         result = await external_memory._get_next_batch(user_id=1, current_batch_id="b1", thread_id=2)
@@ -215,7 +273,9 @@ class TestExternalExceptionChain:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_or_create_collection_wraps_value_error(self, external_memory):
+    async def test_get_or_create_collection_wraps_value_error(
+        self, external_memory: ExternalChromaLongConversationMemory
+    ) -> None:
         """chromadb raises a plain builtin ValueError for EF-conflict validation —
         it must be wrapped into ChromaCollectionError at the choke point."""
         external_memory._get_client = AsyncMock()
@@ -227,7 +287,10 @@ class TestExternalExceptionChain:
             await external_memory._get_or_create_collection(user_id=1, thread_id=2)
 
     @pytest.mark.asyncio
-    async def test_archive_message_wraps_value_error(self, external_memory, message):
+    async def test_archive_message_wraps_value_error(
+        self, external_memory: ExternalChromaLongConversationMemory, message: Message
+    ) -> None:
+        """A raw ValueError (EF-conflict) during archival must surface as ChromaArchiveError."""
         external_memory._get_client = AsyncMock()
         external_memory._get_client.return_value.get_or_create_collection = AsyncMock(
             side_effect=ValueError(EF_CONFLICT_MSG)
@@ -240,21 +303,18 @@ class TestExternalExceptionChain:
 
 
 class TestBackgroundArchivalFailureLogging:
+    """Failures escaping fire-and-forget archival tasks must be logged, not lost."""
+
     @pytest.mark.asyncio
-    async def test_task_manager_logs_background_failure_with_traceback(self):
+    async def test_task_manager_logs_background_failure_with_traceback(self) -> None:
         """A ChromaCollectionError escaping a background archival task must be
         logged (with traceback) by the task manager's done callback."""
-        from chibi.services.task_manager import task_manager
-
         # task_manager is a process-wide singleton; other tests may have
         # triggered shutdown() which blocks run_task.
         task_manager._shutting_down = False
 
-        async def boom() -> None:
-            raise ChromaCollectionError("ef conflict")
-
         with patch("chibi.services.task_manager.logger") as mock_logger:
-            task = task_manager.run_task(boom(), user_id=42)
+            task = task_manager.run_task(_boom(), user_id=42)
             assert task is not None
             # Give the event loop a chance to run the done callback
             for _ in range(20):
@@ -263,10 +323,8 @@ class TestBackgroundArchivalFailureLogging:
             assert "failed" in mock_logger.opt.return_value.error.call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_retention_cleanup_swallows_memory_exception(self):
+    async def test_retention_cleanup_swallows_memory_exception(self) -> None:
         """perform_retention_cleanup must not crash on MemoryException."""
-        from chibi.services.jobs import archive as archive_job
-
         mock_memory = MagicMock()
         mock_memory.delete_old = AsyncMock(side_effect=MemoryException("cleanup blew up"))
 
@@ -277,6 +335,5 @@ class TestBackgroundArchivalFailureLogging:
 
 
 async def asyncio_sleep_tick() -> None:
-    import asyncio
-
+    """Yield control to the event loop for one tick."""
     await asyncio.sleep(0)

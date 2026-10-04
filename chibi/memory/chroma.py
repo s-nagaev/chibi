@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
@@ -37,6 +37,9 @@ from chibi.models import Message, User
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
+
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
 
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
@@ -849,6 +852,11 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+        """Initialize the embedding function without loading the ONNX model.
+
+        Args:
+            model_name: fastembed model identifier used for embedding texts.
+        """
         from fastembed import TextEmbedding  # fastembed is an optional dep
 
         # Only resolve the TextEmbedding class here; the ONNX model loads
@@ -859,7 +867,7 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
         self._model: TextEmbedding | None = None
         self._model_name = model_name
 
-    def _get_model(self):
+    def _get_model(self) -> "TextEmbedding":
         """Construct the fastembed model on first use, then reuse it."""
         if self._model is None:
             self._model = self._text_embedding_cls(model_name=self._model_name)
@@ -867,20 +875,43 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
     @staticmethod
     def name() -> str:
-        """Return the persisted embedding-function name known to chromadb."""
+        """Return the persisted embedding-function name known to chromadb.
+
+        Returns:
+            The name chromadb persists for this embedding function.
+        """
         return "fastembed"
 
     def get_config(self) -> dict[str, Any]:
-        """Return a serializable configuration for the embedding function."""
+        """Return a serializable configuration for the embedding function.
+
+        Returns:
+            Configuration consumed by :meth:`build_from_config`.
+        """
         return {"model_name": self._model_name}
 
     @staticmethod
     def build_from_config(config: dict[str, Any]) -> "FastEmbedEmbeddingFunction":
-        """Rebuild the embedding function from :meth:`get_config` output."""
+        """Rebuild the embedding function from :meth:`get_config` output.
+
+        Args:
+            config: Configuration produced by :meth:`get_config`.
+
+        Returns:
+            A new embedding function built from the persisted configuration.
+        """
         return FastEmbedEmbeddingFunction(model_name=config["model_name"])
 
     def __call__(self, input: Documents) -> Embeddings:
-        # fastembed.embed() returns a generator of numpy arrays; ChromaDB expects lists
+        """Embed the given documents with the fastembed model.
+
+        Args:
+            input: Documents to embed.
+
+        Returns:
+            Embedding vectors as plain lists (chromadb expects lists, while
+            fastembed yields numpy arrays).
+        """
         return [vec.tolist() for vec in self._get_model().embed(input)]
 
 
