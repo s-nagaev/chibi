@@ -24,14 +24,19 @@ class TestCreateMemory:
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = None  # Embedded mode
+            mock_settings.embedding_function = "LOCAL"
+            mock_settings.embedding_model = None
 
-            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory") as mock_chroma_class:
+            with (
+                patch("chibi.memory.chroma.FastEmbedEmbeddingFunction") as mock_ef_class,
+                patch("chibi.memory.chroma.InternalChromaLongConversationMemory") as mock_chroma_class,
+            ):
                 mock_instance = MagicMock()
                 mock_chroma_class.return_value = mock_instance
 
                 result = create_memory()
 
-                mock_chroma_class.assert_called_once()
+                mock_chroma_class.assert_called_once_with(embedding_function=mock_ef_class.return_value)
                 assert result is mock_instance
 
     def test_create_memory_returns_async_client_when_host_configured(self):
@@ -39,14 +44,19 @@ class TestCreateMemory:
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = "localhost"  # External mode
+            mock_settings.embedding_function = "LOCAL"
+            mock_settings.embedding_model = None
 
-            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory") as mock_async_class:
+            with (
+                patch("chibi.memory.chroma.FastEmbedEmbeddingFunction") as mock_ef_class,
+                patch("chibi.memory.chroma.ExternalChromaLongConversationMemory") as mock_async_class,
+            ):
                 mock_instance = MagicMock()
                 mock_async_class.return_value = mock_instance
 
                 result = create_memory()
 
-                mock_async_class.assert_called_once()
+                mock_async_class.assert_called_once_with(embedding_function=mock_ef_class.return_value)
                 assert result is mock_instance
 
     def test_create_memory_returns_none_on_exception(self):
@@ -54,26 +64,32 @@ class TestCreateMemory:
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = None  # Embedded mode
+            mock_settings.embedding_function = "LOCAL"
+            mock_settings.embedding_model = None
 
-            with patch("chibi.memory.chroma.InternalChromaLongConversationMemory", side_effect=ChromaError):
-                with patch("chibi.memory.chroma.logger") as mock_logger:
-                    result = create_memory()
+            with patch("chibi.memory.chroma.FastEmbedEmbeddingFunction"):
+                with patch("chibi.memory.chroma.InternalChromaLongConversationMemory", side_effect=ChromaError):
+                    with patch("chibi.memory.chroma.logger") as mock_logger:
+                        result = create_memory()
 
-                    assert result is None
-                    mock_logger.error.assert_called_once()
+                        assert result is None
+                        mock_logger.error.assert_called_once()
 
     def test_create_memory_returns_none_on_async_exception(self):
         """Test that create_memory returns None when AsyncChromaLongConversationMemory initialization fails."""
         with patch("chibi.memory.chroma.application_settings") as mock_settings:
             mock_settings.is_chroma_configured = True
             mock_settings.chroma_host = "localhost"  # External mode
+            mock_settings.embedding_function = "LOCAL"
+            mock_settings.embedding_model = None
 
-            with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory", side_effect=ChromaError):
-                with patch("chibi.memory.chroma.logger") as mock_logger:
-                    result = create_memory()
+            with patch("chibi.memory.chroma.FastEmbedEmbeddingFunction"):
+                with patch("chibi.memory.chroma.ExternalChromaLongConversationMemory", side_effect=ChromaError):
+                    with patch("chibi.memory.chroma.logger") as mock_logger:
+                        result = create_memory()
 
-                    assert result is None
-                    mock_logger.error.assert_called_once()
+                        assert result is None
+                        mock_logger.error.assert_called_once()
 
     def test_create_memory_import(self):
         """Test that create_memory can be imported."""

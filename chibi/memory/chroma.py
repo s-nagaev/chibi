@@ -12,7 +12,6 @@ from chromadb.api.types import Documents, Embeddings
 from chromadb.config import Settings as ChromaSettings
 from chromadb.errors import ChromaError
 from chromadb.utils.embedding_functions import (
-    DefaultEmbeddingFunction,
     GoogleGeminiEmbeddingFunction,
     JinaEmbeddingFunction,
     MistralEmbeddingFunction,
@@ -54,7 +53,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         - Per-thread batch: each thread_id has separate batch tracking
     """
 
-    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction) -> None:
         """Initialize ChromaDB embedded client."""
         self.embedding_function = embedding_function
         self._client = chromadb.PersistentClient(
@@ -459,7 +458,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         - Per-thread batch: each thread_id has separate batch tracking
     """
 
-    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction) -> None:
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClientAPI | None = None
         self.embedding_function = embedding_function
@@ -849,8 +848,9 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
     ``fastembed`` is an optional dependency. We import it lazily so the package
     can be installed on platforms that don't need it (e.g. macOS x86_64 with its
-    own onnxruntime pin). When the import fails, callers should treat ChromaDB
-    as unsupported on that machine.
+    own onnxruntime pin). When the import fails, :func:`create_memory` disables
+    semantic memory with a loud error — it never falls back to a different
+    embedding model, because vectors from different models are incompatible.
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
@@ -918,15 +918,40 @@ def create_memory() -> LongConversationMemory | None:
                 api_key_env_var="JINA_API_KEY", model_name=model or "jina-embeddings-v5-omni-small"
             )
         case "LOCAL":
+            # The TextEmbedding class resolution inside FastEmbedEmbeddingFunction
+            # is a cheap import — the ONNX model itself loads lazily on the first
+            # embed() call (see FastEmbedEmbeddingFunction._get_model), so
+            # unavailability is detected here without any model download.
             try:
                 embedding_function = FastEmbedEmbeddingFunction(
                     model_name=model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
                 )
-            except Exception:
-                logger.warning("Fastebmed is unavailable. Loading default ChromaDB embedding function...")
-                embedding_function = DefaultEmbeddingFunction()
+            except ImportError as e:
+                # NO silent fallback: vectors embedded with a different model are
+                # incompatible with existing collections (different vector space),
+                # and silently switching models is what created EF=default
+                # collections that later broke archival with EF-conflict errors.
+                logger.error(
+                    "The LOCAL embedding function requires the optional 'fastembed' "
+                    f"package, which is unavailable: {e}. Refusing to fall back to a "
+                    "different embedding model (it would corrupt the vector space of "
+                    "existing collections). Install fastembed (e.g. `pip install "
+                    "fastembed`) or configure a remote provider (OPENAI, GEMINI, "
+                    "MISTRALAI, JINA). Semantic memory is DISABLED."
+                )
+                return None
         case _:
-            embedding_function = DefaultEmbeddingFunction()
+            # Defensive arm: application_settings.embedding_function is a Literal,
+            # so this is unreachable with a validated config. Refuse loudly instead
+            # of silently constructing a default EF.
+            logger.error(
+                f"Unknown embedding function '{application_settings.embedding_function}' "
+                "(valid values: LOCAL, OPENAI, GEMINI, MISTRALAI, JINA). Refusing to "
+                "fall back to the default embedding function (silently switching "
+                "embedding models corrupts the vector space of existing collections). "
+                "Semantic memory is DISABLED."
+            )
+            return None
 
     try:
         conversation_memory: LongConversationMemory
