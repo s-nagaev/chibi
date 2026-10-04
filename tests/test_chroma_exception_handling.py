@@ -44,6 +44,7 @@ class _TestChromaError(ChromaError):
     @classmethod
     @override
     def name(cls) -> str:
+        """Provide the concrete error name required by the abstract base."""
         return "ChromaError"
 
 
