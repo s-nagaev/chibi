@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import warnings
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, cast
 
@@ -40,6 +41,8 @@ from chibi.storage.abstract import Database
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
+
+FASTEMBED_DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
@@ -851,7 +854,7 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     incompatible.
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+    def __init__(self, model_name: str = FASTEMBED_DEFAULT_MODEL) -> None:
         """Initialize the embedding function without loading the ONNX model.
 
         Args:
@@ -870,7 +873,16 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     def _get_model(self) -> "TextEmbedding":
         """Construct the fastembed model on first use, then reuse it."""
         if self._model is None:
-            self._model = self._text_embedding_cls(model_name=self._model_name)
+            # Safe to ignore: fastembed is pinned to 0.8.0, so all stored
+            # embeddings already come from mean pooling (the upstream-canonical
+            # behavior for these models since fastembed 0.6.0).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r".*now uses mean pooling instead of CLS embedding.*",
+                    category=UserWarning,
+                )
+                self._model = self._text_embedding_cls(model_name=self._model_name)
         return self._model
 
     @staticmethod
@@ -950,9 +962,7 @@ def create_memory() -> LongConversationMemory | None:
             # Constructing the EF only imports fastembed; the ONNX model loads
             # on the first embed() call (see FastEmbedEmbeddingFunction._get_model).
             try:
-                embedding_function = FastEmbedEmbeddingFunction(
-                    model_name=model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-                )
+                embedding_function = FastEmbedEmbeddingFunction(model_name=model or FASTEMBED_DEFAULT_MODEL)
             except ImportError as e:
                 # No fallback: switching embedding models would produce vectors
                 # incompatible with existing collections.

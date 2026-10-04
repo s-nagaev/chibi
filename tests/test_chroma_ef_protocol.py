@@ -7,13 +7,14 @@ sys.modules is enough to instantiate the class cheaply.
 
 import sys
 import types
+import warnings
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from chromadb.utils.embedding_functions import config_to_embedding_function, known_embedding_functions
 
-from chibi.memory.chroma import FastEmbedEmbeddingFunction
+from chibi.memory.chroma import FASTEMBED_DEFAULT_MODEL, FastEmbedEmbeddingFunction
 
 TEST_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
@@ -103,3 +104,64 @@ class TestFastEmbedProtocol:
         # Second call must reuse the already-loaded model
         ef.__call__(["world"])
         fake_fastembed.TextEmbedding.assert_called_once()
+
+
+class TestDefaultModel:
+    """The class default must be the intentional multilingual MiniLM model."""
+
+    def test_default_model_is_multilingual_minilm(self, fake_fastembed: types.ModuleType) -> None:
+        """Constructing without model_name must select the multilingual MiniLM
+        constant (not the English-only chromadb/bge default)."""
+        ef = FastEmbedEmbeddingFunction()
+        assert ef._model_name == FASTEMBED_DEFAULT_MODEL
+        assert ef.get_config() == {"model_name": FASTEMBED_DEFAULT_MODEL}
+
+    def test_default_model_roundtrip(self, fake_fastembed: types.ModuleType) -> None:
+        """build_from_config(get_config()) of a default-constructed EF must
+        preserve the default model name."""
+        ef = FastEmbedEmbeddingFunction()
+        rebuilt = FastEmbedEmbeddingFunction.build_from_config(ef.get_config())
+        assert isinstance(rebuilt, FastEmbedEmbeddingFunction)
+        assert rebuilt._model_name == FASTEMBED_DEFAULT_MODEL
+
+
+class TestMeanPoolingWarningSuppression:
+    """_get_model must swallow only fastembed's mean-pooling behavior notice."""
+
+    def _ef_with_warning_emitting_model(
+        self,
+        ef: FastEmbedEmbeddingFunction,
+        fake_fastembed: types.ModuleType,
+        message: str,
+    ) -> None:
+        """Swap in a mocked TextEmbedding class that warns on construction."""
+
+        def _warn_and_return(*args: object, **kwargs: object) -> object:
+            warnings.warn(message, UserWarning, stacklevel=2)
+            return fake_fastembed.TextEmbedding.return_value
+
+        emitting_cls = MagicMock(name="TextEmbedding", side_effect=_warn_and_return)
+        ef._text_embedding_cls = emitting_cls
+
+    def test_mean_pooling_notice_is_suppressed(self, fake_fastembed: types.ModuleType) -> None:
+        """The exact fastembed 0.8.0 mean-pooling UserWarning must not escape
+        _get_model (safe: fastembed is pinned, the store is homogeneous)."""
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        self._ef_with_warning_emitting_model(
+            ef,
+            fake_fastembed,
+            "The model 'BAAI/bge-small-en-v1.5' now uses mean pooling instead of CLS embedding. "
+            "Recreating the model might change the results.",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ef._get_model()
+
+    def test_other_user_warnings_still_propagate(self, fake_fastembed: types.ModuleType) -> None:
+        """The narrow filter must not swallow unrelated UserWarnings."""
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        self._ef_with_warning_emitting_model(ef, fake_fastembed, "some unrelated deprecation notice")
+        with pytest.raises(UserWarning, match="unrelated deprecation notice"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                ef._get_model()
