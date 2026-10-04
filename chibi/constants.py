@@ -22,6 +22,11 @@ AUDIO_UPLOAD_TIMEOUT = 60.0
 # Stable, collision-safe storage identity reserved for the IDE channel.
 IDE_STORAGE_ID = -(10**16)
 
+# Share of the real context size above which a volume-based warning about
+# bulky background tool results (shape-(ii) JSON blobs) is injected into the
+# system prompt, suggesting 'clear_tool_call_history'.
+TOOL_RESULTS_SHARE_WARN_THRESHOLD = 0.25
+
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "o1": 200000,
     "o3": 200000,
