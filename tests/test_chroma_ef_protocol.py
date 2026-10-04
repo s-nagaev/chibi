@@ -78,6 +78,31 @@ class TestFastEmbedProtocol:
         model_instance.embed.assert_called_once_with(["hello", "world"])
         assert [np.asarray(vec).tolist() for vec in result] == [[1.0, 2.0], [3.0, 4.0]]
 
-    def test_model_name_passed_to_text_embedding(self, fake_fastembed):
-        FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+    def test_build_from_config_is_cheap_no_model_load(self, fake_fastembed):
+        """chromadb's is_legacy() calls build_from_config(get_config()) on EVERY
+        get_or_create_collection — constructing the EF must NOT load the ONNX
+        model (that happens lazily on first embed)."""
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        fake_fastembed.TextEmbedding.assert_not_called()
+
+        rebuilt = FastEmbedEmbeddingFunction.build_from_config(ef.get_config())
+
+        assert isinstance(rebuilt, FastEmbedEmbeddingFunction)
+        fake_fastembed.TextEmbedding.assert_not_called()
+
+    def test_model_constructed_lazily_on_first_call(self, fake_fastembed):
+        """The ONNX model must load only when the EF is actually used."""
+        import numpy as np
+
+        model_instance = fake_fastembed.TextEmbedding.return_value
+        model_instance.embed.side_effect = lambda docs: iter([np.array([1.0, 2.0])] * len(docs))
+
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        fake_fastembed.TextEmbedding.assert_not_called()
+
+        ef.__call__(["hello"])
         fake_fastembed.TextEmbedding.assert_called_once_with(model_name=TEST_MODEL)
+
+        # Second call must reuse the already-loaded model
+        ef.__call__(["world"])
+        fake_fastembed.TextEmbedding.assert_called_once()

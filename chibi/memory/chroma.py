@@ -118,7 +118,11 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except ChromaError as e:
+        except (ChromaError, ValueError) as e:
+            # chromadb raises a plain builtin ValueError for EF-conflict
+            # validation ("new: fastembed vs persisted: default") — not a
+            # ChromaError — so it must be wrapped here too, otherwise it
+            # escapes the archival exception chain raw.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def _get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
@@ -536,7 +540,11 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except ChromaError as e:
+        except (ChromaError, ValueError) as e:
+            # chromadb raises a plain builtin ValueError for EF-conflict
+            # validation ("new: fastembed vs persisted: default") — not a
+            # ChromaError — so it must be wrapped here too, otherwise it
+            # escapes the archival exception chain raw.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
@@ -848,8 +856,21 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         from fastembed import TextEmbedding  # fastembed is an optional dep
 
-        self._model = TextEmbedding(model_name=model_name)
+        # NOTE: the TextEmbedding CLASS is resolved here (cheap import) but the
+        # model itself is constructed lazily on first embed. chromadb 1.5.9
+        # calls ``build_from_config(get_config())`` on every
+        # ``get_or_create_collection`` (via ``is_legacy()``), so an eager ONNX
+        # session load in ``__init__`` would cost ~0.3 s per archived message /
+        # semantic search. The model must only load once, when the EF is
+        # actually used for embedding.
+        self._text_embedding_cls = TextEmbedding
+        self._model: TextEmbedding | None = None
         self._model_name = model_name
+
+    def _get_model(self):
+        if self._model is None:
+            self._model = self._text_embedding_cls(model_name=self._model_name)
+        return self._model
 
     @staticmethod
     def name() -> str:
@@ -867,7 +888,7 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
     def __call__(self, input: Documents) -> Embeddings:
         # fastembed.embed() returns a generator of numpy arrays; ChromaDB expects lists
-        return [vec.tolist() for vec in self._model.embed(input)]
+        return [vec.tolist() for vec in self._get_model().embed(input)]
 
 
 def create_memory() -> LongConversationMemory | None:

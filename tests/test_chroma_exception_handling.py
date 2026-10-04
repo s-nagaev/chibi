@@ -4,6 +4,11 @@ Regression context: ``_get_or_create_collection`` raises ``ChromaCollectionError
 (a chibi ``MemoryException``), which is NOT a chromadb ``ChromaError``. Several
 callers invoked it OUTSIDE their ``try`` blocks, so archival/search failures
 escaped the intended handling. These tests pin the fixed behavior.
+
+chromadb 1.5.9 additionally raises a plain builtin ``ValueError`` for
+EF-conflict validation ("new: fastembed vs persisted: default") from
+``get_or_create_collection`` — the choke points must wrap it into
+``ChromaCollectionError`` so it cannot escape the archival chain raw.
 """
 
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -22,6 +27,11 @@ from chibi.memory.chroma import (
     InternalChromaLongConversationMemory,
 )
 from chibi.models import Message
+
+EF_CONFLICT_MSG = (
+    "An embedding function already exists in the collection configuration "
+    "with a different configuration. conflict: new: fastembed vs persisted: default"
+)
 
 
 @pytest.fixture
@@ -112,6 +122,46 @@ class TestInternalExceptionChain:
 
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_get_or_create_collection_wraps_value_error(self, internal_memory):
+        """chromadb raises a plain builtin ValueError for EF-conflict validation
+        ("new: fastembed vs persisted: default") — it must be wrapped into
+        ChromaCollectionError at the choke point, not escape raw."""
+        internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
+
+        with pytest.raises(ChromaCollectionError) as exc_info:
+            await internal_memory._get_or_create_collection(user_id=1, thread_id=2)
+
+        assert isinstance(exc_info.value, MemoryException)
+        assert not isinstance(exc_info.value, ValueError)
+
+    @pytest.mark.asyncio
+    async def test_archive_message_wraps_value_error(self, internal_memory, message):
+        """Regression: a persisted known/default collection + our EF raises
+        ValueError from get_or_create_collection — _archive_message must convert
+        it to ChromaArchiveError, not let the raw ValueError escape."""
+        internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
+
+        with pytest.raises(ChromaArchiveError):
+            await internal_memory._archive_message(
+                msg=message, batch_id="b1", msg_pos=0, prev_batch_id=None, user_id=1, thread_id=2
+            )
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_wraps_value_error(self, internal_memory):
+        internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
+
+        with pytest.raises(ChromaSearchError):
+            await internal_memory._semantic_search(user_id=1, query="q", n_results=1, thread_id=2)
+
+    @pytest.mark.asyncio
+    async def test_get_last_batch_id_returns_none_on_value_error(self, internal_memory):
+        internal_memory._client.get_or_create_collection.side_effect = ValueError(EF_CONFLICT_MSG)
+
+        result = await internal_memory._get_last_batch_id(user_id=1, thread_id=2)
+
+        assert result is None
+
 
 class TestExternalExceptionChain:
     @pytest.mark.asyncio
@@ -153,6 +203,30 @@ class TestExternalExceptionChain:
         result = await external_memory._get_next_batch(user_id=1, current_batch_id="b1", thread_id=2)
 
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_collection_wraps_value_error(self, external_memory):
+        """chromadb raises a plain builtin ValueError for EF-conflict validation —
+        it must be wrapped into ChromaCollectionError at the choke point."""
+        external_memory._get_client = AsyncMock()
+        external_memory._get_client.return_value.get_or_create_collection = AsyncMock(
+            side_effect=ValueError(EF_CONFLICT_MSG)
+        )
+
+        with pytest.raises(ChromaCollectionError):
+            await external_memory._get_or_create_collection(user_id=1, thread_id=2)
+
+    @pytest.mark.asyncio
+    async def test_archive_message_wraps_value_error(self, external_memory, message):
+        external_memory._get_client = AsyncMock()
+        external_memory._get_client.return_value.get_or_create_collection = AsyncMock(
+            side_effect=ValueError(EF_CONFLICT_MSG)
+        )
+
+        with pytest.raises(ChromaArchiveError):
+            await external_memory._archive_message(
+                msg=message, batch_id="b1", msg_pos=0, prev_batch_id=None, user_id=1, thread_id=2
+            )
 
 
 class TestBackgroundArchivalFailureLogging:
