@@ -15,7 +15,11 @@ from chibi.constants import SCHEDULER_HINT_PROMPT
 from chibi.models import Message, User
 from chibi.schemas.app import UsageSchema
 from chibi.services.interface import UserInterface
-from chibi.services.providers.utils import get_usage_from_anthropic_response, prepare_system_prompt
+from chibi.services.providers.utils import (
+    _is_tool_response_message,
+    get_usage_from_anthropic_response,
+    prepare_system_prompt,
+)
 from chibi.services.usage_cache import UsageCacheStore
 
 
@@ -318,3 +322,136 @@ def test_scheduler_hint_prompt_is_compact() -> None:
     assert 1 <= len(content_lines) <= 4
     assert "schedule_task" in SCHEDULER_HINT_PROMPT
     assert "max_fires" in SCHEDULER_HINT_PROMPT
+
+
+def _make_tool_response_blob(tool_name: str, filler: str) -> Message:
+    """Build a shape-(ii) background tool-response turn (role="user" JSON blob).
+
+    Args:
+        tool_name: Tool name stored in the blob payload.
+        filler: Payload content controlling the message size.
+
+    Returns:
+        The constructed message.
+    """
+    payload = {"type": "tool response", "tool_name": tool_name, "result": filler}
+    return Message(role="user", content=json.dumps(payload))
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_mandatory_warning_is_imperative() -> None:
+    """The context warning text must be imperative and keep the '{threshold}%' substring."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = 120000
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface)
+
+    prompt = json.loads(prompt_json)
+    warning = prompt["context_size_warning"]
+    assert "MANDATORY" in warning
+    assert "MUST" in warning
+    assert "summarize_history" in warning
+    assert "clear_tool_call_history" in warning
+    assert "50%" in warning
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_tool_results_warning_fires_above_share_threshold() -> None:
+    """The volume-based warning fires when shape-(ii) blobs exceed 25% of the real context size."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    blob = _make_tool_response_blob("web_search", "SECRET_BLOB_CONTENT" + "x" * 1200)
+    conversation = [blob, Message(role="assistant", content="ok")]
+    tool_results_tokens = sum(msg.estimate_tokens for msg in conversation if _is_tool_response_message(msg))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = tool_results_tokens * 3
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+
+    prompt = json.loads(prompt_json)
+    assert "tool_results_warning" in prompt
+    warning = prompt["tool_results_warning"]
+    assert f"web_search: ~{blob.estimate_tokens} tokens" in warning
+    assert "clear_tool_call_history" in warning
+    assert "SECRET_BLOB_CONTENT" not in warning
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_tool_results_warning_ignores_shape_i_tool_messages() -> None:
+    """In-loop shape-(i) role="tool" results must not trigger the volume-based warning."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    conversation = [Message(role="tool", content="x" * 1200, tool_call_id="call_1")]
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = 100
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+
+    prompt = json.loads(prompt_json)
+    assert "tool_results_warning" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_tool_results_warning_silent_below_share_threshold() -> None:
+    """No volume-based warning while the shape-(ii) share stays at or below 25%."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    conversation = [_make_tool_response_blob("web_search", "x" * 1200)]
+    tool_results_tokens = sum(msg.estimate_tokens for msg in conversation)
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = tool_results_tokens * 10
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+
+    prompt = json.loads(prompt_json)
+    assert "tool_results_warning" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_no_tool_results_warning_without_conversation() -> None:
+    """A cached context size without retained conversation messages emits no volume-based warning."""
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = 50000
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, interface)
+
+    prompt = json.loads(prompt_json)
+    assert "tool_results_warning" not in prompt

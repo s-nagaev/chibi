@@ -45,17 +45,106 @@ async def reset_chat_history(db: Database, storage_id: int, thread_id: int) -> N
     await db.drop_messages(user=user, thread_id=thread_id)
 
 
+# Share of gpt_settings.max_history_tokens used as the token budget for the
+# input of the emergency summarization request itself. At 100k history tokens
+# the raw full-history prompt used to overflow the summarization request;
+# 60% leaves room for the system prompt, tool schemas and the generated
+# summary output while discarding as little context as possible.
+EMERGENCY_SUMMARIZATION_INPUT_BUDGET = 0.6
+
+
+def _is_tool_response_message(message: Message) -> bool:
+    """Detect background tool-response turns stored as role="user" JSON blobs.
+
+    Args:
+        message: The message to inspect.
+
+    Returns:
+        True when the message content is a JSON object with "type": "tool response".
+    """
+    if message.role != "user" or not message.content:
+        return False
+    try:
+        payload = json.loads(message.content)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("type") == "tool response"
+
+
+def _fit_messages_to_budget(messages: list[Message], budget: int) -> list[Message]:
+    """Build a transient summarizer input under the given token budget.
+
+    The input is a separate construction: the stored conversation history is
+    never mutated. Shape-(i) tool-call pairs (assistant ``tool_calls`` +
+    role="tool" results) are already excluded from the summarizer input by the
+    caller and never appear here. Dropping order when over budget:
+
+    1. Background tool-response turns (role="user" JSON blobs with
+       ``"type": "tool response"``), LARGEST first — they are the bulk of the
+       volume and the least valuable as summarization context.
+    2. The oldest remaining turns.
+
+    The most recent message is never dropped so the summarizer always keeps
+    the latest context anchor.
+
+    Args:
+        messages: Candidate messages (already filtered from tool-result turns).
+        budget: Maximum total estimated tokens for the kept messages.
+
+    Returns:
+        The kept messages, in original order, fitting the budget.
+    """
+    total = sum(msg.estimate_tokens for msg in messages)
+    if total <= budget:
+        return messages
+
+    dropped: set[int] = set()
+
+    # (1) Background tool-response JSON blobs, largest first.
+    tool_responses = sorted(
+        (msg for msg in messages if _is_tool_response_message(msg)),
+        key=lambda msg: msg.estimate_tokens,
+        reverse=True,
+    )
+    for msg in tool_responses:
+        if total <= budget:
+            break
+        dropped.add(id(msg))
+        total -= msg.estimate_tokens
+
+    # (2) Oldest remaining turns; never drop the most recent message.
+    if total > budget:
+        for msg in messages[:-1]:
+            if total <= budget:
+                break
+            if id(msg) in dropped:
+                continue
+            dropped.add(id(msg))
+            total -= msg.estimate_tokens
+
+    return [msg for msg in messages if id(msg) not in dropped]
+
+
 @inject_database
 async def emergency_summarization(db: Database, storage_id: int, thread_id: int) -> None:
     user = await db.get_or_create_user(user_id=storage_id)
 
     chat_history = await db.get_conversation_messages(user=user, thread_id=thread_id)
-    chat_history_string = "\n".join(msg.content for msg in chat_history if not msg.tool_calls and not msg.tool_call_id)
+    # In-loop tool results (shape-(i) pairs) are excluded from the summarizer
+    # input exactly as before: assistant tool_calls and their role="tool"
+    # results are not useful summarization context and their pairing is
+    # provider-protocol sensitive.
+    summarizable = [msg for msg in chat_history if not msg.tool_calls and not msg.tool_call_id]
+    budget = int(gpt_settings.max_history_tokens * EMERGENCY_SUMMARIZATION_INPUT_BUDGET)
+    kept = _fit_messages_to_budget(summarizable, budget)
+    chat_history_string = "\n".join(msg.content for msg in kept)
     user_messages: list[Message] = [Message(role="user", content=chat_history_string)]
 
     response, _ = await user.get_active_llm_provider(thread_id=thread_id).get_chat_response(
         messages=user_messages,
         user=user,
+        model=user.get_active_llm_model(thread_id=thread_id),
+        max_tokens=int(gpt_settings.max_tokens * 1.3),
         system_prompt="Summarize this conversation, keeping the most important and useful information using English.",
         caller_storage_id=storage_id,
         caller_thread_id=thread_id,
@@ -65,6 +154,9 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
     await reset_chat_history(storage_id=storage_id, thread_id=thread_id)
     await db.add_message(user=user, message=initial_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
     await db.add_message(user=user, message=answer_message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
+    # The cached prompt size reflects the pre-reset history; without this the
+    # first post-summary turn would instantly re-trigger summarization.
+    UsageCacheStore().invalidate(user_id=storage_id, thread_id=thread_id)
 
 
 @inject_database

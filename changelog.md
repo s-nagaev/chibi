@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.1] - 2026-10-04
+
+### Fixed
+- **Emergency summarization now uses the thread's active model** instead of the provider default model: previously the request could hit a different, separately-billed model and fail with rate-limit errors that were swallowed by the reactive recovery path, leaving the conversation permanently over the context limit.
+- **Emergency summarization requests now fit the context window:** the summarizer input is truncated under a token budget (background tool-response blobs dropped largest-first, then the oldest turns; the latest turn is never dropped, and in-loop tool-call pairs are excluded as before), and the completion cap is raised to 130% of the configured `max_tokens` (threaded as an explicit per-call parameter through all provider completion paths).
+- The token usage cache is invalidated after a successful emergency summarization (previously stale usage data could re-trigger summarization pointlessly).
+
+### Added
+- **Mandatory imperative context-size warning in the system prompt:** the advisory warning was replaced with a mandatory instruction to summarize or drop stale tool results before answering.
+- **Volume-based tool-results warning:** when background tool results exceed 25% of the context size, the system prompt lists the top-3 largest offenders (tool name + estimated tokens) and suggests `clear_tool_call_history`.
+
 ## [1.18.0] - 2026-10-01
 
 ### Added

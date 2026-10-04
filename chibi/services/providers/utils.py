@@ -14,13 +14,13 @@ from openai.types.chat import ChatCompletion
 from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
-from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT
+from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT, TOOL_RESULTS_SHARE_WARN_THRESHOLD
 from chibi.models import Message
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.interface import UserInterface
 from chibi.services.usage_cache import UsageCacheStore
-from chibi.services.user import get_chibi_user
+from chibi.services.user import _is_tool_response_message, get_chibi_user
 from chibi.storage.files import get_file_storage
 from chibi.storage.files.file_storage import FileStorage
 from chibi.utils.app import convert_list_of_models_to_str, get_available_skills
@@ -76,6 +76,56 @@ def _scheduler_hint_applicable() -> bool:
     return _scheduler_tools_register()
 
 
+def _estimate_history_size(messages: list[Message]) -> int:
+    """Estimate the total token size of a conversation history.
+
+    ``Message.estimate_tokens`` ignores ``tool_calls`` argument payloads, so
+    their serialized size is compensated locally (never persisted back to the
+    model).
+
+    Args:
+        messages: The conversation messages.
+
+    Returns:
+        Estimated token count of the whole history, including assistant
+        ``tool_calls`` arguments.
+    """
+    total = sum(msg.estimate_tokens for msg in messages)
+    total += sum(
+        len(json.dumps([tool_call.model_dump() for tool_call in msg.tool_calls])) // 4
+        for msg in messages
+        if msg.tool_calls
+    )
+    return total
+
+
+def _top_tool_result_offenders(messages: list[Message], limit: int = 3) -> list[tuple[str, int]]:
+    """Collect the largest background tool-response turns (shape-(ii) blobs).
+
+    Only tool name and estimated token count are returned — never the result
+    content, to avoid leaking data into every system prompt.
+
+    Args:
+        messages: The conversation messages.
+        limit: Maximum number of offenders to return.
+
+    Returns:
+        ``(tool_name, estimated_tokens)`` tuples, largest first.
+    """
+    offenders: list[tuple[str, int]] = []
+    for msg in messages:
+        if not _is_tool_response_message(msg):
+            continue
+        try:
+            payload = json.loads(msg.content)
+        except (TypeError, ValueError):
+            continue
+        tool_name = str(payload.get("tool_name") or "unknown")
+        offenders.append((tool_name, msg.estimate_tokens))
+    offenders.sort(key=lambda item: item[1], reverse=True)
+    return offenders[:limit]
+
+
 async def prepare_system_prompt(
     base_system_prompt: str,
     user_id: int,
@@ -90,9 +140,10 @@ async def prepare_system_prompt(
         user_id: The user identifier used to fetch user metadata and to key
             the real context-size cache.
         interface: The user interface for the current request, or None.
-        conversation_messages: Retained for caller compatibility; no longer
-            used to compute the context size (the real provider-reported value
-            from ``UsageCacheStore`` is used instead).
+        conversation_messages: Retained history used only as a fallback
+            denominator for the volume-based tool-results warning when no
+            real provider-reported usage is cached; the context-size display
+            itself still relies on the real value from ``UsageCacheStore``.
         thread_id: Session thread ID used when the interface is absent (e.g.
             sub-agent requests) so the effective working directory resolves to
             the same thread-scoped value as the parent request.
@@ -137,6 +188,16 @@ async def prepare_system_prompt(
         thread_id = interface.thread_id
         real_context_size = UsageCacheStore().get(user_id=user_id, thread_id=thread_id)
         max_history_tokens = gpt_settings.max_history_tokens
+        # Denominator for the volume-based tool-results share: the real
+        # provider-reported context size when available, otherwise the local
+        # per-message estimate (including tool_calls arguments).
+        context_size_denominator = (
+            real_context_size
+            if real_context_size is not None
+            else _estimate_history_size(conversation_messages)
+            if conversation_messages
+            else 0
+        )
         if real_context_size is not None:
             context_percentage = round(real_context_size / max_history_tokens * 100) if max_history_tokens else 0
             prompt["approximate_context_size"] = (
@@ -144,13 +205,31 @@ async def prepare_system_prompt(
             )
             if context_percentage > gpt_settings.context_size_warning_threshold:
                 prompt["context_size_warning"] = (
-                    f"The context size is more than {gpt_settings.context_size_warning_threshold}% of the "
-                    f"maximum allowed ({max_history_tokens}) tokens. It is STRONGLY RECOMMENDED to reduce "
-                    f"the context by calling 'summarize_history' or 'clear_tool_call_history' and "
-                    f"generating the most detailed summary possible."
+                    f"MANDATORY: the context size is more than {gpt_settings.context_size_warning_threshold}% of "
+                    f"the maximum allowed ({max_history_tokens}) tokens. You MUST call 'summarize_history' "
+                    f"(history compression) BEFORE producing a substantive answer. Do not ignore this "
+                    f"instruction and do not answer first: compress the history by calling 'summarize_history' "
+                    f"with the most detailed summary possible, or call 'clear_tool_call_history' to drop stale "
+                    f"tool results. Only after the context is reduced, continue answering."
                 )
         else:
             prompt["approximate_context_size"] = "n/a"
+
+        if conversation_messages and context_size_denominator > 0:
+            tool_results_tokens = sum(
+                msg.estimate_tokens for msg in conversation_messages if _is_tool_response_message(msg)
+            )
+            offenders = _top_tool_result_offenders(conversation_messages)
+            tool_share = tool_results_tokens / context_size_denominator
+            if offenders and tool_share > TOOL_RESULTS_SHARE_WARN_THRESHOLD:
+                share_percentage = round(tool_share * 100)
+                top_offenders = "; ".join(f"{name}: ~{tokens} tokens" for name, tokens in offenders)
+                prompt["tool_results_warning"] = (
+                    f"Background tool results occupy ~{tool_results_tokens} tokens "
+                    f"({share_percentage}% of the ~{context_size_denominator}-token context). "
+                    f"Largest offenders (tool name: estimated tokens): {top_offenders}. "
+                    f"You should call 'clear_tool_call_history' to drop these stale tool results."
+                )
 
     llms_data: list[ModelChangeSchema] = await user.get_available_models()
     prompt["available_models_to_delegate"] = convert_list_of_models_to_str(models=llms_data)

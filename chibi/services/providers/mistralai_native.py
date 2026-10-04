@@ -126,6 +126,7 @@ class MistralAI(RestApiFriendlyProvider):
         model: str,
         messages: list[MistralMessageParam],
         interface: UserInterface | None = None,
+        max_tokens: int | None = None,
     ) -> ChatCompletionResponse:
         """Generate Mistral content with empty-response retries.
 
@@ -138,6 +139,8 @@ class MistralAI(RestApiFriendlyProvider):
             model: The Mistral model identifier.
             messages: The conversation messages.
             interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             The final aggregated Mistral response.
@@ -147,12 +150,14 @@ class MistralAI(RestApiFriendlyProvider):
         """
         for attempt in range(gpt_settings.retries):
             if delta_streaming_allowed(interface):
-                response = await self._stream_generate_content(model=model, messages=messages, interface=interface)
+                response = await self._stream_generate_content(
+                    model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                )
             else:
                 response = await self.client.chat.complete_async(
                     model=model,
                     messages=messages,
-                    max_tokens=self.max_tokens,
+                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
                     tools=self.tools_list,  # type: ignore[arg-type]
                     tool_choice="auto",
@@ -177,6 +182,7 @@ class MistralAI(RestApiFriendlyProvider):
         model: str,
         messages: list[MistralMessageParam],
         interface: UserInterface | None,
+        max_tokens: int | None = None,
     ) -> ChatCompletionResponse:
         """Stream a Mistral completion and aggregate it into a final response.
 
@@ -192,6 +198,8 @@ class MistralAI(RestApiFriendlyProvider):
             model: The Mistral model identifier.
             messages: The conversation messages.
             interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
 
         Returns:
             The aggregated final ChatCompletionResponse.
@@ -207,7 +215,7 @@ class MistralAI(RestApiFriendlyProvider):
         async with await self.client.chat.stream_async(
             model=model,
             messages=messages,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             temperature=self.temperature,
             tools=cast(list[Tool], self.tools_list),
             tool_choice="auto",
@@ -285,6 +293,7 @@ class MistralAI(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_mistral() for msg in messages]
@@ -298,6 +307,7 @@ class MistralAI(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]
         return (
@@ -316,6 +326,7 @@ class MistralAI(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -330,7 +341,7 @@ class MistralAI(RestApiFriendlyProvider):
             messages = [SystemMessage(content=prepared_system_prompt, role="system")] + messages[1:]
 
         response: ChatCompletionResponse = await self._generate_content(
-            model=model, messages=messages, interface=interface
+            model=model, messages=messages, interface=interface, max_tokens=max_tokens
         )
         usage = get_usage_from_mistral_response(response_message=response)
         if track_prompt_size:
@@ -425,6 +436,7 @@ class MistralAI(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

@@ -396,6 +396,7 @@ class Gemini(RestApiFriendlyProvider):
         interface: UserInterface | None = None,
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -415,7 +416,7 @@ class Gemini(RestApiFriendlyProvider):
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
             temperature=temperature,
-            max_output_tokens=self.max_tokens,
+            max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             tools=self.tools_list if "gemini" in model_name else None,
@@ -527,6 +528,7 @@ class Gemini(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
     @retry(
@@ -547,6 +549,7 @@ class Gemini(RestApiFriendlyProvider):
         system_prompt: str = gpt_settings.assistant_prompt,
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
+        max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
         initial_messages = [msg.to_google() for msg in messages]
@@ -561,6 +564,7 @@ class Gemini(RestApiFriendlyProvider):
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
+            max_tokens=max_tokens,
         )
 
         new_messages = [msg for msg in updated_messages if msg not in initial_messages]

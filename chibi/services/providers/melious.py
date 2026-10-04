@@ -12,7 +12,7 @@ class Melious(OpenAIFriendlyProvider):
     name = "Melious"
     model_name_keywords_exclude = ["whisper", "flux", "voxtral", "embedding", "image", "pixtral", "multilingual"]
 
-    default_model = "kimi-k2.6"
+    default_model = "glm-5.3-flash"
     default_moderation_model = "deepseek-v4-flash"
-    default_vision_model = "kimi-k2.6"
+    default_vision_model = "glm-5.3-flash"
     temperature = 1
