@@ -2,8 +2,9 @@
 
 import asyncio
 import json
+import warnings
 from datetime import datetime, timedelta
-from typing import Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
@@ -12,11 +13,11 @@ from chromadb.api.types import Documents, Embeddings
 from chromadb.config import Settings as ChromaSettings
 from chromadb.errors import ChromaError
 from chromadb.utils.embedding_functions import (
-    DefaultEmbeddingFunction,
     GoogleGeminiEmbeddingFunction,
     JinaEmbeddingFunction,
     MistralEmbeddingFunction,
     OpenAIEmbeddingFunction,
+    register_embedding_function,
 )
 from loguru import logger
 
@@ -38,6 +39,11 @@ from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
 
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
+
+FASTEMBED_DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
     """ChromaDB implementation using embedded PersistentClient.
@@ -53,7 +59,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         - Per-thread batch: each thread_id has separate batch tracking
     """
 
-    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction) -> None:
         """Initialize ChromaDB embedded client."""
         self.embedding_function = embedding_function
         self._client = chromadb.PersistentClient(
@@ -76,17 +82,17 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
         where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.get,
                 where=where_filter,
                 include=["metadatas"],
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
 
@@ -108,7 +114,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             ChromaDB collection instance.
 
         Raises:
-            ChromaCollectionError: If collection access fails.
+            ChromaCollectionError: If chromadb fails, or the embedding function
+                conflicts with the persisted collection.
         """
         collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         try:
@@ -117,7 +124,9 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except ChromaError as e:
+        except (ChromaError, ValueError) as e:
+            # chromadb raises a builtin ValueError (not ChromaError) when the
+            # embedding function conflicts with the persisted collection.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def _get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
@@ -236,8 +245,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             await asyncio.to_thread(
                 collection.add,
                 metadatas=[metadata],
@@ -245,7 +254,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 documents=[msg.content],
             )
             return None
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
@@ -336,14 +345,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.query,
                 query_texts=[query],
                 n_results=n_results,
             )
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
@@ -382,13 +391,13 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of formatted search results; empty list on error or no matches.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.get,
                 where={field: batch_id},
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get batch {batch_id} (field={field}) for user {user_id}")
             return []
 
@@ -454,7 +463,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         - Per-thread batch: each thread_id has separate batch tracking
     """
 
-    def __init__(self, embedding_function: EmbeddingFunction = DefaultEmbeddingFunction()) -> None:
+    def __init__(self, embedding_function: EmbeddingFunction) -> None:
         """Initialize ChromaDB async client for external server."""
         self._client: chromadb.AsyncClientAPI | None = None
         self.embedding_function = embedding_function
@@ -477,16 +486,16 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
         where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(
                 where=where_filter,
                 include=["metadatas"],
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
 
@@ -526,7 +535,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             ChromaDB async collection instance.
 
         Raises:
-            ChromaCollectionError: If collection access fails.
+            ChromaCollectionError: If chromadb fails, or the embedding function
+                conflicts with the persisted collection.
         """
         collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         client = await self._get_client()
@@ -535,7 +545,9 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 name=collection_name,
                 embedding_function=self.embedding_function,
             )
-        except ChromaError as e:
+        except (ChromaError, ValueError) as e:
+            # chromadb raises a builtin ValueError (not ChromaError) when the
+            # embedding function conflicts with the persisted collection.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
@@ -613,15 +625,15 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             await collection.add(
                 metadatas=[metadata],
                 ids=[str(msg.id)],
                 documents=[msg.content],
             )
             logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
@@ -693,13 +705,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.query(
                 query_texts=[query],
                 n_results=1,
             )
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
@@ -731,10 +743,10 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list on error or no matches.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(where={"batch_id": batch_id})
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get batch {batch_id} for user {user_id}")
             return []
         return self._format_batch_results(result)
@@ -767,10 +779,10 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list if not found.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(where={"prev_batch_id": current_batch_id})
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get next batch after {current_batch_id} for user {user_id}")
             return []
         return self._format_batch_results(result)
@@ -822,33 +834,106 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 continue
 
 
+@register_embedding_function
 class FastEmbedEmbeddingFunction(EmbeddingFunction):
     """ChromaDB-compatible EmbeddingFunction backed by qdrant/fastembed.
 
-    fastembed ships pure-Python wheels (``py3-none-any``) and bundles its own
-    onnxruntime, so it works across platforms without extra system deps.
-    We use it as a drop-in replacement for chromadb's ``DefaultEmbeddingFunction``
-    on platforms where the latter is not available.
+    fastembed ships pure-Python wheels and bundles its own onnxruntime, so it
+    works across platforms where chromadb's ``DefaultEmbeddingFunction`` cannot
+    be installed.
 
-    ``fastembed`` is an optional dependency. We import it lazily so the package
-    can be installed on platforms that don't need it (e.g. macOS x86_64 with its
-    own onnxruntime pin). When the import fails, callers should treat ChromaDB
-    as unsupported on that machine.
+    Implements the chromadb 1.5+ embedding-function protocol (static ``name()``,
+    instance ``get_config()``, static ``build_from_config()``) so that chromadb
+    persists the EF as ``known`` instead of ``legacy``. Legacy EFs break
+    EF-conflict validation on ``get_or_create_collection`` and cannot
+    round-trip their configuration.
+
+    ``fastembed`` is an optional dependency, imported lazily in ``__init__``.
+    If it is missing, :func:`create_memory` disables semantic memory instead of
+    falling back to another embedding model: vectors from different models are
+    incompatible.
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
+    def __init__(self, model_name: str = FASTEMBED_DEFAULT_MODEL) -> None:
+        """Initialize the embedding function without loading the ONNX model.
+
+        Args:
+            model_name: fastembed model identifier used for embedding texts.
+        """
         from fastembed import TextEmbedding  # fastembed is an optional dep
 
-        self._model = TextEmbedding(model_name=model_name)
+        # Only resolve the TextEmbedding class here; the ONNX model loads
+        # lazily in _get_model. chromadb calls build_from_config(get_config())
+        # on every get_or_create_collection, so an eager model load in
+        # __init__ would cost ~0.3 s per archived message / semantic search.
+        self._text_embedding_cls = TextEmbedding
+        self._model: TextEmbedding | None = None
         self._model_name = model_name
 
+    def _get_model(self) -> "TextEmbedding":
+        """Construct the fastembed model on first use, then reuse it."""
+        if self._model is None:
+            # Safe to ignore: fastembed is pinned to 0.8.0, so all stored
+            # embeddings already come from mean pooling (the upstream-canonical
+            # behavior for these models since fastembed 0.6.0).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r".*now uses mean pooling instead of CLS embedding.*",
+                    category=UserWarning,
+                )
+                self._model = self._text_embedding_cls(model_name=self._model_name)
+        return self._model
+
+    @staticmethod
+    def name() -> str:
+        """Return the persisted embedding-function name known to chromadb.
+
+        Returns:
+            The name chromadb persists for this embedding function.
+        """
+        return "fastembed"
+
+    def get_config(self) -> dict[str, Any]:
+        """Return a serializable configuration for the embedding function.
+
+        Returns:
+            Configuration consumed by :meth:`build_from_config`.
+        """
+        return {"model_name": self._model_name}
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "FastEmbedEmbeddingFunction":
+        """Rebuild the embedding function from :meth:`get_config` output.
+
+        Args:
+            config: Configuration produced by :meth:`get_config`.
+
+        Returns:
+            A new embedding function built from the persisted configuration.
+        """
+        return FastEmbedEmbeddingFunction(model_name=config["model_name"])
+
     def __call__(self, input: Documents) -> Embeddings:
-        # fastembed.embed() returns a generator of numpy arrays; ChromaDB expects lists
-        return [vec.tolist() for vec in self._model.embed(input)]
+        """Embed the given documents with the fastembed model.
+
+        Args:
+            input: Documents to embed.
+
+        Returns:
+            Embedding vectors as plain lists (chromadb expects lists, while
+            fastembed yields numpy arrays).
+        """
+        return [vec.tolist() for vec in self._get_model().embed(input)]
 
 
 def create_memory() -> LongConversationMemory | None:
-    """Create memory instance based on ChromaDB configuration."""
+    """Create a memory instance based on ChromaDB configuration.
+
+    Returns:
+        A memory instance, or None if ChromaDB is not configured or the
+        configured embedding function is unavailable.
+    """
     if not application_settings.is_chroma_configured:
         logger.info("ChromaDB not configured, semantic memory disabled")
         return None
@@ -874,15 +959,33 @@ def create_memory() -> LongConversationMemory | None:
                 api_key_env_var="JINA_API_KEY", model_name=model or "jina-embeddings-v5-omni-small"
             )
         case "LOCAL":
+            # Constructing the EF only imports fastembed; the ONNX model loads
+            # on the first embed() call (see FastEmbedEmbeddingFunction._get_model).
             try:
-                embedding_function = FastEmbedEmbeddingFunction(
-                    model_name=model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+                embedding_function = FastEmbedEmbeddingFunction(model_name=model or FASTEMBED_DEFAULT_MODEL)
+            except ImportError as e:
+                # No fallback: switching embedding models would produce vectors
+                # incompatible with existing collections.
+                logger.error(
+                    "The LOCAL embedding function requires the optional 'fastembed' "
+                    f"package, which is unavailable: {e}. Refusing to fall back to a "
+                    "different embedding model (it would corrupt the vector space of "
+                    "existing collections). Install fastembed (e.g. `pip install "
+                    "fastembed`) or configure a remote provider (OPENAI, GEMINI, "
+                    "MISTRALAI, JINA). Semantic memory is DISABLED."
                 )
-            except Exception:
-                logger.warning("Fastebmed is unavailable. Loading default ChromaDB embedding function...")
-                embedding_function = DefaultEmbeddingFunction()
+                return None
         case _:
-            embedding_function = DefaultEmbeddingFunction()
+            # Unreachable with a validated Literal config; refuse instead of
+            # constructing a default EF.
+            logger.error(
+                f"Unknown embedding function '{application_settings.embedding_function}' "
+                "(valid values: LOCAL, OPENAI, GEMINI, MISTRALAI, JINA). Refusing to "
+                "fall back to the default embedding function (silently switching "
+                "embedding models corrupts the vector space of existing collections). "
+                "Semantic memory is DISABLED."
+            )
+            return None
 
     try:
         conversation_memory: LongConversationMemory
