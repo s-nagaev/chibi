@@ -4,9 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.18.1] - 2026-10-04
+## [1.19.0] - 2026-10-04
 
 ### Fixed
+- **Semantic history saving and search no longer fail with a ChromaDB embedding-function conflict error:** the custom FastEmbed embedding function did not implement the embedding-function protocol expected by chromadb 1.5.9, so every write to semantic memory failed — background archival tasks died silently and the affected threads' conversation history was lost from semantic memory. A legacy silent fallback to ChromaDB's default (English-only ONNX) embedding model could additionally poison collections.
+- **The FastEmbed embedding function now fully implements the ChromaDB embedding-function protocol** (`name` / `get_config` / `build_from_config`, registered in the Chroma embedding-function registry): collections now persist the embedding function as "known", and its configuration round-trips through save/load.
+- **Embedding-function-conflict `ValueError`s are now wrapped and logged** instead of silently killing background archival tasks.
+- **The fastembed mean-pooling deprecation notice no longer leaks into logs:** the store is homogeneous — fastembed 0.8.0 has been pinned since the memory subsystem landed, so the notice is factually inapplicable and was suppressed narrowly (by message and category).
 - **Emergency summarization now uses the thread's active model** instead of the provider default model: previously the request could hit a different, separately-billed model and fail with rate-limit errors that were swallowed by the reactive recovery path, leaving the conversation permanently over the context limit.
 - **Emergency summarization requests now fit the context window:** the summarizer input is truncated under a token budget (background tool-response blobs dropped largest-first, then the oldest turns; the latest turn is never dropped, and in-loop tool-call pairs are excluded as before), and the completion cap is raised to 130% of the configured `max_tokens` (threaded as an explicit per-call parameter through all provider completion paths).
 - The token usage cache is invalidated after a successful emergency summarization (previously stale usage data could re-trigger summarization pointlessly).
@@ -14,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Mandatory imperative context-size warning in the system prompt:** the advisory warning was replaced with a mandatory instruction to summarize or drop stale tool results before answering.
 - **Volume-based tool-results warning:** when background tool results exceed 25% of the context size, the system prompt lists the top-3 largest offenders (tool name + estimated tokens) and suggests `clear_tool_call_history`.
+
+### Changed
+- **The silent fallback to ChromaDB's default embedding model is removed:** when fastembed is unavailable, semantic memory is now disabled loudly instead of silently switching to an incompatible model (a different vector space that would corrupt search results).
+- **The embedding model now loads lazily** (once, on the first embed) instead of on every `get_or_create_collection` call (~0.3 s saved per archived message).
+- **The default local embedding model is unified as `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`** — an intentional multilingual default; ChromaDB's built-in default model is English-only.
 
 ## [1.18.0] - 2026-10-01
 
@@ -736,7 +745,9 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.1...v1.19.0
+[1.18.1]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.18.1
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/s-nagaev/chibi/compare/v1.13.1...v1.14.0
