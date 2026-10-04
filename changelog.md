@@ -746,8 +746,7 @@ applied.
 - GitHub Action for linters.
 
 [Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.0...HEAD
-[1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.1...v1.19.0
-[1.18.1]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.18.1
+[1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.19.0
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/s-nagaev/chibi/compare/v1.13.1...v1.14.0
