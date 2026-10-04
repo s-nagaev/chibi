@@ -79,7 +79,9 @@ class BackgroundTaskManager(metaclass=SingletonMeta):
         try:
             exc = task.exception()
             if exc:
-                logger.error(
+                # Full traceback: background (fire-and-forget) tasks are the only
+                # place these errors surface, e.g. archival failures from ChromaDB.
+                logger.opt(exception=exc).error(
                     f"Background task '{task.get_name()}' failed: {exc.__class__.__name__} ({str(exc) or 'no details'})"
                 )
         except asyncio.CancelledError:

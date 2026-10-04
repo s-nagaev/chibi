@@ -1,0 +1,83 @@
+"""Tests for the chromadb embedding-function protocol on FastEmbedEmbeddingFunction.
+
+fastembed is stubbed (no model download): FastEmbedEmbeddingFunction imports
+``TextEmbedding`` lazily inside ``__init__``, so injecting a fake module into
+sys.modules is enough to instantiate the class cheaply.
+"""
+
+import sys
+import types
+from unittest.mock import MagicMock
+
+import pytest
+
+from chibi.memory.chroma import FastEmbedEmbeddingFunction
+
+TEST_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+@pytest.fixture
+def fake_fastembed(monkeypatch):
+    """Inject a fake ``fastembed`` module so TextEmbedding is never constructed."""
+    fake_module = types.ModuleType("fastembed")
+    fake_module.TextEmbedding = MagicMock(name="TextEmbedding")
+    monkeypatch.setitem(sys.modules, "fastembed", fake_module)
+    return fake_module
+
+
+class TestFastEmbedProtocol:
+    def test_name_is_static_and_correct(self):
+        """name() must be callable on the class itself (chromadb calls cls.name())."""
+        assert FastEmbedEmbeddingFunction.name() == "fastembed"
+        assert "fastembed" not in ("legacy", "default")
+
+    def test_registered_with_chromadb(self):
+        """The class must be registered in chromadb's known EF registry."""
+        from chromadb.utils.embedding_functions import known_embedding_functions
+
+        assert known_embedding_functions.get("fastembed") is FastEmbedEmbeddingFunction
+
+    def test_get_config_shape(self, fake_fastembed):
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        config = ef.get_config()
+        assert config == {"model_name": TEST_MODEL}
+
+    def test_build_from_config_roundtrip(self, fake_fastembed):
+        """build_from_config(get_config()) must rebuild an equivalent EF."""
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        rebuilt = FastEmbedEmbeddingFunction.build_from_config(ef.get_config())
+        assert isinstance(rebuilt, FastEmbedEmbeddingFunction)
+        assert rebuilt._model_name == TEST_MODEL
+
+    def test_is_legacy_false(self, fake_fastembed):
+        """chromadb's is_legacy() round-trips build_from_config(get_config())."""
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        assert ef.is_legacy() is False
+
+    def test_config_to_embedding_function_roundtrip(self, fake_fastembed):
+        """The persisted shape used by chromadb must rebuild the EF."""
+        from chromadb.utils.embedding_functions import config_to_embedding_function
+
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        persisted = {"name": ef.name(), "type": "known", "config": ef.get_config()}
+        rebuilt = config_to_embedding_function(persisted)
+        assert isinstance(rebuilt, FastEmbedEmbeddingFunction)
+        assert rebuilt.get_config() == {"model_name": TEST_MODEL}
+
+    def test_call_delegates_to_fastembed(self, fake_fastembed):
+        """__call__ must feed input to fastembed; chromadb's base class wrapper
+        (normalize_embeddings) converts the output to validated embeddings."""
+        import numpy as np
+
+        model_instance = fake_fastembed.TextEmbedding.return_value
+        model_instance.embed.return_value = iter([np.array([1.0, 2.0]), np.array([3.0, 4.0])])
+
+        ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        result = ef.__call__(["hello", "world"])
+
+        model_instance.embed.assert_called_once_with(["hello", "world"])
+        assert [np.asarray(vec).tolist() for vec in result] == [[1.0, 2.0], [3.0, 4.0]]
+
+    def test_model_name_passed_to_text_embedding(self, fake_fastembed):
+        FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
+        fake_fastembed.TextEmbedding.assert_called_once_with(model_name=TEST_MODEL)

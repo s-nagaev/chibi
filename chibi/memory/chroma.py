@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 import chromadb
 from chromadb import Collection, EmbeddingFunction, Metadata, Where
@@ -17,6 +17,7 @@ from chromadb.utils.embedding_functions import (
     JinaEmbeddingFunction,
     MistralEmbeddingFunction,
     OpenAIEmbeddingFunction,
+    register_embedding_function,
 )
 from loguru import logger
 
@@ -76,17 +77,17 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
         where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.get,
                 where=where_filter,
                 include=["metadatas"],
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
 
@@ -236,8 +237,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             await asyncio.to_thread(
                 collection.add,
                 metadatas=[metadata],
@@ -245,7 +246,7 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 documents=[msg.content],
             )
             return None
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
@@ -336,14 +337,14 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.query,
                 query_texts=[query],
                 n_results=n_results,
             )
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
@@ -382,13 +383,13 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of formatted search results; empty list on error or no matches.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await asyncio.to_thread(
                 collection.get,
                 where={field: batch_id},
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get batch {batch_id} (field={field}) for user {user_id}")
             return []
 
@@ -477,16 +478,16 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             The most recent batch_id, or None if no recent messages or on error.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         one_week_ago = (datetime.now() - timedelta(days=7)).timestamp()
         where_filter = cast(Where, {"timestamp_unix": {"$gte": one_week_ago}})
 
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(
                 where=where_filter,
                 include=["metadatas"],
             )
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get last batch_id for user {user_id}, thread {thread_id}")
             return None
 
@@ -613,15 +614,15 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             "timestamp_unix": now.timestamp(),
         }
 
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             await collection.add(
                 metadatas=[metadata],
                 ids=[str(msg.id)],
                 documents=[msg.content],
             )
             logger.debug(f"Archived message {msg.id} in batch {batch_id} at pos {msg_pos}")
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Failed to archive message {msg.id}")
             raise ChromaArchiveError(f"Failed to archive message {msg.id}: {e}") from e
 
@@ -693,13 +694,13 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Raises:
             ChromaSearchError: If the search query fails.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.query(
                 query_texts=[query],
                 n_results=1,
             )
-        except ChromaError as e:
+        except (ChromaError, ChromaCollectionError) as e:
             logger.exception(f"Semantic search failed for user {user_id}, thread {thread_id}")
             raise ChromaSearchError(f"Semantic search failed: {e}") from e
 
@@ -731,10 +732,10 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list on error or no matches.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(where={"batch_id": batch_id})
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get batch {batch_id} for user {user_id}")
             return []
         return self._format_batch_results(result)
@@ -767,10 +768,10 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
         Returns:
             List of MemorySearchResult objects; empty list if not found.
         """
-        collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
         try:
+            collection = await self._get_or_create_collection(user_id=user_id, thread_id=thread_id)
             result = await collection.get(where={"prev_batch_id": current_batch_id})
-        except ChromaError:
+        except (ChromaError, ChromaCollectionError):
             logger.exception(f"Failed to get next batch after {current_batch_id} for user {user_id}")
             return []
         return self._format_batch_results(result)
@@ -822,6 +823,7 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 continue
 
 
+@register_embedding_function
 class FastEmbedEmbeddingFunction(EmbeddingFunction):
     """ChromaDB-compatible EmbeddingFunction backed by qdrant/fastembed.
 
@@ -829,6 +831,13 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     onnxruntime, so it works across platforms without extra system deps.
     We use it as a drop-in replacement for chromadb's ``DefaultEmbeddingFunction``
     on platforms where the latter is not available.
+
+    Implements the chromadb 1.5+ embedding-function protocol (static ``name()``,
+    instance ``get_config()``, static ``build_from_config(config)``) so that the
+    EF is persisted with the collection as a ``known`` function instead of
+    ``legacy``. Without this protocol chromadb treats the EF as legacy, which
+    both breaks EF-conflict validation on ``get_or_create_collection`` and
+    prevents round-tripping the EF configuration.
 
     ``fastembed`` is an optional dependency. We import it lazily so the package
     can be installed on platforms that don't need it (e.g. macOS x86_64 with its
@@ -841,6 +850,20 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
         self._model = TextEmbedding(model_name=model_name)
         self._model_name = model_name
+
+    @staticmethod
+    def name() -> str:
+        """Return the persisted embedding-function name known to chromadb."""
+        return "fastembed"
+
+    def get_config(self) -> dict[str, Any]:
+        """Return a serializable configuration for the embedding function."""
+        return {"model_name": self._model_name}
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "FastEmbedEmbeddingFunction":
+        """Rebuild the embedding function from :meth:`get_config` output."""
+        return FastEmbedEmbeddingFunction(model_name=config["model_name"])
 
     def __call__(self, input: Documents) -> Embeddings:
         # fastembed.embed() returns a generator of numpy arrays; ChromaDB expects lists
