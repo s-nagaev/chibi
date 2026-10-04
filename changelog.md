@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.19.0] - 2026-10-04
+## [1.19.0] - 2026-10-05
 
 ### Fixed
 - **Semantic history saving and search no longer fail with a ChromaDB embedding-function conflict error:** the custom FastEmbed embedding function did not implement the embedding-function protocol expected by chromadb 1.5.9, so every write to semantic memory failed — background archival tasks died silently and the affected threads' conversation history was lost from semantic memory. A legacy silent fallback to ChromaDB's default (English-only ONNX) embedding model could additionally poison collections.
