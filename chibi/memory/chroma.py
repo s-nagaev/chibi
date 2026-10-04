@@ -108,7 +108,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
             ChromaDB collection instance.
 
         Raises:
-            ChromaCollectionError: If collection access fails.
+            ChromaCollectionError: If chromadb fails, or the embedding function
+                conflicts with the persisted collection.
         """
         collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         try:
@@ -118,10 +119,8 @@ class InternalChromaLongConversationMemory(LongConversationMemory):
                 embedding_function=self.embedding_function,
             )
         except (ChromaError, ValueError) as e:
-            # chromadb raises a plain builtin ValueError for EF-conflict
-            # validation ("new: fastembed vs persisted: default") — not a
-            # ChromaError — so it must be wrapped here too, otherwise it
-            # escapes the archival exception chain raw.
+            # chromadb raises a builtin ValueError (not ChromaError) when the
+            # embedding function conflicts with the persisted collection.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def _get_or_create_archive_state(self, user_id: int, thread_id: int = 0) -> ArchiveState:
@@ -530,7 +529,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
             ChromaDB async collection instance.
 
         Raises:
-            ChromaCollectionError: If collection access fails.
+            ChromaCollectionError: If chromadb fails, or the embedding function
+                conflicts with the persisted collection.
         """
         collection_name = self._get_collection_name(user_id=user_id, thread_id=thread_id)
         client = await self._get_client()
@@ -540,10 +540,8 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
                 embedding_function=self.embedding_function,
             )
         except (ChromaError, ValueError) as e:
-            # chromadb raises a plain builtin ValueError for EF-conflict
-            # validation ("new: fastembed vs persisted: default") — not a
-            # ChromaError — so it must be wrapped here too, otherwise it
-            # escapes the archival exception chain raw.
+            # chromadb raises a builtin ValueError (not ChromaError) when the
+            # embedding function conflicts with the persisted collection.
             raise ChromaCollectionError(f"Failed to get or create collection '{collection_name}': {e}") from e
 
     async def archive(self, user_id: int, messages: list[Message], thread_id: int = 0) -> None:
@@ -834,40 +832,35 @@ class ExternalChromaLongConversationMemory(LongConversationMemory):
 class FastEmbedEmbeddingFunction(EmbeddingFunction):
     """ChromaDB-compatible EmbeddingFunction backed by qdrant/fastembed.
 
-    fastembed ships pure-Python wheels (``py3-none-any``) and bundles its own
-    onnxruntime, so it works across platforms without extra system deps.
-    We use it as a drop-in replacement for chromadb's ``DefaultEmbeddingFunction``
-    on platforms where the latter is not available.
+    fastembed ships pure-Python wheels and bundles its own onnxruntime, so it
+    works across platforms where chromadb's ``DefaultEmbeddingFunction`` cannot
+    be installed.
 
     Implements the chromadb 1.5+ embedding-function protocol (static ``name()``,
-    instance ``get_config()``, static ``build_from_config(config)``) so that the
-    EF is persisted with the collection as a ``known`` function instead of
-    ``legacy``. Without this protocol chromadb treats the EF as legacy, which
-    both breaks EF-conflict validation on ``get_or_create_collection`` and
-    prevents round-tripping the EF configuration.
+    instance ``get_config()``, static ``build_from_config()``) so that chromadb
+    persists the EF as ``known`` instead of ``legacy``. Legacy EFs break
+    EF-conflict validation on ``get_or_create_collection`` and cannot
+    round-trip their configuration.
 
-    ``fastembed`` is an optional dependency. We import it lazily so the package
-    can be installed on platforms that don't need it (e.g. macOS x86_64 with its
-    own onnxruntime pin). When the import fails, :func:`create_memory` disables
-    semantic memory with a loud error — it never falls back to a different
-    embedding model, because vectors from different models are incompatible.
+    ``fastembed`` is an optional dependency, imported lazily in ``__init__``.
+    If it is missing, :func:`create_memory` disables semantic memory instead of
+    falling back to another embedding model: vectors from different models are
+    incompatible.
     """
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5") -> None:
         from fastembed import TextEmbedding  # fastembed is an optional dep
 
-        # NOTE: the TextEmbedding CLASS is resolved here (cheap import) but the
-        # model itself is constructed lazily on first embed. chromadb 1.5.9
-        # calls ``build_from_config(get_config())`` on every
-        # ``get_or_create_collection`` (via ``is_legacy()``), so an eager ONNX
-        # session load in ``__init__`` would cost ~0.3 s per archived message /
-        # semantic search. The model must only load once, when the EF is
-        # actually used for embedding.
+        # Only resolve the TextEmbedding class here; the ONNX model loads
+        # lazily in _get_model. chromadb calls build_from_config(get_config())
+        # on every get_or_create_collection, so an eager model load in
+        # __init__ would cost ~0.3 s per archived message / semantic search.
         self._text_embedding_cls = TextEmbedding
         self._model: TextEmbedding | None = None
         self._model_name = model_name
 
     def _get_model(self):
+        """Construct the fastembed model on first use, then reuse it."""
         if self._model is None:
             self._model = self._text_embedding_cls(model_name=self._model_name)
         return self._model
@@ -892,7 +885,12 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
 
 
 def create_memory() -> LongConversationMemory | None:
-    """Create memory instance based on ChromaDB configuration."""
+    """Create a memory instance based on ChromaDB configuration.
+
+    Returns:
+        A memory instance, or None if ChromaDB is not configured or the
+        configured embedding function is unavailable.
+    """
     if not application_settings.is_chroma_configured:
         logger.info("ChromaDB not configured, semantic memory disabled")
         return None
@@ -918,19 +916,15 @@ def create_memory() -> LongConversationMemory | None:
                 api_key_env_var="JINA_API_KEY", model_name=model or "jina-embeddings-v5-omni-small"
             )
         case "LOCAL":
-            # The TextEmbedding class resolution inside FastEmbedEmbeddingFunction
-            # is a cheap import — the ONNX model itself loads lazily on the first
-            # embed() call (see FastEmbedEmbeddingFunction._get_model), so
-            # unavailability is detected here without any model download.
+            # Constructing the EF only imports fastembed; the ONNX model loads
+            # on the first embed() call (see FastEmbedEmbeddingFunction._get_model).
             try:
                 embedding_function = FastEmbedEmbeddingFunction(
                     model_name=model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
                 )
             except ImportError as e:
-                # NO silent fallback: vectors embedded with a different model are
-                # incompatible with existing collections (different vector space),
-                # and silently switching models is what created EF=default
-                # collections that later broke archival with EF-conflict errors.
+                # No fallback: switching embedding models would produce vectors
+                # incompatible with existing collections.
                 logger.error(
                     "The LOCAL embedding function requires the optional 'fastembed' "
                     f"package, which is unavailable: {e}. Refusing to fall back to a "
@@ -941,9 +935,8 @@ def create_memory() -> LongConversationMemory | None:
                 )
                 return None
         case _:
-            # Defensive arm: application_settings.embedding_function is a Literal,
-            # so this is unreachable with a validated config. Refuse loudly instead
-            # of silently constructing a default EF.
+            # Unreachable with a validated Literal config; refuse instead of
+            # constructing a default EF.
             logger.error(
                 f"Unknown embedding function '{application_settings.embedding_function}' "
                 "(valid values: LOCAL, OPENAI, GEMINI, MISTRALAI, JINA). Refusing to "
