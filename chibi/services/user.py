@@ -481,7 +481,7 @@ async def get_models_available(
         active_model = user.get_active_image_model(thread_id=thread_id) or active_provider.default_image_model
     else:
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
-        active_model = user.get_active_llm_model(thread_id=thread_id) or active_provider.default_image_model
+        active_model = user.get_active_llm_model(thread_id=thread_id) or active_provider.default_model
 
     for model in available_models:
         if model.name == active_model and model.provider == active_provider.name:

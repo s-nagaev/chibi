@@ -588,7 +588,12 @@ class ChibiBot:
             reply_markup = self._create_provider_selection_keyboad_from_grouped(
                 grouped=grouped, context=context, active_provider=active_provider
             )
-            set_user_action(context=context, action=UserAction.SELECT_MODEL_PROVIDER)
+            next_action = (
+                UserAction.SELECT_IMAGE_MODEL_PROVIDER
+                if current_user_action(context=context) == UserAction.SELECT_IMAGE_MODEL
+                else UserAction.SELECT_MODEL_PROVIDER
+            )
+            set_user_action(context=context, action=next_action)
             await query.edit_message_text(text="Select a provider:", reply_markup=reply_markup)
             return None
 
