@@ -425,6 +425,13 @@ MAX_HISTORY_TOKENS=100000
 # Get from: https://programmablesearchengine.google.com/
 # GOOGLE_SEARCH_CX=
 
+# Jina AI API key (optional)
+# Enables the key-gated `jina_search` tool, lifts r.jina.ai Reader rate limits
+# to 500 RPM, and switches the hybrid `read_web_page` to Jina-first routing.
+# Without it, `jina_read` and `read_web_page` still work on the free 20 RPM tier.
+# Get from: https://jina.ai/
+# JINA_API_KEY=
+
 
 # ============================================================================
 # 13. TELEGRAM ADVANCED

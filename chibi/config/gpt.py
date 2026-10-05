@@ -119,6 +119,7 @@ class GPTSettings(BaseSettings):
 
     google_search_api_key: str | None = Field(default=None)
     google_search_cx: str | None = Field(default=None)
+    jina_api_key: str | None = Field(alias="JINA_API_KEY", default=None)
 
     @property
     def google_search_client_set(self) -> bool:
