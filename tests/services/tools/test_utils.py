@@ -1,11 +1,13 @@
 """Tests for thread-context plumbing in provider tool utilities."""
 
+import gzip
 import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import httpx
 import pytest
 
 from chibi.models import User
@@ -16,6 +18,7 @@ from chibi.services.providers.tools.memory import GetCurrentWorkingDirTool, SetW
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import (
+    _get_url,
     get_sub_agent_response,
     resolve_session_context,
 )
@@ -293,3 +296,21 @@ class TestThreadCloneCopiesDirs:
         user = await db.get_or_create_user(user_id=8)
         assert cloned_messages == 0
         assert user.thread_working_dirs.get(20) == "/clone-me"
+
+
+class TestGetUrlAcceptEncoding:
+    @pytest.mark.asyncio
+    async def test_does_not_advertise_encodings_without_decoders(self) -> None:
+        captured_headers: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_headers.update(dict(request.headers))
+            return httpx.Response(200, content=gzip.compress(b"decodable body"), headers={"Content-Encoding": "gzip"})
+
+        with patch("httpx.AsyncHTTPTransport", new=lambda retries, proxy: httpx.MockTransport(handler)):
+            response = await _get_url(url="https://example.com")
+
+        accept_encoding = captured_headers.get("Accept-Encoding", "")
+        assert "br" not in accept_encoding.split(", ")
+        assert "zstd" not in accept_encoding.split(", ")
+        assert response.text == "decodable body"
