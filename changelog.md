@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **New `jina_read` web tool:** reads pages through the Jina Reader API with `return_format` (text/markdown/html/screenshot/pageshot), `target_selector`, link summaries and a configurable timeout. Works without an API key on the free 20 RPM tier; with `JINA_API_KEY` the limit rises to 500 RPM. Handles JS-heavy and anti-bot pages that plain extraction cannot.
+- **New `jina_search` web tool (key-gated):** searches the web via the Jina Search API and returns top results with titles, URLs and content truncated to ~2000 characters per result (title and URL always preserved). Registered only when `JINA_API_KEY` is configured — the Search API hard-requires a key and bills ≥10k tokens per request.
+- **Hybrid `read_web_page` with quality gating and a circuit breaker:** the tool is now a smart orchestrator. With `JINA_API_KEY` the Jina Reader path is tried first; without it, trafilatura goes first and the free r.jina.ai tier acts as the fallback. Every result passes a quality gate (minimum length, raw-HTML fallback detection, JavaScript-garbage heuristics); each path is guarded by an in-memory circuit breaker (3 consecutive failures → 5-minute cooldown → single half-open trial). When both paths fail the gate, the better raw result is returned with a warning instead of nothing. The return contract is unchanged.
+- **`JINA_API_KEY` setting** documented in the generated configuration reference (Section 12, Search Capabilities).
+
+### Fixed
+- **Web pages are no longer returned as mojibake when a server negotiates brotli compression:** the shared HTTP helper manually advertised `Accept-Encoding: gzip, deflate, br`, but httpx has no brotli decoder installed, so servers honoring the header returned brotli-compressed bytes that were passed through undecoded. The header now advertises only the encodings httpx can actually decode (gzip, deflate).
+
 ## [1.19.0] - 2026-10-05
 
 ### Fixed
