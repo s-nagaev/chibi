@@ -22,6 +22,7 @@ from .ocr_pdf import OcrPdfTool
 from .scheduler import DeleteScheduledTaskTool, ListScheduledTasksTool, ScheduleTaskTool
 from .schemas import ToolResponseSchema
 from .send import SendAudioTool, SendImageTool, SendVideoTool
+from .telegram_files import ReadTelegramFileTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
 from .topic import RenameThreadTool
 from .vision import AnalyzeImageTool, GetFileInfoTool
