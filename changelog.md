@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`JINA_API_KEY` setting** documented in the generated configuration reference (Section 12, Search Capabilities).
 
 ### Fixed
+- **Scheduled/self-wake turns can now deliver media and chat actions to Telegram:** `SchedulerInterface.send_audio`, `send_video`, `send_images` and `send_document` no longer raise `NotImplementedError` (which crashed the job into a generic "Scheduled job failed" note) — they mirror `TelegramInterface` delivery through the shared scheduler Bot with the payload-fixed `chat_id`/`message_thread_id`. Typing / uploading-photo / recording-voice chat actions are sent as best-effort cosmetic hints whose failures are logged and swallowed instead of failing the job; image URL lists fall back to a plain text message with the URLs when the media group upload fails.
 - **Web pages are no longer returned as mojibake when a server negotiates brotli compression:** the shared HTTP helper manually advertised `Accept-Encoding: gzip, deflate, br`, but httpx has no brotli decoder installed, so servers honoring the header returned brotli-compressed bytes that were passed through undecoded. The header now advertises only the encodings httpx can actually decode (gzip, deflate).
 
 ## [1.19.0] - 2026-10-05
