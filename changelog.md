@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.19.1] - 2026-10-09
+## [1.19.0] - 2026-10-09
 
 ### Added
 - **New `jina_read` web tool:** reads pages through the Jina Reader API with `return_format` (text/markdown/html/screenshot/pageshot), `target_selector`, link summaries and a configurable timeout. Works without an API key on the free 20 RPM tier; with `JINA_API_KEY` the limit rises to 500 RPM. Handles JS-heavy and anti-bot pages that plain extraction cannot.
@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scheduled/self-wake turns can now deliver media and chat actions to Telegram:** `SchedulerInterface.send_audio`, `send_video`, `send_images` and `send_document` no longer raise `NotImplementedError` (which crashed the job into a generic "Scheduled job failed" note) — they mirror `TelegramInterface` delivery through the shared scheduler Bot with the payload-fixed `chat_id`/`message_thread_id`. Typing / uploading-photo / recording-voice chat actions are sent as best-effort cosmetic hints whose failures are logged and swallowed instead of failing the job; image URL lists fall back to a plain text message with the URLs when the media group upload fails.
 - **Web pages are no longer returned as mojibake when a server negotiates brotli compression:** the shared HTTP helper manually advertised `Accept-Encoding: gzip, deflate, br`, but httpx has no brotli decoder installed, so servers honoring the header returned brotli-compressed bytes that were passed through undecoded. The header now advertises only the encodings httpx can actually decode (gzip, deflate).
 - **Selecting an image model no longer overwrites the thread's LLM model:** tapping "← Back to providers" in the /image_models menu (shown when a provider has more than 12 image models) previously switched the inline-keyboard state to the LLM flow, so the next tap stored the image model as the thread's chat model until it was re-selected manually.
-
-## [1.19.0] - 2026-10-05
-
-### Fixed
 - **Semantic history saving and search no longer fail with a ChromaDB embedding-function conflict error:** the custom FastEmbed embedding function did not implement the embedding-function protocol expected by chromadb 1.5.9, so every write to semantic memory failed — background archival tasks died silently and the affected threads' conversation history was lost from semantic memory. A legacy silent fallback to ChromaDB's default (English-only ONNX) embedding model could additionally poison collections.
 - **The FastEmbed embedding function now fully implements the ChromaDB embedding-function protocol** (`name` / `get_config` / `build_from_config`, registered in the Chroma embedding-function registry): collections now persist the embedding function as "known", and its configuration round-trips through save/load.
 - **Embedding-function-conflict `ValueError`s are now wrapped and logged** instead of silently killing background archival tasks.
@@ -762,8 +758,7 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.1...HEAD
-[1.19.1]: https://github.com/s-nagaev/chibi/compare/v1.19.0...v1.19.1
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.0...HEAD
 [1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.19.0
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
