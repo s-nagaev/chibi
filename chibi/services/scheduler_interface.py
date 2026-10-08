@@ -1,20 +1,23 @@
 """Lightweight user interface for delivering agent output from scheduler job context."""
 
 import asyncio
+import random
 from io import BytesIO
 from typing import Any, Awaitable, Callable
 
 import telegramify_markdown
 from loguru import logger
-from telegram import Bot
-from telegram.constants import MessageLimit, ParseMode
+from telegram import Bot, InputMediaDocument, InputMediaPhoto
+from telegram.constants import ChatAction, FileSizeLimit, MessageLimit, ParseMode
 from telegram.error import BadRequest
 from telegram.request import HTTPXRequest
 
 from chibi.config import telegram_settings
+from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.exceptions import ConfigurationError
 from chibi.services.interface import UserInterface
-from chibi.utils.telegram import split_markdown_v2
+from chibi.utils.rich_message import RichMessageBuilder
+from chibi.utils.telegram import download_image, split_markdown_v2
 
 _scheduler_bot: Bot | None = None
 _scheduler_bot_lock = asyncio.Lock()
@@ -109,6 +112,7 @@ class SchedulerInterface(UserInterface):
         self._storage_id = storage_id
         self._chat_id = chat_id
         self._thread_id = thread_id
+        self._thinking_draft_id: int | None = None
 
     @property
     def chat_id(self) -> str | int:
@@ -220,17 +224,53 @@ class SchedulerInterface(UserInterface):
         """
         return None
 
+    async def _send_chat_action(self, action: ChatAction) -> None:
+        """Send a chat action through the shared scheduler Bot, swallowing failures.
+
+        Chat actions are purely cosmetic status indicators; a delivery failure
+        must never abort the scheduled job, so any exception is logged as a
+        warning and discarded (deliberately different from TelegramInterface,
+        which lets the exception propagate).
+
+        Args:
+            action: The Telegram chat action to send.
+        """
+        bot = await _get_scheduler_bot()
+        try:
+            await bot.send_chat_action(
+                chat_id=self._chat_id,
+                action=action,
+                message_thread_id=self._thread_id or None,
+            )
+        except Exception as e:
+            logger.bind(user_id=self._user_id).warning(
+                f"Failed to send chat action '{action}' to {self.chat_data}: {e}. "
+                f"Chat actions are cosmetic and never fail the scheduled job."
+            )
+
     async def send_action_typing(self) -> None:
-        """Sends a typing action to the user. No-op in scheduler context."""
-        return None
+        """Sends a typing action to the chat fixed in the job context.
+
+        Best effort: failures are logged and swallowed because a chat action
+        is cosmetic and must never fail the scheduled job.
+        """
+        await self._send_chat_action(ChatAction.TYPING)
 
     async def send_action_uploading_photo(self) -> None:
-        """Sends an uploading photo action to the user. No-op in scheduler context."""
-        return None
+        """Sends an uploading photo action to the chat fixed in the job context.
+
+        Best effort: failures are logged and swallowed because a chat action
+        is cosmetic and must never fail the scheduled job.
+        """
+        await self._send_chat_action(ChatAction.UPLOAD_PHOTO)
 
     async def send_action_recording(self) -> None:
-        """Sends a recording voice action to the user. No-op in scheduler context."""
-        return None
+        """Sends a recording voice action to the chat fixed in the job context.
+
+        Best effort: failures are logged and swallowed because a chat action
+        is cosmetic and must never fail the scheduled job.
+        """
+        await self._send_chat_action(ChatAction.RECORD_VOICE)
 
     async def send_reaction(self, reaction: str) -> None:
         """Sends a reaction to the user's message. No-op in scheduler context.
@@ -245,11 +285,77 @@ class SchedulerInterface(UserInterface):
         """Deletes the last message sent by the user. No-op in scheduler context."""
         return None
 
+    async def _clear_thinking_draft(self) -> None:
+        """Clear any active ``<tg-thinking>`` draft before the final message.
+
+        Mirrors ``TelegramInterface._clear_thinking_draft``: works around a
+        known Mac Telegram client bug where the ``<tg-thinking>`` draft
+        persists and overlaps the final message. Delivery goes through the
+        shared scheduler Bot; a failure is logged and discarded because the
+        draft is cosmetic and must never fail the scheduled job.
+        """
+        if self._thinking_draft_id is None:
+            return None
+        try:
+            payload = RichMessageBuilder.build_thinking_draft(
+                thoughts="\u200b",
+                chat_id=self._chat_id,
+                thread_id=self._thread_id or None,
+            )
+            payload["draft_id"] = self._thinking_draft_id
+            bot = await _get_scheduler_bot()
+            await bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.bind(user_id=self._user_id).warning(f"Failed to clear thinking draft for {self.chat_data}: {e}.")
+        finally:
+            self._thinking_draft_id = None
+        return None
+
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Send LLM thoughts as a native Telegram ``<tg-thinking>`` draft.
+
+        Mirrors ``TelegramInterface.send_llm_thoughts``: the reasoning is
+        delivered through the shared scheduler Bot as an ephemeral
+        ``sendRichMessageDraft`` and cleared before the final message (see
+        ``send_message``). Deliberately NO plain-text fallback: LLM thoughts
+        must never become chat content in scheduled turns, so a delivery
+        failure is only logged and the draft is simply not shown.
+
+        Args:
+            thoughts: The LLM reasoning text to display.
+        """
+        if not thoughts or thoughts == "No content":
+            return None
+
+        if self._thinking_draft_id is None:
+            self._thinking_draft_id = random.randint(1, 2**31 - 1)
+
+        payload = RichMessageBuilder.build_thinking_draft(
+            thoughts=thoughts,
+            chat_id=self._chat_id,
+            thread_id=self._thread_id or None,
+        )
+        payload["draft_id"] = self._thinking_draft_id
+
+        try:
+            bot = await _get_scheduler_bot()
+            await bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.bind(user_id=self._user_id).warning(
+                f"Failed to send LLM thoughts draft to {self.chat_data}: {e}. "
+                f"Thoughts are never sent as plain text in scheduled turns."
+            )
+            # A failed draft is dropped (never re-sent as plain text); the id is
+            # reset so a later thought chunk starts a fresh draft.
+            self._thinking_draft_id = None
+        return None
+
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Send a text message to the Telegram chat and thread fixed in the job context.
 
         The message is converted to MarkdownV2; if Telegram rejects it, it is
-        re-sent in plain text chunks.
+        re-sent in plain text chunks. Any active ``<tg-thinking>`` draft is
+        cleared first so it does not overlap the final message.
 
         Args:
             message: The text content to send.
@@ -258,6 +364,7 @@ class SchedulerInterface(UserInterface):
                 reply to.
             **kwargs: Additional arguments for the message sending function.
         """
+        await self._clear_thinking_draft()
         bot = await _get_scheduler_bot()
         message_thread_id = self._thread_id or None
         markdown_chunks = split_markdown_v2(telegramify_markdown.markdownify(message))
@@ -296,11 +403,16 @@ class SchedulerInterface(UserInterface):
         filename: str | None = None,
         **kwargs: Any,
     ) -> None:
-        """Sends an audio file to the user.
+        """Sends an audio file to the Telegram chat and thread fixed in the job context.
+
+        Delivered through the shared scheduler Bot with HTML parse mode and
+        audio-sized upload timeouts.
 
         Args:
             audio: The audio data or path to send.
-            reply: Whether to reply to the user's message.
+            reply: Whether to reply to the user's message; has no effect in
+                scheduler context because there is no incoming message to
+                reply to.
             title: The title of the audio.
             caption: The caption for the audio.
             performer: The performer of the audio.
@@ -308,12 +420,22 @@ class SchedulerInterface(UserInterface):
             thumbnail: The thumbnail data for the audio.
             filename: The filename for the audio.
             **kwargs: Additional arguments for the audio sending function.
-
-        Raises:
-            NotImplementedError: Media delivery is not supported in scheduler
-                context in v1.
         """
-        raise NotImplementedError("SchedulerInterface does not support audio delivery.")
+        bot = await _get_scheduler_bot()
+        await bot.send_audio(
+            chat_id=self._chat_id,
+            audio=audio,
+            title=title,
+            performer=performer,
+            caption=caption,
+            duration=duration,
+            thumbnail=thumbnail,
+            filename=filename,
+            parse_mode="HTML",
+            message_thread_id=self._thread_id or None,
+            read_timeout=AUDIO_UPLOAD_TIMEOUT,
+            write_timeout=AUDIO_UPLOAD_TIMEOUT,
+        )
 
     async def send_video(
         self,
@@ -326,37 +448,125 @@ class SchedulerInterface(UserInterface):
         filename: str | None = None,
         **kwargs: Any,
     ) -> None:
-        """Sends a video file to the user.
+        """Sends a video file to the Telegram chat and thread fixed in the job context.
+
+        Delivered through the shared scheduler Bot with HTML parse mode and
+        file-sized upload timeouts.
 
         Args:
             video: The video data or path to send.
-            reply: Whether to reply to the user's message.
+            reply: Whether to reply to the user's message; has no effect in
+                scheduler context because there is no incoming message to
+                reply to.
             title: The title of the video.
             caption: The caption for the video.
             duration: The duration of the video in seconds.
             thumbnail: The thumbnail data for the video.
             filename: The filename for the video.
             **kwargs: Additional arguments for the video sending function.
-
-        Raises:
-            NotImplementedError: Media delivery is not supported in scheduler
-                context in v1.
         """
-        raise NotImplementedError("SchedulerInterface does not support video delivery.")
+        bot = await _get_scheduler_bot()
+        await bot.send_video(
+            chat_id=self._chat_id,
+            video=video,
+            caption=caption,
+            duration=duration,
+            thumbnail=thumbnail,
+            filename=filename,
+            message_thread_id=self._thread_id or None,
+            parse_mode="HTML",
+            read_timeout=FILE_UPLOAD_TIMEOUT,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
+        )
 
     async def send_images(self, images: list[BytesIO] | list[str], reply: bool = True, **kwargs: Any) -> None:
-        """Sends a list of images to the user.
+        """Sends a list of images to the Telegram chat and thread fixed in the job context.
+
+        URL lists are downloaded and delivered as a photo media group; if the
+        media group fails, the original URLs are sent as a plain text message
+        so the images are never silently lost. ``BytesIO`` buffers are
+        partitioned by size: photos below ``PHOTOSIZE_UPLOAD`` go into a
+        photos group, larger buffers below ``FILESIZE_UPLOAD`` are delivered
+        as documents, and anything beyond the file size limit is skipped with
+        an error log.
 
         Args:
-            images: A list of image data or paths to send.
-            reply: Whether to reply to the user's message.
+            images: A list of image URLs or ``BytesIO`` buffers to send.
+            reply: Whether to reply to the user's message; has no effect in
+                scheduler context because there is no incoming message to
+                reply to.
             **kwargs: Additional arguments for the image sending function.
-
-        Raises:
-            NotImplementedError: Media delivery is not supported in scheduler
-                context in v1.
         """
-        raise NotImplementedError("SchedulerInterface does not support image delivery.")
+        if not images:
+            logger.bind(user_id=self._user_id).warning(
+                f"SchedulerInterface: send_images called with an empty list for {self.chat_data}; nothing to send."
+            )
+            return
+
+        await self._send_chat_action(ChatAction.UPLOAD_PHOTO)
+        bot = await _get_scheduler_bot()
+        message_thread_id = self._thread_id or None
+
+        if isinstance(images[0], str):
+            logger.bind(user_id=self._user_id).info(
+                f"Downloading {len(images)} images for {self.user_data} via URLs..."
+            )
+            image_files = [await download_image(image_url=str(url)) for url in images]
+            try:
+                logger.bind(user_id=self._user_id).info(
+                    f"Uploading {len(images)} images to {self.user_data} in the {self.chat_data}"
+                )
+                await bot.send_media_group(
+                    chat_id=self._chat_id,
+                    media=[InputMediaPhoto(data) for data in image_files],
+                    message_thread_id=message_thread_id,
+                    read_timeout=IMAGE_UPLOAD_TIMEOUT,
+                    write_timeout=IMAGE_UPLOAD_TIMEOUT,
+                )
+            except Exception as e:
+                logger.bind(user_id=self._user_id).error(
+                    f"{self.user_data} image generation request succeeded, but we couldn't send the image "
+                    f"to {self.chat_data} due to exception: {e}. Trying to send it via text message..."
+                )
+                await self.send_message("\n".join(str(url) for url in images))
+            return
+
+        media_photos: list[BytesIO] = []
+        media_docs: list[BytesIO] = []
+        for file in images:
+            if not isinstance(file, BytesIO):
+                continue
+            file.seek(0, 2)
+            size = file.tell()
+            file.seek(0)
+            if size < FileSizeLimit.PHOTOSIZE_UPLOAD:
+                media_photos.append(file)
+            elif size < FileSizeLimit.FILESIZE_UPLOAD:
+                media_docs.append(file)
+            else:
+                logger.bind(user_id=self._user_id).error(
+                    f"{self.user_data} File size ({size}) exceeds file size limit, skipping it.."
+                )
+                continue
+
+        if media_photos:
+            await bot.send_media_group(
+                chat_id=self._chat_id,
+                media=[InputMediaPhoto(img) for img in media_photos],
+                message_thread_id=message_thread_id,
+                write_timeout=IMAGE_UPLOAD_TIMEOUT,
+            )
+
+        if media_docs:
+            logger.bind(user_id=self._user_id).info(
+                f"Uploading {len(media_docs)} image(s) as file(s) to {self.user_data} in the {self.chat_data}"
+            )
+            await bot.send_media_group(
+                chat_id=self._chat_id,
+                media=[InputMediaDocument(media=img, filename="file.jpeg") for img in media_docs],
+                message_thread_id=message_thread_id,
+                write_timeout=FILE_UPLOAD_TIMEOUT,
+            )
 
     async def send_document(
         self,
@@ -366,7 +576,10 @@ class SchedulerInterface(UserInterface):
         thumbnail: bytes | None = None,
         **kwargs: Any,
     ) -> None:
-        """Sends a document file to the user.
+        """Sends a document file to the Telegram chat and thread fixed in the job context.
+
+        Delivered through the shared scheduler Bot with file-sized upload
+        timeouts.
 
         Args:
             document: The document data to send.
@@ -374,12 +587,18 @@ class SchedulerInterface(UserInterface):
             caption: The caption for the document.
             thumbnail: The thumbnail data for the document.
             **kwargs: Additional arguments for the document sending function.
-
-        Raises:
-            NotImplementedError: Media delivery is not supported in scheduler
-                context in v1.
         """
-        raise NotImplementedError("SchedulerInterface does not support document delivery.")
+        bot = await _get_scheduler_bot()
+        await bot.send_document(
+            chat_id=self._chat_id,
+            document=document,
+            filename=filename,
+            caption=caption,
+            thumbnail=thumbnail,
+            message_thread_id=self._thread_id or None,
+            read_timeout=FILE_UPLOAD_TIMEOUT,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
+        )
 
 
 class StdioSchedulerInterface(UserInterface):

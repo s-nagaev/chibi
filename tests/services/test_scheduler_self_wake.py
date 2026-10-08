@@ -217,20 +217,6 @@ async def test_scheduler_bot_requires_token() -> None:
         await _get_scheduler_bot()
 
 
-async def test_scheduler_interface_media_delivery_is_not_supported() -> None:
-    """Media delivery methods are explicitly unsupported in scheduler context."""
-    interface = SchedulerInterface(user_id=1, storage_id=1, chat_id=555, thread_id=0)
-
-    with pytest.raises(NotImplementedError):
-        await interface.send_images(images=["http://example.com/image.png"])
-    with pytest.raises(NotImplementedError):
-        await interface.send_audio(audio=b"audio")
-    with pytest.raises(NotImplementedError):
-        await interface.send_video(video=b"video")
-    with pytest.raises(NotImplementedError):
-        await interface.send_document(document=b"doc")
-
-
 async def test_scheduler_trigger_persists_ack_answer_to_history(local_db: LocalStorage) -> None:
     """Even a silent ACK answer is persisted to the thread history."""
     provider_mock = _make_provider_mock("<chibi>ACK</chibi>")

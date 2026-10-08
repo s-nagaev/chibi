@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -29,6 +30,11 @@ if TYPE_CHECKING:
 SYSTEM_JOB_PREFIX = "system:"
 AGENT_JOB_PREFIX = "agent:"
 RETENTION_CLEANUP_JOB_ID = "system:retention_cleanup"
+# Legacy job ids produced by the pre-namespace registration code
+# (``id=f"retention_cleanup-{timestamp}"``, one per restart). A startup
+# migration in ``register_retention_cleanup_job`` removes them from the
+# persistent store so affected deployments self-heal without manual cleanup.
+LEGACY_RETENTION_JOB_ID_PATTERN = re.compile(r"^retention_cleanup-\d{14}$")
 TELEGRAM_SCHEDULER_DB_FILENAME = "scheduler.db"
 STDIO_SCHEDULER_DB_FILENAME = "scheduler_stdio.db"
 _JOB_ID_SUFFIX_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -441,6 +447,23 @@ def register_retention_cleanup_job(scheduler: ChibiScheduler) -> None:
     # needs ``ChibiScheduler``), so importing the archive helper at module level
     # would create a circular import.
     from chibi.services.jobs.archive import perform_retention_cleanup
+
+    # Startup self-heal migration: drop legacy ``retention_cleanup-<timestamp>``
+    # duplicates left behind by the old per-restart registration code. O(existing
+    # jobs), runs once per process start before the fixed-id job is registered.
+    removed = 0
+    for job in scheduler.get_jobs():
+        if not LEGACY_RETENTION_JOB_ID_PATTERN.match(job.id):
+            continue
+        try:
+            scheduler._scheduler.remove_job(job.id)
+            removed += 1
+        except JobLookupError:  # tolerate races with concurrent removals
+            logger.debug("Legacy retention job {} already removed", job.id)
+    if removed:
+        logger.info("Legacy retention cleanup duplicates removed: {}", removed)
+    else:
+        logger.debug("Legacy retention cleanup duplicates removed: 0")
 
     scheduler.schedule_interval_job(
         job_id=RETENTION_CLEANUP_JOB_ID,
