@@ -12,11 +12,13 @@ from apscheduler.schedulers.base import STATE_RUNNING, STATE_STOPPED
 from chibi.exceptions import SchedulerJobError
 from chibi.services.jobs.archive import perform_retention_cleanup
 from chibi.services.scheduler import (
+    LEGACY_RETENTION_JOB_ID_PATTERN,
     RETENTION_CLEANUP_JOB_ID,
     ChibiScheduler,
     StdioScheduler,
     _validate_job_id,
     get_stdio_scheduler,
+    register_retention_cleanup_job,
 )
 from chibi.utils.app import SingletonMeta
 
@@ -346,6 +348,65 @@ class TestRetentionJobRegistration:
             assert [job.id for job in scheduler.get_jobs()] == [RETENTION_CLEANUP_JOB_ID]
         finally:
             scheduler.shutdown(wait=False)
+
+
+def _seed_legacy_job(scheduler, job_id: str = "retention_cleanup-20260719132619") -> None:
+    scheduler.add_job(
+        dummy_job,
+        trigger="interval",
+        days=180,
+        id=job_id,
+        replace_existing=False,
+        next_run_time=datetime.now(),
+    )
+
+
+@pytest.fixture()
+def registration_settings():
+    """Settings namespace required by register_retention_cleanup_job."""
+    return SimpleNamespace(chroma_history_retention_days=180, scheduler_misfire_grace_time=3600)
+
+
+class TestLegacyRetentionJobMigration:
+    """Tests for the startup self-heal migration in register_retention_cleanup_job."""
+
+    def test_registration_removes_legacy_duplicates(self, scheduler, registration_settings):
+        _seed_legacy_job(scheduler)
+        _seed_legacy_job(scheduler, "retention_cleanup-20260915150059")
+        with patch("chibi.services.scheduler.application_settings", registration_settings):
+            register_retention_cleanup_job(scheduler)
+        assert [job.id for job in scheduler.get_jobs()] == [RETENTION_CLEANUP_JOB_ID]
+
+    def test_registration_without_legacy_jobs_is_noop(self, scheduler, registration_settings):
+        with patch("chibi.services.scheduler.application_settings", registration_settings):
+            register_retention_cleanup_job(scheduler)
+        assert [job.id for job in scheduler.get_jobs()] == [RETENTION_CLEANUP_JOB_ID]
+
+    def test_protected_jobs_are_never_removed(self, scheduler, registration_settings):
+        _seed_legacy_job(scheduler)
+        scheduler.schedule_interval_job(job_id="system:other", func=dummy_job, interval_seconds=60)
+        scheduler.schedule_interval_job(job_id="agent:134604548:daily-report", func=dummy_job, interval_seconds=60)
+        with patch("chibi.services.scheduler.application_settings", registration_settings):
+            register_retention_cleanup_job(scheduler)
+        remaining_ids = {job.id for job in scheduler.get_jobs()}
+        assert remaining_ids == {
+            RETENTION_CLEANUP_JOB_ID,
+            "system:other",
+            "agent:134604548:daily-report",
+        }
+
+    @pytest.mark.parametrize(
+        ("job_id", "expected"),
+        [
+            ("retention_cleanup-20260719132619", True),
+            ("system:retention_cleanup", False),
+            ("agent:1:x", False),
+            ("retention_cleanup-abc", False),
+            ("retention_cleanup-2026071", False),
+        ],
+    )
+    def test_legacy_id_pattern(self, job_id, expected):
+        assert bool(LEGACY_RETENTION_JOB_ID_PATTERN.match(job_id)) is expected
 
 
 class TestRedisPasswordMerge:
