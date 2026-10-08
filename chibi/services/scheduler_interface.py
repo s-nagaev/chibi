@@ -1,6 +1,7 @@
 """Lightweight user interface for delivering agent output from scheduler job context."""
 
 import asyncio
+import random
 from io import BytesIO
 from typing import Any, Awaitable, Callable
 
@@ -15,6 +16,7 @@ from chibi.config import telegram_settings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.exceptions import ConfigurationError
 from chibi.services.interface import UserInterface
+from chibi.utils.rich_message import RichMessageBuilder
 from chibi.utils.telegram import download_image, split_markdown_v2
 
 _scheduler_bot: Bot | None = None
@@ -110,6 +112,7 @@ class SchedulerInterface(UserInterface):
         self._storage_id = storage_id
         self._chat_id = chat_id
         self._thread_id = thread_id
+        self._thinking_draft_id: int | None = None
 
     @property
     def chat_id(self) -> str | int:
@@ -282,11 +285,77 @@ class SchedulerInterface(UserInterface):
         """Deletes the last message sent by the user. No-op in scheduler context."""
         return None
 
+    async def _clear_thinking_draft(self) -> None:
+        """Clear any active ``<tg-thinking>`` draft before the final message.
+
+        Mirrors ``TelegramInterface._clear_thinking_draft``: works around a
+        known Mac Telegram client bug where the ``<tg-thinking>`` draft
+        persists and overlaps the final message. Delivery goes through the
+        shared scheduler Bot; a failure is logged and discarded because the
+        draft is cosmetic and must never fail the scheduled job.
+        """
+        if self._thinking_draft_id is None:
+            return None
+        try:
+            payload = RichMessageBuilder.build_thinking_draft(
+                thoughts="\u200b",
+                chat_id=self._chat_id,
+                thread_id=self._thread_id or None,
+            )
+            payload["draft_id"] = self._thinking_draft_id
+            bot = await _get_scheduler_bot()
+            await bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.bind(user_id=self._user_id).warning(f"Failed to clear thinking draft for {self.chat_data}: {e}.")
+        finally:
+            self._thinking_draft_id = None
+        return None
+
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Send LLM thoughts as a native Telegram ``<tg-thinking>`` draft.
+
+        Mirrors ``TelegramInterface.send_llm_thoughts``: the reasoning is
+        delivered through the shared scheduler Bot as an ephemeral
+        ``sendRichMessageDraft`` and cleared before the final message (see
+        ``send_message``). Deliberately NO plain-text fallback: LLM thoughts
+        must never become chat content in scheduled turns, so a delivery
+        failure is only logged and the draft is simply not shown.
+
+        Args:
+            thoughts: The LLM reasoning text to display.
+        """
+        if not thoughts or thoughts == "No content":
+            return None
+
+        if self._thinking_draft_id is None:
+            self._thinking_draft_id = random.randint(1, 2**31 - 1)
+
+        payload = RichMessageBuilder.build_thinking_draft(
+            thoughts=thoughts,
+            chat_id=self._chat_id,
+            thread_id=self._thread_id or None,
+        )
+        payload["draft_id"] = self._thinking_draft_id
+
+        try:
+            bot = await _get_scheduler_bot()
+            await bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.bind(user_id=self._user_id).warning(
+                f"Failed to send LLM thoughts draft to {self.chat_data}: {e}. "
+                f"Thoughts are never sent as plain text in scheduled turns."
+            )
+            # A failed draft is dropped (never re-sent as plain text); the id is
+            # reset so a later thought chunk starts a fresh draft.
+            self._thinking_draft_id = None
+        return None
+
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Send a text message to the Telegram chat and thread fixed in the job context.
 
         The message is converted to MarkdownV2; if Telegram rejects it, it is
-        re-sent in plain text chunks.
+        re-sent in plain text chunks. Any active ``<tg-thinking>`` draft is
+        cleared first so it does not overlap the final message.
 
         Args:
             message: The text content to send.
@@ -295,6 +364,7 @@ class SchedulerInterface(UserInterface):
                 reply to.
             **kwargs: Additional arguments for the message sending function.
         """
+        await self._clear_thinking_draft()
         bot = await _get_scheduler_bot()
         message_thread_id = self._thread_id or None
         markdown_chunks = split_markdown_v2(telegramify_markdown.markdownify(message))
