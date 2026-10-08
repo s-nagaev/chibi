@@ -65,6 +65,7 @@ from chibi.utils.telegram import (
     telegram_setting_pre_start_check,
     user_interacts_with_bot,
 )
+from chibi.utils.text_files import is_text_file
 
 _T = TypeVar("_T")
 RenameThreadTool.register = True
@@ -264,6 +265,12 @@ class ChibiBot:
             caption = {
                 "user_caption": message.caption or "no data",
                 "file_id": file_id,
+                "file_name": document_meta.file_name,
+                "mime_type": document_meta.mime_type,
+                "is_text_file": is_text_file(
+                    mime_type=document_meta.mime_type,
+                    file_name=document_meta.file_name,
+                ),
             }
             interface.set_caption(json.dumps(caption))
 
