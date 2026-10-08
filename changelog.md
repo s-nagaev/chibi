@@ -4,13 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.19.1] - 2026-10-09
 
 ### Added
 - **New `jina_read` web tool:** reads pages through the Jina Reader API with `return_format` (text/markdown/html/screenshot/pageshot), `target_selector`, link summaries and a configurable timeout. Works without an API key on the free 20 RPM tier; with `JINA_API_KEY` the limit rises to 500 RPM. Handles JS-heavy and anti-bot pages that plain extraction cannot.
 - **New `jina_search` web tool (key-gated):** searches the web via the Jina Search API and returns top results with titles, URLs and content truncated to ~2000 characters per result (title and URL always preserved). Registered only when `JINA_API_KEY` is configured — the Search API hard-requires a key and bills ≥10k tokens per request.
 - **Hybrid `read_web_page` with quality gating and a circuit breaker:** the tool is now a smart orchestrator. With `JINA_API_KEY` the Jina Reader path is tried first; without it, trafilatura goes first and the free r.jina.ai tier acts as the fallback. Every result passes a quality gate (minimum length, raw-HTML fallback detection, JavaScript-garbage heuristics); each path is guarded by an in-memory circuit breaker (3 consecutive failures → 5-minute cooldown → single half-open trial). When both paths fail the gate, the better raw result is returned with a warning instead of nothing. The return contract is unchanged.
 - **`JINA_API_KEY` setting** documented in the generated configuration reference (Section 12, Search Capabilities).
+- **New `read_telegram_file` tool:** reads the content of a text-based file (e.g. `.md`, `.txt`, `.py`, `.json`) previously sent as a document to the Telegram chat. The `file_id` comes from upload captions or the `get_file_info` tool; content is served by the new `TelegramFileStorage.get_text` backed by a shared text-file detector (MIME allowlist first, file-extension fallback — Telegram often reports `application/octet-stream` for plain-text files it cannot classify). Non-text files (images, binaries) and oversized files are rejected; very long files may be truncated with an explicit marker at the end of the content; tool-level errors (`ValueError`, `FileNotFoundError`, `StorageError`) propagate per the tool error conventions. Only works when file storage is set to Telegram; covered by 10 new tool tests.
+- **Document upload captions now include file readability hints:** the caption metadata exposed to the model for every uploaded document gains `file_name`, `mime_type` and an `is_text_file` flag (computed by the shared detector), so the agent knows upfront whether a file can be read with `read_telegram_file`.
 
 ### Fixed
 - **Legacy `retention_cleanup-<timestamp>` scheduler job duplicates are now removed automatically at startup:** the old registration code created a uniquely-named retention-cleanup job on every restart (`retention_cleanup-YYYYMMDDHHMMSS`), leaving dozens of redundant copies in the persistent store that would each fire and run `perform_retention_cleanup` again. `register_retention_cleanup_job` now performs a one-shot O(jobs) self-heal pass that deletes any job id matching `retention_cleanup-\d{14}` from the persistent store (Redis or SQLite) before registering the fixed-id job — `system:*` and `agent:*` jobs are never touched — so affected deployments clean themselves up on the next restart without manual intervention.
@@ -760,7 +762,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.1...HEAD
+[1.19.1]: https://github.com/s-nagaev/chibi/compare/v1.19.0...v1.19.1
 [1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.19.0
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
