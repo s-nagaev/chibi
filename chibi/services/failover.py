@@ -541,6 +541,23 @@ class FailoverResult:
     last_trigger: FailoverTrigger | None = None
 
 
+@dataclass
+class _WalkState:
+    """Mutable per-request state shared by the failover walk helpers.
+
+    Extracted from ``FailoverEngine.run`` so the walk steps can live in
+    private methods instead of closures mutating ``nonlocal`` variables.
+    One instance per ``run()`` call; never shared across requests.
+    """
+
+    result: FailoverResult
+    tried: set[tuple[str, str | None]] = field(default_factory=set)
+    last_exception: BaseException | None = None
+    last_trigger: FailoverTrigger | None = None
+    first_attempted: FailoverPair | None = None
+    instances: dict[str, "Provider"] | None = None
+
+
 class FailoverEngine:
     """Runs a chat call behind the failover semantics for one role."""
 
@@ -653,6 +670,131 @@ class FailoverEngine:
         except Exception as e:
             logger.warning(f"Failover: {hook_name} notification hook failed: {e}")
 
+    async def _get_instances(
+        self, state: _WalkState, primary_provider: "Provider", primary_key: str
+    ) -> dict[str, "Provider"]:
+        """Return the chat-ready provider instances, built lazily on first use.
+
+        Chat-ready provider instances for this user. Built LAZILY: a fully
+        successful request never instantiates extra providers nor touches
+        the cooldown store — the ladder (and the model enumeration behind
+        it) is resolved only when the primary fails.
+        """
+        if state.instances is None:
+            state.instances = self._chat_ready_instances()
+            # The primary is always included so the first attempt never
+            # depends on registry filtering.
+            state.instances.setdefault(primary_key, primary_provider)
+        return state.instances
+
+    async def _attempt(
+        self,
+        state: _WalkState,
+        role: Role,
+        call: ChatCall,
+        pair: FailoverPair,
+        provider_instance: "Provider",
+    ) -> bool:
+        """Run one (provider, model) pair. True on success."""
+        key = (pair.provider.lower(), pair.model)
+        if key in state.tried:
+            return False
+        state.tried.add(key)
+        if state.first_attempted is None:
+            state.first_attempted = pair
+        try:
+            response, new_messages = await call(provider_instance, pair.model)
+        except Exception as e:
+            kind = classify_exception(e)
+            state.result.attempts.append(
+                FailoverAttempt(provider=pair.provider, model=pair.model, ok=False, kind=kind, error=str(e))
+            )
+            if kind is None:
+                raise  # not failover-worthy (context overflow, auth, ...) — propagate honestly
+            state.last_exception = e
+            state.last_trigger = FailoverTrigger(kind=kind, provider=pair.provider, model=pair.model, original=e)
+            await self.cooldown.mark(pair.provider)
+            logger.warning(
+                f"Failover[{role}]: {pair.provider}/{pair.model or '<default>'} failed ({kind}); "
+                f"provider put on a {COOLDOWN_TTL_SECONDS // 60}-minute cooldown."
+            )
+            return False
+        state.result.response = response
+        state.result.new_messages = new_messages
+        state.result.serving_provider = response.provider or pair.provider
+        state.result.serving_model = pair.model or response.model
+        # Any successful pair other than the first attempted one (the
+        # primary) is by definition a fallback.
+        state.result.fallback_used = pair != state.first_attempted
+        state.result.attempts.append(FailoverAttempt(provider=pair.provider, model=pair.model, ok=True))
+        return True
+
+    async def _walk_pairs(
+        self,
+        state: _WalkState,
+        role: Role,
+        pairs_iter: list[FailoverPair],
+        instances_map: dict[str, "Provider"],
+        cooldown_check: bool,
+        primary_key: str,
+        on_fallback: FallbackHook | None,
+        call: ChatCall,
+    ) -> None:
+        """Walk the fallback steps in order, attempting each viable pair.
+
+        Stops as soon as a pair succeeds (the result is already recorded in
+        the walk state); otherwise returns with the state left for the
+        honest-failure epilogue.
+        """
+        for index, pair in enumerate(pairs_iter):
+            instance = instances_map.get(pair.provider.lower())
+            if instance is None:
+                logger.warning(
+                    f"Failover[{role}]: chain step {pair.provider}/{pair.model or '<default>'} "
+                    f"is not available to this user — skipping."
+                )
+                continue
+            # No revisiting already-tried pairs within one request.
+            if (pair.provider.lower(), pair.model) in state.tried:
+                continue
+            # Notification (failover_notification task): every step after a
+            # failure is a fallback transition — warn BEFORE attempting it.
+            # Skipped pairs (cooldown / unavailable instance) are NOT
+            # announced: nothing is actually attempted there.
+            if state.last_trigger is not None and on_fallback is not None:
+                await self._notify("on_fallback", on_fallback, state.last_trigger, pair)
+            # Cooldown blocks auto-selection only, never the primary and
+            # never manual chains. Cooldowns set during THIS request are
+            # honoured for later ladder steps as well.
+            if (
+                cooldown_check
+                and index > 0
+                and pair.provider.lower() != primary_key
+                and await self.cooldown.is_blocked(pair.provider)
+            ):
+                logger.debug(f"Failover[{role}]: skipping {pair.provider} (on cooldown)")
+                continue
+            if await self._attempt(state, role, call, pair, instance):
+                return
+
+    async def _fail_honestly(self, state: _WalkState, on_failure: FailureHook | None) -> FailoverResult:
+        """Finish the walk when every step failed: notify, then raise honestly."""
+        # Nothing worked — fail honestly with the original exception.
+        if state.result.response is not None:  # pragma: no cover — defensive
+            return state.result
+        # Notification (failover_notification task): announce the final
+        # honest failure, but ONLY when fallbacks were genuinely attempted
+        # (attempts beyond the primary). A single-attempt failure with no
+        # fallback candidates never fires on_failure — the standard error
+        # handling already reports it and "no fallback succeeded" would be
+        # noise about fallbacks that never existed.
+        if on_failure is not None and state.last_trigger is not None and len(state.result.attempts) > 1:
+            fallback_targets = [FailoverPair(provider=a.provider, model=a.model) for a in state.result.attempts[1:]]
+            await self._notify("on_failure", on_failure, state.last_trigger, fallback_targets)
+        raise (
+            state.last_exception or state.last_trigger or RuntimeError("Failover: no provider could serve the request")
+        )
+
     async def run(
         self,
         role: Role,
@@ -692,72 +834,17 @@ class FailoverEngine:
                 exception is not a failover trigger.
         """
         policy = resolve_failover_policy(role)
-        tried: set[tuple[str, str | None]] = set()
-        result = FailoverResult(response=None, new_messages=[])  # type: ignore[arg-type]
-        last_exception: BaseException | None = None
-        last_trigger: FailoverTrigger | None = None
+        state = _WalkState(result=FailoverResult(response=None, new_messages=[]))  # type: ignore[arg-type]
         # Guard against non-string provider names (e.g. AsyncMock doubles in
         # tests): every real provider defines ``name`` as a class-level str.
         primary_name = primary_provider.name if isinstance(primary_provider.name, str) else "primary"
         primary_key = primary_name.lower()
-        first_attempted: FailoverPair | None = None
-
-        # Chat-ready provider instances for this user. Built LAZILY: a
-        # fully successful request never instantiates extra providers nor
-        # touches the cooldown store — the ladder (and the model
-        # enumeration behind it) is resolved only when the primary fails.
-        instances: dict[str, "Provider"] | None = None
-
-        async def get_instances() -> dict[str, "Provider"]:
-            nonlocal instances
-            if instances is None:
-                instances = self._chat_ready_instances()
-                # The primary is always included so the first attempt never
-                # depends on registry filtering.
-                instances.setdefault(primary_key, primary_provider)
-            return instances
-
-        async def attempt(pair: FailoverPair, provider_instance: "Provider") -> bool:
-            """Run one (provider, model) pair. True on success."""
-            nonlocal last_exception, last_trigger, first_attempted
-            key = (pair.provider.lower(), pair.model)
-            if key in tried:
-                return False
-            tried.add(key)
-            if first_attempted is None:
-                first_attempted = pair
-            try:
-                response, new_messages = await call(provider_instance, pair.model)
-            except Exception as e:
-                kind = classify_exception(e)
-                result.attempts.append(
-                    FailoverAttempt(provider=pair.provider, model=pair.model, ok=False, kind=kind, error=str(e))
-                )
-                if kind is None:
-                    raise  # not failover-worthy (context overflow, auth, ...) — propagate honestly
-                last_exception = e
-                last_trigger = FailoverTrigger(kind=kind, provider=pair.provider, model=pair.model, original=e)
-                await self.cooldown.mark(pair.provider)
-                logger.warning(
-                    f"Failover[{role}]: {pair.provider}/{pair.model or '<default>'} failed ({kind}); "
-                    f"provider put on a {COOLDOWN_TTL_SECONDS // 60}-minute cooldown."
-                )
-                return False
-            result.response = response
-            result.new_messages = new_messages
-            result.serving_provider = response.provider or pair.provider
-            result.serving_model = pair.model or response.model
-            # Any successful pair other than the first attempted one (the
-            # primary) is by definition a fallback.
-            result.fallback_used = pair != first_attempted
-            result.attempts.append(FailoverAttempt(provider=pair.provider, model=pair.model, ok=True))
-            return True
 
         if policy.mode == FailoverMode.DISABLED:
-            await attempt(FailoverPair(provider=primary_name, model=model), primary_provider)
-            if result.response is None:
-                raise last_exception or last_trigger or RuntimeError("Failover: attempt produced no result")
-            return result
+            await self._attempt(state, role, call, FailoverPair(provider=primary_name, model=model), primary_provider)
+            if state.result.response is None:
+                raise state.last_exception or state.last_trigger or RuntimeError("Failover: attempt produced no result")
+            return state.result
 
         if policy.mode == FailoverMode.MANUAL:
             # Head of chain = the caller-resolved primary (the user's active
@@ -771,65 +858,30 @@ class FailoverEngine:
             cooldown_check = False
             # Extra providers are only needed when the chain has fallback
             # steps; an empty chain must not pay for instantiation.
-            instances_map = await get_instances() if policy.chain else {primary_key: primary_provider}
+            instances_map = (
+                await self._get_instances(state, primary_provider, primary_key)
+                if policy.chain
+                else {primary_key: primary_provider}
+            )
         else:  # AUTO
             # Primary attempt FIRST: the auto ladder — including provider
             # model enumeration — is resolved lazily, only when the primary
             # actually fails. A successful request pays for neither the
             # cooldown store nor the model registry.
-            if await attempt(FailoverPair(provider=primary_name, model=model), primary_provider):
-                return result
+            if await self._attempt(
+                state, role, call, FailoverPair(provider=primary_name, model=model), primary_provider
+            ):
+                return state.result
+            instances_map = await self._get_instances(state, primary_provider, primary_key)
             blocked: dict[str, bool] = {}
-            instances_map = await get_instances()
             pairs_iter = await self._build_auto_ladder(
                 primary_provider=primary_provider, model=model, instances=instances_map, blocked=blocked
             )
             cooldown_check = True
 
-        for index, pair in enumerate(pairs_iter):
-            instance = instances_map.get(pair.provider.lower())
-            if instance is None:
-                logger.warning(
-                    f"Failover[{role}]: chain step {pair.provider}/{pair.model or '<default>'} "
-                    f"is not available to this user — skipping."
-                )
-                continue
-            # No revisiting already-tried pairs within one request.
-            if (pair.provider.lower(), pair.model) in tried:
-                continue
-            # Notification (failover_notification task): every step after a
-            # failure is a fallback transition — warn BEFORE attempting it.
-            # Skipped pairs (cooldown / unavailable instance) are NOT
-            # announced: nothing is actually attempted there.
-            if last_trigger is not None and on_fallback is not None:
-                await self._notify("on_fallback", on_fallback, last_trigger, pair)
-            # Cooldown blocks auto-selection only, never the primary and
-            # never manual chains. Cooldowns set during THIS request are
-            # honoured for later ladder steps as well.
-            if (
-                cooldown_check
-                and index > 0
-                and pair.provider.lower() != primary_key
-                and await self.cooldown.is_blocked(pair.provider)
-            ):
-                logger.debug(f"Failover[{role}]: skipping {pair.provider} (on cooldown)")
-                continue
-            if await attempt(pair, instance):
-                return result
-
+        await self._walk_pairs(state, role, pairs_iter, instances_map, cooldown_check, primary_key, on_fallback, call)
         # Nothing worked — fail honestly with the original exception.
-        if result.response is not None:  # pragma: no cover — defensive
-            return result
-        # Notification (failover_notification task): announce the final
-        # honest failure, but ONLY when fallbacks were genuinely attempted
-        # (attempts beyond the primary). A single-attempt failure with no
-        # fallback candidates never fires on_failure — the standard error
-        # handling already reports it and "no fallback succeeded" would be
-        # noise about fallbacks that never existed.
-        if on_failure is not None and last_trigger is not None and len(result.attempts) > 1:
-            fallback_targets = [FailoverPair(provider=a.provider, model=a.model) for a in result.attempts[1:]]
-            await self._notify("on_failure", on_failure, last_trigger, fallback_targets)
-        raise last_exception or last_trigger or RuntimeError("Failover: no provider could serve the request")
+        return await self._fail_honestly(state, on_failure)
 
 
 async def run_with_failover(
