@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Image-to-image support in the `generate_image` tool:** the tool now accepts optional `reference_file_ids` (Telegram file IDs of previously uploaded images) and/or `reference_paths` (local filesystem paths; requires `filesystem_access` to be enabled) and passes the resolved reference images to the selected image model. Provider and model capability gating prevents calls to models without image input support: supported out of the box for Gemini Nano Banana content-creation models (`gemini-*-image`, via inline prompt parts) and OpenAI `gpt-image-*` models (via the Images Edit API), while `imagen-*` / `dall-e-*` models and providers without image input reject the call with a clear error. Reference images are limited to PNG, JPEG and WebP, at most 10 images, 10 MB each; calls without reference input behave exactly as before.
+
 ## [1.19.0] - 2026-10-09
 
 ### Added
