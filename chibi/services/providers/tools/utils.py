@@ -140,6 +140,31 @@ async def _get_url(url: str) -> Response:
         return await client.get(url=url, headers=headers)
 
 
+def _log_subagent_fallback(trigger: FailoverTrigger, pair: FailoverPair) -> None:
+    """Log a sub-agent fallback warning (log-only notification path).
+
+    A sub-agent request has no interface by design, so the same message the
+    master path would deliver to the chat is written to the log instead.
+
+    Args:
+        trigger: The trigger that fired the fallback.
+        pair: The (provider, model) pair about to be attempted.
+    """
+    warning = failover_warning_message(trigger=trigger, fallback=pair)
+    logger.warning(f"Failover[subagent] (chat notification unavailable): {warning}")
+
+
+def _log_subagent_failure(trigger: FailoverTrigger, fallback_targets: list[FailoverPair]) -> None:
+    """Log the sub-agent final honest-failure message (log-only path).
+
+    Args:
+        trigger: The last trigger that fired.
+        fallback_targets: The fallback pairs that were actually attempted.
+    """
+    failure = failover_failure_message(trigger=trigger, fallback_targets=fallback_targets)
+    logger.warning(f"Failover[subagent] (chat notification unavailable): {failure}")
+
+
 @inject_database
 async def get_sub_agent_response(
     db: Database,
@@ -197,14 +222,6 @@ async def get_sub_agent_response(
     # So subagent fallbacks are reported to the log with the exact same
     # message the master path would send to the chat; the parent chat still
     # sees the sub-agent's own honest failure if every step is exhausted.
-    def _log_fallback(trigger: FailoverTrigger, pair: FailoverPair) -> None:
-        warning = failover_warning_message(trigger=trigger, fallback=pair)
-        logger.warning(f"Failover[subagent] (chat notification unavailable): {warning}")
-
-    def _log_failure(trigger: FailoverTrigger, fallback_targets: list[FailoverPair]) -> None:
-        failure = failover_failure_message(trigger=trigger, fallback_targets=fallback_targets)
-        logger.warning(f"Failover[subagent] (chat notification unavailable): {failure}")
-
     chat_response = (
         await run_with_failover(
             role="subagent",
@@ -219,10 +236,11 @@ async def get_sub_agent_response(
                 caller_storage_id=caller_storage_id,
                 caller_thread_id=caller_thread_id,
             ),
-            on_fallback=_log_fallback,
-            on_failure=_log_failure,
+            on_fallback=_log_subagent_fallback,
+            on_failure=_log_subagent_failure,
         )
     ).response
+    assert chat_response is not None  # Type narrowing for mypy: a returned walk always carries a response
     return chat_response
 
 

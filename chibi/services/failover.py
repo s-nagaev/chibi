@@ -54,7 +54,7 @@ import inspect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 import aiohttp
 import httpx
@@ -81,6 +81,8 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.storage.database import _db_provider
+from chibi.storage.redis import RedisStorage
 from chibi.utils.app import SingletonMeta
 
 if TYPE_CHECKING:
@@ -101,7 +103,7 @@ FailureHook = Callable[["FailoverTrigger", list["FailoverPair"]], Any]
 COOLDOWN_TTL_SECONDS = 20 * 60  # 20 minutes, fixed per owner decision (v1)
 COOLDOWN_KEY_PREFIX = "failover:cooldown:"
 
-ChatCall = Callable[["Provider", Optional[str]], Awaitable[tuple["ChatResponseSchema", list["Message"]]]]
+ChatCall = Callable[["Provider", str | None], Awaitable[tuple["ChatResponseSchema", list["Message"]]]]
 
 # Failover trigger taxonomy. Mapping is checked top-down; order matters
 # because SDK exception hierarchies overlap (e.g. openai.APITimeoutError is
@@ -427,9 +429,6 @@ class CooldownStore(metaclass=SingletonMeta):
             if self._client_resolved:
                 return self._client
             try:
-                from chibi.storage.database import _db_provider  # app-wide instance
-                from chibi.storage.redis import RedisStorage
-
                 db = await _db_provider.get_database()
             except Exception as e:  # storage not configured / unavailable
                 logger.debug(f"Cooldown store: no database available ({e})")
@@ -530,10 +529,14 @@ class FailoverResult:
     the outcome for callers; user-facing fallback warnings are delivered
     through the engine's ``on_fallback`` / ``on_failure`` notification
     hooks (failover_notification task), not from this dataclass.
+
+    ``response`` stays ``None`` until some step succeeds; the engine only
+    ever RETURNS a result carrying a response — a walk that produced none
+    raises instead (honest failure).
     """
 
-    response: "ChatResponseSchema"
-    new_messages: list["Message"]
+    response: "ChatResponseSchema | None" = None
+    new_messages: list["Message"] = field(default_factory=list)
     fallback_used: bool = False
     serving_provider: str = ""
     serving_model: str | None = None
@@ -565,8 +568,6 @@ class FailoverEngine:
         self.user = user
         self.cooldown = CooldownStore()
         self.model_registry = FailoverModelRegistry()
-
-    # -- candidate resolution ------------------------------------------------
 
     def _chat_ready_instances(self) -> dict[str, "Provider"]:
         """Instantiate every chat-ready provider available to this user.
@@ -652,8 +653,6 @@ class FailoverEngine:
                 ladder.append(FailoverPair(provider=instance.name, model=None))
 
         return ladder
-
-    # -- execution -----------------------------------------------------------
 
     @staticmethod
     async def _notify(hook_name: str, hook: Callable[..., Any], *args: Any) -> None:
@@ -778,7 +777,12 @@ class FailoverEngine:
                 return
 
     async def _fail_honestly(self, state: _WalkState, on_failure: FailureHook | None) -> FailoverResult:
-        """Finish the walk when every step failed: notify, then raise honestly."""
+        """Finish the walk when every step failed: notify, then raise honestly.
+
+        Raises:
+            Exception: The last provider exception when every chain step
+                failed (honest failure).
+        """
         # Nothing worked — fail honestly with the original exception.
         if state.result.response is not None:  # pragma: no cover — defensive
             return state.result
@@ -834,7 +838,7 @@ class FailoverEngine:
                 exception is not a failover trigger.
         """
         policy = resolve_failover_policy(role)
-        state = _WalkState(result=FailoverResult(response=None, new_messages=[]))  # type: ignore[arg-type]
+        state = _WalkState(result=FailoverResult(response=None, new_messages=[]))
         # Guard against non-string provider names (e.g. AsyncMock doubles in
         # tests): every real provider defines ``name`` as a class-level str.
         primary_name = primary_provider.name if isinstance(primary_provider.name, str) else "primary"

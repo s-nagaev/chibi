@@ -14,6 +14,7 @@ notification hooks of ``FailoverEngine`` / ``run_with_failover``:
   untouched by the notification layer.
 """
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
@@ -33,6 +34,10 @@ from chibi.services.failover import (
     reset_failover_policy_cache,
     run_with_failover,
 )
+from chibi.utils.app import SingletonMeta
+
+if TYPE_CHECKING:
+    from chibi.services.providers.provider import Provider
 
 
 @pytest.fixture(autouse=True)
@@ -47,8 +52,6 @@ def _clean_cooldown_and_registry_singletons():
     """CooldownStore / FailoverModelRegistry are process-wide singletons:
     drop their state between tests so cooldowns from one test never leak
     into the ladder of another."""
-    from chibi.utils.app import SingletonMeta
-
     for cls in (CooldownStore, FailoverModelRegistry):
         SingletonMeta._instances.pop(cls, None)
     yield
@@ -56,7 +59,9 @@ def _clean_cooldown_and_registry_singletons():
         SingletonMeta._instances.pop(cls, None)
 
 
-def _make_trigger(kind: TriggerKind = "rate_limit", provider: str = "openai", model: str | None = "gpt-5.6-luna"):
+def _make_trigger(
+    kind: TriggerKind = "rate_limit", provider: str = "openai", model: str | None = "gpt-5.6-luna"
+) -> FailoverTrigger:
     return FailoverTrigger(kind=kind, provider=provider, model=model, original=RuntimeError("boom"))
 
 
@@ -69,14 +74,16 @@ class _Recorder:
         ] = []  # (kind, trigger pair, target provider, target model)
         self.failures: list[tuple[str, list[tuple[str, str | None]]]] = []
 
-    def on_fallback(self, trigger, pair) -> None:
+    def on_fallback(self, trigger: FailoverTrigger, pair: FailoverPair) -> None:
         self.fallbacks.append((trigger.kind, f"{trigger.provider}/{trigger.model}", pair.provider, pair.model))
 
-    def on_failure(self, trigger, fallback_targets) -> None:
+    def on_failure(self, trigger: FailoverTrigger, fallback_targets: list[FailoverPair]) -> None:
         self.failures.append((trigger.kind, [(p.provider, p.model) for p in fallback_targets]))
 
 
-def _stub_user(*, chat_ready: dict | None = None, instances: dict | None = None):
+def _stub_user(
+    *, chat_ready: dict[str, type] | None = None, instances: dict[str, "Provider"] | None = None
+) -> AsyncMock:
     user = AsyncMock()
     if chat_ready is not None and instances is not None:
         user.providers.chat_ready = chat_ready

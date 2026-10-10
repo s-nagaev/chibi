@@ -18,6 +18,7 @@ provider registry maps chat-ready provider classes to instances, and
 ``ConnectionError`` as the failover-classified trigger exception.
 """
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -30,6 +31,10 @@ from chibi.services.failover import CooldownStore, FailoverModelRegistry, reset_
 from chibi.services.providers.tools.utils import get_sub_agent_response
 from chibi.services.user import get_llm_chat_completion_answer
 from chibi.storage.database import _db_provider
+from chibi.utils.app import SingletonMeta
+
+if TYPE_CHECKING:
+    from chibi.services.providers.provider import Provider
 
 
 @pytest.fixture(autouse=True)
@@ -42,19 +47,17 @@ def _clean_policy_cache():
 @pytest.fixture(autouse=True)
 def _clean_cooldown_and_registry_singletons():
     for cls in (CooldownStore, FailoverModelRegistry):
-        SingletonMeta_instances_pop(cls)
+        _pop_singleton_instances(cls)
     yield
     for cls in (CooldownStore, FailoverModelRegistry):
-        SingletonMeta_instances_pop(cls)
+        _pop_singleton_instances(cls)
 
 
-def SingletonMeta_instances_pop(cls) -> None:
-    from chibi.utils.app import SingletonMeta
-
+def _pop_singleton_instances(cls: type) -> None:
     SingletonMeta._instances.pop(cls, None)
 
 
-def _stub_user():
+def _stub_user() -> Mock:
     """A minimal user double with an empty provider registry."""
     user = Mock()
     user.providers = Mock()
@@ -63,14 +66,14 @@ def _stub_user():
     return user
 
 
-def _stub_db(user):
+def _stub_db(user: Mock) -> AsyncMock:
     db = AsyncMock()
     db.get_or_create_user = AsyncMock(return_value=user)
     db.get_conversation_messages = AsyncMock(return_value=[])
     return db
 
 
-def _stub_interface():
+def _stub_interface() -> Mock:
     interface = Mock()
     interface.storage_id = 1
     interface.thread_id = 0
@@ -91,13 +94,13 @@ def _assistant_message(text: str) -> Message:
     return Message(role="assistant", content=text)
 
 
-def _wire_providers(user, instances: dict):
+def _wire_providers(user: Mock, instances: dict[str, "Provider"]) -> None:
     """Populate the stub user's registry: name -> chat-ready class + instance."""
     user.providers.chat_ready = {name: type(f"{name.title()}Stub", (), {"name": name}) for name in instances}
     user.providers.get_instance = lambda provider_class: instances[provider_class.name]
 
 
-def _primary(name: str, *, fails: bool, answer: str = "primary answer"):
+def _primary(name: str, *, fails: bool, answer: str = "primary answer") -> AsyncMock:
     provider = AsyncMock()
     provider.name = name
     if fails:
