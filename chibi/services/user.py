@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VideoResult, VisionResultSchema
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
@@ -406,6 +406,32 @@ async def generate_image(
 
 
 @inject_database
+async def generate_video(
+    db: Database,
+    interface: UserInterface,
+    prompt: str,
+    model: str | None = None,
+    provider_name: str | None = None,
+    duration: int | None = None,
+) -> VideoResult:
+    user = await db.get_or_create_user(user_id=interface.user_id)
+
+    if provider_name:
+        provider = user.providers.get(provider_name)
+        selected_model = model
+    else:
+        provider = user.get_active_video_provider(thread_id=interface.thread_id)
+        selected_model = user.get_active_video_model(thread_id=interface.thread_id)
+
+    if not provider:
+        raise NoProviderSelectedError("No video provider available")
+    result = await provider.get_videos(prompt=prompt, model=selected_model, duration=duration)
+    if interface.user_id not in gpt_settings.video_generations_whitelist:
+        await db.count_video(interface.user_id)
+    return result
+
+
+@inject_database
 async def describe_image(
     db: Database,
     user_id: int,
@@ -502,6 +528,12 @@ async def get_models_available(
 async def user_has_reached_images_generation_limit(db: Database, user_id: int) -> bool:
     user = await db.get_or_create_user(user_id=user_id)
     return user.has_reached_image_limits
+
+
+@inject_database
+async def user_has_reached_videos_generation_limit(db: Database, user_id: int) -> bool:
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.has_reached_video_limits
 
 
 @inject_database

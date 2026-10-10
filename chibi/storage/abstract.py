@@ -8,7 +8,7 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from chibi.models import ImageMeta, Message, User
+from chibi.models import ImageMeta, Message, User, VideoMeta
 
 CHAT_COMPLETION_CLASSES = {
     "assistant": ChatCompletionAssistantMessageParam,
@@ -50,4 +50,10 @@ class Database(ABC):
         user = await self.get_or_create_user(user_id=user_id)
         expire_at = time.time() + 60 * 750  # ~ 1 month
         user.images.append(ImageMeta(expire_at=expire_at))
+        await self.save_user(user)
+
+    async def count_video(self, user_id: int) -> None:
+        user = await self.get_or_create_user(user_id=user_id)
+        expire_at = time.time() + 60 * 750  # ~ 1 month
+        user.videos.append(VideoMeta(expire_at=expire_at))
         await self.save_user(user)
