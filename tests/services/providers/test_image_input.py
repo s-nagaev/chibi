@@ -1,6 +1,8 @@
 """Tests for image-to-image support in providers and the user generate_image service."""
 
 import base64
+from collections.abc import Iterator
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -175,7 +177,7 @@ async def test_gemini_imagen_model_without_images_uses_generate_images(
 
 
 @pytest.fixture
-def openai_client() -> SimpleNamespace:
+def openai_client() -> Iterator[SimpleNamespace]:
     """Patch the AsyncOpenAI client factory and return the fake client namespace.
 
     The fake is a SimpleNamespace (not callable) so the provider's
@@ -208,7 +210,9 @@ async def test_openai_gpt_image_uses_images_edit(openai_client: SimpleNamespace)
     assert kwargs["n"] == provider.image_n_choices
     assert kwargs["size"] == provider.image_size
     assert kwargs["timeout"] == gpt_settings.timeout
-    assert result[0].getvalue() == b"edited-bytes"
+    first = result[0]
+    assert isinstance(first, BytesIO)
+    assert first.getvalue() == b"edited-bytes"
 
 
 @pytest.mark.asyncio
@@ -269,7 +273,7 @@ async def test_user_generate_image_passes_images_to_provider() -> None:
     images = [(b"ref", "image/png")]
 
     result = await generate_image.__wrapped__(
-        db=db,
+        db,
         interface=interface,
         prompt="a cat",
         model="gpt-image-2",
