@@ -97,6 +97,7 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 ### 多模態提供商（選用）
 
 - **影像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image、Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image、CogView）、MiniMax（Image-01），以及任何提供影像生成模型的轉售聚合商
+- **影片**：Alibaba（Wan）、ZhipuAI（CogVideoX）、MiniMax（Hailuo）；每位使用者每月限額可透過環境變數 `VIDEO_GENERATIONS_LIMIT` 設定
 - **音樂**：Suno、ElevenLabs Music
 - **語音（TTS/STT）**：ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper、Kokoro）、Xiaomi（MiMo TTS）、自訂 OpenAI 相容端點（自託管）
 
@@ -273,6 +274,7 @@ Chibi 能在對話中途切換提供商時保持上下文，或為每個步驟�
 
 ### 🎨 豐富的內容生成
 - **影像**：Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
+- **影片**：Wan（Alibaba）、CogVideoX（ZhipuAI）、Hailuo（MiniMax）
 - **音樂**：Suno（包含自訂模式：風格/歌詞/人聲）
 - **語音**：轉錄 + 文字轉語音（ElevenLabs、OpenAI）
 

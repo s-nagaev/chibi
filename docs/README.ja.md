@@ -97,6 +97,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 ### マルチモーダルプロバイダー（任意）
 
 - **画像:** Google（Imagen, Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image, Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image, CogView）、MiniMax（Image-01）、および画像生成モデルへのアクセスを提供するあらゆるリセラー／アグリゲーター
+- **動画:** Alibaba（Wan）、ZhipuAI（CogVideoX）、MiniMax（Hailuo）。ユーザーごとの月間上限は環境変数 `VIDEO_GENERATIONS_LIMIT` で設定できます
 - **音楽:** Suno、ElevenLabs Music
 - **音声（TTS/STT）:** ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper, Kokoro）、Xiaomi（MiMo TTS）、カスタムOpenAI互換エンドポイント（セルフホスト）
 
@@ -273,6 +274,7 @@ MCP 経由で公開できるツールであれば、Chibi は使い方を学習�
 
 ### 🎨 リッチなコンテンツ生成
 - **画像:** Nano Banana、Imagen、Qwen、Wan、GPT Image、Grok Imagine、GLM Image
+- **動画:** Wan（Alibaba）、CogVideoX（ZhipuAI）、Hailuo（MiniMax）
 - **音楽:** Suno（カスタムモード: スタイル/歌詞/ボーカル指定を含む）
 - **音声:** 文字起こし + テキスト読み上げ（ElevenLabs、OpenAI）
 

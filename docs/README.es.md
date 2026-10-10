@@ -95,6 +95,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 ### Proveedores multimodales (opcional)
 
 - **Imágenes:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), y cualquier revendedor-agregador que proporcione acceso a modelos de generación de imágenes
+- **Vídeo:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); el límite mensual por usuario se configura con la variable de entorno `VIDEO_GENERATIONS_LIMIT`
 - **Música:** Suno, ElevenLabs Music
 - **Voz (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
@@ -270,6 +271,7 @@ Si una herramienta puede exponerse vía MCP, Chibi puede aprender a usarla.
 
 ### 🎨 Generación de contenido enriquecido
 - **Imágenes:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
+- **Vídeo:** Wan (Alibaba), CogVideoX (ZhipuAI), Hailuo (MiniMax)
 - **Música:** Suno (incluye modo personalizado: estilo/letra/voces)
 - **Voz:** transcripción + texto a voz (ElevenLabs, OpenAI)
 

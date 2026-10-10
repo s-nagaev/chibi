@@ -95,6 +95,7 @@ Chibi поддерживает множество провайдеров в ра
 ### Мультимодальные провайдеры (опционально)
 
 - **Изображения:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), и любой реселлер-агрегатор, предоставляющий доступ к моделям генерации изображений
+- **Видео:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); месячный лимит на пользователя настраивается переменной окружения `VIDEO_GENERATIONS_LIMIT`
 - **Музыка:** Suno, ElevenLabs Music
 - **Голос (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
@@ -270,6 +271,7 @@ Chibi сохраняет контекст при переключении меж
 
 ### 🎨 Генерация контента
 - **Изображения:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
+- **Видео:** Wan (Alibaba), CogVideoX (ZhipuAI), Hailuo (MiniMax)
 - **Музыка:** Suno (включая custom mode: стиль/текст/вокал)
 - **Голос:** транскрибация + синтез речи (ElevenLabs, OpenAI)
 
