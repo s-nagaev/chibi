@@ -106,6 +106,10 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     tool_name: str | None = None
     source: str | None = None
+    # Exclude this message from ChromaDB semantic-memory archival.
+    # Use for synthesized messages (e.g. summarization pair) that would
+    # otherwise duplicate context already covered by the original messages.
+    excluded_from_memory: bool = False
 
     @property
     def estimate_tokens(self) -> int:
@@ -116,7 +120,9 @@ class Message(BaseModel):
         if not wrapper_class:
             raise ValueError(f"Role {self.role} seems not supported yet")
 
-        open_ai_message = wrapper_class(**self.model_dump(exclude={"expire_at"}))
+        open_ai_message = wrapper_class(
+            **self.model_dump(exclude={"expire_at", "excluded_from_memory"})
+        )
         return open_ai_message
 
     @classmethod
