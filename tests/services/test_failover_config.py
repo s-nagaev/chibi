@@ -28,7 +28,7 @@ def _clean_policy_cache():
 
 
 @pytest.fixture
-def loguru_messages(caplog):
+def loguru_messages():
     """Capture loguru output via a temporary sink (loguru does not
     propagate to the standard logging handlers used by ``caplog``)."""
     messages: list[str] = []
