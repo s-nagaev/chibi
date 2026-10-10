@@ -40,7 +40,7 @@ class ModelChangeSchema(BaseModel):
     name: str
     display_name: str = ""
     image_generation: bool
-    video_generation: bool = False
+    video_generation: bool = Field(default=False, description="Whether the model supports video generation.")
 
     @model_validator(mode="after")
     def set_display_name_if_none(self) -> "ModelChangeSchema":
@@ -57,9 +57,9 @@ class VideoResult(BaseModel):
     duration in seconds when the provider reports it.
     """
 
-    video: bytes
-    thumbnail: bytes | None = None
-    duration: int | None = None
+    video: bytes = Field(description="Fully downloaded MP4 payload of the generated video.")
+    thumbnail: bytes | None = Field(default=None, description="JPEG thumbnail bytes, if the provider returned one.")
+    duration: int | None = Field(default=None, description="Clip duration in seconds, if the provider reported it.")
 
 
 class ModeratorsAnswer(BaseModel):

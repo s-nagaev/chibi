@@ -476,8 +476,10 @@ class ImageMeta(BaseModel):
 
 
 class VideoMeta(BaseModel):
-    id: int = Field(default_factory=time.time_ns)
-    expire_at: float
+    """A single counted video generation with its monthly-expiry timestamp."""
+
+    id: int = Field(default_factory=time.time_ns, description="Generation timestamp in nanoseconds, used as ID.")
+    expire_at: float = Field(description="Unix timestamp when the generation stops counting toward the monthly limit.")
 
 
 class TelegramFileMeta(BaseModel):
@@ -570,6 +572,17 @@ class User(BaseModel):
         return None
 
     def get_active_video_provider(self, thread_id: int) -> "Provider":
+        """Resolve the video provider for the thread.
+
+        Args:
+            thread_id: Thread whose provider selection is checked first.
+
+        Returns:
+            The selected or first available video provider instance.
+
+        Raises:
+            NoProviderSelectedError: If no video-capable provider can be resolved.
+        """
         provider_name: str | None = None
 
         if selected_video_model := self.thread_selected_video_model.get(thread_id):
@@ -593,6 +606,14 @@ class User(BaseModel):
         raise NoProviderSelectedError
 
     def get_active_video_model(self, thread_id: int) -> str | None:
+        """Return the video model selected for the thread, or None if not chosen.
+
+        Args:
+            thread_id: Thread whose model selection is checked.
+
+        Returns:
+            The selected video model name, or None.
+        """
         if selected_model := self.thread_selected_video_model.get(thread_id):
             return selected_model.name
         return None
@@ -726,6 +747,7 @@ class User(BaseModel):
 
     @property
     def has_reached_video_limits(self) -> bool:
+        """Whether the user has used up their monthly video generation quota."""
         if not gpt_settings.video_generations_monthly_limit:
             return False
         if str(self.id) in gpt_settings.video_generations_whitelist:
