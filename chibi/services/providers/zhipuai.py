@@ -51,7 +51,23 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
         models.extend(additional_models)
         return models
 
-    async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples. Not yet
+                supported by this provider and ignored.
+
+        Returns:
+            List of image URLs.
+
+        Raises:
+            NoResponseError: If the provider returns no image data.
+        """
         model = model or self.default_image_model
         url = "https://api.z.ai/api/paas/v4/images/generations"
         response = await self._request(

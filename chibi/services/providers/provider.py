@@ -429,6 +429,20 @@ class Provider(ABC):
     async def get_images(
         self, prompt: str, model: str | None, images: list[tuple[bytes, str]] | None = None
     ) -> list[str] | list[BytesIO]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name, or None for the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples for
+                image-to-image generation.
+
+        Returns:
+            List of image URLs or BytesIO objects with image data.
+
+        Raises:
+            NotImplementedError: Must be implemented by concrete providers.
+        """
         raise NotImplementedError
 
     def _get_max_tokens_value(self, model_name: str) -> int:

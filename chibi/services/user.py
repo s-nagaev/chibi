@@ -402,10 +402,7 @@ async def generate_image(
 
     if not provider:
         raise NoProviderSelectedError("No image provider available")
-    if images:
-        result = await provider.get_images(prompt=prompt, model=selected_model, images=images)
-    else:
-        result = await provider.get_images(prompt=prompt, model=selected_model)
+    result = await provider.get_images(prompt=prompt, model=selected_model, images=images)
     if interface.user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(interface.user_id)
     return result

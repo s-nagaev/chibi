@@ -657,15 +657,30 @@ class Gemini(RestApiFriendlyProvider):
             logger.error(f"Error parsing moderator's response: {answer}. Error: {e}")
             return ModeratorsAnswer(verdict="declined", reason=answer, status="error")
 
-    async def get_images(self, prompt: str, model: str | None = None) -> list[BytesIO]:
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[BytesIO]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples. Not yet
+                supported by this provider and ignored.
+
+        Returns:
+            List of BytesIO objects with image data.
+        """
         selected_model = model or self.default_image_model
 
         if "imagen-" in selected_model:
-            images = await self._generate_image_by_imagen(prompt=prompt, model=selected_model)
+            generated_images = await self._generate_image_by_imagen(prompt=prompt, model=selected_model)
         else:
-            images = await self._generate_image_via_content_creation_model(prompt=prompt, model=selected_model)
+            generated_images = await self._generate_image_via_content_creation_model(
+                prompt=prompt, model=selected_model
+            )
 
-        return [BytesIO(image.image_bytes) for image in images if image.image_bytes]
+        return [BytesIO(image.image_bytes) for image in generated_images if image.image_bytes]
 
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
