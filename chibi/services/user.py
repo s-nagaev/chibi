@@ -12,6 +12,7 @@ from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
+from chibi.services.failover import run_with_failover
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
@@ -320,15 +321,27 @@ async def get_llm_chat_completion_answer(
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
         active_model = user.get_active_llm_model(thread_id=thread_id)
 
-        chat_response, new_messages = await active_provider.get_chat_response(
-            messages=conversation_messages,
+        # Failover-guarded chat call. The retry loop lives inside the lock
+        # for history consistency; the emergency summarization path above is
+        # deliberately NOT failover-guarded (determinism where determinism
+        # matters). ``emergency_summarization`` and moderation are out of
+        # scope per the failover plan.
+        failover_result = await run_with_failover(
+            role="master",
             user=user,
+            primary_provider=active_provider,
             model=active_model,
-            interface=interface,
-            track_prompt_size=True,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
+            call=lambda provider, model: provider.get_chat_response(
+                messages=conversation_messages,
+                user=user,
+                model=model,
+                interface=interface,
+                track_prompt_size=True,
+                caller_storage_id=interface.storage_id,
+                caller_thread_id=interface.thread_id,
+            ),
         )
+        chat_response, new_messages = failover_result.response, failover_result.new_messages
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
             await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)

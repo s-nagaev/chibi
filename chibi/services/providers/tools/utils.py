@@ -14,6 +14,7 @@ from chibi.config import gpt_settings
 from chibi.constants import get_sub_executor_prompt
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.failover import run_with_failover
 from chibi.services.interface import UserInterface
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
@@ -182,14 +183,22 @@ async def get_sub_agent_response(
         user_message,
     ]
 
-    chat_response, _ = await provider.get_chat_response(
-        messages=conversation_messages,
-        user=user,
-        model=model_name,
-        system_prompt=get_sub_executor_prompt(gpt_settings.filesystem_access),
-        caller_storage_id=caller_storage_id,
-        caller_thread_id=caller_thread_id,
-    )
+    chat_response = (
+        await run_with_failover(
+            role="subagent",
+            user=user,
+            primary_provider=provider,
+            model=model_name,
+            call=lambda failover_provider, failover_model: failover_provider.get_chat_response(
+                messages=conversation_messages,
+                user=user,
+                model=failover_model,
+                system_prompt=get_sub_executor_prompt(gpt_settings.filesystem_access),
+                caller_storage_id=caller_storage_id,
+                caller_thread_id=caller_thread_id,
+            ),
+        )
+    ).response
     return chat_response
 
 
