@@ -45,6 +45,7 @@ Hard rules honoured here:
 """
 
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -84,6 +85,13 @@ if TYPE_CHECKING:
 
 Role = Literal["master", "subagent"]
 TriggerKind = Literal["rate_limit", "server_error", "timeout", "network"]
+
+# Notification hooks (failover_notification task): invoked by the engine when
+# a fallback step is ABOUT to be attempted and when every step is exhausted.
+# Hooks may be sync or async callables; the engine awaits async ones but never
+# lets a hook failure break the failover walk itself.
+FallbackHook = Callable[["FailoverTrigger", "FailoverPair"], Any]
+FailureHook = Callable[["FailoverTrigger", list["FailoverPair"]], Any]
 
 COOLDOWN_TTL_SECONDS = 20 * 60  # 20 minutes, fixed per owner decision (v1)
 COOLDOWN_KEY_PREFIX = "failover:cooldown:"
@@ -143,6 +151,62 @@ class FailoverTrigger(Exception):
 
     def __str__(self) -> str:
         return f"FailoverTrigger(kind={self.kind!r}, provider={self.provider!r}, model={self.model!r})"
+
+
+def format_failover_pair(provider: str, model: str | None) -> str:
+    """Render a (provider, model) pair for user-facing messages.
+
+    Args:
+        provider: Provider name.
+        model: Model name, or None for the provider's default model.
+
+    Returns:
+        ``provider/model`` or ``provider/<default>`` when the model is None.
+    """
+    return f"{provider}/{model if model is not None else '<default>'}"
+
+
+def failover_warning_message(trigger: "FailoverTrigger", fallback: "FailoverPair") -> str:
+    """Build the in-chat warning for one fallback transition.
+
+    Owner-confirmed shape: which trigger fired and which fallback target is
+    being attempted, e.g. ``⚠️ openai/gpt-5.6-luna hit rate_limit — falling
+    back to gemini/gemini-2.5-flash``.
+
+    Args:
+        trigger: The failover trigger that fired on the previous attempt.
+        fallback: The (provider, model) pair about to be attempted.
+
+    Returns:
+        The warning text.
+    """
+    return (
+        f"⚠️ {format_failover_pair(trigger.provider, trigger.model)} hit {trigger.kind} — "
+        f"falling back to {format_failover_pair(fallback.provider, fallback.model)}"
+    )
+
+
+def failover_failure_message(trigger: "FailoverTrigger", fallback_targets: list["FailoverPair"]) -> str:
+    """Build the in-chat message for the final honest failure.
+
+    Sent when the failover walk actually attempted fallbacks and none of
+    them succeeded (a single-attempt failure with no fallback candidates
+    never produces this message — the standard error handling covers it).
+
+    Args:
+        trigger: The last failover trigger observed.
+        fallback_targets: The fallback (provider, model) pairs that were
+            actually attempted (not merely configured).
+
+    Returns:
+        The honest failure text.
+    """
+    if fallback_targets:
+        targets = ", ".join(format_failover_pair(pair.provider, pair.model) for pair in fallback_targets)
+        tail = f"all fallback attempts failed ({targets}). No fallback succeeded."
+    else:
+        tail = "no fallback succeeded."
+    return f"⚠️ {format_failover_pair(trigger.provider, trigger.model)} hit {trigger.kind} — {tail}"
 
 
 def classify_exception(exception: BaseException) -> TriggerKind | None:
@@ -457,9 +521,10 @@ class FailoverAttempt:
 class FailoverResult:
     """Outcome of a failover-guarded chat request.
 
-    ``fallback_used`` / ``serving_provider`` / ``serving_model`` are what
-    the notification layer (failover_notification task) consumes to warn
-    the user honestly about any fallback.
+    ``fallback_used`` / ``serving_provider`` / ``serving_model`` describe
+    the outcome for callers; user-facing fallback warnings are delivered
+    through the engine's ``on_fallback`` / ``on_failure`` notification
+    hooks (failover_notification task), not from this dataclass.
     """
 
     response: "ChatResponseSchema"
@@ -568,12 +633,29 @@ class FailoverEngine:
 
     # -- execution -----------------------------------------------------------
 
+    @staticmethod
+    async def _notify(hook_name: str, hook: Callable[..., Any], *args: Any) -> None:
+        """Invoke a notification hook without ever breaking the failover walk.
+
+        Sync and async hooks are both supported; any exception the hook
+        raises is logged and swallowed — a notification failure must not
+        influence the fallback semantics in any way.
+        """
+        try:
+            outcome = hook(*args)
+            if inspect.isawaitable(outcome):
+                await outcome
+        except Exception as e:
+            logger.warning(f"Failover: {hook_name} notification hook failed: {e}")
+
     async def run(
         self,
         role: Role,
         primary_provider: "Provider",
         model: str | None,
         call: ChatCall,
+        on_fallback: FallbackHook | None = None,
+        on_failure: FailureHook | None = None,
     ) -> FailoverResult:
         """Execute ``call`` behind the failover policy for ``role``.
 
@@ -583,6 +665,18 @@ class FailoverEngine:
             model: The active model (None = provider default).
             call: Callable receiving (provider, model) and returning the
                 provider-call coroutine with the caller's fixed arguments.
+            on_fallback: Optional notification hook invoked (with the
+                trigger that fired and the pair about to be attempted)
+                immediately before EVERY fallback attempt — auto ladder and
+                manual chain alike. Never fired for the primary attempt.
+                Hook failures are logged and swallowed: a notification can
+                neither block nor break the walk.
+            on_failure: Optional notification hook invoked once (with the
+                last trigger and the fallback pairs that were ACTUALLY
+                attempted) right before the final honest error is raised.
+                Only fired when at least one fallback attempt really
+                happened — a single-attempt failure (no fallback candidates,
+                or DISABLED mode) stays silent here.
 
         Returns:
             A ``FailoverResult`` (response + fallback metadata).
@@ -698,6 +792,12 @@ class FailoverEngine:
             # No revisiting already-tried pairs within one request.
             if (pair.provider.lower(), pair.model) in tried:
                 continue
+            # Notification (failover_notification task): every step after a
+            # failure is a fallback transition — warn BEFORE attempting it.
+            # Skipped pairs (cooldown / unavailable instance) are NOT
+            # announced: nothing is actually attempted there.
+            if last_trigger is not None and on_fallback is not None:
+                await self._notify("on_fallback", on_fallback, last_trigger, pair)
             # Cooldown blocks auto-selection only, never the primary and
             # never manual chains. Cooldowns set during THIS request are
             # honoured for later ladder steps as well.
@@ -715,6 +815,15 @@ class FailoverEngine:
         # Nothing worked — fail honestly with the original exception.
         if result.response is not None:  # pragma: no cover — defensive
             return result
+        # Notification (failover_notification task): announce the final
+        # honest failure, but ONLY when fallbacks were genuinely attempted
+        # (attempts beyond the primary). A single-attempt failure with no
+        # fallback candidates never fires on_failure — the standard error
+        # handling already reports it and "no fallback succeeded" would be
+        # noise about fallbacks that never existed.
+        if on_failure is not None and last_trigger is not None and len(result.attempts) > 1:
+            fallback_targets = [FailoverPair(provider=a.provider, model=a.model) for a in result.attempts[1:]]
+            await self._notify("on_failure", on_failure, last_trigger, fallback_targets)
         raise last_exception or last_trigger or RuntimeError("Failover: no provider could serve the request")
 
 
@@ -724,6 +833,8 @@ async def run_with_failover(
     primary_provider: "Provider",
     model: str | None,
     call: ChatCall,
+    on_fallback: FallbackHook | None = None,
+    on_failure: FailureHook | None = None,
 ) -> FailoverResult:
     """Convenience entry point used by the integration call sites.
 
@@ -736,11 +847,22 @@ async def run_with_failover(
         call: Callable ``(provider, model) -> coroutine`` performing the
             actual ``provider.get_chat_response(...)`` with the caller's
             fixed keyword arguments.
+        on_fallback: Optional notification hook fired before every
+            fallback attempt (see :meth:`FailoverEngine.run`).
+        on_failure: Optional notification hook fired before the final
+            honest error (see :meth:`FailoverEngine.run`).
 
     Returns:
         The ``FailoverResult`` with the response and fallback metadata.
     """
-    return await FailoverEngine(user=user).run(role=role, primary_provider=primary_provider, model=model, call=call)
+    return await FailoverEngine(user=user).run(
+        role=role,
+        primary_provider=primary_provider,
+        model=model,
+        call=call,
+        on_fallback=on_fallback,
+        on_failure=on_failure,
+    )
 
 
 # Install-time validation: resolve both roles once at import/config-load

@@ -14,7 +14,13 @@ from chibi.config import gpt_settings
 from chibi.constants import get_sub_executor_prompt
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
-from chibi.services.failover import run_with_failover
+from chibi.services.failover import (
+    FailoverPair,
+    FailoverTrigger,
+    failover_failure_message,
+    failover_warning_message,
+    run_with_failover,
+)
 from chibi.services.interface import UserInterface
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
@@ -183,6 +189,22 @@ async def get_sub_agent_response(
         user_message,
     ]
 
+    # Notification wiring (failover_notification task). DECISION (log-only):
+    # a sub-agent request has NO interface by design (the parent's interface
+    # object is deliberately not propagated to avoid reentrancy), and there
+    # is no facility to deliver a chat message from (storage_id, thread_id)
+    # alone — the chat/send layer lives in the runner-side interface objects.
+    # So subagent fallbacks are reported to the log with the exact same
+    # message the master path would send to the chat; the parent chat still
+    # sees the sub-agent's own honest failure if every step is exhausted.
+    def _log_fallback(trigger: FailoverTrigger, pair: FailoverPair) -> None:
+        warning = failover_warning_message(trigger=trigger, fallback=pair)
+        logger.warning(f"Failover[subagent] (chat notification unavailable): {warning}")
+
+    def _log_failure(trigger: FailoverTrigger, fallback_targets: list[FailoverPair]) -> None:
+        failure = failover_failure_message(trigger=trigger, fallback_targets=fallback_targets)
+        logger.warning(f"Failover[subagent] (chat notification unavailable): {failure}")
+
     chat_response = (
         await run_with_failover(
             role="subagent",
@@ -197,6 +219,8 @@ async def get_sub_agent_response(
                 caller_storage_id=caller_storage_id,
                 caller_thread_id=caller_thread_id,
             ),
+            on_fallback=_log_fallback,
+            on_failure=_log_failure,
         )
     ).response
     return chat_response
