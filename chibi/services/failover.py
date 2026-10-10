@@ -32,11 +32,19 @@ Hard rules honoured here:
 - No revisiting already-tried (provider, model) pairs within one request.
 - Cooldown is the ONLY persistent state (Redis-backed, 20 min fixed TTL,
   not configurable in v1).
+- Happy path stays clean: the primary is attempted first, and the auto
+  ladder — including provider model enumeration and any cooldown-store
+  access — is resolved lazily, only when the primary fails.
+- Enumeration-failure interpretation: a provider whose model list could
+  not be enumerated is skipped as an exact-match (step 2) candidate but is
+  still a step 3 (default-model) candidate — an unknown model list is not
+  an absent model.
 - Latency note: in-provider retries (tenacity, ``reraise=True``) can burn
   ~5-10 minutes per provider before failover fires; the engine simply sees
   the re-raised raw/service exception after the provider gave up.
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -45,6 +53,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Optional
 import aiohttp
 import httpx
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 from google.genai.errors import ServerError as GeminiServerError
@@ -88,6 +97,7 @@ ChatCall = Callable[["Provider", Optional[str]], Awaitable[tuple["ChatResponseSc
 _TIMEOUT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.TimeoutException,
     OpenAIAPITimeoutError,
+    AnthropicAPITimeoutError,
     aiohttp.ServerTimeoutError,
     TimeoutError,
 )
@@ -217,27 +227,47 @@ class CooldownStore(metaclass=SingletonMeta):
 
     The cooldown affects ONLY auto-selection (the auto ladder). Manual
     chains and explicit user selections are never blocked by it.
+
+    Storage resolution is cached on the (process-wide) singleton: the
+    app-wide ``chibi.storage.database._db_provider`` ``DatabaseCache``
+    instance is reused (never a fresh ``DatabaseCache()`` per operation),
+    so exactly ONE storage resolution happens per process and the resolved
+    Redis client is reused for every subsequent cooldown operation.
     """
 
     def __init__(self) -> None:
         self._memory: dict[str, float] = {}
+        self._client: Any | None = None
+        self._client_resolved = False
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def _key(provider_name: str) -> str:
         return f"{COOLDOWN_KEY_PREFIX}{provider_name.lower()}"
 
     async def _redis_client(self) -> Any | None:
-        from chibi.storage.database import DatabaseCache
-        from chibi.storage.redis import RedisStorage
+        """Return the cached Redis client, or None when unavailable.
 
-        try:
-            db = await DatabaseCache().get_database()
-        except Exception as e:  # storage not configured / unavailable
-            logger.debug(f"Cooldown store: no database available ({e})")
-            return None
-        if isinstance(db, RedisStorage):
-            return db.redis
-        return None
+        The app-wide database instance (``_db_provider``) is resolved at
+        most once per process; a transient resolution failure is not cached
+        (the store fail-opens to memory and retries on a later operation).
+        """
+        if self._client_resolved:
+            return self._client
+        async with self._lock:
+            if self._client_resolved:
+                return self._client
+            try:
+                from chibi.storage.database import _db_provider  # app-wide instance
+                from chibi.storage.redis import RedisStorage
+
+                db = await _db_provider.get_database()
+            except Exception as e:  # storage not configured / unavailable
+                logger.debug(f"Cooldown store: no database available ({e})")
+                return None
+            self._client = db.redis if isinstance(db, RedisStorage) else None
+            self._client_resolved = True
+            return self._client
 
     async def mark(self, provider_name: str) -> None:
         """Put the provider on a fixed 20-minute cooldown."""
@@ -385,6 +415,13 @@ class FailoverEngine:
         (a cooldown never blocks an explicit choice, and a re-failure
         simply re-marks the cooldown).
 
+        Documented interpretation of the plan's enumeration-failure rule:
+        it governs STEP 2 only — a provider whose model list could not be
+        enumerated ("model list unknown") is skipped as an exact-match
+        candidate but is NOT excluded from step 3, where it is attempted
+        with its default model (``model=None``), because an unknown model
+        list does not mean the model is absent.
+
         Args:
             primary_provider: The active provider resolved by the caller.
             model: The active model (None = provider default).
@@ -466,10 +503,20 @@ class FailoverEngine:
         primary_key = primary_name.lower()
         first_attempted: FailoverPair | None = None
 
-        # Chat-ready provider instances for this user; the primary is always
-        # included so the first attempt never depends on registry filtering.
-        instances = self._chat_ready_instances()
-        instances.setdefault(primary_key, primary_provider)
+        # Chat-ready provider instances for this user. Built LAZILY: a
+        # fully successful request never instantiates extra providers nor
+        # touches the cooldown store — the ladder (and the model
+        # enumeration behind it) is resolved only when the primary fails.
+        instances: dict[str, "Provider"] | None = None
+
+        async def get_instances() -> dict[str, "Provider"]:
+            nonlocal instances
+            if instances is None:
+                instances = self._chat_ready_instances()
+                # The primary is always included so the first attempt never
+                # depends on registry filtering.
+                instances.setdefault(primary_key, primary_provider)
+            return instances
 
         async def attempt(pair: FailoverPair, provider_instance: "Provider") -> bool:
             """Run one (provider, model) pair. True on success."""
@@ -519,15 +566,23 @@ class FailoverEngine:
             # single attempt on the caller-resolved primary.
             pairs_iter: list[FailoverPair] = list(policy.chain) or [FailoverPair(provider=primary_name, model=model)]
             cooldown_check = False
+            instances_map = await get_instances()
         else:  # AUTO
+            # Primary attempt FIRST: the auto ladder — including provider
+            # model enumeration — is resolved lazily, only when the primary
+            # actually fails. A successful request pays for neither the
+            # cooldown store nor the model registry.
+            if await attempt(FailoverPair(provider=primary_name, model=model), primary_provider):
+                return result
             blocked: dict[str, bool] = {}
+            instances_map = await get_instances()
             pairs_iter = await self._build_auto_ladder(
-                primary_provider=primary_provider, model=model, instances=instances, blocked=blocked
+                primary_provider=primary_provider, model=model, instances=instances_map, blocked=blocked
             )
             cooldown_check = True
 
         for index, pair in enumerate(pairs_iter):
-            instance = instances.get(pair.provider.lower())
+            instance = instances_map.get(pair.provider.lower())
             if instance is None:
                 logger.warning(
                     f"Failover[{role}]: chain step {pair.provider}/{pair.model or '<default>'} "
