@@ -2,7 +2,7 @@ from anthropic import AsyncClient
 from loguru import logger
 
 from chibi.config import gpt_settings
-from chibi.exceptions import NoApiKeyProvidedError
+from chibi.exceptions import NoApiKeyProvidedError, ServiceResponseError
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.providers.provider import AnthropicFriendlyProvider
 
@@ -126,12 +126,22 @@ class Minimax(AnthropicFriendlyProvider):
         Args:
             prompt: Text description of the image to generate.
             model: Image model name. Defaults to the provider's default image model.
-            images: Optional image input as (bytes, mime type) tuples. Not yet
-                supported by this provider and ignored.
+            images: Optional image input as (bytes, mime type) tuples. Not supported
+                by this provider.
 
         Returns:
             List of image URLs.
+
+        Raises:
+            ServiceResponseError: If image input is provided, which this provider
+                does not support.
         """
+        if images:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model or self.default_image_model,
+                detail="This provider does not support image input for image generation.",
+            )
         url = "https://api.minimax.io/v1/image_generation"
         response = await self._request(
             method="POST",
