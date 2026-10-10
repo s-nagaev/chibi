@@ -510,7 +510,9 @@ class User(BaseModel):
     tokens: dict[str, str] = {}
     messages: list[Message] = Field(default_factory=list)
     images: list[ImageMeta] = Field(default_factory=list)
-    videos: list[VideoMeta] = Field(default_factory=list)
+    videos: list[VideoMeta] = Field(
+        default_factory=list, description="Video generations counted toward the monthly limit."
+    )
     gpt_model: str | None = None  # TODO: Deprecated
     selected_gpt_model_name: str | None = None  # TODO: Deprecated
     selected_gpt_provider_name: str | None = None  # TODO: Deprecated
@@ -523,8 +525,12 @@ class User(BaseModel):
     thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
     thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
-    thread_selected_video_model: dict[int, SelectedModel] = Field(default_factory=dict)
-    selected_video_provider_name: str | None = None
+    thread_selected_video_model: dict[int, SelectedModel] = Field(
+        default_factory=dict, description="Thread ID to the video model selected in it."
+    )
+    selected_video_provider_name: str | None = Field(
+        default=None, description="Provider selected for video generation, if any."
+    )
     thread_names: dict[int, str] = Field(default_factory=dict)
     thread_working_dirs: dict[int, str] = Field(default_factory=dict)
     thread_notes: dict[int, str] = Field(default_factory=dict)
@@ -747,7 +753,11 @@ class User(BaseModel):
 
     @property
     def has_reached_video_limits(self) -> bool:
-        """Whether the user has used up their monthly video generation quota."""
+        """Whether the user has used up their monthly video generation quota.
+
+        Returns:
+            True if the monthly video generation limit is reached for this user.
+        """
         if not gpt_settings.video_generations_monthly_limit:
             return False
         if str(self.id) in gpt_settings.video_generations_whitelist:

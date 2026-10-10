@@ -186,7 +186,11 @@ class RegisteredProviders:
 
     @property
     def video_generation_ready(self) -> dict[str, type["Provider"]]:
-        """Video-capable providers that have an API key configured."""
+        """Video-capable providers that have an API key configured.
+
+        Returns:
+            Mapping of provider name to provider class for the video-capable providers.
+        """
         return {name: provider for name, provider in self.available.items() if provider.video_generation_ready}
 
     @property
@@ -237,7 +241,11 @@ class RegisteredProviders:
 
     @property
     def first_video_generation_ready(self) -> "Provider | None":
-        """First available video-capable provider instance, or None if there is none."""
+        """First available video-capable provider instance, if any.
+
+        Returns:
+            A configured video provider instance, or None if there is none.
+        """
         if provider := next(iter(self.video_generation_ready.values()), None):
             return self.get_instance(provider=provider)
         return None
