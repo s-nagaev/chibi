@@ -76,7 +76,13 @@ from chibi.exceptions import (
     ServiceResponseError,
 )
 from chibi.models import Message, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.schemas.app import (
+    ChatResponseSchema,
+    ModelChangeSchema,
+    ModeratorsAnswer,
+    VideoResult,
+    VisionResultSchema,
+)
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
@@ -94,6 +100,32 @@ from chibi.services.usage_cache import UsageCacheStore
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+
+async def download_media(url: str, timeout: float = 120.0) -> bytes:
+    """Download raw bytes from a provider-generated media URL.
+
+    Provider video/audio URLs are short-lived, so the payload must be fetched
+    immediately after the generation job finishes. Uses the same proxy and
+    retry transport settings as the rest of the provider layer.
+
+    Args:
+        url: The media URL to download.
+        timeout: Per-request timeout in seconds.
+
+    Returns:
+        The downloaded payload bytes.
+
+    Raises:
+        httpx.HTTPError: On any transport or HTTP-level failure.
+    """
+    transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
+    async with httpx.AsyncClient(
+        transport=transport, timeout=timeout, proxy=gpt_settings.proxy, follow_redirects=True
+    ) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.content
 
 
 class RegisteredProviders:
@@ -153,6 +185,15 @@ class RegisteredProviders:
         return {name: provider for name, provider in self.available.items() if provider.image_generation_ready}
 
     @property
+    def video_generation_ready(self) -> dict[str, type["Provider"]]:
+        """Video-capable providers that have an API key configured.
+
+        Returns:
+            Mapping of provider name to provider class for the video-capable providers.
+        """
+        return {name: provider for name, provider in self.available.items() if provider.video_generation_ready}
+
+    @property
     def stt_ready(self) -> dict[str, type["Provider"]]:
         return {name: provider for name, provider in self.available.items() if provider.stt_ready}
 
@@ -199,6 +240,17 @@ class RegisteredProviders:
         return None
 
     @property
+    def first_video_generation_ready(self) -> "Provider | None":
+        """First available video-capable provider instance, if any.
+
+        Returns:
+            A configured video provider instance, or None if there is none.
+        """
+        if provider := next(iter(self.video_generation_ready.values()), None):
+            return self.get_instance(provider=provider)
+        return None
+
+    @property
     def first_chat_ready(self) -> Optional["Provider"]:
         if provider := next(iter(self.chat_ready.values()), None):
             return self.get_instance(provider=provider)
@@ -232,6 +284,7 @@ class Provider(ABC):
     vision_ready: bool = False
     moderation_ready: bool = False
     image_generation_ready: bool = False
+    video_generation_ready: bool = False
 
     name: str
     model_name_keywords: list[str] = []
@@ -240,6 +293,11 @@ class Provider(ABC):
 
     default_model: str
     default_image_model: str | None = None
+    default_video_model: str | None = None
+    # Video generation polling: providers own the submit -> poll -> download
+    # lifecycle inside get_videos, bounded by these settings.
+    video_poll_interval: int = 15
+    video_poll_timeout: int = 480
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
@@ -312,7 +370,9 @@ class Provider(ABC):
         """
         raise NotImplementedError
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         raise NotImplementedError
 
     def get_model_display_name(self, model_name: str) -> str:
@@ -416,6 +476,33 @@ class Provider(ABC):
     async def get_images(self, prompt: str, model: str | None) -> list[str] | list[BytesIO]:
         raise NotImplementedError
 
+    async def get_videos(
+        self,
+        model: str | None,
+        prompt: str,
+        image: bytes | str | None = None,
+        duration: int | None = None,
+        **kwargs: Any,
+    ) -> VideoResult:
+        """Generate a video and return the downloaded MP4 bytes.
+
+        The implementation owns the whole lifecycle: submit the generation
+        job, poll until completion and download the resulting MP4. ``image``
+        and ``duration`` keep the signature ready for image-to-video (wave 2);
+        text-to-video providers must raise when ``image`` is provided.
+
+        Args:
+            model: The video model to use (``None`` lets the provider pick its default).
+            prompt: The text prompt describing the clip.
+            image: Optional reference image (bytes or URL) for image-to-video.
+            duration: Optional requested clip duration in seconds.
+            **kwargs: Provider-specific extra parameters.
+
+        Returns:
+            A VideoResult with the downloaded video bytes.
+        """
+        raise NotImplementedError
+
     def _get_max_tokens_value(self, model_name: str) -> int:
         return getattr(self, "max_tokens", gpt_settings.max_tokens)
 
@@ -476,12 +563,14 @@ class Provider(ABC):
         return results
 
     def filter_and_return_list_of_models(
-        self, models: list[ModelChangeSchema], image_generation: bool = False
+        self, models: list[ModelChangeSchema], image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema]:
         all_models = sorted(models, key=lambda model: model.name, reverse=True)
 
         if image_generation:
             filtered_models = [model for model in all_models if model.image_generation]
+        elif video_generation:
+            filtered_models = [model for model in all_models if model.video_generation]
         else:
             filtered_models = [model for model in all_models if self.is_chat_ready_model(model.name)]
 
@@ -980,7 +1069,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         return ModeratorsAnswer(verdict="declined", reason=reason, status="operation aborted")
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         try:
             models = await self.client.models.list()
         except Exception as e:
@@ -993,10 +1084,13 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 name=model.id,
                 display_name=self.get_model_display_name(model.id),
                 image_generation=self.is_image_ready_model(model.id),
+                video_generation=False,
             )
             for model in models.data
         ]
-        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
+        return self.filter_and_return_list_of_models(
+            models=all_models, image_generation=image_generation, video_generation=video_generation
+        )
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
         return await self.client.images.generate(
@@ -1546,8 +1640,10 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             logger.error(msg)
             return ModeratorsAnswer(verdict="declined", reason=msg, status="error")
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
-        if image_generation:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
+        if image_generation or video_generation:
             return []
 
         try:
@@ -1563,8 +1659,11 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 name=model.get("id"),
                 display_name=model.get("display_name") or model.get("id"),
                 image_generation=False,
+                video_generation=False,
             )
             for model in response_data
             if model.get("id") and (model.get("type") == "model" or model.get("object") == "model")
         ]
-        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
+        return self.filter_and_return_list_of_models(
+            models=all_models, image_generation=image_generation, video_generation=video_generation
+        )

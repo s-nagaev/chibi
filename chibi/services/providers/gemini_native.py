@@ -689,7 +689,9 @@ class Gemini(RestApiFriendlyProvider):
 
         return super().get_model_display_name(model_name=model_name[7:])
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         try:
             async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as aclient:
                 models = await aclient.models.list()
@@ -703,11 +705,14 @@ class Gemini(RestApiFriendlyProvider):
                 name=model.name,
                 display_name=self.get_model_display_name(model.name),
                 image_generation=self.is_image_ready_model(model.name),
+                video_generation=False,
             )
             async for model in models
             if model.name
         ]
-        return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)
+        return self.filter_and_return_list_of_models(
+            models=all_models, image_generation=image_generation, video_generation=video_generation
+        )
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         voice = voice or self.tts_voice

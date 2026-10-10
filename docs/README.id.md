@@ -95,6 +95,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 ### Penyedia multimodal (opsional)
 
 - **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), dan penjual kembali-agregator apa pun yang menyediakan akses ke model pembuatan gambar
+- **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); batas bulanan per pengguna dapat dikonfigurasi melalui variabel lingkungan `VIDEO_GENERATIONS_LIMIT`
 - **Musik:** Suno, ElevenLabs Music
 - **Suara (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
@@ -270,6 +271,7 @@ Jika sebuah tool bisa diekspos via MCP, Chibi bisa belajar menggunakannya.
 
 ### 🎨 Generasi konten kaya
 - **Gambar:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
+- **Video:** Wan (Alibaba), CogVideoX (ZhipuAI), Hailuo (MiniMax)
 - **Musik:** Suno (termasuk custom mode: style/lyrics/vocal)
 - **Suara:** transkripsi + text-to-speech (ElevenLabs, OpenAI)
 

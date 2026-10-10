@@ -82,5 +82,7 @@ class ElevenLabs(Provider):
 
         return bytes(buf)
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         return []

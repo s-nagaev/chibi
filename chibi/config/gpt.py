@@ -62,6 +62,12 @@ class GPTSettings(BaseSettings):
     image_size_alibaba: str = "1664*928"
     image_size_openai: Literal["1024x1024", "1536x1024", "1024x1536", "auto"] = "1536x1024"
 
+    video_generations_monthly_limit: int = Field(
+        alias="VIDEO_GENERATIONS_LIMIT",
+        default=0,
+        description="Maximum video generations per user per month; 0 disables the limit.",
+    )
+
     default_model: str | None = Field(default=None)
     default_provider: str | None = Field(default=None)
 
@@ -105,6 +111,11 @@ class GPTSettings(BaseSettings):
     context_size_warning_threshold: int = Field(alias="CONTEXT_SIZE_WARNING_THRESHOLD", default=50, ge=0, le=100)
 
     image_generations_whitelist_raw: str | None = Field(alias="IMAGE_GENERATIONS_WHITELIST", default=None)
+    video_generations_whitelist_raw: str | None = Field(
+        alias="VIDEO_GENERATIONS_WHITELIST",
+        default=None,
+        description="Comma-separated user IDs exempt from the video generation monthly limit.",
+    )
     models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
     models_blacklist_raw: str | None = Field(alias="MODELS_BLACKLIST", default=None)
     proxy: str | None = Field(default=None)
@@ -158,6 +169,14 @@ class GPTSettings(BaseSettings):
         return (
             [x.strip() for x in self.image_generations_whitelist_raw.split(",")]
             if self.image_generations_whitelist_raw
+            else []
+        )
+
+    @property
+    def video_generations_whitelist(self) -> list[str]:
+        return (
+            [x.strip() for x in self.video_generations_whitelist_raw.split(",")]
+            if self.video_generations_whitelist_raw
             else []
         )
 

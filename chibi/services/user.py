@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VideoResult, VisionResultSchema
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
@@ -32,7 +32,9 @@ async def get_chibi_user(db: Database, user_id: int) -> User:
 async def set_active_model(db: Database, interface: UserInterface, model: ModelChangeSchema) -> None:
     user = await db.get_or_create_user(user_id=interface.storage_id)
     thread_id = interface.thread_id
-    if model.image_generation:
+    if model.video_generation:
+        user.thread_selected_video_model[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
+    elif model.image_generation:
         user.thread_selected_image_model[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
     else:
         user.thread_selected_llm[thread_id] = SelectedModel(name=model.name, provider_name=model.provider)
@@ -404,6 +406,48 @@ async def generate_image(
 
 
 @inject_database
+async def generate_video(
+    db: Database,
+    interface: UserInterface,
+    prompt: str,
+    model: str | None = None,
+    provider_name: str | None = None,
+    duration: int | None = None,
+) -> VideoResult:
+    """Generate a video via the selected provider and count the usage.
+
+    Args:
+        db: Database instance.
+        interface: User interface carrying the requester's identity.
+        prompt: Video generation prompt.
+        model: Optional video model name override.
+        provider_name: Optional provider name override.
+        duration: Optional clip length in seconds, if the model supports it.
+
+    Returns:
+        The fully downloaded video generation result.
+
+    Raises:
+        NoProviderSelectedError: If no video provider can be resolved.
+    """
+    user = await db.get_or_create_user(user_id=interface.user_id)
+
+    if provider_name:
+        provider = user.providers.get(provider_name)
+        selected_model = model
+    else:
+        provider = user.get_active_video_provider(thread_id=interface.thread_id)
+        selected_model = user.get_active_video_model(thread_id=interface.thread_id)
+
+    if not provider:
+        raise NoProviderSelectedError("No video provider available")
+    result = await provider.get_videos(prompt=prompt, model=selected_model, duration=duration)
+    if interface.user_id not in gpt_settings.video_generations_whitelist:
+        await db.count_video(interface.user_id)
+    return result
+
+
+@inject_database
 async def describe_image(
     db: Database,
     user_id: int,
@@ -459,24 +503,31 @@ async def ocr_pdf(
 
 # @cached(ttl=3600)
 @inject_database
-async def get_user_cached_models(db: Database, user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+async def get_user_cached_models(
+    db: Database, user_id: int, image_generation: bool = False, video_generation: bool = False
+) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    return await user.get_available_models(image_generation=image_generation)
+    return await user.get_available_models(image_generation=image_generation, video_generation=video_generation)
 
 
 @inject_database
 async def get_models_available(
-    db: Database, user_id: int, image_generation: bool = False, thread_id: int = 0
+    db: Database, user_id: int, image_generation: bool = False, video_generation: bool = False, thread_id: int = 0
 ) -> list[ModelChangeSchema]:
     user = await db.get_or_create_user(user_id=user_id)
-    user_models = await get_user_cached_models(user_id=user_id, image_generation=image_generation)
+    user_models = await get_user_cached_models(
+        user_id=user_id, image_generation=image_generation, video_generation=video_generation
+    )
 
     if not user_models:
         return []
 
     available_models = deepcopy(user_models)
 
-    if image_generation:
+    if video_generation:
+        active_provider = user.get_active_video_provider(thread_id=thread_id)
+        active_model = user.get_active_video_model(thread_id=thread_id) or active_provider.default_video_model
+    elif image_generation:
         active_provider = user.get_active_image_provider(thread_id=thread_id)
         active_model = user.get_active_image_model(thread_id=thread_id) or active_provider.default_image_model
     else:
@@ -493,6 +544,12 @@ async def get_models_available(
 async def user_has_reached_images_generation_limit(db: Database, user_id: int) -> bool:
     user = await db.get_or_create_user(user_id=user_id)
     return user.has_reached_image_limits
+
+
+@inject_database
+async def user_has_reached_videos_generation_limit(db: Database, user_id: int) -> bool:
+    user = await db.get_or_create_user(user_id=user_id)
+    return user.has_reached_video_limits
 
 
 @inject_database
@@ -677,6 +734,8 @@ async def clone_thread_messages(
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
     if old_thread_id in user.thread_selected_image_model:
         user.thread_selected_image_model[new_thread_id] = user.thread_selected_image_model[old_thread_id]
+    if old_thread_id in user.thread_selected_video_model:
+        user.thread_selected_video_model[new_thread_id] = user.thread_selected_video_model[old_thread_id]
     if old_thread_id in user.thread_working_dirs:
         user.thread_working_dirs[new_thread_id] = user.thread_working_dirs[old_thread_id]
 

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Text-to-video generation via three new providers:** Alibaba (Wan, `wan2.6-t2v` — async `AioVideoSynthesis` submit/poll/download), ZhipuAI (`cogvideox-3` on the same z.ai base URL and API key as chat/image) and MiniMax (Hailuo `H3`/`H3-Max` via the V2 API). Polling happens inside the provider (`get_videos`, bounded 15 s interval / 480 s timeout) and always returns downloaded MP4 bytes — provider URLs expire after 1–24 h. Providers declare their video models and are `video_generation_ready` when a key is configured.
+- **New `generate_video` and `get_available_video_generation_models` tools:** the model picks a provider (or uses the user's active video provider fallback, mirroring the image flow), generation runs in the background (1–6 min), and the finished clip is delivered to Telegram via `send_video` with a cover thumbnail downscaled to the Bot API constraints (JPEG < 200 kB, ≤ 320 px). Clips larger than ~48 MB are delivered as documents. Tools are registered only when at least one video-capable provider key is configured (respecting `TOOLS_WHITELIST` and `PUBLIC_MODE` semantics of the other tools).
+- **Video generation limits, 1:1 with images:** `VIDEO_GENERATIONS_LIMIT` monthly cap, `VIDEO_GENERATIONS_WHITELIST` allowlist, `User.videos` history with backward-compatible storage defaults, per-thread and per-user active video provider/model selection (`/video_models`-style plumbing), and e2e-style flow tests covering delivery, the size guard and the limit-exceeded path.
+- **Docs:** video generation providers documented in README and all translated READMEs.
+
 ## [1.19.0] - 2026-10-09
 
 ### Added
