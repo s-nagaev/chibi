@@ -350,6 +350,54 @@ On corporate networks with TLS-inspecting (MITM) proxies, long single-shot LLM r
 
 ---
 
+## Provider failover
+
+Chibi can automatically - or manually, if you prefer - fall back to another provider when an LLM request fails on **rate limits, server errors, timeouts or network failures** (context overflow and moderation errors are deliberately not failover triggers: they have their own recovery paths).
+
+### Configuration
+
+Two environment variables control the behaviour, independently for the **main chat** and for **sub-agent requests**:
+
+- `FAILOVER_CHAIN_MASTER` - fallback chain for main chat requests
+- `FAILOVER_CHAIN_SUBAGENT` - fallback chain for sub-agent requests
+
+Each value is exactly one of:
+
+| Value | Behaviour |
+|-------|-----------|
+| `auto` *(default)* | Automatic fallback ladder (see below) |
+| `disabled` | No fallback for the role: a single attempt, honest failure |
+| `provider/model, provider/model, ...` | Manual ordered chain |
+
+Examples:
+
+```
+FAILOVER_CHAIN_MASTER=auto
+FAILOVER_CHAIN_SUBAGENT=openai/gpt-4o,anthropic/claude-sonnet-4
+```
+
+The pair grammar splits on the **first** slash only - providers never contain slashes, while model names may (e.g. `google/gemini-3.5-flash-lite`). Validation is non-fatal by design: every invalid entry (empty, missing slash, empty provider/model part, duplicate pair) produces a clear warning and is skipped - a malformed chain never prevents Chibi from starting.
+
+### AUTO semantics (default, zero config)
+
+1. **The primary is attempted first.** The happy path is untouched: no registry lookups, no cooldown-store access, no extra latency until the primary actually fails.
+2. **Cooldown on failure.** When provider X fails to serve model Y, X is put on a **20-minute cooldown** (the only persistent state - Redis when configured, in-memory otherwise). The cooldown affects only auto-selection; manual choices are never blocked.
+3. **Same model, another provider.** If model Y exists at another provider (exact-name match against the in-memory model registry), the request is retried there.
+4. **Next provider's default model.** If Y exists nowhere else, the request is retried on the next provider's default model.
+5. **Honest failure.** If nothing works, the last provider error is raised as-is. No model mixing, no silent degradation.
+
+Within a single request no (provider, model) pair is ever retried, and a provider whose model list could not be enumerated is skipped as a same-model candidate but remains a default-model candidate.
+
+### MANUAL semantics (opt-in, per role)
+
+An ordered chain of `provider/model` pairs fully replaces the auto ladder for that role. The head of the chain is the primary; the cooldown never blocks a manual chain (explicit user choice).
+
+### Warnings
+
+Every fallback attempt is announced - an in-chat warning for master requests, a log warning for sub-agent requests - and the final failure, when it comes, is always reported honestly.
+
+---
+
 ## Documentation
 
 - **Start here:** https://chibi.bot

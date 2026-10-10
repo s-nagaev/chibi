@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-10-10
+
+### Added
+- **Provider failover engine (auto ladder, manual chains, 20-minute cooldown store):** when an LLM request fails on rate limits, server errors, timeouts or network failures (context overflow and moderation errors are deliberately excluded — they have their own recovery paths), the request is retried behind a fallback policy resolved per role (`master` / `subagent`). `AUTO` (default, zero config): the failed provider goes on a 20-minute cooldown (the only persistent state — Redis when configured, in-memory otherwise; it affects only auto-selection, never manual choices), then the same model is retried on another provider (exact-name match against the in-memory model registry), then the next provider's default model, then an honest failure — no model mixing, no revisiting already-tried pairs, no cross-mode cascades. The primary is always attempted first and the ladder — including model enumeration and cooldown-store access — is built lazily only after the primary fails, so the happy path keeps zero extra latency. `MANUAL`: an ordered chain of `provider/model` pairs fully replaces the ladder for that role, head of the chain is the primary, and the cooldown never blocks it (explicit user choice). `DISABLED`: a single attempt, honest failure.
+- **Failover chain configuration with non-fatal validation:** two new settings, `FAILOVER_CHAIN_MASTER` (main chat) and `FAILOVER_CHAIN_SUBAGENT` (sub-agent requests), each accepting `auto` (default), `disabled`, or an ordered comma-separated list of `provider/model` pairs split on the first slash (model names may contain slashes, e.g. `google/gemini-3.5-flash-lite`). Validation is non-fatal by design: empty, missing-slash, empty-part and duplicate entries are warned about and skipped — a malformed chain never prevents Chibi from starting. Policies are resolved once per process and memoized; the resolved policy (policy cache, cooldown store, model registry) can be reset programmatically for tests and future runtime overrides.
+- **In-chat warnings on every fallback attempt:** each transition to a fallback (auto ladder or manual chain alike, never the primary attempt) announces the trigger (rate limit / server error / timeout / network) and the pair about to be attempted — as a chat warning for master requests and a log warning for sub-agent requests. The final failure, when every step of the chain fails, is always reported honestly with the last provider error; hook failures are logged and swallowed so a notification can neither block nor break the fallback walk.
+- **Wiring integration tests:** five end-to-end tests exercise the real call sites (main chat and sub-agent request paths) against the engine — the fallback walk, in-chat warning delivery, cooldown behaviour across requests, and the `disabled` policy bypass — rather than only the engine in isolation.
+
 ## [1.19.0] - 2026-10-09
 
 ### Added
@@ -758,7 +766,8 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/s-nagaev/chibi/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.19.0
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/s-nagaev/chibi/compare/v1.14.0...v1.14.1
