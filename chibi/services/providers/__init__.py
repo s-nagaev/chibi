@@ -30,5 +30,8 @@ from chibi.services.providers.sambanova import SambaNova
 from chibi.services.providers.siliconflow import SiliconFlow
 from chibi.services.providers.suno import Suno
 from chibi.services.providers.together import Together
+from chibi.services.providers.tools.video import sync_video_tool_registration
 from chibi.services.providers.xiaomi import Xiaomi
 from chibi.services.providers.zhipuai import ZhipuAI
+
+sync_video_tool_registration()
