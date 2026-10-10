@@ -1,3 +1,4 @@
+import asyncio
 import re
 from io import BytesIO
 from typing import Any, Unpack
@@ -5,12 +6,13 @@ from typing import Any, Unpack
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
+from PIL import Image
 
 from chibi.config import gpt_settings
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
-from chibi.services.providers.tools.tool import ChibiTool
+from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.user import (
     generate_video,
@@ -44,8 +46,7 @@ def sync_video_tool_registration() -> None:
     Called at the end of the ``chibi.services.providers`` package import, once
     the provider registry is fully populated.
     """
-    from chibi.services.providers import RegisteredProviders
-    from chibi.services.providers.tools.tool import RegisteredChibiTools
+    from chibi.services.providers import RegisteredProviders  # Circular import avoidance
 
     if not gpt_settings.public_mode and not RegisteredProviders().video_generation_ready:
         RegisteredChibiTools.deregister_tools(VIDEO_TOOL_NAMES)
@@ -75,17 +76,13 @@ def prepare_video_thumbnail(thumbnail: bytes) -> bytes | None:
         Thumbnail bytes meeting the constraints, or ``None``.
     """
     try:
-        from PIL import Image
-        from PIL.ImageFile import ImageFile
-
-        image: ImageFile
         with Image.open(BytesIO(thumbnail)) as loaded:
             loaded.load()
-            image = loaded
+            image: Image.Image = loaded
             if image.width > THUMBNAIL_MAX_PIXELS or image.height > THUMBNAIL_MAX_PIXELS:
                 image.thumbnail((THUMBNAIL_MAX_PIXELS, THUMBNAIL_MAX_PIXELS))
             if image.mode not in ("RGB", "L"):
-                image = image.convert("RGB")  # type: ignore[assignment]
+                image = image.convert("RGB")
             for quality in (85, 70, 55, 40):
                 buffer = BytesIO()
                 image.save(buffer, format="JPEG", quality=quality)
@@ -97,6 +94,8 @@ def prepare_video_thumbnail(thumbnail: bytes) -> bytes | None:
 
 
 class GetAvailableVideoGenerationModelsTool(ChibiTool):
+    """Expose the list of video generation models available to the user."""
+
     register = True
     definition = ChatCompletionToolParam(
         type="function",
@@ -114,6 +113,17 @@ class GetAvailableVideoGenerationModelsTool(ChibiTool):
 
     @classmethod
     async def function(cls, **kwargs: Unpack[AdditionalOptions]) -> dict[str, Any]:
+        """Return the video generation models available for the requesting user.
+
+        Args:
+            kwargs: Automatically injected call options; ``user_id`` is required.
+
+        Returns:
+            Mapping with the serialized list of available video models.
+
+        Raises:
+            ToolException: If ``user_id`` was not injected into the call.
+        """
         user_id = kwargs.get("user_id")
         if not user_id:
             raise ToolException("This function requires user_id to be automatically provided.")
@@ -128,6 +138,8 @@ class GetAvailableVideoGenerationModelsTool(ChibiTool):
 
 
 class GenerateVideoTool(ChibiTool):
+    """Generate a video from a text prompt and deliver it to the user's chat."""
+
     register = True
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
@@ -178,6 +190,15 @@ class GenerateVideoTool(ChibiTool):
         duration: int | None,
         interface: UserInterface,
     ) -> None:
+        """Generate a video and send it to the user's chat.
+
+        Args:
+            provider: Provider name, or None to use the user's active video provider.
+            model: Video model name, or None to use the provider's default.
+            prompt: Video generation prompt.
+            duration: Requested clip length in seconds, if the model supports it.
+            interface: User interface used to deliver the result.
+        """
         result = await generate_video(
             interface=interface,
             prompt=prompt,
@@ -186,7 +207,7 @@ class GenerateVideoTool(ChibiTool):
             duration=duration,
         )
 
-        thumbnail = prepare_video_thumbnail(result.thumbnail) if result.thumbnail else None
+        thumbnail = await asyncio.to_thread(prepare_video_thumbnail, result.thumbnail) if result.thumbnail else None
         title = f"{prompt[:20]}..."
         # Keep the prompt-derived filename filesystem-safe: strip slashes,
         # newlines, quotes, emoji and other non-word characters.
@@ -226,6 +247,21 @@ class GenerateVideoTool(ChibiTool):
         duration: int | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        """Generate a video from the prompt and deliver it to the user's chat.
+
+        Args:
+            prompt: Video generation prompt.
+            provider: Optional provider name override.
+            video_model: Optional video model name override.
+            duration: Optional clip length in seconds, if the model supports it.
+            kwargs: Automatically injected call options (interface, user_id).
+
+        Returns:
+            Mapping describing the successful delivery.
+
+        Raises:
+            ToolException: If the user has reached the monthly video generation limit.
+        """
         interface = cls.get_interface(kwargs=kwargs)
 
         if await user_has_reached_videos_generation_limit(user_id=interface.user_id):

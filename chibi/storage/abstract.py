@@ -53,6 +53,11 @@ class Database(ABC):
         await self.save_user(user)
 
     async def count_video(self, user_id: int) -> None:
+        """Append a video generation record that expires after roughly one month.
+
+        Args:
+            user_id: User whose usage is counted.
+        """
         user = await self.get_or_create_user(user_id=user_id)
         expire_at = time.time() + 60 * 750  # ~ 1 month
         user.videos.append(VideoMeta(expire_at=expire_at))

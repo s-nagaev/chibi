@@ -102,6 +102,22 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
         duration: int | None = None,
         **kwargs: Any,
     ) -> VideoResult:
+        """Generate a text-to-video clip via the ZhipuAI video API.
+
+        Args:
+            model: Video model name, or None for the provider default.
+            prompt: Video generation prompt.
+            image: Optional image input; text-to-video only, so must be None.
+            duration: Optional clip length in seconds (5 or 10); ignored otherwise.
+            kwargs: Additional provider-specific options.
+
+        Returns:
+            The fully downloaded video generation result.
+
+        Raises:
+            NotImplementedError: If an image input is provided.
+            NoModelSelectedError: If no video model is selected.
+        """
         if image is not None:
             raise NotImplementedError(f"{self.name} video generation supports text-to-video only for now")
 

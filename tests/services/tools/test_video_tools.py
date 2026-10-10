@@ -7,10 +7,11 @@ import os
 import subprocess
 import sys
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator, cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
+from PIL import Image
 
 from chibi.config import gpt_settings
 from chibi.models import User
@@ -33,7 +34,7 @@ def _sync_env(
     ready: bool,
     public_mode: bool = False,
     tools_whitelist: list[str] | None = None,
-) -> Iterator[dict]:
+) -> Iterator[dict[str, Any]]:
     """Run sync_video_tool_registration with a controlled environment."""
     providers_mock = MagicMock()
     providers_mock.return_value.video_generation_ready = {"alibaba"} if ready else {}
@@ -50,8 +51,6 @@ def _sync_env(
 
 
 def _jpeg_bytes(width: int, height: int, color: str = "red") -> bytes:
-    from PIL import Image
-
     buffer = io.BytesIO()
     Image.new("RGB", (width, height), color).save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
@@ -68,7 +67,7 @@ def mock_interface() -> MagicMock:
 
 
 @pytest.fixture
-def mock_kwargs(mock_interface: MagicMock) -> dict:
+def mock_kwargs(mock_interface: MagicMock) -> dict[str, Any]:
     return {"interface": mock_interface, "user_id": 12345}
 
 
@@ -89,10 +88,10 @@ class TestRegistration:
         assert GenerateVideoTool.run_in_background_by_default is True
 
     def test_generate_video_definition_requires_only_prompt(self) -> None:
-        from typing import Any, cast
-
+        # The tool definition is an untyped TypedDict payload; cast to inspect its structure.
         function = cast(dict[str, Any], GenerateVideoTool.definition["function"])
         assert function["parameters"]["required"] == ["prompt"]
+        # Same untyped payload: cast the nested parameters dict for key-set assertions.
         properties = cast(dict[str, Any], function["parameters"]["properties"])
         assert set(properties) == {"provider", "video_model", "prompt", "duration"}
 
@@ -142,7 +141,7 @@ class TestRegistration:
         }
         env["PUBLIC_MODE"] = "false"
         env.update(env_overrides)
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [
                 sys.executable,
                 "-c",
@@ -182,7 +181,7 @@ class TestRegistration:
 
 
 class TestGetAvailableVideoGenerationModelsTool:
-    async def test_returns_available_models(self, mock_kwargs: dict) -> None:
+    async def test_returns_available_models(self, mock_kwargs: dict[str, Any]) -> None:
         models = [
             ModelChangeSchema(provider="Alibaba", name="wan2.6-t2v", image_generation=False, video_generation=True)
         ]
@@ -202,7 +201,7 @@ class TestGetAvailableVideoGenerationModelsTool:
 
 class TestGenerateVideoLimitCheck:
     async def test_limit_reached_raises_and_does_not_generate(
-        self, mock_kwargs: dict, mock_interface: MagicMock
+        self, mock_kwargs: dict[str, Any], mock_interface: MagicMock
     ) -> None:
         with (
             patch(
@@ -218,7 +217,7 @@ class TestGenerateVideoLimitCheck:
         mock_interface.send_video.assert_not_awaited()
         mock_interface.send_document.assert_not_awaited()
 
-    async def test_limit_not_reached_generates(self, mock_kwargs: dict) -> None:
+    async def test_limit_not_reached_generates(self, mock_kwargs: dict[str, Any]) -> None:
         with (
             patch(
                 "chibi.services.providers.tools.video.user_has_reached_videos_generation_limit",
@@ -236,7 +235,7 @@ class TestGenerateVideoLimitCheck:
 
 
 class TestGenerateVideoProviderFallback:
-    async def test_without_provider_args_resolves_via_active_provider(self, mock_kwargs: dict) -> None:
+    async def test_without_provider_args_resolves_via_active_provider(self, mock_kwargs: dict[str, Any]) -> None:
         with (
             patch(
                 "chibi.services.providers.tools.video.user_has_reached_videos_generation_limit",
@@ -253,7 +252,7 @@ class TestGenerateVideoProviderFallback:
         assert kwargs["provider_name"] is None
         assert kwargs["model"] is None
 
-    async def test_provider_and_model_are_passed_through(self, mock_kwargs: dict) -> None:
+    async def test_provider_and_model_are_passed_through(self, mock_kwargs: dict[str, Any]) -> None:
         with (
             patch(
                 "chibi.services.providers.tools.video.user_has_reached_videos_generation_limit",
@@ -282,8 +281,6 @@ class TestThumbnailConstraints:
         assert len(result) < THUMBNAIL_MAX_BYTES
 
     def test_oversized_jpeg_is_downscaled_to_320px(self) -> None:
-        from PIL import Image
-
         thumbnail = _jpeg_bytes(1024, 768)
         result = prepare_video_thumbnail(thumbnail)
         assert result is not None
@@ -307,7 +304,9 @@ class TestThumbnailConstraints:
 
 
 class TestSizeGuardDelivery:
-    async def test_video_within_limit_is_sent_as_video(self, mock_kwargs: dict, mock_interface: MagicMock) -> None:
+    async def test_video_within_limit_is_sent_as_video(
+        self, mock_kwargs: dict[str, Any], mock_interface: MagicMock
+    ) -> None:
         thumbnail = _jpeg_bytes(300, 200)
         with (
             patch(
@@ -329,7 +328,9 @@ class TestSizeGuardDelivery:
         assert kwargs["thumbnail"] is not None
         assert kwargs["filename"].endswith(".mp4")
 
-    async def test_video_over_limit_is_sent_as_document(self, mock_kwargs: dict, mock_interface: MagicMock) -> None:
+    async def test_video_over_limit_is_sent_as_document(
+        self, mock_kwargs: dict[str, Any], mock_interface: MagicMock
+    ) -> None:
         big_video = b"x" * (VIDEO_SIZE_GUARD_BYTES + 1)
         with (
             patch(
@@ -350,7 +351,7 @@ class TestSizeGuardDelivery:
         assert "file" in kwargs["caption"].lower()
 
     async def test_thumbnail_violating_constraints_is_dropped(
-        self, mock_kwargs: dict, mock_interface: MagicMock
+        self, mock_kwargs: dict[str, Any], mock_interface: MagicMock
     ) -> None:
         with (
             patch(
@@ -367,7 +368,9 @@ class TestSizeGuardDelivery:
         kwargs = mock_interface.send_video.await_args.kwargs
         assert kwargs["thumbnail"] is None
 
-    async def test_filename_is_sanitised_from_the_prompt(self, mock_kwargs: dict, mock_interface: MagicMock) -> None:
+    async def test_filename_is_sanitised_from_the_prompt(
+        self, mock_kwargs: dict[str, Any], mock_interface: MagicMock
+    ) -> None:
         with (
             patch(
                 "chibi.services.providers.tools.video.user_has_reached_videos_generation_limit",
@@ -421,7 +424,7 @@ class TestFullToolFlowWithMockedProvider:
             yield db, provider
 
     async def test_flow_delivers_video_and_counts_usage(
-        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+        self, e2e_env, mock_kwargs: dict[str, Any], mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         db, provider = e2e_env
         monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 5, raising=False)
@@ -441,7 +444,7 @@ class TestFullToolFlowWithMockedProvider:
         assert len(user.videos) == 1
 
     async def test_flow_sends_oversized_video_as_document(
-        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+        self, e2e_env, mock_kwargs: dict[str, Any], mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         db, provider = e2e_env
         monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 5, raising=False)
@@ -460,7 +463,7 @@ class TestFullToolFlowWithMockedProvider:
         assert len(user.videos) == 1
 
     async def test_flow_blocks_generation_when_limit_reached(
-        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+        self, e2e_env, mock_kwargs: dict[str, Any], mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         db, provider = e2e_env
         monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 1, raising=False)

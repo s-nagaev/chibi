@@ -414,6 +414,22 @@ async def generate_video(
     provider_name: str | None = None,
     duration: int | None = None,
 ) -> VideoResult:
+    """Generate a video via the selected provider and count the usage.
+
+    Args:
+        db: Database instance.
+        interface: User interface carrying the requester's identity.
+        prompt: Video generation prompt.
+        model: Optional video model name override.
+        provider_name: Optional provider name override.
+        duration: Optional clip length in seconds, if the model supports it.
+
+    Returns:
+        The fully downloaded video generation result.
+
+    Raises:
+        NoProviderSelectedError: If no video provider can be resolved.
+    """
     user = await db.get_or_create_user(user_id=interface.user_id)
 
     if provider_name:
