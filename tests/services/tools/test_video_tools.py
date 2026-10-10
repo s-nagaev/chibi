@@ -2,6 +2,12 @@
 provider fallback, thumbnail constraints and the size-guard delivery."""
 
 import io
+import json
+import os
+import subprocess
+import sys
+from contextlib import contextmanager
+from typing import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +23,27 @@ from chibi.services.providers.tools.video import (
     prepare_video_thumbnail,
     sync_video_tool_registration,
 )
+
+
+@contextmanager
+def _sync_env(
+    ready: bool,
+    public_mode: bool = False,
+    tools_whitelist: list[str] | None = None,
+) -> Iterator[dict]:
+    """Run sync_video_tool_registration with a controlled environment."""
+    providers_mock = MagicMock()
+    providers_mock.return_value.video_generation_ready = {"alibaba"} if ready else {}
+    settings = MagicMock()
+    settings.public_mode = public_mode
+    settings.tools_whitelist = tools_whitelist or []
+    with (
+        patch("chibi.services.providers.RegisteredProviders", providers_mock),
+        patch("chibi.services.providers.tools.video.gpt_settings", settings),
+        patch.object(RegisteredChibiTools, "tools_map", dict(RegisteredChibiTools.tools_map)),
+    ):
+        sync_video_tool_registration()
+        yield RegisteredChibiTools.tools_map
 
 
 def _jpeg_bytes(width: int, height: int, color: str = "red") -> bytes:
@@ -67,32 +94,88 @@ class TestRegistration:
         assert set(properties) == {"provider", "video_model", "prompt", "duration"}
 
     def test_sync_registers_tools_when_a_provider_is_video_ready(self) -> None:
-        with (
-            patch(
-                "chibi.services.providers.tools.video._video_generation_ready",
-                return_value=True,
-            ),
-            patch.object(RegisteredChibiTools, "tools_map", {}),
-        ):
-            sync_video_tool_registration()
-            assert "generate_video" in RegisteredChibiTools.tools_map
-            assert "get_available_video_generation_models" in RegisteredChibiTools.tools_map
+        with _sync_env(ready=True) as tools_map:
+            assert "generate_video" in tools_map
+            assert "get_available_video_generation_models" in tools_map
 
     def test_sync_deregisters_tools_without_a_video_ready_provider(self) -> None:
-        with (
-            patch(
-                "chibi.services.providers.tools.video._video_generation_ready",
-                return_value=False,
-            ),
-            patch.object(RegisteredChibiTools, "tools_map", {}),
-        ):
-            RegisteredChibiTools.tools_map["generate_video"] = GenerateVideoTool
-            RegisteredChibiTools.tools_map["get_available_video_generation_models"] = (
-                GetAvailableVideoGenerationModelsTool
-            )
-            sync_video_tool_registration()
-            assert "generate_video" not in RegisteredChibiTools.tools_map
-            assert "get_available_video_generation_models" not in RegisteredChibiTools.tools_map
+        with patch.object(RegisteredChibiTools, "tools_map", dict(RegisteredChibiTools.tools_map)) as seeded:
+            seeded["generate_video"] = GenerateVideoTool
+            seeded["get_available_video_generation_models"] = GetAvailableVideoGenerationModelsTool
+            with _sync_env(ready=False) as tools_map:
+                assert "generate_video" not in tools_map
+                assert "get_available_video_generation_models" not in tools_map
+
+    def test_sync_in_public_mode_keeps_tools_registered_even_without_a_ready_provider(self) -> None:
+        with patch.object(RegisteredChibiTools, "tools_map", dict(RegisteredChibiTools.tools_map)) as seeded:
+            seeded.pop("generate_video", None)
+            seeded.pop("get_available_video_generation_models", None)
+            with _sync_env(ready=False, public_mode=True) as tools_map:
+                assert "generate_video" in tools_map
+                assert "get_available_video_generation_models" in tools_map
+
+    def test_sync_respects_tools_whitelist(self) -> None:
+        with patch.object(RegisteredChibiTools, "tools_map", dict(RegisteredChibiTools.tools_map)) as seeded:
+            seeded["generate_video"] = GenerateVideoTool
+            seeded["get_available_video_generation_models"] = GetAvailableVideoGenerationModelsTool
+            with _sync_env(ready=True, tools_whitelist=["text_to_speech", "generate_image"]) as tools_map:
+                assert "generate_video" not in tools_map
+                assert "get_available_video_generation_models" not in tools_map
+
+    def test_sync_keeps_tools_outside_the_whitelist_scope_untouched(self) -> None:
+        with patch.object(RegisteredChibiTools, "tools_map", {"text_to_speech": "sentinel"}):
+            with _sync_env(ready=True, tools_whitelist=["text_to_speech", "generate_image"]) as tools_map:
+                assert tools_map == {"text_to_speech": "sentinel"}
+
+    def _fresh_interpreter_tools_map(self, env_overrides: dict[str, str]) -> list[str]:
+        """Import the providers package in a fresh interpreter and return the tool names.
+
+        Guards the actual wiring of sync_video_tool_registration() at the end
+        of chibi.services.providers.__init__: deleting the call must turn these
+        tests red.
+        """
+        env = {
+            key: value for key, value in os.environ.items() if not key.endswith("_KEY") and not key.endswith("_TOKEN")
+        }
+        env["PUBLIC_MODE"] = "false"
+        env.update(env_overrides)
+        result = subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                "-c",
+                "import chibi.services.providers; "
+                "from chibi.services.providers.tools.tool import RegisteredChibiTools; "
+                "import json; print(json.dumps(sorted(RegisteredChibiTools.tools_map)))",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=True,
+        )
+        return json.loads(result.stdout)
+
+    def test_fresh_interpreter_without_keys_has_no_video_tools(self) -> None:
+        tools = self._fresh_interpreter_tools_map({})
+        assert "generate_video" not in tools
+        assert "get_available_video_generation_models" not in tools
+
+    def test_fresh_interpreter_with_video_key_registers_video_tools(self) -> None:
+        tools = self._fresh_interpreter_tools_map({"ALIBABA_API_KEY": "dummy"})
+        assert "generate_video" in tools
+        assert "get_available_video_generation_models" in tools
+
+    def test_fresh_interpreter_in_public_mode_registers_video_tools(self) -> None:
+        tools = self._fresh_interpreter_tools_map({"ALIBABA_API_KEY": "dummy", "PUBLIC_MODE": "true"})
+        assert "generate_video" in tools
+        assert "get_available_video_generation_models" in tools
+
+    def test_fresh_interpreter_whitelist_excludes_video_tools(self) -> None:
+        tools = self._fresh_interpreter_tools_map(
+            {"ALIBABA_API_KEY": "dummy", "TOOLS_WHITELIST": "text_to_speech,generate_image"}
+        )
+        assert "generate_video" not in tools
+        assert "get_available_video_generation_models" not in tools
 
 
 class TestGetAvailableVideoGenerationModelsTool:
@@ -280,3 +363,25 @@ class TestSizeGuardDelivery:
 
         kwargs = mock_interface.send_video.await_args.kwargs
         assert kwargs["thumbnail"] is None
+
+    async def test_filename_is_sanitised_from_the_prompt(self, mock_kwargs: dict, mock_interface: MagicMock) -> None:
+        with (
+            patch(
+                "chibi.services.providers.tools.video.user_has_reached_videos_generation_limit",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "chibi.services.providers.tools.video.generate_video",
+                new=AsyncMock(return_value=_video_result()),
+            ),
+        ):
+            await GenerateVideoTool.function(prompt='a "cat"/on\na 🚲 bike?', **mock_kwargs)
+
+        filename = mock_interface.send_video.await_args.kwargs["filename"]
+        assert filename.endswith(".mp4")
+        assert "/" not in filename
+        assert "\\" not in filename
+        assert '"' not in filename
+        assert "\n" not in filename
+        assert "?" not in filename
+        assert "🚲" not in filename
