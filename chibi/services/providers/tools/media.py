@@ -1,4 +1,6 @@
-from asyncio import sleep
+import mimetypes
+from asyncio import sleep, to_thread
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Unpack
 
 from loguru import logger
@@ -13,9 +15,17 @@ from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, download
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
+from chibi.storage.files import get_file_storage
 
 if TYPE_CHECKING:
     from chibi.services.providers import ElevenLabs, Minimax, Suno
+    from chibi.services.providers.provider import Provider
+
+MAX_REFERENCE_IMAGES = 10
+MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
+ALLOWED_REFERENCE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
+UNKNOWN_MIME_TYPES = frozenset({None, "", "application/octet-stream"})
+UNKNOWN_MIME_FALLBACK = "image/png"
 
 
 class TextToSpeechTool(ChibiTool):
@@ -91,6 +101,80 @@ class GetAvailableImageModelsTool(ChibiTool):
         }
 
 
+def _normalize_reference_mime(mime: str | None) -> str:
+    """Map unknown MIME types to the image/png fallback.
+
+    Args:
+        mime: MIME type reported by storage metadata or guessed from a file path.
+
+    Returns:
+        The original MIME type, or ``image/png`` when it is unknown.
+    """
+    if mime is None or mime in UNKNOWN_MIME_TYPES:
+        return UNKNOWN_MIME_FALLBACK
+    return mime
+
+
+async def _resolve_reference_from_file_id(interface: UserInterface, file_id: str) -> tuple[bytes, str]:
+    """Resolve a single reference image previously uploaded by the user.
+
+    Args:
+        interface: User interface bound to the current request.
+        file_id: Unique identifier of a previously uploaded file.
+
+    Returns:
+        Tuple of raw image bytes and the resolved MIME type.
+
+    Raises:
+        ToolException: If the file ID cannot be resolved from storage.
+    """
+    storage = get_file_storage(interface=interface)
+    try:
+        file_info = await storage.get_file_info(file_id=file_id)
+        image_bytes = await storage.get_bytes(file_id=file_id)
+    except FileNotFoundError as e:
+        raise ToolException(f"Reference file with ID '{file_id}' was not found.") from e
+    return image_bytes, _normalize_reference_mime(mime=file_info.get("mime_type"))
+
+
+async def _resolve_reference_from_path(path_str: str) -> tuple[bytes, str]:
+    """Resolve a single reference image from the local filesystem.
+
+    Args:
+        path_str: Absolute or tilde-expanded filesystem path to the image.
+
+    Returns:
+        Tuple of raw image bytes and the resolved MIME type.
+
+    Raises:
+        ToolException: If the path does not point to an existing file.
+    """
+    path = Path(path_str).expanduser().resolve()
+    if not path.is_file():
+        raise ToolException(f"Reference file not found: {path}")
+    image_bytes = await to_thread(path.read_bytes)
+    mime, _ = mimetypes.guess_type(str(path))
+    return image_bytes, _normalize_reference_mime(mime=mime)
+
+
+def _validate_reference_limits(images: list[tuple[bytes, str]]) -> None:
+    """Validate resolved reference images against count, MIME and size constraints.
+
+    Args:
+        images: Resolved reference images as (bytes, mime) tuples.
+
+    Raises:
+        ToolException: If any limit is violated.
+    """
+    if len(images) > MAX_REFERENCE_IMAGES:
+        raise ToolException(f"Too many reference images: {len(images)}. Maximum is {MAX_REFERENCE_IMAGES}.")
+    for image_bytes, mime in images:
+        if mime not in ALLOWED_REFERENCE_MIME_TYPES:
+            raise ToolException(f"Unsupported reference image type '{mime}'. Allowed types: PNG, JPEG, WebP.")
+        if len(image_bytes) > MAX_REFERENCE_IMAGE_BYTES:
+            raise ToolException("Reference image exceeds the 10 MB size limit.")
+
+
 class GenerateImageTool(ChibiTool):
     register = True
     run_in_background_by_default = True
@@ -104,7 +188,10 @@ class GenerateImageTool(ChibiTool):
                 "about whether the operation was successful or not. Check available providers and models first. "
                 "Use your knowledge to adapt the prompt for a specific model to achieve the best result. "
                 f"The aspect ratio ({gpt_settings.image_aspect_ratio}), size, and image quality are set globally "
-                f"and cannot be changed via the prompt"
+                "and cannot be changed via the prompt. Reference images may be passed via reference_file_ids "
+                "and/or reference_paths, but only models with image-to-image support accept them — the call "
+                "fails for models without image input support. Allowed image formats: PNG, JPEG, WebP; "
+                "maximum 10 reference images, 10 MB each."
             ),
             parameters={
                 "type": "object",
@@ -112,6 +199,22 @@ class GenerateImageTool(ChibiTool):
                     "provider": {"type": "string", "description": "Provider name, i.e. 'Gemini'"},
                     "image_model": {"type": "string", "description": "Model name, i.e. 'dall-e-3'"},
                     "prompt": {"type": "string", "description": "Image generation prompt. English recommended"},
+                    "reference_file_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "File IDs of previously uploaded images to use as reference input "
+                            "(image-to-image). Optional. May be combined with reference_paths."
+                        ),
+                    },
+                    "reference_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Local filesystem paths of images to use as reference input (image-to-image). "
+                            "Optional. Requires filesystem access. May be combined with reference_file_ids."
+                        ),
+                    },
                 },
                 "required": ["provider", "image_model", "prompt"],
             },
@@ -120,9 +223,103 @@ class GenerateImageTool(ChibiTool):
     name = "generate_image"
 
     @classmethod
-    async def generate_and_send_image(cls, provider: str, model: str, prompt: str, interface: UserInterface) -> None:
-        images = await generate_image(interface=interface, provider_name=provider, model=model, prompt=prompt)
-        await interface.send_images(images=images)
+    def _validate_image_input_support(cls, provider_name: str, model: str, provider: "Provider") -> None:
+        """Ensure the selected provider and model accept reference images.
+
+        Args:
+            provider_name: Name of the provider selected for generation.
+            model: Model name selected for generation.
+            provider: Provider instance to inspect.
+
+        Raises:
+            ToolException: If the provider or the model does not support image input.
+        """
+        if not provider.image_to_image_ready:
+            raise ToolException(f"Provider '{provider_name}' does not support image input for image generation.")
+        if not provider.supports_image_input(model):
+            raise ToolException(f"Model '{model}' of provider '{provider_name}' does not accept reference images.")
+
+    @classmethod
+    async def _resolve_reference_images(
+        cls,
+        interface: UserInterface,
+        provider_name: str,
+        model: str,
+        reference_file_ids: list[str] | None,
+        reference_paths: list[str] | None,
+    ) -> list[tuple[bytes, str]] | None:
+        """Validate and resolve optional reference images into bytes and MIME type tuples.
+
+        Args:
+            interface: User interface bound to the current request.
+            provider_name: Name of the provider selected for generation.
+            model: Model name selected for generation.
+            reference_file_ids: File IDs of previously uploaded reference images, if any.
+            reference_paths: Local filesystem paths of reference images, if any.
+
+        Returns:
+            Resolved reference images as (bytes, mime) tuples, or None when no reference
+            input was provided.
+
+        Raises:
+            ToolException: If the selected provider or model does not accept image input,
+                filesystem access is disabled, the total number of reference images exceeds
+                the limit, a reference file is missing, or any image violates the MIME or
+                size constraints.
+        """
+        file_ids = reference_file_ids or []
+        paths = reference_paths or []
+        if not file_ids and not paths:
+            return None
+
+        if len(file_ids) + len(paths) > MAX_REFERENCE_IMAGES:
+            raise ToolException(
+                f"Too many reference images: {len(file_ids) + len(paths)}. Maximum is {MAX_REFERENCE_IMAGES}."
+            )
+
+        user = await get_chibi_user(user_id=interface.user_id)
+        provider = user.providers.get(provider_name=provider_name)
+        if provider is None:
+            raise ToolException(f"Provider '{provider_name}' is not available.")
+        cls._validate_image_input_support(provider_name=provider_name, model=model, provider=provider)
+
+        if paths and not gpt_settings.filesystem_access:
+            raise ToolException(
+                "Filesystem access is disabled. Local reference image paths require filesystem_access to be enabled."
+            )
+
+        images: list[tuple[bytes, str]] = []
+        for file_id in file_ids:
+            images.append(await _resolve_reference_from_file_id(interface=interface, file_id=file_id))
+        for path_str in paths:
+            images.append(await _resolve_reference_from_path(path_str=path_str))
+
+        _validate_reference_limits(images=images)
+        return images
+
+    @classmethod
+    async def generate_and_send_image(
+        cls,
+        provider: str,
+        model: str,
+        prompt: str,
+        interface: UserInterface,
+        images: list[tuple[bytes, str]] | None = None,
+    ) -> None:
+        """Generate an image and send it to the user.
+
+        Args:
+            provider: Provider name.
+            model: Model name.
+            prompt: Image generation prompt.
+            interface: User interface bound to the current request.
+            images: Optional reference images as (bytes, mime) tuples for models with
+                image-to-image support.
+        """
+        generated_images = await generate_image(
+            interface=interface, provider_name=provider, model=model, prompt=prompt, images=images
+        )
+        await interface.send_images(images=generated_images)
         return None
 
     @classmethod
@@ -131,18 +328,53 @@ class GenerateImageTool(ChibiTool):
         provider: str,
         image_model: str,
         prompt: str,
+        reference_file_ids: list[str] | None = None,
+        reference_paths: list[str] | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        """Generate an image, optionally based on reference images, and send it to the user.
+
+        Args:
+            provider: Provider name, i.e. 'Gemini'.
+            image_model: Model name, i.e. 'dall-e-3'.
+            prompt: Image generation prompt.
+            reference_file_ids: File IDs of previously uploaded images used as reference
+                input. Supported only by image-to-image capable models. May be combined
+                with reference_paths — a documented deviation from the vision tool's
+                either-or precedent.
+            reference_paths: Local filesystem paths of images used as reference input.
+                Requires filesystem access to be enabled. May be combined with
+                reference_file_ids.
+            **kwargs: Additional options injected by the tool runner.
+
+        Returns:
+            Dict describing the operation outcome.
+
+        Raises:
+            ToolException: If the monthly limit is reached, the selected provider or model
+                does not accept image input, filesystem access is disabled, the number of
+                reference images exceeds the limit, a reference file is missing, or any
+                image violates the MIME or size constraints.
+        """
         interface = cls.get_interface(kwargs=kwargs)
 
         if await user_has_reached_images_generation_limit(user_id=interface.user_id):
             raise ToolException("User has reached image generation monthly limit.")
+
+        images = await cls._resolve_reference_images(
+            interface=interface,
+            provider_name=provider,
+            model=image_model,
+            reference_file_ids=reference_file_ids,
+            reference_paths=reference_paths,
+        )
 
         await cls.generate_and_send_image(
             provider=provider,
             model=image_model,
             prompt=prompt,
             interface=interface,
+            images=images,
         )
         return {"detail": "Image was successfully generated and sent to user."}
 
