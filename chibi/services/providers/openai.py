@@ -1,5 +1,6 @@
 import base64
 import json
+from io import BytesIO
 from typing import Any
 
 from loguru import logger
@@ -40,6 +41,7 @@ class OpenAI(OpenAIFriendlyProvider):
     moderation_ready = True
     vision_ready = True
     ocr_ready = True
+    image_to_image_ready = True
 
     name = "OpenAI"
     model_name_prefixes = ["gpt", "o1", "o3", "o4"]
@@ -140,6 +142,81 @@ class OpenAI(OpenAIFriendlyProvider):
     @classmethod
     def is_image_ready_model(cls, model_name: str) -> bool:
         return "image" in model_name.lower()
+
+    @classmethod
+    def supports_image_input(cls, model: str) -> bool:
+        """Check whether a specific model of this provider accepts image input for generation.
+
+        Args:
+            model: Model name to check.
+
+        Returns:
+            True for ``gpt-image-*`` models, False for ``dall-e-*`` models and
+            everything else.
+        """
+        return model.removeprefix("models/").startswith("gpt-image")
+
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str] | list[BytesIO]:
+        """Generate images from a text prompt and optional reference images.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional reference images as (bytes, mime type) tuples. Supported
+                by ``gpt-image-*`` models only.
+
+        Returns:
+            List of image URLs or BytesIO objects with image data.
+
+        Raises:
+            NoModelSelectedError: If no image model is selected.
+            ServiceResponseError: If reference images are provided for a model that
+                does not accept image input, or the API returns no image data.
+        """
+        selected_model = model or self.default_image_model
+        if not selected_model:
+            raise NoModelSelectedError(provider=self.name, detail="No image generation model selected")
+        if images:
+            if not self.supports_image_input(selected_model):
+                raise ServiceResponseError(
+                    provider=self.name,
+                    model=selected_model,
+                    detail="does not support image input; select a gpt-image model instead",
+                )
+            return await self._get_image_edit_response(prompt=prompt, model=selected_model, images=images)
+        return await super().get_images(prompt=prompt, model=selected_model, images=None)
+
+    async def _get_image_edit_response(self, prompt: str, model: str, images: list[tuple[bytes, str]]) -> list[BytesIO]:
+        """Edit images with a gpt-image model.
+
+        Args:
+            prompt: Text description of the edit to apply.
+            model: The gpt-image model name.
+            images: Reference images as (bytes, mime type) tuples.
+
+        Returns:
+            List of BytesIO objects with image data.
+
+        Raises:
+            ServiceResponseError: When the API response contains no image data.
+        """
+        multipart: list[tuple[str, bytes, str]] = []
+        for index, (data, mime_type) in enumerate(images):
+            extension = mime_type.split("/")[-1].replace("jpeg", "jpg")
+            multipart.append((f"image_{index}.{extension}", data, mime_type))
+        response = await self.client.images.edit(
+            model=model,
+            prompt=prompt,
+            image=multipart,
+            n=gpt_settings.image_n_choices,
+            size=self.image_size,
+            timeout=gpt_settings.timeout,
+        )
+        if not response.data:
+            raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
+        return [BytesIO(base64.b64decode(image.b64_json)) for image in response.data if image.b64_json]
 
     async def _get_image_generation_response(self, prompt: str, model: str) -> ImagesResponse:
         return await self.client.images.generate(

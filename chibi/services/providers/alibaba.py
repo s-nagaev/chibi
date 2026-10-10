@@ -34,8 +34,31 @@ class Alibaba(OpenAIFriendlyProvider):
             return choice.message.content
         return choice.message.content[0].get("image")
 
-    async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples. Not supported
+                by this provider.
+
+        Returns:
+            List of image URLs.
+
+        Raises:
+            ServiceResponseError: If image input is provided, which this provider
+                does not support, or if the provider returns an error response.
+        """
         model = model or self.default_model
+        if images:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="This provider does not support image input for image generation.",
+            )
         message = Message(role="user", content=[{"text": prompt}])
         number_of_images = 1 if "qwen" in model or "z-image" in model else gpt_settings.image_n_choices
         response: ImageGenerationResponse = await AioImageGeneration.call(
