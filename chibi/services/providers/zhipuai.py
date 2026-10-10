@@ -25,7 +25,9 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
     def get_model_display_name(self, model_name: str) -> str:
         return model_name.upper()
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         if image_generation:
             return [
                 ModelChangeSchema(
@@ -35,7 +37,10 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
                     provider=self.name, name="cogview-4-250304", display_name="CogView 4", image_generation=True
                 ),
             ]
-        models = await super().get_available_models(image_generation=False)
+        if video_generation:
+            # Video models are wired in by the video-generation provider task.
+            return []
+        models = await super().get_available_models(image_generation=False, video_generation=video_generation)
 
         additional_models = [
             ModelChangeSchema(

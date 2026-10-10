@@ -48,7 +48,9 @@ class Minimax(AnthropicFriendlyProvider):
         self._client = AsyncClient(api_key=self.token, base_url=self.base_url)
         return self._client
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         if image_generation:
             image_models = [
                 ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
@@ -56,7 +58,7 @@ class Minimax(AnthropicFriendlyProvider):
 
             return self.filter_and_return_list_of_models(models=image_models, image_generation=image_generation)
 
-        models = await super().get_available_models()
+        models = await super().get_available_models(video_generation=video_generation)
         if not models:
             # Get models endpoint sometimes returns empty list, so we need a hacky fallback here
             supported_models = [
@@ -75,7 +77,9 @@ class Minimax(AnthropicFriendlyProvider):
                 )
                 for model_name in supported_models
             ]
-        return self.filter_and_return_list_of_models(models=models, image_generation=image_generation)
+        return self.filter_and_return_list_of_models(
+            models=models, image_generation=image_generation, video_generation=video_generation
+        )
 
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         voice = voice or self.tts_voice

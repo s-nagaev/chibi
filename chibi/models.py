@@ -515,6 +515,8 @@ class User(BaseModel):
     thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
     thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
+    thread_selected_video_model: dict[int, SelectedModel] = Field(default_factory=dict)
+    selected_video_provider_name: str | None = None
     thread_names: dict[int, str] = Field(default_factory=dict)
     thread_working_dirs: dict[int, str] = Field(default_factory=dict)
     thread_notes: dict[int, str] = Field(default_factory=dict)
@@ -558,6 +560,34 @@ class User(BaseModel):
 
     def get_active_image_model(self, thread_id: int) -> str | None:
         if selected_model := self.thread_selected_image_model.get(thread_id):
+            return selected_model.name
+        return None
+
+    def get_active_video_provider(self, thread_id: int) -> "Provider":
+        provider_name: str | None = None
+
+        if selected_video_model := self.thread_selected_video_model.get(thread_id):
+            provider_name = selected_video_model.provider_name
+
+        elif self.selected_video_provider_name:
+            provider_name = self.selected_video_provider_name
+
+        elif self.providers.first_video_generation_ready:
+            provider_name = self.providers.first_video_generation_ready.name
+
+        else:
+            raise NoProviderSelectedError
+
+        if not provider_name:
+            raise NoProviderSelectedError
+
+        if provider := self.providers.get(provider_name=provider_name):
+            return provider
+
+        raise NoProviderSelectedError
+
+    def get_active_video_model(self, thread_id: int) -> str | None:
+        if selected_model := self.thread_selected_video_model.get(thread_id):
             return selected_model.name
         return None
 
@@ -668,9 +698,14 @@ class User(BaseModel):
         return application_settings.working_dir
 
     @cached(ttl=60 * 60)
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances
-        tasks = [provider.get_available_models(image_generation=image_generation) for provider in providers]
+        tasks = [
+            provider.get_available_models(image_generation=image_generation, video_generation=video_generation)
+            for provider in providers
+        ]
         results = await asyncio.gather(*tasks)
 
         return list(itertools.chain.from_iterable(results))

@@ -40,12 +40,26 @@ class ModelChangeSchema(BaseModel):
     name: str
     display_name: str = ""
     image_generation: bool
+    video_generation: bool = False
 
     @model_validator(mode="after")
     def set_display_name_if_none(self) -> "ModelChangeSchema":
         if not self.display_name:
             self.display_name = self.name
         return self
+
+
+class VideoResult(BaseModel):
+    """A fully downloaded video generation result.
+
+    Providers always return the MP4 payload as bytes (URLs expire and Telegram
+    uploads by-URL are capped), plus an optional JPEG thumbnail and the clip
+    duration in seconds when the provider reports it.
+    """
+
+    video: bytes
+    thumbnail: bytes | None = None
+    duration: int | None = None
 
 
 class ModeratorsAnswer(BaseModel):
