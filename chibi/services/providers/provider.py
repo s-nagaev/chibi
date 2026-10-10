@@ -102,6 +102,32 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
+async def download_media(url: str, timeout: float = 120.0) -> bytes:
+    """Download raw bytes from a provider-generated media URL.
+
+    Provider video/audio URLs are short-lived, so the payload must be fetched
+    immediately after the generation job finishes. Uses the same proxy and
+    retry transport settings as the rest of the provider layer.
+
+    Args:
+        url: The media URL to download.
+        timeout: Per-request timeout in seconds.
+
+    Returns:
+        The downloaded payload bytes.
+
+    Raises:
+        httpx.HTTPError: On any transport or HTTP-level failure.
+    """
+    transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
+    async with httpx.AsyncClient(
+        transport=transport, timeout=timeout, proxy=gpt_settings.proxy, follow_redirects=True
+    ) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.content
+
+
 class RegisteredProviders:
     all: dict[str, type["Provider"]] = {}
     available: dict[str, type["Provider"]] = {}
@@ -258,6 +284,10 @@ class Provider(ABC):
     default_model: str
     default_image_model: str | None = None
     default_video_model: str | None = None
+    # Video generation polling: providers own the submit -> poll -> download
+    # lifecycle inside get_videos, bounded by these settings.
+    video_poll_interval: int = 15
+    video_poll_timeout: int = 480
     default_stt_model: str | None = None
     default_tts_voice: str | None = None
     default_tts_model: str | None = None
