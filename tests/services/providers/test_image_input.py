@@ -1,7 +1,8 @@
 """Tests for image-to-image support in providers and the user generate_image service."""
 
 import base64
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import partial
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
@@ -20,20 +21,49 @@ from chibi.services.user import generate_image
 TEST_TOKEN = "test-token-for-image-input"
 
 
+def _make_client_factory(models: "_FakeGeminiModels") -> Callable[..., "_FakeGeminiClient"]:
+    """Return a callable that builds fake Gemini SDK clients bound to ``models``.
+
+    Args:
+        models: Fake models namespace shared by every built client.
+
+    Returns:
+        A factory accepting (and ignoring) the SDK client constructor arguments.
+    """
+    return partial(_FakeGeminiClient, models)
+
+
 class _FakeGeminiModels:
     """Fake ``client.aio.models`` namespace recording image-generation calls."""
 
     def __init__(self) -> None:
+        """Initialize empty call recorders and empty canned responses."""
         self.generate_content_calls: list[dict[str, Any]] = []
         self.generate_images_calls: list[dict[str, Any]] = []
         self.generate_content_response: Any = None
         self.generate_images_response: Any = None
 
     async def generate_content(self, **kwargs: Any) -> Any:
+        """Record a generate_content call and return the canned response.
+
+        Args:
+            kwargs: Keyword arguments of the SDK call.
+
+        Returns:
+            The canned generate_content response (may be None).
+        """
         self.generate_content_calls.append(kwargs)
         return self.generate_content_response
 
     async def generate_images(self, **kwargs: Any) -> Any:
+        """Record a generate_images call and return the canned response.
+
+        Args:
+            kwargs: Keyword arguments of the SDK call.
+
+        Returns:
+            The canned generate_images response (may be None).
+        """
         self.generate_images_calls.append(kwargs)
         return self.generate_images_response
 
@@ -42,12 +72,19 @@ class _FakeGeminiAio:
     """Fake async namespace of the google-genai client."""
 
     def __init__(self, models: _FakeGeminiModels) -> None:
+        """Store the fake models namespace.
+
+        Args:
+            models: Fake models namespace to expose as ``aio.models``.
+        """
         self.models = models
 
     async def __aenter__(self) -> "_FakeGeminiAio":
+        """Return self as the async context value."""
         return self
 
     async def __aexit__(self, *args: Any) -> None:
+        """Accept and ignore SDK exit arguments."""
         return None
 
 
@@ -55,18 +92,24 @@ class _FakeGeminiClient:
     """Fake ``google.genai.client.Client`` hosting the fake models namespace."""
 
     def __init__(self, models: _FakeGeminiModels, *args: Any, **kwargs: Any) -> None:
+        """Build the fake client around the shared models namespace.
+
+        Args:
+            models: Fake models namespace to expose under ``aio.models``.
+            *args: Ignored SDK constructor arguments.
+            **kwargs: Ignored SDK constructor arguments.
+        """
         self.aio = _FakeGeminiAio(models)
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def gemini_models(monkeypatch: pytest.MonkeyPatch) -> _FakeGeminiModels:
     """Patch the Gemini SDK client with a fake and expose the recorded calls."""
     models = _FakeGeminiModels()
-
-    def client_factory(*args: Any, **kwargs: Any) -> _FakeGeminiClient:
-        return _FakeGeminiClient(models)
-
-    monkeypatch.setattr("chibi.services.providers.gemini_native.Client", client_factory)
+    monkeypatch.setattr(
+        "chibi.services.providers.gemini_native.Client",
+        _make_client_factory(models),
+    )
     return models
 
 
@@ -176,7 +219,7 @@ async def test_gemini_imagen_model_without_images_uses_generate_images(
     assert result[0].getvalue() == b"imagen-bytes"
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def openai_client() -> Iterator[SimpleNamespace]:
     """Patch the AsyncOpenAI client factory and return the fake client namespace.
 

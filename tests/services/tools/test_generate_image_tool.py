@@ -21,7 +21,7 @@ PROVIDER_NAME = "Gemini"
 CONTENT_MODEL = "gemini-2.5-flash-image"
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def mock_interface() -> Mock:
     """Return a mock user interface with a fixed user id."""
     interface = Mock()
@@ -30,7 +30,7 @@ def mock_interface() -> Mock:
     return interface
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def mock_provider() -> Mock:
     """Return a mock provider that accepts image input."""
     provider = Mock()
@@ -39,7 +39,7 @@ def mock_provider() -> Mock:
     return provider
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def mock_user(mock_provider: Mock) -> Mock:
     """Return a mock user whose provider manager yields the mock provider."""
     user = Mock()
@@ -47,7 +47,7 @@ def mock_user(mock_provider: Mock) -> Mock:
     return user
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def mock_storage() -> AsyncMock:
     """Return a mock file storage serving a JPEG reference image."""
     storage = AsyncMock()
@@ -56,7 +56,7 @@ def mock_storage() -> AsyncMock:
     return storage
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def generate_mock(mock_user: Mock, mock_storage: AsyncMock, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     """Patch media-module collaborators and return the generate_image mock."""
     monkeypatch.setattr(media, "user_has_reached_images_generation_limit", AsyncMock(return_value=False))
@@ -96,6 +96,7 @@ def test_normalize_reference_mime_falls_back_to_png() -> None:
     assert _normalize_reference_mime(mime="image/webp") == "image/webp"
 
 
+@pytest.mark.asyncio
 async def test_file_id_resolution_passes_bytes_and_mime(mock_interface: Mock, generate_mock: AsyncMock) -> None:
     """A reference_file_id resolves to bytes plus MIME and reaches generate_image."""
     result = await call_tool(mock_interface, reference_file_ids=["abc123"])
@@ -110,6 +111,7 @@ async def test_file_id_resolution_passes_bytes_and_mime(mock_interface: Mock, ge
     )
 
 
+@pytest.mark.asyncio
 async def test_reference_path_expands_tilde(
     mock_interface: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -129,6 +131,7 @@ async def test_reference_path_expands_tilde(
     )
 
 
+@pytest.mark.asyncio
 async def test_reference_path_resolves_relative(
     mock_interface: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -148,6 +151,7 @@ async def test_reference_path_resolves_relative(
     )
 
 
+@pytest.mark.asyncio
 async def test_missing_reference_path_raises_tool_exception(
     mock_interface: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -160,6 +164,7 @@ async def test_missing_reference_path_raises_tool_exception(
         await call_tool(mock_interface, reference_paths=[str(missing)])
 
 
+@pytest.mark.asyncio
 async def test_missing_file_id_raises_tool_exception(
     mock_interface: Mock, mock_storage: AsyncMock, generate_mock: AsyncMock
 ) -> None:
@@ -170,6 +175,7 @@ async def test_missing_file_id_raises_tool_exception(
         await call_tool(mock_interface, reference_file_ids=["abc123"])
 
 
+@pytest.mark.asyncio
 async def test_reference_paths_require_filesystem_access(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -180,6 +186,7 @@ async def test_reference_paths_require_filesystem_access(
         await call_tool(mock_interface, reference_paths=["/tmp/whatever.png"])
 
 
+@pytest.mark.asyncio
 async def test_combined_file_ids_and_paths_preserve_order(
     mock_interface: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -199,6 +206,7 @@ async def test_combined_file_ids_and_paths_preserve_order(
     )
 
 
+@pytest.mark.asyncio
 async def test_unknown_file_mime_falls_back_to_png(
     mock_interface: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -218,6 +226,7 @@ async def test_unknown_file_mime_falls_back_to_png(
     )
 
 
+@pytest.mark.asyncio
 async def test_too_many_reference_images_raises(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -229,6 +238,7 @@ async def test_too_many_reference_images_raises(
         await call_tool(mock_interface, reference_file_ids=file_ids)
 
 
+@pytest.mark.asyncio
 async def test_oversized_reference_image_raises(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -240,6 +250,7 @@ async def test_oversized_reference_image_raises(
         await call_tool(mock_interface, reference_file_ids=["abc123"])
 
 
+@pytest.mark.asyncio
 async def test_disallowed_reference_mime_raises(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -254,6 +265,7 @@ async def test_disallowed_reference_mime_raises(
         await call_tool(mock_interface, reference_file_ids=["abc123"])
 
 
+@pytest.mark.asyncio
 async def test_disallowed_image_mime_raises(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch, generate_mock: AsyncMock
 ) -> None:
@@ -264,6 +276,7 @@ async def test_disallowed_image_mime_raises(
         await call_tool(mock_interface, reference_file_ids=["abc123"])
 
 
+@pytest.mark.asyncio
 async def test_provider_without_image_input_support_raises(
     mock_interface: Mock, mock_user: Mock, generate_mock: AsyncMock
 ) -> None:
@@ -275,6 +288,7 @@ async def test_provider_without_image_input_support_raises(
         await call_tool(mock_interface, reference_file_ids=["abc123"])
 
 
+@pytest.mark.asyncio
 async def test_model_without_image_input_support_raises(
     mock_interface: Mock, mock_provider: Mock, generate_mock: AsyncMock
 ) -> None:
@@ -285,6 +299,7 @@ async def test_model_without_image_input_support_raises(
         await call_tool(mock_interface, reference_file_ids=["abc123"], image_model="dall-e-3")
 
 
+@pytest.mark.asyncio
 async def test_no_reference_input_skips_capability_checks(
     mock_interface: Mock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

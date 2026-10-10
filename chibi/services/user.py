@@ -391,6 +391,26 @@ async def generate_image(
     provider_name: str | None = None,
     images: list[tuple[bytes, str]] | None = None,
 ) -> list[str] | list[BytesIO]:
+    """Generate images via the user's selected or active image provider.
+
+    Args:
+        db: Database instance (injected).
+        interface: User interface bound to the current request.
+        prompt: Image generation prompt.
+        model: Optional image model override. Ignored when ``provider_name`` is
+            not given, in which case the user's active image model is used.
+        provider_name: Optional provider override. When omitted, the user's
+            active image provider is used together with its active model.
+        images: Optional reference images as (bytes, mime type) tuples for
+            models with image-to-image support.
+
+    Returns:
+        List of image URLs, or list of BytesIO objects with image data,
+        as produced by the provider.
+
+    Raises:
+        NoProviderSelectedError: If no image provider is available.
+    """
     user = await db.get_or_create_user(user_id=interface.user_id)
 
     if provider_name:

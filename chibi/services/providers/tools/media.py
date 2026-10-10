@@ -126,6 +126,7 @@ async def _resolve_reference_from_file_id(interface: UserInterface, file_id: str
         Tuple of raw image bytes and the resolved MIME type.
 
     Raises:
+        ValueError: If the file storage backend is not configured for this interface.
         ToolException: If the file ID cannot be resolved from storage.
     """
     storage = get_file_storage(interface=interface)
