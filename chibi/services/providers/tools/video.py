@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 from typing import Any, Unpack
 
@@ -5,6 +6,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
+from chibi.config import gpt_settings
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
@@ -28,32 +30,33 @@ THUMBNAIL_MAX_PIXELS = 320
 VIDEO_TOOL_NAMES = ["generate_video", "get_available_video_generation_models"]
 
 
-def _video_generation_ready() -> bool:
-    try:
-        from chibi.services.providers import RegisteredProviders
-    except ImportError:
-        # The providers package is still being imported (it imports the tools
-        # package itself): the registry cannot be read yet. The tools start
-        # registered and sync_video_tool_registration() finalises the state
-        # once all providers are loaded.
-        return True
-    return bool(RegisteredProviders().video_generation_ready)
-
-
 def sync_video_tool_registration() -> None:
-    """Align the video tools' registration with the provider readiness.
+    """Align the video tools' registration with the operator configuration.
 
-    Called after the provider registry is fully populated so that both video
-    tools are registered only if at least one provider is video-ready.
+    Mirrors the image tools: the tool classes are statically registered (the
+    ``ChibiTool.__init_subclass__`` whitelist gate applied at class-definition
+    time), and in public mode availability is resolved per user at call time.
+    This sync pass only matters in private mode, where the tools make sense
+    solely when at least one configured provider is video-ready. The
+    ``TOOLS_WHITELIST`` gate is honoured exactly like
+    ``ChibiTool.__init_subclass__`` does.
+
+    Called at the end of the ``chibi.services.providers`` package import, once
+    the provider registry is fully populated.
     """
+    from chibi.services.providers import RegisteredProviders
     from chibi.services.providers.tools.tool import RegisteredChibiTools
 
-    if _video_generation_ready():
-        for tool in (GetAvailableVideoGenerationModelsTool, GenerateVideoTool):
-            if tool.name not in RegisteredChibiTools.tools_map:
-                RegisteredChibiTools.register(tool)
+    if not gpt_settings.public_mode and not RegisteredProviders().video_generation_ready:
+        RegisteredChibiTools.deregister_tools(VIDEO_TOOL_NAMES)
         return None
-    RegisteredChibiTools.deregister_tools(VIDEO_TOOL_NAMES)
+
+    for tool in (GetAvailableVideoGenerationModelsTool, GenerateVideoTool):
+        if gpt_settings.tools_whitelist and tool.name not in gpt_settings.tools_whitelist:
+            RegisteredChibiTools.deregister_tools([tool.name])
+            continue
+        if tool.name not in RegisteredChibiTools.tools_map:
+            RegisteredChibiTools.register(tool)
     return None
 
 
@@ -94,7 +97,7 @@ def prepare_video_thumbnail(thumbnail: bytes) -> bytes | None:
 
 
 class GetAvailableVideoGenerationModelsTool(ChibiTool):
-    register = _video_generation_ready()
+    register = True
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
@@ -125,7 +128,7 @@ class GetAvailableVideoGenerationModelsTool(ChibiTool):
 
 
 class GenerateVideoTool(ChibiTool):
-    register = _video_generation_ready()
+    register = True
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
@@ -136,7 +139,8 @@ class GenerateVideoTool(ChibiTool):
                 "Generate video using one of the available models. You won’t see the video itself, only a message "
                 "about whether the operation was successful or not. Check available providers and models first. "
                 "Use your knowledge to adapt the prompt for a specific model to achieve the best result. "
-                "The aspect ratio, size and resolution are set globally and cannot be changed via the prompt"
+                "The aspect ratio and resolution are determined by the chosen model and cannot be changed via "
+                "the prompt; the duration can be requested via the duration parameter if the model supports it."
             ),
             parameters={
                 "type": "object",
@@ -184,7 +188,10 @@ class GenerateVideoTool(ChibiTool):
 
         thumbnail = prepare_video_thumbnail(result.thumbnail) if result.thumbnail else None
         title = f"{prompt[:20]}..."
-        filename = f"{title.replace(' ', '_')}.mp4"
+        # Keep the prompt-derived filename filesystem-safe: strip slashes,
+        # newlines, quotes, emoji and other non-word characters.
+        safe_name = re.sub(r"[^\w-]+", "_", prompt[:40]).strip("_") or "video"
+        filename = f"{safe_name}.mp4"
 
         if len(result.video) > VIDEO_SIZE_GUARD_BYTES:
             logger.log(
