@@ -8,10 +8,12 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from typing import Iterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from chibi.config import gpt_settings
+from chibi.models import User
 from chibi.schemas.app import ModelChangeSchema, VideoResult
 from chibi.services.providers.tools import GenerateVideoTool, GetAvailableVideoGenerationModelsTool
 from chibi.services.providers.tools.exceptions import ToolException
@@ -23,6 +25,7 @@ from chibi.services.providers.tools.video import (
     prepare_video_thumbnail,
     sync_video_tool_registration,
 )
+from chibi.storage.local import LocalStorage
 
 
 @contextmanager
@@ -385,3 +388,90 @@ class TestSizeGuardDelivery:
         assert "\n" not in filename
         assert "?" not in filename
         assert "🚲" not in filename
+
+
+def _stub_database_provider(db: LocalStorage) -> MagicMock:
+    stub = MagicMock()
+    stub.get_database = AsyncMock(return_value=db)
+    return stub
+
+
+class TestFullToolFlowWithMockedProvider:
+    """E2E-style tool flow: the real limit check and ``generate_video`` service run
+    against a LocalStorage instance, with the provider mocked at the ``get_videos``
+    boundary. Verifies that limit checking, usage counting and delivery (video vs
+    document) work together, not just in isolation."""
+
+    @pytest.fixture
+    def e2e_env(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(gpt_settings, "video_generations_whitelist_raw", None, raising=False)
+        db = LocalStorage(storage_path=str(tmp_path))
+        provider = MagicMock()
+        provider.name = "Alibaba"
+        provider.get_videos = AsyncMock(
+            return_value=_video_result(video=b"mp4-bytes", thumbnail=_jpeg_bytes(300, 200), duration=5)
+        )
+        with (
+            patch("chibi.storage.database._db_provider", _stub_database_provider(db)),
+            patch.object(User, "providers", new_callable=PropertyMock) as providers_mock,
+            patch.object(User, "get_active_video_provider", return_value=provider),
+            patch.object(User, "get_active_video_model", return_value="wan2.6-t2v"),
+        ):
+            providers_mock.return_value.get.return_value = provider
+            yield db, provider
+
+    async def test_flow_delivers_video_and_counts_usage(
+        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db, provider = e2e_env
+        monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 5, raising=False)
+
+        result = await GenerateVideoTool.function(prompt="a cat on a bike", **mock_kwargs)
+
+        assert result == {"detail": "Video was successfully generated and sent to user."}
+        provider.get_videos.assert_awaited_once_with(prompt="a cat on a bike", model="wan2.6-t2v", duration=None)
+        mock_interface.send_video.assert_awaited_once()
+        mock_interface.send_document.assert_not_awaited()
+        kwargs = mock_interface.send_video.await_args.kwargs
+        assert kwargs["video"] == b"mp4-bytes"
+        assert kwargs["duration"] == 5
+        assert kwargs["thumbnail"] is not None
+
+        user = await db.get_or_create_user(user_id=12345)
+        assert len(user.videos) == 1
+
+    async def test_flow_sends_oversized_video_as_document(
+        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db, provider = e2e_env
+        monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 5, raising=False)
+        big_video = b"x" * (VIDEO_SIZE_GUARD_BYTES + 1)
+        provider.get_videos.return_value = _video_result(video=big_video, duration=10)
+
+        await GenerateVideoTool.function(prompt="a big cat", **mock_kwargs)
+
+        mock_interface.send_document.assert_awaited_once()
+        mock_interface.send_video.assert_not_awaited()
+        kwargs = mock_interface.send_document.await_args.kwargs
+        assert kwargs["document"] == big_video
+        assert "file" in kwargs["caption"].lower()
+
+        user = await db.get_or_create_user(user_id=12345)
+        assert len(user.videos) == 1
+
+    async def test_flow_blocks_generation_when_limit_reached(
+        self, e2e_env, mock_kwargs: dict, mock_interface: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db, provider = e2e_env
+        monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 1, raising=False)
+        await db.count_video(12345)
+
+        with pytest.raises(ToolException, match="monthly limit"):
+            await GenerateVideoTool.function(prompt="a cat", **mock_kwargs)
+
+        provider.get_videos.assert_not_awaited()
+        mock_interface.send_video.assert_not_awaited()
+        mock_interface.send_document.assert_not_awaited()
+
+        user = await db.get_or_create_user(user_id=12345)
+        assert len(user.videos) == 1  # only the pre-seeded generation

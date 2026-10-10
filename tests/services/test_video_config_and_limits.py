@@ -55,6 +55,11 @@ class TestVideoLimits:
         assert gpt_settings.video_generations_monthly_limit == 0
         assert user.has_reached_video_limits is False
 
+    def test_empty_history_is_below_any_positive_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 5, raising=False)
+        user = User(id=1, videos=[])
+        assert user.has_reached_video_limits is False
+
     def test_limit_not_reached_below_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(gpt_settings, "video_generations_monthly_limit", 3, raising=False)
         user = User(id=1, videos=[VideoMeta(expire_at=1e12)])
