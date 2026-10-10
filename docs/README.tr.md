@@ -95,6 +95,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 ### Multimodal sağlayıcılar (opsiyonel)
 
 - **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), ve görüntü oluşturma modellerine erişim sağlayan herhangi bir satıcı-toplayıcı
+- **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); kullanıcı başına aylık sınır `VIDEO_GENERATIONS_LIMIT` ortam değişkeni ile yapılandırılır
 - **Müzik:** Suno, ElevenLabs Music
 - **Ses (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
@@ -270,6 +271,7 @@ Bir araç MCP üzerinden sunulabiliyorsa, Chibi onu kullanmayı öğrenebilir.
 
 ### 🎨 Zengin içerik üretimi
 - **Görseller:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
+- **Video:** Wan (Alibaba), CogVideoX (ZhipuAI), Hailuo (MiniMax)
 - **Müzik:** Suno (custom mode dahil: stil/şarkı sözü/vokal)
 - **Ses:** transkripsiyon + metinden sese (ElevenLabs, OpenAI)
 
