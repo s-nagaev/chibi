@@ -384,7 +384,12 @@ async def check_history_and_summarize(db: Database, storage_id: int, thread_id: 
 
 @inject_database
 async def generate_image(
-    db: Database, interface: UserInterface, prompt: str, model: str | None = None, provider_name: str | None = None
+    db: Database,
+    interface: UserInterface,
+    prompt: str,
+    model: str | None = None,
+    provider_name: str | None = None,
+    images: list[tuple[bytes, str]] | None = None,
 ) -> list[str] | list[BytesIO]:
     user = await db.get_or_create_user(user_id=interface.user_id)
 
@@ -397,10 +402,13 @@ async def generate_image(
 
     if not provider:
         raise NoProviderSelectedError("No image provider available")
-    images = await provider.get_images(prompt=prompt, model=selected_model)
+    if images:
+        result = await provider.get_images(prompt=prompt, model=selected_model, images=images)
+    else:
+        result = await provider.get_images(prompt=prompt, model=selected_model)
     if interface.user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(interface.user_id)
-    return images
+    return result
 
 
 @inject_database

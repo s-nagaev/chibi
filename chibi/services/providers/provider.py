@@ -232,6 +232,7 @@ class Provider(ABC):
     vision_ready: bool = False
     moderation_ready: bool = False
     image_generation_ready: bool = False
+    image_to_image_ready: bool = False
 
     name: str
     model_name_keywords: list[str] = []
@@ -413,7 +414,21 @@ class Provider(ABC):
             "strict": False,
         }
 
-    async def get_images(self, prompt: str, model: str | None) -> list[str] | list[BytesIO]:
+    @classmethod
+    def supports_image_input(cls, model: str) -> bool:
+        """Check whether a specific model of this provider accepts image input for generation.
+
+        Args:
+            model: Model name to check.
+
+        Returns:
+            True if the model supports image-to-image input, False otherwise.
+        """
+        return False
+
+    async def get_images(
+        self, prompt: str, model: str | None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str] | list[BytesIO]:
         raise NotImplementedError
 
     def _get_max_tokens_value(self, model_name: str) -> int:
@@ -1009,7 +1024,24 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             response_format="url",
         )
 
-    async def get_images(self, prompt: str, model: str | None = None) -> list[str] | list[BytesIO]:
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str] | list[BytesIO]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples. Not yet
+                supported by this base implementation and ignored.
+
+        Returns:
+            List of image URLs or BytesIO objects with image data.
+
+        Raises:
+            NoModelSelectedError: If no image model is selected.
+            ServiceResponseError: If the provider returns no image data.
+        """
         model = model or self.default_image_model
         if not model:
             raise NoModelSelectedError(provider=self.name, detail="No image generation model selected")
@@ -1017,12 +1049,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         if not response.data:
             raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
 
-        images: list[Image] = response.data
+        image_data: list[Image] = response.data
 
         if response.data[0].url:
-            return [image.url for image in images if image.url]
+            return [image.url for image in image_data if image.url]
 
-        return [BytesIO(base64.b64decode(image.b64_json)) for image in images if image.b64_json]
+        return [BytesIO(base64.b64decode(image.b64_json)) for image in image_data if image.b64_json]
 
     async def vision(
         self,
