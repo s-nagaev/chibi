@@ -26,6 +26,7 @@ from chibi.services.failover import (
     FailoverModelRegistry,
     FailoverPair,
     FailoverTrigger,
+    TriggerKind,
     failover_failure_message,
     failover_warning_message,
     format_failover_pair,
@@ -55,7 +56,7 @@ def _clean_cooldown_and_registry_singletons():
         SingletonMeta._instances.pop(cls, None)
 
 
-def _make_trigger(kind: str = "rate_limit", provider: str = "openai", model: str | None = "gpt-5.6-luna"):
+def _make_trigger(kind: TriggerKind = "rate_limit", provider: str = "openai", model: str | None = "gpt-5.6-luna"):
     return FailoverTrigger(kind=kind, provider=provider, model=model, original=RuntimeError("boom"))
 
 
@@ -468,7 +469,7 @@ class TestHookRobustness:
         )
         assert seen == [("network", "lyceum")]
 
-    async def test_failing_hook_is_logged_not_raised(self, monkeypatch, caplog):
+    async def test_failing_hook_is_logged_not_raised(self, monkeypatch):
         monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "lyceum/glm-5.3-flash", raising=False)
         messages: list[str] = []
         sink_id = logger.add(messages.append, level="WARNING")

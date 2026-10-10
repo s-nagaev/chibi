@@ -15,6 +15,11 @@ AUTO mode (default, zero config):
        model (``model=None`` keeps the existing default-model semantics).
     4. If nothing works -> fail with an honest error. No model-mixing, no
        cross-mode cascades.
+    Degenerate case: with a ``None`` primary model (user never selected a
+    model) the AUTO ladder collapses to a single attempt — the
+    ``model and not with_model`` guard in the ladder builder suppresses
+    step 3. This is deliberate: without a selected model there is nothing
+    to "fail over from" on the same-provider step.
 
 MANUAL mode (opt-in, per role):
     An ordered chain of (provider, model) pairs. Head of the chain is the
@@ -376,7 +381,7 @@ def validate_failover_chains() -> None:
     skipped by :func:`parse_failover_chain`.
     """
     for role in ("master", "subagent"):
-        resolve_failover_policy(role)  # type: ignore[arg-type]
+        resolve_failover_policy(role)
 
 
 class CooldownStore(metaclass=SingletonMeta):
