@@ -21,6 +21,11 @@ def _make_dummy_provider(name: str, video_ready: bool) -> type:
     """
 
     class _Dummy:
+        name: str
+        api_key: str
+        default_model: str
+        video_generation_ready: bool
+
         def __init__(self, token: str = "") -> None:
             self.token = token
 
@@ -83,9 +88,7 @@ class TestRegisteredProvidersVideo:
     def test_video_ready_provider_is_listed(self) -> None:
         video_provider = _make_dummy_provider("VideoReady", video_ready=True)
         chat_provider = _make_dummy_provider("OnlyChat", video_ready=False)
-        with patch.object(
-            RegisteredProviders, "available", {"videoready": video_provider, "onlychat": chat_provider}
-        ):
+        with patch.object(RegisteredProviders, "available", {"videoready": video_provider, "onlychat": chat_provider}):
             registry = RegisteredProviders()
             assert set(registry.video_generation_ready) == {"videoready"}
             instance = registry.first_video_generation_ready

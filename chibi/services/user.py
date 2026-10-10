@@ -686,6 +686,8 @@ async def clone_thread_messages(
         user.thread_selected_llm[new_thread_id] = user.thread_selected_llm[old_thread_id]
     if old_thread_id in user.thread_selected_image_model:
         user.thread_selected_image_model[new_thread_id] = user.thread_selected_image_model[old_thread_id]
+    if old_thread_id in user.thread_selected_video_model:
+        user.thread_selected_video_model[new_thread_id] = user.thread_selected_video_model[old_thread_id]
     if old_thread_id in user.thread_working_dirs:
         user.thread_working_dirs[new_thread_id] = user.thread_working_dirs[old_thread_id]
 
