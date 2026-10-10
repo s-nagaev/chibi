@@ -1046,19 +1046,27 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         Args:
             prompt: Text description of the image to generate.
             model: Image model name. Defaults to the provider's default image model.
-            images: Optional image input as (bytes, mime type) tuples. Not yet
-                supported by this base implementation and ignored.
+            images: Optional image input as (bytes, mime type) tuples. Not supported
+                by this base implementation.
 
         Returns:
             List of image URLs or BytesIO objects with image data.
 
         Raises:
             NoModelSelectedError: If no image model is selected.
-            ServiceResponseError: If the provider returns no image data.
+            ServiceResponseError: If the provider returns no image data, or if
+                image input is provided, which this base implementation does not
+                support.
         """
         model = model or self.default_image_model
         if not model:
             raise NoModelSelectedError(provider=self.name, detail="No image generation model selected")
+        if images:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="This provider does not support image input for image generation.",
+            )
         response = await self._get_image_generation_response(prompt=prompt, model=model)
         if not response.data:
             raise ServiceResponseError(provider=self.name, model=model, detail="No image data received.")
