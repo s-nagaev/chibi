@@ -31,7 +31,7 @@ class Alibaba(OpenAIFriendlyProvider):
     default_moderation_model = "qwen3.8-flash"
 
     default_image_model = "qwen-image-plus"
-    default_video_model = "wan2.6-t2v-flash"
+    default_video_model = "wan2.6-t2v"
     default_vision_model = "qwen3-vl-flash"
 
     @staticmethod
@@ -173,13 +173,6 @@ class Alibaba(OpenAIFriendlyProvider):
 
         if video_generation:
             wan_video_models = [
-                ModelChangeSchema(
-                    provider=self.name,
-                    name="wan2.6-t2v-flash",
-                    display_name="Wan 2.6 T2V Flash",
-                    image_generation=False,
-                    video_generation=True,
-                ),
                 ModelChangeSchema(
                     provider=self.name,
                     name="wan2.6-t2v",

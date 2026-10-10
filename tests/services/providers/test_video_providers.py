@@ -28,7 +28,7 @@ async def test_video_generation_ready_flags() -> None:
     assert alibaba.video_generation_ready
     assert zhipu.video_generation_ready
     assert minimax.video_generation_ready
-    assert alibaba.default_video_model == "wan2.6-t2v-flash"
+    assert alibaba.default_video_model == "wan2.6-t2v"
     assert zhipu.default_video_model == "cogvideox-3"
     assert minimax.default_video_model == "MiniMax-H3"
 
@@ -58,7 +58,7 @@ class TestAlibabaVideo:
         assert result.video == b"MP4"
         assert result.thumbnail is None
         assert result.duration == 5
-        sdk.async_call.assert_awaited_once_with(api_key="test_token", model="wan2.6-t2v-flash", prompt="a cat surfing")
+        sdk.async_call.assert_awaited_once_with(api_key="test_token", model="wan2.6-t2v", prompt="a cat surfing")
         sdk.fetch.assert_awaited_with(task="task-1", api_key="test_token")
 
     @pytest.mark.asyncio
@@ -172,7 +172,7 @@ class TestAlibabaVideo:
         ):
             models = await Alibaba("test_token").get_available_models(video_generation=True)
 
-        assert {model.name for model in models} == {"wan2.6-t2v-flash", "wan2.6-t2v"}
+        assert {model.name for model in models} == {"wan2.6-t2v"}
         assert all(model.video_generation for model in models)
 
 
