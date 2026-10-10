@@ -1,17 +1,28 @@
+import asyncio
 import datetime
 import json
 import time
 from copy import deepcopy
 from datetime import timezone
+from functools import partial
 from io import BytesIO
 from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from loguru import logger
+
 from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
+from chibi.services.failover import (
+    FailoverPair,
+    FailoverTrigger,
+    failover_failure_message,
+    failover_warning_message,
+    run_with_failover,
+)
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
@@ -192,6 +203,74 @@ async def get_telegram_document(db: Database, storage_id: int, file_unique_id: s
     return user.telegram_files.get(file_unique_id)
 
 
+def _log_failed_notification(task: "asyncio.Task[None]") -> None:
+    """Done-callback for fire-and-forget failover notification tasks.
+
+    Logs (never raises) when a warning message could not be delivered to
+    the chat — a failed notification must never surface as an error to the
+    user or break the answer path.
+
+    Args:
+        task: The completed notification task.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning(f"Failover: failed to deliver the chat notification: {exc}")
+
+
+def _deliver_failover_notification(interface: UserInterface, pending: list[asyncio.Task[None]], message: str) -> None:
+    """Fire-and-forget delivery of a failover notification to the chat.
+
+    A slow or failed chat send must never delay or break the failover
+    walk itself; the created task is appended to ``pending`` so the caller
+    can await it before returning (warning lands before the answer/error),
+    and a failed delivery is logged, never raised.
+
+    Args:
+        interface: The user interface to deliver the message through.
+        pending: Mutable list of in-flight notification tasks to append to.
+        message: The notification message to deliver.
+    """
+    task = asyncio.create_task(interface.send_message(message=message))
+    pending.append(task)
+    task.add_done_callback(_log_failed_notification)
+
+
+def _failover_fallback_hook(
+    interface: UserInterface, pending: list[asyncio.Task[None]], trigger: FailoverTrigger, pair: FailoverPair
+) -> None:
+    """Deliver a fallback warning to the chat (fire-and-forget).
+
+    Args:
+        interface: The user interface to deliver the message through.
+        pending: Mutable list of in-flight notification tasks to append to.
+        trigger: The trigger that fired the fallback.
+        pair: The (provider, model) pair about to be attempted.
+    """
+    _deliver_failover_notification(interface, pending, failover_warning_message(trigger=trigger, fallback=pair))
+
+
+def _failover_failure_hook(
+    interface: UserInterface,
+    pending: list[asyncio.Task[None]],
+    trigger: FailoverTrigger,
+    fallback_targets: list[FailoverPair],
+) -> None:
+    """Deliver the final honest-failure message to the chat (fire-and-forget).
+
+    Args:
+        interface: The user interface to deliver the message through.
+        pending: Mutable list of in-flight notification tasks to append to.
+        trigger: The last trigger that fired.
+        fallback_targets: The fallback pairs that were actually attempted.
+    """
+    _deliver_failover_notification(
+        interface, pending, failover_failure_message(trigger=trigger, fallback_targets=fallback_targets)
+    )
+
+
 @inject_database
 async def get_llm_chat_completion_answer(
     db: Database,
@@ -320,15 +399,42 @@ async def get_llm_chat_completion_answer(
         active_provider = user.get_active_llm_provider(thread_id=thread_id)
         active_model = user.get_active_llm_model(thread_id=thread_id)
 
-        chat_response, new_messages = await active_provider.get_chat_response(
-            messages=conversation_messages,
-            user=user,
-            model=active_model,
-            interface=interface,
-            track_prompt_size=True,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
-        )
+        # Failover-guarded chat call. The retry loop lives inside the lock
+        # for history consistency; the emergency summarization path above is
+        # deliberately NOT failover-guarded (determinism where determinism
+        # matters). ``emergency_summarization`` and moderation are out of
+        # scope per the failover plan.
+        #
+        # Notification wiring (failover_notification task): fallback warnings
+        # and the final honest failure go to the chat via the interface.
+        # Delivery is fire-and-forget so a slow chat send can never delay
+        # the failover walk itself; pending sends are awaited before this
+        # function returns/raises (warning lands before the answer/error).
+        pending_notifications: list[asyncio.Task[None]] = []
+
+        try:
+            failover_result = await run_with_failover(
+                role="master",
+                user=user,
+                primary_provider=active_provider,
+                model=active_model,
+                call=lambda provider, model: provider.get_chat_response(
+                    messages=conversation_messages,
+                    user=user,
+                    model=model,
+                    interface=interface,
+                    track_prompt_size=True,
+                    caller_storage_id=interface.storage_id,
+                    caller_thread_id=interface.thread_id,
+                ),
+                on_fallback=partial(_failover_fallback_hook, interface, pending_notifications),
+                on_failure=partial(_failover_failure_hook, interface, pending_notifications),
+            )
+        finally:
+            if pending_notifications:
+                await asyncio.gather(*pending_notifications, return_exceptions=True)
+        chat_response, new_messages = failover_result.response, failover_result.new_messages
+        assert chat_response is not None  # Type narrowing for mypy: a returned walk always carries a response
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
             await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
