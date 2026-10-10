@@ -467,7 +467,7 @@ class Provider(ABC):
 
     async def get_videos(
         self,
-        model: str,
+        model: str | None,
         prompt: str,
         image: bytes | str | None = None,
         duration: int | None = None,
@@ -481,7 +481,7 @@ class Provider(ABC):
         text-to-video providers must raise when ``image`` is provided.
 
         Args:
-            model: The video model to use.
+            model: The video model to use (``None`` lets the provider pick its default).
             prompt: The text prompt describing the clip.
             image: Optional reference image (bytes or URL) for image-to-video.
             duration: Optional requested clip duration in seconds.

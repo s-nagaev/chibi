@@ -475,6 +475,11 @@ class ImageMeta(BaseModel):
     expire_at: float
 
 
+class VideoMeta(BaseModel):
+    id: int = Field(default_factory=time.time_ns)
+    expire_at: float
+
+
 class TelegramFileMeta(BaseModel):
     file_id: str
     file_name: str
@@ -503,6 +508,7 @@ class User(BaseModel):
     tokens: dict[str, str] = {}
     messages: list[Message] = Field(default_factory=list)
     images: list[ImageMeta] = Field(default_factory=list)
+    videos: list[VideoMeta] = Field(default_factory=list)
     gpt_model: str | None = None  # TODO: Deprecated
     selected_gpt_model_name: str | None = None  # TODO: Deprecated
     selected_gpt_provider_name: str | None = None  # TODO: Deprecated
@@ -717,6 +723,14 @@ class User(BaseModel):
         if str(self.id) in gpt_settings.image_generations_whitelist:
             return False
         return len(self.images) >= gpt_settings.image_generations_monthly_limit
+
+    @property
+    def has_reached_video_limits(self) -> bool:
+        if not gpt_settings.video_generations_monthly_limit:
+            return False
+        if str(self.id) in gpt_settings.video_generations_whitelist:
+            return False
+        return len(self.videos) >= gpt_settings.video_generations_monthly_limit
 
     def approximate_context_size(self, thread_id: int) -> int:
         messages_to_count = []
