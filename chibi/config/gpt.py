@@ -114,6 +114,9 @@ class GPTSettings(BaseSettings):
     filesystem_access: bool = Field(default=False)
     allow_delegation: bool = Field(default=True)
     llm_role_raw: str | None = Field(alias="LLM_ROLE", default=None)
+    failover_chain_master_raw: str | None = Field(alias="FAILOVER_CHAIN_MASTER", default=None)
+    failover_chain_subagent_raw: str | None = Field(alias="FAILOVER_CHAIN_SUBAGENT", default=None)
+
     delegate_task_timeout: int | None = Field(default=None)
     tools_whitelist_raw: str | None = Field(alias="TOOLS_WHITELIST", default=None)
 

@@ -63,6 +63,7 @@ from openai import APITimeoutError as OpenAIAPITimeoutError
 from openai import InternalServerError as OpenAIInternalServerError
 from openai import RateLimitError as OpenAIRateLimitError
 
+from chibi.config.gpt import gpt_settings
 from chibi.exceptions import (
     ContextLengthExceededError,
     NoApiKeyProvidedError,
@@ -198,21 +199,120 @@ class FailoverPolicy:
     chain: list[FailoverPair] = field(default_factory=list)
 
 
+def parse_failover_chain(raw: str | None, role: Role) -> FailoverPolicy:
+    """Parse one ``FAILOVER_CHAIN_*`` setting into a :class:`FailoverPolicy`.
+
+    Grammar (owner-confirmed, see the plan): the value is exactly one of
+
+    - ``auto`` (case-insensitive) — the auto ladder;
+    - ``disabled`` (case-insensitive) — no fallback for the role;
+    - a comma-separated ordered list of ``provider/model`` pairs, where the
+      pair splits on the FIRST slash only (provider names contain no
+      slashes; model names may, e.g. ``google/gemini-3.5-flash-lite``).
+
+    Whitespace is tolerated everywhere. Validation is non-fatal by design
+    (install-time rule): every invalid entry (empty, missing slash, empty
+    provider or model part, duplicate pair) produces a clear warning and is
+    skipped — the application never crashes on a malformed chain. An
+    unset/blank value means the default policy: AUTO.
+
+    Args:
+        raw: The raw setting value (``None`` when unset).
+        role: ``"master"`` or ``"subagent"`` — used for warnings only.
+
+    Returns:
+        The resolved policy (AUTO/DISABLED with an empty chain, or MANUAL
+        with the validated chain; the chain holds the FALLBACK steps —
+        the engine prepends the call site's primary as the head).
+    """
+    if raw is None or not raw.strip():
+        return FailoverPolicy(mode=FailoverMode.AUTO, chain=[])
+
+    value = raw.strip()
+    lowered = value.lower()
+    env_name = f"FAILOVER_CHAIN_{role.upper()}"
+
+    if lowered == "auto":
+        return FailoverPolicy(mode=FailoverMode.AUTO, chain=[])
+    if lowered == "disabled":
+        return FailoverPolicy(mode=FailoverMode.DISABLED, chain=[])
+
+    chain: list[FailoverPair] = []
+    seen: set[tuple[str, str | None]] = set()
+    for index, entry in enumerate(value.split(","), start=1):
+        entry = entry.strip()
+        if not entry:
+            logger.warning(f"Failover[{role}]: {env_name} entry #{index} is empty — skipped.")
+            continue
+        provider, _, model = entry.partition("/")  # first slash only
+        provider = provider.strip()
+        model = model.strip()
+        if not provider or not model:
+            logger.warning(
+                f"Failover[{role}]: {env_name} entry #{index} '{entry}' is invalid — "
+                f"expected 'provider/model' (split on the first slash) — skipped."
+            )
+            continue
+        key = (provider.lower(), model)
+        if key in seen:
+            logger.warning(f"Failover[{role}]: {env_name} entry #{index} '{entry}' is a duplicate pair — skipped.")
+            continue
+        seen.add(key)
+        chain.append(FailoverPair(provider=provider, model=model))
+
+    return FailoverPolicy(mode=FailoverMode.MANUAL, chain=chain)
+
+
+# Env settings are bootstrap defaults (changes go through the Redis
+# runtime override, not the process environment): the resolved policy is
+# memoized per role for the process lifetime. Tests and future runtime
+# overrides can invalidate it with :func:`reset_failover_policy_cache`.
+_policy_cache: dict[str, FailoverPolicy] = {}
+
+
 def resolve_failover_policy(role: Role) -> FailoverPolicy:
     """Resolve the failover policy for a role.
 
-    v1 bootstrap default: AUTO for every role. The ``failover_config`` task
-    replaces this with the real resolution order (``FAILOVER_CHAIN_MASTER``
-    / ``FAILOVER_CHAIN_SUBAGENT`` env bootstrap defaults + Redis runtime
-    override), keeping this seam intact.
+    Reads the ``FAILOVER_CHAIN_MASTER`` / ``FAILOVER_CHAIN_SUBAGENT``
+    bootstrap default (via ``GPTSettings``) and parses it with
+    :func:`parse_failover_chain`. The result is memoized per role: the
+    environment is a bootstrap default, so re-reading it per request would
+    be misleading once a Redis runtime override lands.
 
     Args:
         role: ``"master"`` or ``"subagent"``.
 
     Returns:
-        The policy for the role.
+        The policy for the role (AUTO by default).
     """
-    return FailoverPolicy(mode=FailoverMode.AUTO, chain=[])
+    cached = _policy_cache.get(role)
+    if cached is not None:
+        return cached
+    raw = getattr(gpt_settings, f"failover_chain_{role}_raw", None)
+    policy = parse_failover_chain(raw, role)
+    _policy_cache[role] = policy
+    logger.info(
+        f"Failover[{role}]: failover policy resolved — mode={policy.mode.value}, "
+        f"configured chain steps={len(policy.chain)}."
+    )
+    return policy
+
+
+def reset_failover_policy_cache() -> None:
+    """Drop the memoized policies (tests / future runtime overrides)."""
+    _policy_cache.clear()
+
+
+def validate_failover_chains() -> None:
+    """Install-time validation of both chain settings.
+
+    Parses both roles once, so malformed ``FAILOVER_CHAIN_*`` values
+    produce their warnings at startup (config load) instead of on the
+    first request. Never raises: invalid entries are warned about and
+    skipped by :func:`parse_failover_chain`.
+    """
+    for role in ("master", "subagent"):
+        resolve_failover_policy(role)  # type: ignore[arg-type]
 
 
 class CooldownStore(metaclass=SingletonMeta):
@@ -561,12 +661,18 @@ class FailoverEngine:
             return result
 
         if policy.mode == FailoverMode.MANUAL:
-            # Head of chain = primary; the chain fully replaces auto and is
-            # never blocked by the cooldown. An empty chain falls back to a
-            # single attempt on the caller-resolved primary.
-            pairs_iter: list[FailoverPair] = list(policy.chain) or [FailoverPair(provider=primary_name, model=model)]
+            # Head of chain = the caller-resolved primary (the user's active
+            # selection); the configured chain lists the FALLBACK steps in
+            # order. The chain fully replaces auto and is never blocked by
+            # the cooldown. An empty configured chain degrades to a single
+            # attempt on the primary (same walk as DISABLED, minus the
+            # honest-error framing). The tried-set deduplicates a primary
+            # that also appears in the configured chain.
+            pairs_iter: list[FailoverPair] = [FailoverPair(provider=primary_name, model=model), *policy.chain]
             cooldown_check = False
-            instances_map = await get_instances()
+            # Extra providers are only needed when the chain has fallback
+            # steps; an empty chain must not pay for instantiation.
+            instances_map = await get_instances() if policy.chain else {primary_key: primary_provider}
         else:  # AUTO
             # Primary attempt FIRST: the auto ladder — including provider
             # model enumeration — is resolved lazily, only when the primary
@@ -635,3 +741,9 @@ async def run_with_failover(
         The ``FailoverResult`` with the response and fallback metadata.
     """
     return await FailoverEngine(user=user).run(role=role, primary_provider=primary_provider, model=model, call=call)
+
+
+# Install-time validation: resolve both roles once at import/config-load
+# so malformed FAILOVER_CHAIN_* values are reported (warned and skipped)
+# at startup rather than on the first chat request. Never raises.
+validate_failover_chains()
