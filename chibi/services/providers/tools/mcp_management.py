@@ -83,7 +83,7 @@ async def register_tools_from_mcp_session(
                     function=FunctionDefinition(
                         name=chibi_tool_name,
                         description=f"MCP Server: {server_name}. {tool.description or ''}",
-                        parameters=cast(dict[str, object], _clean_schema(tool.inputSchema)),
+                        parameters=cast(dict[str, object], _clean_schema(tool.input_schema)),
                     ),
                 ),
                 "name": chibi_tool_name,
