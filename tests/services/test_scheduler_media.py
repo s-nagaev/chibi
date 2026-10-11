@@ -10,6 +10,7 @@ from telegram.constants import ChatAction, FileSizeLimit
 
 import chibi.services.scheduler_interface as scheduler_interface_module
 from chibi.config import gpt_settings
+from chibi.config.gpt import GPTSettings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.services.scheduler_interface import SchedulerInterface
 
@@ -198,9 +199,10 @@ class TestSendImagesFromLocalPaths:
     """Local file paths are read from disk and reuse the BytesIO buffer pipeline."""
 
     @pytest.fixture
-    def filesystem_access_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def filesystem_access_enabled(self, monkeypatch: pytest.MonkeyPatch) -> GPTSettings:
         """Enable the filesystem_access gate for the duration of a test."""
         monkeypatch.setattr(gpt_settings, "filesystem_access", True)
+        return gpt_settings
 
     def _local_file(self, tmp_path: Path, name: str, size: int) -> Path:
         """Create a local image file of the given size.
@@ -221,6 +223,7 @@ class TestSendImagesFromLocalPaths:
         self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
     ) -> None:
         """A small local file is delivered as an InputMediaPhoto via the shared buffer pipeline."""
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = self._local_file(tmp_path, "picture.png", 1024)
 
         await interface.send_images(images=[str(local_file)])
@@ -242,6 +245,7 @@ class TestSendImagesFromLocalPaths:
         self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
     ) -> None:
         """A local file above PHOTOSIZE_UPLOAD is delivered as a document."""
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = self._local_file(tmp_path, "big.png", FileSizeLimit.PHOTOSIZE_UPLOAD + 1)
 
         await interface.send_images(images=[str(local_file)])
@@ -255,6 +259,7 @@ class TestSendImagesFromLocalPaths:
         self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
     ) -> None:
         """When the URL media group fails, local paths appear in the fallback text as base names only."""
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = self._local_file(tmp_path, "picture.png", 1024)
         scheduler_bot.send_media_group.side_effect = [RuntimeError("upload failed"), None]
 

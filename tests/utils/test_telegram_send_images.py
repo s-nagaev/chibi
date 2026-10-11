@@ -9,6 +9,7 @@ from telegram import InputFile, InputMediaDocument, InputMediaPhoto
 from telegram.constants import FileSizeLimit
 
 from chibi.config import gpt_settings
+from chibi.config.gpt import GPTSettings
 from chibi.constants import FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.utils.telegram import send_images
 
@@ -66,15 +67,17 @@ class TestSendImagesFromUrls:
 
 
 @pytest.fixture
-def filesystem_access_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def filesystem_access_enabled(monkeypatch: pytest.MonkeyPatch) -> GPTSettings:
     """Enable the filesystem_access gate for the duration of a test."""
     monkeypatch.setattr(gpt_settings, "filesystem_access", True)
+    return gpt_settings
 
 
 class TestSendImagesFromLocalPaths:
     """Local file paths are read from disk and routed through the buffer pipeline."""
 
     async def test_small_local_file_sent_as_photo(self, tmp_path: Path, filesystem_access_enabled) -> None:
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = make_local_file(tmp_path)
         update = make_update()
         context = make_context()
@@ -94,6 +97,7 @@ class TestSendImagesFromLocalPaths:
         assert media_file.input_file_content == b"x" * 1024
 
     async def test_large_local_file_sent_as_document(self, tmp_path: Path, filesystem_access_enabled) -> None:
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = make_local_file(tmp_path, size=FileSizeLimit.PHOTOSIZE_UPLOAD + 1)
         update = make_update()
         context = make_context()
@@ -106,6 +110,7 @@ class TestSendImagesFromLocalPaths:
         assert all(isinstance(m, InputMediaDocument) for m in kwargs["media"])
 
     async def test_nonexistent_path_raises_without_delivery(self, tmp_path: Path, filesystem_access_enabled) -> None:
+        assert filesystem_access_enabled.filesystem_access is True
         update = make_update()
         context = make_context()
 
@@ -115,6 +120,7 @@ class TestSendImagesFromLocalPaths:
         context.bot.send_media_group.assert_not_awaited()
 
     async def test_directory_raises_without_delivery(self, tmp_path: Path, filesystem_access_enabled) -> None:
+        assert filesystem_access_enabled.filesystem_access is True
         update = make_update()
         context = make_context()
 
@@ -141,6 +147,7 @@ class TestSendImagesFailureFallback:
     async def test_fallback_masks_local_paths(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filesystem_access_enabled
     ) -> None:
+        assert filesystem_access_enabled.filesystem_access is True
         local_file = make_local_file(tmp_path)
         update = make_update()
         context = make_context()
