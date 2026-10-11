@@ -43,6 +43,8 @@ class LocalStorage(Database):
             current_time = time.time()
             if hasattr(user, "images"):
                 user.images = [img for img in user.images if img.expire_at > current_time]
+            if hasattr(user, "videos"):
+                user.videos = [video for video in user.videos if video.expire_at > current_time]
             return user
 
         return None

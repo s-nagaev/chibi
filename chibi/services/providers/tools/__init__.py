@@ -26,5 +26,6 @@ from .send import SendAudioTool, SendImageTool, SendVideoTool
 from .telegram_files import ReadTelegramFileTool
 from .tool import RegisteredChibiTools, RegisteredFunctionsMap
 from .topic import RenameThreadTool
+from .video import GenerateVideoTool, GetAvailableVideoGenerationModelsTool
 from .vision import AnalyzeImageTool, GetFileInfoTool
 from .web import DDGSWebSearchTool, GoogleSearchTool, ReadWebPageTool, SearchNewsTool

@@ -475,6 +475,13 @@ class ImageMeta(BaseModel):
     expire_at: float
 
 
+class VideoMeta(BaseModel):
+    """A single counted video generation with its monthly-expiry timestamp."""
+
+    id: int = Field(default_factory=time.time_ns, description="Generation timestamp in nanoseconds, used as ID.")
+    expire_at: float = Field(description="Unix timestamp when the generation stops counting toward the monthly limit.")
+
+
 class TelegramFileMeta(BaseModel):
     file_id: str
     file_name: str
@@ -503,6 +510,9 @@ class User(BaseModel):
     tokens: dict[str, str] = {}
     messages: list[Message] = Field(default_factory=list)
     images: list[ImageMeta] = Field(default_factory=list)
+    videos: list[VideoMeta] = Field(
+        default_factory=list, description="Video generations counted toward the monthly limit."
+    )
     gpt_model: str | None = None  # TODO: Deprecated
     selected_gpt_model_name: str | None = None  # TODO: Deprecated
     selected_gpt_provider_name: str | None = None  # TODO: Deprecated
@@ -515,6 +525,12 @@ class User(BaseModel):
     thread_messages_map: dict[int, list[Message]] = Field(default_factory=dict)
     thread_selected_llm: dict[int, SelectedModel] = Field(default_factory=dict)
     thread_selected_image_model: dict[int, SelectedModel] = Field(default_factory=dict)
+    thread_selected_video_model: dict[int, SelectedModel] = Field(
+        default_factory=dict, description="Thread ID to the video model selected in it."
+    )
+    selected_video_provider_name: str | None = Field(
+        default=None, description="Provider selected for video generation, if any."
+    )
     thread_names: dict[int, str] = Field(default_factory=dict)
     thread_working_dirs: dict[int, str] = Field(default_factory=dict)
     thread_notes: dict[int, str] = Field(default_factory=dict)
@@ -558,6 +574,53 @@ class User(BaseModel):
 
     def get_active_image_model(self, thread_id: int) -> str | None:
         if selected_model := self.thread_selected_image_model.get(thread_id):
+            return selected_model.name
+        return None
+
+    def get_active_video_provider(self, thread_id: int) -> "Provider":
+        """Resolve the video provider for the thread.
+
+        Args:
+            thread_id: Thread whose provider selection is checked first.
+
+        Returns:
+            The selected or first available video provider instance.
+
+        Raises:
+            NoProviderSelectedError: If no video-capable provider can be resolved.
+        """
+        provider_name: str | None = None
+
+        if selected_video_model := self.thread_selected_video_model.get(thread_id):
+            provider_name = selected_video_model.provider_name
+
+        elif self.selected_video_provider_name:
+            provider_name = self.selected_video_provider_name
+
+        elif self.providers.first_video_generation_ready:
+            provider_name = self.providers.first_video_generation_ready.name
+
+        else:
+            raise NoProviderSelectedError
+
+        if not provider_name:
+            raise NoProviderSelectedError
+
+        if provider := self.providers.get(provider_name=provider_name):
+            return provider
+
+        raise NoProviderSelectedError
+
+    def get_active_video_model(self, thread_id: int) -> str | None:
+        """Return the video model selected for the thread, or None if not chosen.
+
+        Args:
+            thread_id: Thread whose model selection is checked.
+
+        Returns:
+            The selected video model name, or None.
+        """
+        if selected_model := self.thread_selected_video_model.get(thread_id):
             return selected_model.name
         return None
 
@@ -668,9 +731,14 @@ class User(BaseModel):
         return application_settings.working_dir
 
     @cached(ttl=60 * 60)
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
         providers = self.providers.available_instances
-        tasks = [provider.get_available_models(image_generation=image_generation) for provider in providers]
+        tasks = [
+            provider.get_available_models(image_generation=image_generation, video_generation=video_generation)
+            for provider in providers
+        ]
         results = await asyncio.gather(*tasks)
 
         return list(itertools.chain.from_iterable(results))
@@ -682,6 +750,19 @@ class User(BaseModel):
         if str(self.id) in gpt_settings.image_generations_whitelist:
             return False
         return len(self.images) >= gpt_settings.image_generations_monthly_limit
+
+    @property
+    def has_reached_video_limits(self) -> bool:
+        """Whether the user has used up their monthly video generation quota.
+
+        Returns:
+            True if the monthly video generation limit is reached for this user.
+        """
+        if not gpt_settings.video_generations_monthly_limit:
+            return False
+        if str(self.id) in gpt_settings.video_generations_whitelist:
+            return False
+        return len(self.videos) >= gpt_settings.video_generations_monthly_limit
 
     def approximate_context_size(self, thread_id: int) -> int:
         messages_to_count = []
