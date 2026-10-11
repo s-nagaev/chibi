@@ -164,12 +164,17 @@ async def test_connect_stdio_unwraps_exception_group_from_transport():
     """A failing stdio transport wrapped in an ExceptionGroup must surface its cause."""
     inner = RuntimeError("stdio process exited with code 1")
 
-    @asynccontextmanager
-    async def failing_stdio_client(params):
-        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
-        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+    class FailingStdioClient:
+        def __call__(self, params):
+            return self
 
-    with patch("chibi.services.mcp.manager.stdio_client", failing_stdio_client):
+        async def __aenter__(self):
+            raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    with patch("chibi.services.mcp.manager.stdio_client", FailingStdioClient()):
         with pytest.raises(RuntimeError, match="stdio process exited with code 1"):
             await MCPManager.connect_stdio("test-server", "echo", [])
 
@@ -180,12 +185,17 @@ async def test_connect_sse_unwraps_exception_group_from_transport():
     """A failing SSE transport wrapped in an ExceptionGroup must surface its cause."""
     inner = RuntimeError("Server returned an error response")
 
-    @asynccontextmanager
-    async def failing_sse_client(url, headers=None, **kwargs):
-        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
-        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+    class FailingSseClient:
+        def __call__(self, url, headers=None, **kwargs):
+            return self
 
-    with patch("chibi.services.mcp.manager.sse_client", failing_sse_client):
+        async def __aenter__(self):
+            raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    with patch("chibi.services.mcp.manager.sse_client", FailingSseClient()):
         with pytest.raises(RuntimeError, match="Server returned an error response"):
             await MCPManager.connect_sse("test-server", "http://localhost/sse")
 
@@ -200,14 +210,19 @@ async def test_connect_rest_unwraps_exception_group_from_transport():
     async def failing_http_client(**kwargs):
         yield MagicMock(name="http_client")
 
-    @asynccontextmanager
-    async def failing_streamable_http_client(url, http_client=None, **kwargs):
-        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
-        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+    class FailingStreamableHttpClient:
+        def __call__(self, url, http_client=None, **kwargs):
+            return self
+
+        async def __aenter__(self):
+            raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
 
     with (
         patch("chibi.services.mcp.manager.create_mcp_http_client", failing_http_client),
-        patch("chibi.services.mcp.manager.streamable_http_client", failing_streamable_http_client),
+        patch("chibi.services.mcp.manager.streamable_http_client", FailingStreamableHttpClient()),
     ):
         with pytest.raises(RuntimeError, match="401 Unauthorized"):
             await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
