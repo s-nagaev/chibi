@@ -8,7 +8,7 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, download
+from chibi.services.providers.tools.utils import AdditionalOptions, download, is_remote_url, resolve_local_file
 
 
 class SendTextFileTool(ChibiTool):
@@ -54,7 +54,7 @@ class SendAudioTool(ChibiTool):
                     "audio_url": {
                         "type": "string",
                         "description": (
-                            "URL to the audio file (MP3, OGG, etc.). Telegram will download it automatically."
+                            "URL of the audio file (MP3, OGG, etc.), or an absolute path to a local file on disk."
                         ),
                     },
                     "title": {
@@ -95,16 +95,37 @@ class SendAudioTool(ChibiTool):
         caption: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        """Send an audio file to the user.
+
+        Args:
+            audio_url: URL of the audio file, or a path to a local file on disk.
+            title: The title of the audio.
+            performer: The performer of the audio.
+            duration: The duration of the audio in seconds.
+            thumbnail_url: URL to a thumbnail image (optional).
+            caption: The caption for the audio.
+            **kwargs: Additional invocation options injected by the provider.
+
+        Returns:
+            A confirmation dictionary.
+
+        Raises:
+            PermissionError: If a local path is supplied while filesystem access is disabled.
+            ToolException: If a local path does not point to an existing file.
+        """
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"Sending audio to user: {audio_url}")
 
+        audio_source: bytes | str
+        if is_remote_url(audio_url):
+            audio_data = await download(url=audio_url)
+            audio_source = audio_data or audio_url
+        else:
+            audio_source = str(resolve_local_file(path_str=audio_url))
+
         # Download thumbnail if provided
         thumbnail_data: bytes | None = None
-        audio_data: bytes | None = None
-        if audio_url.startswith("http"):
-            audio_data = await download(url=audio_url)
-
         if thumbnail_url:
             thumbnail_data = await download(url=thumbnail_url)
 
@@ -115,7 +136,7 @@ class SendAudioTool(ChibiTool):
             filename = f"{clean_title[:50]}.mp3"
 
         await interface.send_audio(
-            audio=audio_data or audio_url,
+            audio=audio_source,
             title=title,
             performer=performer,
             duration=duration,
@@ -139,7 +160,9 @@ class SendVideoTool(ChibiTool):
                 "properties": {
                     "video_url": {
                         "type": "string",
-                        "description": "URL to the video file (MP4, etc.). Telegram will download it automatically.",
+                        "description": (
+                            "URL of the video file (MP4, etc.), or an absolute path to a local file on disk."
+                        ),
                     },
                     "caption": {
                         "type": "string",
@@ -177,9 +200,29 @@ class SendVideoTool(ChibiTool):
         thumbnail_url: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        """Send a video file to the user.
+
+        Args:
+            video_url: URL of the video file, or a path to a local file on disk.
+            caption: The caption for the video.
+            duration: The duration of the video in seconds.
+            thumbnail_url: URL to a thumbnail image (optional).
+            **kwargs: Additional invocation options injected by the provider.
+
+        Returns:
+            A confirmation dictionary.
+
+        Raises:
+            PermissionError: If a local path is supplied while filesystem access is disabled.
+            ToolException: If a local path does not point to an existing file.
+        """
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"Sending video to user: {video_url}")
+
+        video_source: str = video_url
+        if not is_remote_url(video_url):
+            video_source = str(resolve_local_file(path_str=video_url))
 
         # Download thumbnail if provided
         thumbnail_bytes = None
@@ -195,7 +238,7 @@ class SendVideoTool(ChibiTool):
 
         # Send video
         await interface.send_video(
-            video=video_url,
+            video=video_source,
             caption=caption,
             duration=duration,
             thumbnail=thumbnail_bytes,
@@ -217,7 +260,7 @@ class SendImageTool(ChibiTool):
                     "image_url": {
                         "type": "string",
                         "description": (
-                            "URL to the image file (JPEG, PNG, etc.). Telegram will download it automatically."
+                            "URL of the image, or an absolute path to a local file on disk (JPEG, PNG, etc.)."
                         ),
                     },
                     "caption": {
@@ -238,13 +281,31 @@ class SendImageTool(ChibiTool):
         caption: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
+        """Send an image to the user.
+
+        Args:
+            image_url: URL of the image, or a path to a local file on disk.
+            caption: The caption for the image.
+            **kwargs: Additional invocation options injected by the provider.
+
+        Returns:
+            A confirmation dictionary.
+
+        Raises:
+            PermissionError: If a local path is supplied while filesystem access is disabled.
+            ToolException: If a local path does not point to an existing file.
+        """
         interface = cls.get_interface(kwargs=kwargs)
 
         logger.log("TOOL", f"Sending image to user: {image_url}")
 
+        image_source: str = image_url
+        if not is_remote_url(image_url):
+            image_source = str(resolve_local_file(path_str=image_url))
+
         # Send photo
         await interface.send_images(
-            images=[image_url],
+            images=[image_source],
             reply=False,
             caption=caption,
         )
