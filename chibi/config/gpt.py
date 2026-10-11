@@ -133,9 +133,7 @@ class GPTSettings(BaseSettings):
     failover_chain_subagent_raw: str | None = Field(
         alias="FAILOVER_CHAIN_SUBAGENT",
         default="auto",
-        description=(
-            "FAILOVER_CHAIN_SUBAGENT: 'auto' (default), 'disabled', or an ordered 'provider/model' chain."
-        ),
+        description=("FAILOVER_CHAIN_SUBAGENT: 'auto' (default), 'disabled', or an ordered 'provider/model' chain."),
     )
 
     delegate_task_timeout: int | None = Field(default=None)
