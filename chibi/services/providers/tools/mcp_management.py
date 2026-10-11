@@ -17,6 +17,48 @@ from chibi.services.providers.utils import escape_and_truncate
 JsonNode = dict[str, Any] | list[Any] | str | int | float | bool | None
 
 
+def _compose_auth_headers(
+    headers: dict[str, str] | None,
+    secret_envs: list[str] | None,
+    env_file_path: str | None,
+) -> dict[str, str] | None:
+    """Compose request headers for HTTP-based MCP transports.
+
+    The final header dict is composed with the following precedence (lowest to
+    highest): plain ``headers`` -> non-empty values from ``env_file_path`` ->
+    values of the environment variables named in ``secret_envs``. Secret values
+    are pulled from ``os.environ`` and are never logged.
+
+    Args:
+        headers: Optional plain HTTP headers sent as-is to the client.
+        secret_envs: Optional list of environment variable names whose values are
+            injected as headers (highest precedence).
+        env_file_path: Optional path to the env file with header values.
+
+    Returns:
+        The composed header dict, or None when no inputs are provided.
+
+    Raises:
+        ValueError: If ``env_file_path`` does not exist.
+        KeyError: If a variable named in ``secret_envs`` is missing from the environment.
+    """
+    if env_file_path:
+        if not os.path.exists(env_file_path):
+            raise ValueError(f"The file {env_file_path} does not exist.")
+        headers = headers or {}
+        envs_from_file = dotenv_values(env_file_path)
+        envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
+        if envs_with_values_from_file:
+            headers.update(envs_with_values_from_file)
+
+    if secret_envs:
+        headers = headers or {}
+        for secret_env in secret_envs:
+            headers[secret_env] = os.environ[secret_env]
+
+    return headers
+
+
 def _clean_schema(schema: JsonNode) -> JsonNode:
     """Recursively cleans the schema for LLM provider compatibility.
 
@@ -264,19 +306,7 @@ class InitializeSseMCPServer(ChibiTool):
         Returns:
             dict[str, Any]: Success or error message.
         """
-        if env_file_path:
-            if not os.path.exists(env_file_path):
-                raise ValueError(f"The file {env_file_path} does not exist.")
-            headers = headers or {}
-            envs_from_file = dotenv_values(env_file_path)
-            envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
-            if envs_with_values_from_file:
-                headers.update(envs_with_values_from_file)
-
-        if secret_envs:
-            headers = headers or {}
-            for secret_env in secret_envs:
-                headers[secret_env] = os.environ[secret_env]
+        headers = _compose_auth_headers(headers, secret_envs, env_file_path)
 
         try:
             session = await MCPManager.connect_sse(server_name, url, headers=headers)
@@ -285,10 +315,96 @@ class InitializeSseMCPServer(ChibiTool):
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="sse")
 
 
+class InitializeRestMCPServer(ChibiTool):
+    register = application_settings.enable_mcp_rest
+    name = "initialize_rest_mcp_server"
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="initialize_rest_mcp_server",
+            description=(
+                "Connect to an MCP server via REST (plain JSON-RPC over HTTP POST) and register its tools "
+                "dynamically. Suitable for stateless JSON-RPC endpoints that do not support SSE."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "server_name": {
+                        "type": "string",
+                        "description": "Unique name for this server session (e.g., 'sqlite', 'github').",
+                    },
+                    "url": {"type": "string", "description": "JSON-RPC endpoint URL (required for rest)."},
+                    "headers": {
+                        "type": "object",
+                        "description": (
+                            "Optional plain HTTP headers sent with every request (e.g. Authorization). "
+                            "Merged with the lowest precedence: env_file_path values override them, "
+                            "secret_envs values override both."
+                        ),
+                    },
+                    "secret_envs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "A list of environment variables whose values are injected as headers "
+                            "without direct access to their contents. Highest merge precedence."
+                        ),
+                    },
+                    "env_file_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the env-file with header values. "
+                            "Overrides plain headers, but is overridden by secret_envs."
+                        ),
+                    },
+                },
+                "required": ["server_name", "url"],
+            },
+        ),
+    )
+
+    @classmethod
+    async def function(
+        cls,
+        server_name: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        secret_envs: list[str] | None = None,
+        env_file_path: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Connect to an MCP server via REST and register its tools dynamically.
+
+        The transport performs one plain JSON POST per JSON-RPC message over the
+        SDK streamable-HTTP client, so it works against stateless JSON-RPC
+        endpoints without SSE or session negotiation. Headers are composed by
+        ``_compose_auth_headers`` with the same precedence as the SSE tool.
+
+        Args:
+            server_name: Unique name for the session.
+            url: JSON-RPC endpoint URL (rest).
+            headers: Optional plain HTTP headers sent as-is to the client.
+            secret_envs: Optional list of environment variable names whose values are
+                injected as headers (highest precedence).
+            env_file_path: Optional path to the env file with header values.
+
+        Returns:
+            dict[str, Any]: Success or error message.
+        """
+        headers = _compose_auth_headers(headers, secret_envs, env_file_path)
+
+        session = await MCPManager.connect_rest(server_name, url, headers=headers)
+        return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="rest")
+
+
 class DeinitializeMCPServer(ChibiTool):
     """Disconnects from an MCP server and removes its tools."""
 
-    register = application_settings.enable_mcp_stdio or application_settings.enable_mcp_sse
+    register = (
+        application_settings.enable_mcp_stdio
+        or application_settings.enable_mcp_sse
+        or application_settings.enable_mcp_rest
+    )
     name = "deinitialize_mcp_server"
     definition = ChatCompletionToolParam(
         type="function",
