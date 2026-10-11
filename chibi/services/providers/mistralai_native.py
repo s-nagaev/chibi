@@ -598,8 +598,10 @@ class MistralAI(RestApiFriendlyProvider):
                 detail=f"Could not extract text from PDF: {e}",
             )
 
-    async def get_available_models(self, image_generation: bool = False) -> list[ModelChangeSchema]:
-        if image_generation:
+    async def get_available_models(
+        self, image_generation: bool = False, video_generation: bool = False
+    ) -> list[ModelChangeSchema]:
+        if image_generation or video_generation:
             return []
 
         try:

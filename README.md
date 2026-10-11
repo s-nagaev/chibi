@@ -95,6 +95,7 @@ Model resellers and inference aggregators:
 ### Multimodal providers (optional)
 
 - **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), and any reseller-aggregator providing access to image generation models
+- **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); the per-user monthly limit is configured via the `VIDEO_GENERATIONS_LIMIT` environment variable
 - **Music:** Suno, ElevenLabs Music
 - **Voice (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
 
@@ -274,6 +275,7 @@ If a tool can be exposed via MCP, Chibi can learn to use it.
 
 ### 🎨 Rich content generation
 - **Images:** Nano Banana, Imagen, Qwen, Wan, GPT Image, Grok Imagine, GLM Image
+- **Video:** Wan (Alibaba), CogVideoX (ZhipuAI), Hailuo (MiniMax)
 - **Music:** Suno (including custom mode: style/lyrics/vocals)
 - **Voice:** transcription + text-to-speech (ElevenLabs, OpenAI)
 
