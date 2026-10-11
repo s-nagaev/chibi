@@ -116,13 +116,15 @@ class GPTSettings(BaseSettings):
     llm_role_raw: str | None = Field(alias="LLM_ROLE", default=None)
     failover_chain_master_raw: str | None = Field(
         alias="FAILOVER_CHAIN_MASTER",
-        default=None,
-        description="Raw FAILOVER_CHAIN_MASTER value: 'auto', 'disabled', or an ordered 'provider/model' chain.",
+        default="auto",
+        description="FAILOVER_CHAIN_MASTER: 'auto' (default), 'disabled', or an ordered 'provider/model' chain.",
     )
     failover_chain_subagent_raw: str | None = Field(
         alias="FAILOVER_CHAIN_SUBAGENT",
-        default=None,
-        description="Raw FAILOVER_CHAIN_SUBAGENT value: 'auto', 'disabled', or an ordered 'provider/model' chain.",
+        default="auto",
+        description=(
+            "FAILOVER_CHAIN_SUBAGENT: 'auto' (default), 'disabled', or an ordered 'provider/model' chain."
+        ),
     )
 
     delegate_task_timeout: int | None = Field(default=None)
