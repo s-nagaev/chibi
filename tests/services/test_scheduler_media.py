@@ -1,13 +1,16 @@
 """Media delivery and chat actions of the Telegram SchedulerInterface."""
 
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from telegram import InputMediaDocument, InputMediaPhoto
+from telegram import InputFile, InputMediaDocument, InputMediaPhoto
 from telegram.constants import ChatAction, FileSizeLimit
 
 import chibi.services.scheduler_interface as scheduler_interface_module
+from chibi.config import gpt_settings
+from chibi.config.gpt import GPTSettings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.services.scheduler_interface import SchedulerInterface
 
@@ -187,6 +190,98 @@ class TestSendImagesFromUrls:
     async def test_empty_list_is_a_noop(self, interface, scheduler_bot) -> None:
         """An empty image list sends nothing."""
         await interface.send_images(images=[])
+
+        scheduler_bot.send_media_group.assert_not_awaited()
+        scheduler_bot.send_message.assert_not_awaited()
+
+
+class TestSendImagesFromLocalPaths:
+    """Local file paths are read from disk and reuse the BytesIO buffer pipeline."""
+
+    @pytest.fixture
+    def filesystem_access_enabled(self, monkeypatch: pytest.MonkeyPatch) -> GPTSettings:
+        """Enable the filesystem_access gate for the duration of a test."""
+        monkeypatch.setattr(gpt_settings, "filesystem_access", True)
+        return gpt_settings
+
+    def _local_file(self, tmp_path: Path, name: str, size: int) -> Path:
+        """Create a local image file of the given size.
+
+        Args:
+            tmp_path: Pytest temporary directory.
+            name: File name.
+            size: File size in bytes.
+
+        Returns:
+            The path to the created file.
+        """
+        file = tmp_path / name
+        file.write_bytes(b"x" * size)
+        return file
+
+    async def test_small_local_file_sent_as_photo(
+        self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
+    ) -> None:
+        """A small local file is delivered as an InputMediaPhoto via the shared buffer pipeline."""
+        assert filesystem_access_enabled.filesystem_access is True
+        local_file = self._local_file(tmp_path, "picture.png", 1024)
+
+        await interface.send_images(images=[str(local_file)])
+
+        scheduler_bot.send_media_group.assert_awaited_once()
+        kwargs = scheduler_bot.send_media_group.await_args.kwargs
+        assert kwargs["chat_id"] == 555
+        assert kwargs["message_thread_id"] is None
+        assert kwargs["write_timeout"] == IMAGE_UPLOAD_TIMEOUT
+        media = kwargs["media"]
+        assert len(media) == 1
+        assert isinstance(media[0], InputMediaPhoto)
+        media_file = media[0].media
+        assert isinstance(media_file, InputFile)
+        assert media_file.filename == "picture.png"
+        assert media_file.input_file_content == b"x" * 1024
+
+    async def test_large_local_file_sent_as_document(
+        self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
+    ) -> None:
+        """A local file above PHOTOSIZE_UPLOAD is delivered as a document."""
+        assert filesystem_access_enabled.filesystem_access is True
+        local_file = self._local_file(tmp_path, "big.png", FileSizeLimit.PHOTOSIZE_UPLOAD + 1)
+
+        await interface.send_images(images=[str(local_file)])
+
+        scheduler_bot.send_media_group.assert_awaited_once()
+        kwargs = scheduler_bot.send_media_group.await_args.kwargs
+        assert kwargs["write_timeout"] == FILE_UPLOAD_TIMEOUT
+        assert all(isinstance(m, InputMediaDocument) for m in kwargs["media"])
+
+    async def test_fallback_masks_local_paths(
+        self, interface, scheduler_bot, tmp_path, filesystem_access_enabled
+    ) -> None:
+        """When the URL media group fails, local paths appear in the fallback text as base names only."""
+        assert filesystem_access_enabled.filesystem_access is True
+        local_file = self._local_file(tmp_path, "picture.png", 1024)
+        scheduler_bot.send_media_group.side_effect = [RuntimeError("upload failed"), None]
+
+        with patch("chibi.services.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
+            await interface.send_images(images=["http://example.com/1.png", str(local_file)])
+
+        scheduler_bot.send_message.assert_awaited()
+        sent_texts = [call.kwargs["text"] for call in scheduler_bot.send_message.await_args_list]
+        fallback_text = "".join(sent_texts).replace("\\", "")
+        assert "http://example.com/1.png" in fallback_text
+        assert "picture.png" in fallback_text
+        assert str(tmp_path) not in fallback_text
+
+    async def test_filesystem_access_disabled_rejects_local_path(
+        self, interface, scheduler_bot, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A local path with filesystem_access disabled raises PermissionError and sends nothing."""
+        monkeypatch.setattr(gpt_settings, "filesystem_access", False)
+        local_file = self._local_file(tmp_path, "picture.png", 1024)
+
+        with pytest.raises(PermissionError, match="Filesystem access is disabled"):
+            await interface.send_images(images=[str(local_file)])
 
         scheduler_bot.send_media_group.assert_not_awaited()
         scheduler_bot.send_message.assert_not_awaited()

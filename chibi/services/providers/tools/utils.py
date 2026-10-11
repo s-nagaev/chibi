@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 import json
 import urllib.parse
 from hashlib import sha256
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ParamSpec, TypedDict, TypeVar, Unpack
 
 import httpx
@@ -22,6 +24,7 @@ from chibi.services.failover import (
     run_with_failover,
 )
 from chibi.services.interface import UserInterface
+from chibi.services.providers.tools.exceptions import ToolException
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 from chibi.utils.app import SingletonMeta
@@ -242,6 +245,54 @@ async def get_sub_agent_response(
     ).response
     assert chat_response is not None  # Type narrowing for mypy: a returned walk always carries a response
     return chat_response
+
+
+def is_remote_url(value: str) -> bool:
+    """Report whether a tool argument is an http(s) URL rather than a local path.
+
+    Args:
+        value: The raw tool argument value.
+
+    Returns:
+        True when the value carries an explicit http or https scheme.
+    """
+    return value.startswith(("http://", "https://"))
+
+
+def resolve_local_file(path_str: str) -> Path:
+    """Resolve a tool-supplied local path to an existing file, gated by filesystem access.
+
+    Local-file access is allowed only when ``gpt_settings.filesystem_access`` is
+    enabled, mirroring the permission model of ``AnalyzeImageTool``.
+
+    Args:
+        path_str: Absolute, relative or tilde-expanded filesystem path.
+
+    Returns:
+        The fully resolved path to an existing regular file.
+
+    Raises:
+        PermissionError: If ``gpt_settings.filesystem_access`` is disabled.
+        ToolException: If the path does not point to an existing file.
+    """
+    if not gpt_settings.filesystem_access:
+        raise PermissionError("Filesystem access is disabled. Enable it (FILESYSTEM_ACCESS=true) to send local files.")
+    path = Path(path_str).expanduser().resolve()
+    if not path.is_file():
+        raise ToolException(f"File not found: {path}")
+    return path
+
+
+async def read_local_file(path: Path) -> bytes:
+    """Read a local file's bytes off the event loop thread.
+
+    Args:
+        path: Resolved path to an existing file.
+
+    Returns:
+        The raw file bytes.
+    """
+    return await asyncio.to_thread(path.read_bytes)
 
 
 async def download(url: str) -> bytes | None:

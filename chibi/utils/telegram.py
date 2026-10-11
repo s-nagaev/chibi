@@ -2,6 +2,7 @@ import re
 import sys
 from collections import deque
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Coroutine, Literal, ParamSpec, Type, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -515,50 +516,20 @@ async def download_image(image_url: str) -> bytes:
     return response.content
 
 
-async def send_images(
-    images: list[str] | list[BytesIO],
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> None:
-    """Send a list of images to the user.
+async def _send_image_buffers(images: list[BytesIO], update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Partition image buffers by size and deliver them as photos or documents.
+
+    Buffers below ``PHOTOSIZE_UPLOAD`` go into a photo media group, larger
+    buffers below ``FILESIZE_UPLOAD`` are delivered as documents, and anything
+    beyond the file size limit is skipped with an error log.
 
     Args:
-        images: A list of image URLs or BytesIO objects.
+        images: In-memory image buffers.
         update: The incoming Telegram update.
         context: The update context.
     """
     telegram_chat = get_telegram_chat(update=update)
     telegram_message = get_telegram_message(update=update)
-    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
-
-    if isinstance(images[0], str):
-        logger.info(f"Downloading {len(images)} images for {user_data(update)} via URLs...")
-        image_files = [await download_image(image_url=str(url)) for url in images]
-        try:
-            logger.info(f"Uploading {len(images)} images to {user_data(update)} in the {chat_data(update)}")
-            await context.bot.send_media_group(
-                chat_id=telegram_chat.id,
-                media=[InputMediaPhoto(url) for url in image_files],
-                reply_to_message_id=telegram_message.message_id,
-                message_thread_id=telegram_message.message_thread_id,
-                read_timeout=IMAGE_UPLOAD_TIMEOUT,
-                write_timeout=IMAGE_UPLOAD_TIMEOUT,
-            )
-        except Exception as e:
-            logger.error(
-                f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
-                f"due to exception: {e}. Trying to send it via text message..."
-            )
-            image_urls = [str(url) for url in images]
-            await send_message(
-                update=update,
-                context=context,
-                text="\n".join(image_urls),
-                disable_web_page_preview=False,
-                message_thread_id=telegram_message.message_thread_id,
-            )
-        return None
-
     logger.info(f"Uploading {len(images)} image(s) to {user_data(update)} in the {chat_data(update)}")
     media_photos: list[BytesIO] = []
     media_docs: list[BytesIO] = []
@@ -597,6 +568,85 @@ async def send_images(
             message_thread_id=telegram_message.message_thread_id,
             write_timeout=FILE_UPLOAD_TIMEOUT,
         )
+
+
+async def send_images(
+    images: list[str] | list[BytesIO],
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Send a list of images to the user.
+
+    String items are treated as http(s) URLs (downloaded first) or as local
+    file paths (read from disk; requires ``gpt_settings.filesystem_access``).
+    Local files are delivered through the same in-memory buffer pipeline as
+    ``BytesIO`` items, including the size partitioning. If the media group
+    upload fails, the URLs — or, for local files, only their base names — are
+    re-sent as a plain text message so no absolute filesystem path can leak
+    into the chat.
+
+    Args:
+        images: A list of image URLs, local file paths or BytesIO objects.
+        update: The incoming Telegram update.
+        context: The update context.
+
+    Raises:
+        PermissionError: If a local path is supplied while filesystem access is disabled.
+        ToolException: If a local path does not point to an existing file.
+    """
+    from chibi.services.providers.tools.utils import (  # Circular import avoidance
+        is_remote_url,
+        read_local_file,
+        resolve_local_file,
+    )
+
+    telegram_chat = get_telegram_chat(update=update)
+    telegram_message = get_telegram_message(update=update)
+    await context.bot.send_chat_action(chat_id=telegram_chat.id, action=constants.ChatAction.UPLOAD_PHOTO)
+
+    if isinstance(images[0], str):
+        sources = [str(image) for image in images]
+        url_sources = [source for source in sources if is_remote_url(source)]
+        path_sources = [source for source in sources if not is_remote_url(source)]
+
+        if url_sources:
+            logger.info(f"Downloading {len(url_sources)} images for {user_data(update)} via URLs...")
+            image_files = [await download_image(image_url=url) for url in url_sources]
+            try:
+                logger.info(f"Uploading {len(image_files)} images to {user_data(update)} in the {chat_data(update)}")
+                await context.bot.send_media_group(
+                    chat_id=telegram_chat.id,
+                    media=[InputMediaPhoto(url) for url in image_files],
+                    reply_to_message_id=telegram_message.message_id,
+                    message_thread_id=telegram_message.message_thread_id,
+                    read_timeout=IMAGE_UPLOAD_TIMEOUT,
+                    write_timeout=IMAGE_UPLOAD_TIMEOUT,
+                )
+            except Exception as e:
+                logger.error(
+                    f"{user_data(update)} image generation request succeeded, but we couldn't send the image "
+                    f"due to exception: {e}. Trying to send it via text message..."
+                )
+                fallback_parts = [source if is_remote_url(source) else Path(source).name for source in sources]
+                await send_message(
+                    update=update,
+                    context=context,
+                    text="\n".join(fallback_parts),
+                    disable_web_page_preview=False,
+                    thread_id=telegram_message.message_thread_id,
+                )
+
+        if path_sources:
+            local_buffers: list[BytesIO] = []
+            for source in path_sources:
+                path = resolve_local_file(path_str=source)
+                buffer = BytesIO(await read_local_file(path=path))
+                buffer.name = path.name
+                local_buffers.append(buffer)
+            await _send_image_buffers(images=local_buffers, update=update, context=context)
+        return None
+
+    await _send_image_buffers(images=cast(list[BytesIO], images), update=update, context=context)
 
 
 async def send_text_file(file_content: str, file_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -3,7 +3,8 @@
 import asyncio
 import random
 from io import BytesIO
-from typing import Any, Awaitable, Callable
+from pathlib import Path
+from typing import Any, Awaitable, Callable, cast
 
 import telegramify_markdown
 from loguru import logger
@@ -16,6 +17,7 @@ from chibi.config import telegram_settings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.exceptions import ConfigurationError
 from chibi.services.interface import UserInterface
+from chibi.services.providers.tools.utils import is_remote_url, read_local_file, resolve_local_file
 from chibi.utils.rich_message import RichMessageBuilder
 from chibi.utils.telegram import download_image, split_markdown_v2
 
@@ -479,58 +481,19 @@ class SchedulerInterface(UserInterface):
             write_timeout=FILE_UPLOAD_TIMEOUT,
         )
 
-    async def send_images(self, images: list[BytesIO] | list[str], reply: bool = True, **kwargs: Any) -> None:
-        """Sends a list of images to the Telegram chat and thread fixed in the job context.
+    async def _send_image_buffers(self, images: list[BytesIO], bot: Bot, message_thread_id: int | None) -> None:
+        """Partition image buffers by size and deliver them as photos or documents.
 
-        URL lists are downloaded and delivered as a photo media group; if the
-        media group fails, the original URLs are sent as a plain text message
-        so the images are never silently lost. ``BytesIO`` buffers are
-        partitioned by size: photos below ``PHOTOSIZE_UPLOAD`` go into a
-        photos group, larger buffers below ``FILESIZE_UPLOAD`` are delivered
-        as documents, and anything beyond the file size limit is skipped with
-        an error log.
+        Shared buffer pipeline of ``send_images``: buffers below
+        ``PHOTOSIZE_UPLOAD`` go into a photos group, larger buffers below
+        ``FILESIZE_UPLOAD`` are delivered as documents, and anything beyond the
+        file size limit is skipped with an error log.
 
         Args:
-            images: A list of image URLs or ``BytesIO`` buffers to send.
-            reply: Whether to reply to the user's message; has no effect in
-                scheduler context because there is no incoming message to
-                reply to.
-            **kwargs: Additional arguments for the image sending function.
+            images: In-memory image buffers.
+            bot: The Telegram bot to deliver through.
+            message_thread_id: The target message thread, or None for non-threaded chats.
         """
-        if not images:
-            logger.bind(user_id=self._user_id).warning(
-                f"SchedulerInterface: send_images called with an empty list for {self.chat_data}; nothing to send."
-            )
-            return
-
-        await self._send_chat_action(ChatAction.UPLOAD_PHOTO)
-        bot = await _get_scheduler_bot()
-        message_thread_id = self._thread_id or None
-
-        if isinstance(images[0], str):
-            logger.bind(user_id=self._user_id).info(
-                f"Downloading {len(images)} images for {self.user_data} via URLs..."
-            )
-            image_files = [await download_image(image_url=str(url)) for url in images]
-            try:
-                logger.bind(user_id=self._user_id).info(
-                    f"Uploading {len(images)} images to {self.user_data} in the {self.chat_data}"
-                )
-                await bot.send_media_group(
-                    chat_id=self._chat_id,
-                    media=[InputMediaPhoto(data) for data in image_files],
-                    message_thread_id=message_thread_id,
-                    read_timeout=IMAGE_UPLOAD_TIMEOUT,
-                    write_timeout=IMAGE_UPLOAD_TIMEOUT,
-                )
-            except Exception as e:
-                logger.bind(user_id=self._user_id).error(
-                    f"{self.user_data} image generation request succeeded, but we couldn't send the image "
-                    f"to {self.chat_data} due to exception: {e}. Trying to send it via text message..."
-                )
-                await self.send_message("\n".join(str(url) for url in images))
-            return
-
         media_photos: list[BytesIO] = []
         media_docs: list[BytesIO] = []
         for file in images:
@@ -567,6 +530,84 @@ class SchedulerInterface(UserInterface):
                 message_thread_id=message_thread_id,
                 write_timeout=FILE_UPLOAD_TIMEOUT,
             )
+
+    async def send_images(self, images: list[BytesIO] | list[str], reply: bool = True, **kwargs: Any) -> None:
+        """Sends a list of images to the Telegram chat and thread fixed in the job context.
+
+        String items are treated as http(s) URLs (downloaded first) or as local
+        file paths (read from disk; requires ``gpt_settings.filesystem_access``).
+        Local files are delivered through the same in-memory buffer pipeline as
+        ``BytesIO`` items, including the size partitioning. URL lists are
+        delivered as a photo media group; if that fails, the original URLs —
+        or, for local files, only their base names — are sent as a plain text
+        message so the images are never silently lost and no absolute
+        filesystem path can leak into the chat. ``BytesIO`` buffers are
+        partitioned by size: photos below ``PHOTOSIZE_UPLOAD`` go into a
+        photos group, larger buffers below ``FILESIZE_UPLOAD`` are delivered
+        as documents, and anything beyond the file size limit is skipped with
+        an error log.
+
+        Args:
+            images: A list of image URLs, local file paths or ``BytesIO`` buffers to send.
+            reply: Whether to reply to the user's message; has no effect in
+                scheduler context because there is no incoming message to
+                reply to.
+            **kwargs: Additional arguments for the image sending function.
+
+        Raises:
+            PermissionError: If a local path is supplied while filesystem access is disabled.
+            ToolException: If a local path does not point to an existing file.
+        """
+        if not images:
+            logger.bind(user_id=self._user_id).warning(
+                f"SchedulerInterface: send_images called with an empty list for {self.chat_data}; nothing to send."
+            )
+            return
+
+        await self._send_chat_action(ChatAction.UPLOAD_PHOTO)
+        bot = await _get_scheduler_bot()
+        message_thread_id = self._thread_id or None
+
+        if isinstance(images[0], str):
+            sources = [str(image) for image in images]
+            url_sources = [source for source in sources if is_remote_url(source)]
+            path_sources = [source for source in sources if not is_remote_url(source)]
+
+            if url_sources:
+                logger.bind(user_id=self._user_id).info(
+                    f"Downloading {len(url_sources)} images for {self.user_data} via URLs..."
+                )
+                image_files = [await download_image(image_url=url) for url in url_sources]
+                try:
+                    logger.bind(user_id=self._user_id).info(
+                        f"Uploading {len(image_files)} images to {self.user_data} in the {self.chat_data}"
+                    )
+                    await bot.send_media_group(
+                        chat_id=self._chat_id,
+                        media=[InputMediaPhoto(data) for data in image_files],
+                        message_thread_id=message_thread_id,
+                        read_timeout=IMAGE_UPLOAD_TIMEOUT,
+                        write_timeout=IMAGE_UPLOAD_TIMEOUT,
+                    )
+                except Exception as e:
+                    logger.bind(user_id=self._user_id).error(
+                        f"{self.user_data} image generation request succeeded, but we couldn't send the image "
+                        f"to {self.chat_data} due to exception: {e}. Trying to send it via text message..."
+                    )
+                    fallback_parts = [source if is_remote_url(source) else Path(source).name for source in sources]
+                    await self.send_message("\n".join(fallback_parts))
+
+            if path_sources:
+                local_buffers: list[BytesIO] = []
+                for source in path_sources:
+                    path = resolve_local_file(path_str=source)
+                    buffer = BytesIO(await read_local_file(path=path))
+                    buffer.name = path.name
+                    local_buffers.append(buffer)
+                await self._send_image_buffers(images=local_buffers, bot=bot, message_thread_id=message_thread_id)
+            return
+
+        await self._send_image_buffers(images=cast(list[BytesIO], images), bot=bot, message_thread_id=message_thread_id)
 
     async def send_document(
         self,
