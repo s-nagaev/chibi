@@ -122,12 +122,15 @@ class MCPManager:
             return session
 
     @classmethod
-    async def connect_sse(cls, name: str, url: str, timeout: float = 20.0) -> ClientSession:
+    async def connect_sse(
+        cls, name: str, url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
+    ) -> ClientSession:
         """Connect to an MCP server via SSE transport.
 
         Args:
             name: Unique name for the server session.
             url: SSE endpoint URL.
+            headers: Optional HTTP headers sent with the SSE request (e.g. Authorization).
             timeout: Connection timeout in seconds.
 
         Returns:
@@ -143,7 +146,7 @@ class MCPManager:
             logger.log("TOOL", f"Connecting to MCP server '{name}' via SSE: {url}")
 
             async def sse_factory(stack: AsyncExitStack):
-                return await stack.enter_async_context(sse_client(url))
+                return await stack.enter_async_context(sse_client(url, headers=headers))
 
             ready_event = asyncio.Event()
 

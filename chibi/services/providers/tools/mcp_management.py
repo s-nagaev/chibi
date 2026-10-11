@@ -207,6 +207,29 @@ class InitializeSseMCPServer(ChibiTool):
                         "description": "Unique name for this server session (e.g., 'sqlite', 'github').",
                     },
                     "url": {"type": "string", "description": "SSE endpoint URL (required for sse)."},
+                    "headers": {
+                        "type": "object",
+                        "description": (
+                            "Optional plain HTTP headers sent with the SSE request (e.g. Authorization). "
+                            "Merged with the lowest precedence: env_file_path values override them, "
+                            "secret_envs values override both."
+                        ),
+                    },
+                    "secret_envs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "A list of environment variables whose values are injected as headers "
+                            "without direct access to their contents. Highest merge precedence."
+                        ),
+                    },
+                    "env_file_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the env-file with header values. "
+                            "Overrides plain headers, but is overridden by secret_envs."
+                        ),
+                    },
                 },
                 "required": ["server_name", "url"],
             },
@@ -218,19 +241,45 @@ class InitializeSseMCPServer(ChibiTool):
         cls,
         server_name: str,
         url: str,
+        headers: dict[str, str] | None = None,
+        secret_envs: list[str] | None = None,
+        env_file_path: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Executes the tool.
+        """Connect to an MCP server via SSE and register its tools dynamically.
+
+        The final header dict is composed with the following precedence (lowest to
+        highest): plain ``headers`` -> non-empty values from ``env_file_path`` ->
+        values of the environment variables named in ``secret_envs``. Secret values
+        are pulled from ``os.environ`` and are never logged.
 
         Args:
             server_name: Unique name for the session.
             url: SSE endpoint URL (sse).
+            headers: Optional plain HTTP headers sent as-is to the SSE client.
+            secret_envs: Optional list of environment variable names whose values are
+                injected as headers (highest precedence).
+            env_file_path: Optional path to the env file with header values.
 
         Returns:
             dict[str, Any]: Success or error message.
         """
+        if env_file_path:
+            if not os.path.exists(env_file_path):
+                raise ValueError(f"The file {env_file_path} does not exist.")
+            headers = headers or {}
+            envs_from_file = dotenv_values(env_file_path)
+            envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
+            if envs_with_values_from_file:
+                headers.update(envs_with_values_from_file)
+
+        if secret_envs:
+            headers = headers or {}
+            for secret_env in secret_envs:
+                headers[secret_env] = os.environ[secret_env]
+
         try:
-            session = await MCPManager.connect_sse(server_name, url)
+            session = await MCPManager.connect_sse(server_name, url, headers=headers)
         except Exception:
             raise
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="sse")
