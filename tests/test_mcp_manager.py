@@ -258,6 +258,97 @@ async def test_disconnect_cleans_up_session_and_tools():
     assert MCPManager.pop_server_tools("test-server") == []
 
 
+async def test_successful_connect_stdio_keeps_lifecycle_task_for_disconnect():
+    """A successful connect must keep the lifecycle task registered so disconnect can cancel it."""
+    session = _make_session()
+
+    @asynccontextmanager
+    async def fake_stdio_client(params):
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    session_cm = MagicMock(name="session_cm")
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+    client_session_factory = MagicMock(return_value=session_cm)
+
+    with (
+        patch("chibi.services.mcp.manager.stdio_client", fake_stdio_client),
+        patch("chibi.services.mcp.manager.ClientSession", client_session_factory),
+    ):
+        await MCPManager.connect_stdio("test-server", "echo", [])
+
+        lifecycle_task = MCPManager._server_tasks.get("test-server")
+        assert lifecycle_task is not None
+        assert not lifecycle_task.done()
+
+        await MCPManager.disconnect("test-server")
+
+        assert lifecycle_task.cancelled()
+        assert "test-server" not in MCPManager._server_tasks
+        assert MCPManager.get_session("test-server") is None
+
+
+async def test_successful_connect_sse_keeps_lifecycle_task_for_disconnect():
+    """A successful SSE connect must keep the lifecycle task registered so disconnect can cancel it."""
+    session = _make_session()
+
+    @asynccontextmanager
+    async def fake_sse_client(url, headers=None, **kwargs):
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    session_cm = MagicMock(name="session_cm")
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+    client_session_factory = MagicMock(return_value=session_cm)
+
+    with (
+        patch("chibi.services.mcp.manager.sse_client", fake_sse_client),
+        patch("chibi.services.mcp.manager.ClientSession", client_session_factory),
+    ):
+        await MCPManager.connect_sse("test-server", "http://localhost/sse")
+
+        lifecycle_task = MCPManager._server_tasks.get("test-server")
+        assert lifecycle_task is not None
+
+        await MCPManager.disconnect("test-server")
+
+        assert lifecycle_task.cancelled()
+        assert "test-server" not in MCPManager._server_tasks
+
+
+async def test_successful_connect_rest_keeps_lifecycle_task_for_disconnect():
+    """A successful REST connect must keep the lifecycle task registered so disconnect can cancel it."""
+    session = _make_session()
+
+    @asynccontextmanager
+    async def fake_http_client(**kwargs):
+        yield MagicMock(name="http_client")
+
+    @asynccontextmanager
+    async def fake_streamable_http_client(url, http_client=None, **kwargs):
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    session_cm = MagicMock(name="session_cm")
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+    client_session_factory = MagicMock(return_value=session_cm)
+
+    with (
+        patch("chibi.services.mcp.manager.create_mcp_http_client", fake_http_client),
+        patch("chibi.services.mcp.manager.streamable_http_client", fake_streamable_http_client),
+        patch("chibi.services.mcp.manager.ClientSession", client_session_factory),
+    ):
+        await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+        lifecycle_task = MCPManager._server_tasks.get("test-server")
+        assert lifecycle_task is not None
+
+        await MCPManager.disconnect("test-server")
+
+        assert lifecycle_task.cancelled()
+        assert "test-server" not in MCPManager._server_tasks
+
+
 async def _run_stdio_tool(**kwargs) -> MagicMock:
     """Run InitializeStdioMCPServer.function with connect_stdio mocked; return the mock."""
     connect_stdio_mock = AsyncMock(return_value=MagicMock(name="session"))

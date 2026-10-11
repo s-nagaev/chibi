@@ -32,8 +32,9 @@ ENV_FILE_PATH_SCHEMA_DESCRIPTION = (
     "Absolute path to the env file. The file is a VARIABLE store used as the fallback "
     "source for secret_envs template substitution; only entries whose names look like "
     "real HTTP headers (hyphenated like 'X-Api-Key', or canonical mixed case like "
-    "'Authorization') are additionally merged as literal headers. All-uppercase or "
-    "underscore-style names (e.g. MELIOUS_API_KEY) are never sent as headers."
+    "'Authorization') are additionally merged as literal headers. All-uppercase, "
+    "all-lowercase or underscore-style names (e.g. MELIOUS_API_KEY, token) are never "
+    "sent as headers."
 )
 
 
@@ -42,9 +43,9 @@ def _looks_like_http_header_name(name: str) -> bool:
 
     The rule: a hyphenated name (``X-Api-Key``) or a canonical mixed-case single
     word (``Authorization``) is treated as an HTTP header. Anything with
-    underscores (``MELIOUS_API_KEY``) or a fully uppercase single word
-    (``API_TOKEN``) is treated as an environment variable and never sent as a
-    header.
+    underscores (``MELIOUS_API_KEY``), a fully uppercase single word
+    (``API_TOKEN``) or a fully lowercase single word (``api_token``) is treated
+    as an environment variable and never sent as a header.
 
     Args:
         name: The name to check.
@@ -56,7 +57,7 @@ def _looks_like_http_header_name(name: str) -> bool:
         return bool(_HTTP_HEADER_NAME_PATTERN.match(name))
     if "_" in name:
         return False
-    return not name.isupper()
+    return not name.isupper() and not name.islower()
 
 
 def _load_env_file_values(env_file_path: str | None) -> dict[str, str]:
@@ -155,8 +156,8 @@ def _compose_auth_headers(
     names look like real HTTP headers (hyphenated like ``X-Api-Key``, or canonical
     mixed case like ``Authorization``) are additionally merged as literal headers, so
     configs that intentionally placed ``Authorization=...``-style entries in the file
-    keep working. All-uppercase or underscore-style names (e.g. ``MELIOUS_API_KEY``)
-    are never sent as headers.
+    keep working. All-uppercase, all-lowercase or underscore-style names (e.g.
+    ``MELIOUS_API_KEY``, ``token``) are never sent as headers.
 
     Each ``secret_envs`` entry is either ``"Header-Name=template ${VAR}"`` (the header
     value is the template with every ``${VAR}`` substituted) or a bare ``"VAR"`` name
@@ -459,10 +460,7 @@ class InitializeSseMCPServer(ChibiTool):
         """
         headers = _compose_auth_headers(headers, secret_envs, env_file_path)
 
-        try:
-            session = await MCPManager.connect_sse(server_name, url, headers=headers)
-        except Exception:
-            raise
+        session = await MCPManager.connect_sse(server_name, url, headers=headers)
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="sse")
 
 

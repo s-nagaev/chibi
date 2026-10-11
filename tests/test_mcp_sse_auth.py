@@ -175,6 +175,16 @@ async def test_sse_tool_env_file_header_like_entry_still_merged(tmp_path, monkey
     assert headers == {"Authorization": "Bearer from-file", "X-Api-Key": "key-123"}
 
 
+async def test_sse_tool_env_file_lowercase_entry_not_merged(tmp_path):
+    """Fully lowercase env-file entries are variable-store style and must not become headers."""
+    env_file = tmp_path / "vars.env"
+    env_file.write_text("token=secret-token\napikey=key-123\n")
+
+    connect_sse_mock = await _run_sse_tool(env_file_path=str(env_file))
+
+    assert connect_sse_mock.await_args.kwargs["headers"] is None
+
+
 async def test_sse_tool_precedence_headers_env_file_secrets(tmp_path, monkeypatch):
     """Precedence (lowest to highest): plain headers -> header-like env file -> secret envs."""
     monkeypatch.setenv("SHARED_SECRET", "from-env")

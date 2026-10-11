@@ -115,8 +115,8 @@ class MCPManager:
         Raises:
             BaseException: The underlying lifecycle failure, re-raised with its
                 original type.
-            RuntimeError: If the connection times out or the session never
-                registers without a recorded failure.
+            RuntimeError: If the session never registers without a recorded failure.
+            asyncio.TimeoutError: If the connection times out.
         """
         try:
             await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
@@ -128,11 +128,12 @@ class MCPManager:
             raise
 
         error = cls._session_errors.pop(name, None)
-        session = cls._sessions.get(name)
-        cls._server_tasks.pop(name, None)
         if error is not None:
+            cls._server_tasks.pop(name, None)
             raise _unwrap_exception(error)
+        session = cls._sessions.get(name)
         if not session:
+            cls._server_tasks.pop(name, None)
             raise RuntimeError(f"Failed to initialize MCP server '{name}'")
         return session
 
@@ -154,7 +155,8 @@ class MCPManager:
 
         Raises:
             BaseException: The underlying transport or initialization failure.
-            RuntimeError: If connection scheduling fails or times out.
+            RuntimeError: If connection scheduling fails.
+            asyncio.TimeoutError: If the connection times out.
         """
         async with cls._lock:
             if name in cls._sessions:
@@ -196,7 +198,8 @@ class MCPManager:
 
         Raises:
             BaseException: The underlying transport or initialization failure.
-            RuntimeError: If connection scheduling fails or times out.
+            RuntimeError: If connection scheduling fails.
+            asyncio.TimeoutError: If the connection times out.
         """
         async with cls._lock:
             if name in cls._sessions:
@@ -240,7 +243,8 @@ class MCPManager:
 
         Raises:
             BaseException: The underlying transport or initialization failure.
-            RuntimeError: If connection scheduling fails or times out.
+            RuntimeError: If connection scheduling fails.
+            asyncio.TimeoutError: If the connection times out.
         """
         async with cls._lock:
             if name in cls._sessions:
