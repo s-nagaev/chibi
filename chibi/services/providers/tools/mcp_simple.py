@@ -30,9 +30,9 @@ class McpEchoTool(ChibiTool):
         server_script = """
 import asyncio
 import sys
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("Echo")
+mcp = MCPServer("Echo")
 
 @mcp.tool()
 def echo(message: str) -> str:

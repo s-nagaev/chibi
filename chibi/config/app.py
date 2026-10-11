@@ -66,6 +66,7 @@ class ApplicationSettings(BaseSettings):
     # MCP settings
     enable_mcp_sse: bool = Field(default=True)
     enable_mcp_stdio: bool = Field(default=False)
+    enable_mcp_rest: bool = Field(default=False)
 
     # HeartBeat settings
     heartbeat_url: str | None = Field(default=None)

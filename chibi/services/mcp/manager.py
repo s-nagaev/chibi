@@ -6,6 +6,7 @@ from loguru import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from mcp.types import CallToolResult
 
 from chibi.services.task_manager import task_manager
@@ -122,12 +123,15 @@ class MCPManager:
             return session
 
     @classmethod
-    async def connect_sse(cls, name: str, url: str, timeout: float = 20.0) -> ClientSession:
+    async def connect_sse(
+        cls, name: str, url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
+    ) -> ClientSession:
         """Connect to an MCP server via SSE transport.
 
         Args:
             name: Unique name for the server session.
             url: SSE endpoint URL.
+            headers: Optional HTTP headers sent with the SSE request (e.g. Authorization).
             timeout: Connection timeout in seconds.
 
         Returns:
@@ -143,12 +147,68 @@ class MCPManager:
             logger.log("TOOL", f"Connecting to MCP server '{name}' via SSE: {url}")
 
             async def sse_factory(stack: AsyncExitStack):
-                return await stack.enter_async_context(sse_client(url))
+                return await stack.enter_async_context(sse_client(url, headers=headers))
 
             ready_event = asyncio.Event()
 
             task = task_manager.run_task(
                 coro=cls._session_lifecycle(name, sse_factory, ready_event, timeout), user_id=-1
+            )
+            if not task:
+                raise RuntimeError("Failed to schedule MCP connection task")
+
+            cls._server_tasks[name] = task
+            try:
+                await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
+            except Exception as e:
+                logger.error(f"An exception occurred while initializing MCP server: {e}")
+                task.cancel()
+                cls._server_tasks.pop(name, None)
+                raise e
+
+            session = cls._sessions.get(name)
+            if not session:
+                cls._server_tasks.pop(name, None)
+                raise RuntimeError(f"Failed to initialize MCP server '{name}'")
+
+            return session
+
+    @classmethod
+    async def connect_rest(
+        cls, name: str, url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
+    ) -> ClientSession:
+        """Connect to an MCP server via the REST (streamable HTTP) transport.
+
+        The transport performs one plain JSON POST per JSON-RPC message, which
+        makes it suitable for stateless JSON-RPC endpoints that do not support
+        SSE or session negotiation.
+
+        Args:
+            name: Unique name for the server session.
+            url: JSON-RPC endpoint URL.
+            headers: Optional HTTP headers sent with every request (e.g. Authorization).
+            timeout: Connection timeout in seconds.
+
+        Returns:
+            The connected ClientSession.
+
+        Raises:
+            RuntimeError: If connection fails or times out.
+        """
+        async with cls._lock:
+            if name in cls._sessions:
+                return cls._sessions[name]
+
+            logger.log("TOOL", f"Connecting to MCP server '{name}' via REST: {url}")
+
+            async def rest_factory(stack: AsyncExitStack):
+                http_client = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+                return await stack.enter_async_context(streamable_http_client(url, http_client=http_client))
+
+            ready_event = asyncio.Event()
+
+            task = task_manager.run_task(
+                coro=cls._session_lifecycle(name, rest_factory, ready_event, timeout), user_id=-1
             )
             if not task:
                 raise RuntimeError("Failed to schedule MCP connection task")

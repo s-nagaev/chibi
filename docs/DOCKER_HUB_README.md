@@ -261,6 +261,7 @@ Chibi connects to MCP servers **dynamically at runtime** — there is no static 
 
 - **`initialize_stdio_mcp_server`** — connect to an MCP server via stdio (e.g., a local CLI tool).
 - **`initialize_sse_mcp_server`** — connect to an MCP server via SSE (e.g., a remote HTTP endpoint).
+- **`initialize_rest_mcp_server`** — connect to an MCP server via REST (plain JSON-RPC over HTTP POST, e.g., a stateless JSON-RPC endpoint that does not support SSE).
 - **`deinitialize_mcp_server`** — disconnect from a previously connected server.
 
 Once connected, the MCP server's tools are automatically registered and become available to the agent for the duration of the session.
@@ -271,6 +272,7 @@ Once connected, the MCP server's tools are automatically registered and become a
 |----------|---------|-------------|
 | `ENABLE_MCP_SSE` | `true` | Allow the agent to connect to MCP servers via SSE |
 | `ENABLE_MCP_STDIO` | `false` | Allow the agent to connect to MCP servers via stdio |
+| `ENABLE_MCP_REST` | `false` | Allow the agent to connect to MCP servers via REST (plain JSON-RPC over HTTP POST) |
 
 > **Note:** `ENABLE_MCP_STDIO` is `false` by default because stdio-based servers execute local processes inside the container. Enable it only when you understand the security implications.
 
