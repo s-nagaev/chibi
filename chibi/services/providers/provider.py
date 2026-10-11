@@ -1305,7 +1305,10 @@ class RestApiFriendlyProvider(Provider):
                 detail = f"status_code: {status_code}, status_msg: {status_msg}"
         if detail:
             raise ServiceResponseError(provider=self.name, detail=detail)
-        raise ServiceResponseError(provider=self.name)
+        raise ServiceResponseError(
+            provider=self.name,
+            detail=f"status_code: {response.status_code}, body: {response.text[:200]}",
+        )
 
 
 class AnthropicFriendlyProvider(RestApiFriendlyProvider):

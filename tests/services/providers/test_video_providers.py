@@ -520,6 +520,49 @@ class TestMinimaxVideo:
                 await provider.get_videos(model=None, prompt="a cat")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("requested", "expected"),
+        [
+            ("MiniMax-H3", "MiniMax-H3"),
+            ("H3", "MiniMax-H3"),
+            ("h3-Max", "MiniMax-H3-Max"),
+        ],
+    )
+    async def test_get_videos_normalizes_model_shorthand(self, requested: str, expected: str) -> None:
+        provider = Minimax("test_token")
+        submit_response = MockResponse({"task_id": "42"})
+        done_response = MockResponse(
+            {"task": {"id": "42", "status": "succeeded", "content": {"url": "https://cdn/v.mp4"}}}
+        )
+
+        with (
+            patch(
+                "chibi.services.providers.provider.RestApiFriendlyProvider._request",
+                new=AsyncMock(side_effect=[submit_response, done_response]),
+            ) as request_mock,
+            patch("chibi.services.providers.minimax.sleep", new=AsyncMock()),
+            patch("chibi.services.providers.minimax.download_media", new=AsyncMock(return_value=b"MP4")),
+        ):
+            await provider.get_videos(model=requested, prompt="a cat")
+
+        assert request_mock.call_args_list[0].kwargs["data"]["model"] == expected
+
+    @pytest.mark.asyncio
+    async def test_get_videos_raises_on_unknown_video_model(self) -> None:
+        provider = Minimax("test_token")
+
+        with patch(
+            "chibi.services.providers.provider.RestApiFriendlyProvider._request",
+            new=AsyncMock(side_effect=AssertionError("request must not be issued for an unknown model")),
+        ):
+            with pytest.raises(ServiceResponseError) as exc_info:
+                await provider.get_videos(model="Foo", prompt="a cat")
+
+        assert "Foo" in exc_info.value.detail
+        assert "MiniMax-H3" in exc_info.value.detail
+        assert "MiniMax-H3-Max" in exc_info.value.detail
+
+    @pytest.mark.asyncio
     async def test_get_available_models_declares_video_models(self) -> None:
         models = await Minimax("test_token").get_available_models(video_generation=True)
 

@@ -67,22 +67,7 @@ class Minimax(AnthropicFriendlyProvider):
             return self.filter_and_return_list_of_models(models=image_models, image_generation=image_generation)
 
         if video_generation:
-            video_models = [
-                ModelChangeSchema(
-                    provider=self.name,
-                    name="MiniMax-H3",
-                    display_name="MiniMax H3",
-                    image_generation=False,
-                    video_generation=True,
-                ),
-                ModelChangeSchema(
-                    provider=self.name,
-                    name="MiniMax-H3-Max",
-                    display_name="MiniMax H3 Max",
-                    image_generation=False,
-                    video_generation=True,
-                ),
-            ]
+            video_models = self._declared_video_models()
             return self.filter_and_return_list_of_models(models=video_models, video_generation=video_generation)
 
         models = await super().get_available_models(video_generation=video_generation)
@@ -190,6 +175,56 @@ class Minimax(AnthropicFriendlyProvider):
         images_urls = response_data.get("data", {}).get("image_urls", [])
         return images_urls
 
+    async def _normalize_video_model(self, model: str) -> str:
+        """Resolve a video model shorthand to a declared video model name.
+
+        Args:
+            model: Requested video model name, possibly a display-name shorthand
+                such as ``H3`` instead of ``MiniMax-H3``.
+
+        Returns:
+            The declared video model name accepted by the /v2 API.
+
+        Raises:
+            ServiceResponseError: If the model does not match any declared video model.
+        """
+        declared = [m.name for m in self._declared_video_models()]
+        if model in declared:
+            return model
+        lowered = model.lower()
+        for name in declared:
+            if name.lower().endswith(lowered):
+                return name
+        supported = ", ".join(declared)
+        raise ServiceResponseError(
+            provider=self.name,
+            model=model,
+            detail=f"Unsupported video model {model!r}. Supported models: {supported}",
+        )
+
+    def _declared_video_models(self) -> list[ModelChangeSchema]:
+        """Build the full catalog of video models supported by the MiniMax /v2 API.
+
+        Returns:
+            The declared video model schemas, unfiltered by model whitelists.
+        """
+        return [
+            ModelChangeSchema(
+                provider=self.name,
+                name="MiniMax-H3",
+                display_name="MiniMax H3",
+                image_generation=False,
+                video_generation=True,
+            ),
+            ModelChangeSchema(
+                provider=self.name,
+                name="MiniMax-H3-Max",
+                display_name="MiniMax H3 Max",
+                image_generation=False,
+                video_generation=True,
+            ),
+        ]
+
     async def get_videos(
         self,
         model: str | None,
@@ -213,6 +248,7 @@ class Minimax(AnthropicFriendlyProvider):
         Raises:
             NotImplementedError: If an image input is provided.
             NoModelSelectedError: If no video model is selected.
+            ServiceResponseError: If the requested video model is not supported.
         """
         if image is not None:
             raise NotImplementedError(f"{self.name} video generation supports text-to-video only for now")
@@ -220,6 +256,7 @@ class Minimax(AnthropicFriendlyProvider):
         model = model or self.default_video_model
         if not model:
             raise NoModelSelectedError(provider=self.name, detail="No video generation model selected")
+        model = await self._normalize_video_model(model)
 
         # The V2 API requires resolution, duration and (for text-to-video) a
         # non-adaptive ratio.
