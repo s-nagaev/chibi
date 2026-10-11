@@ -12,17 +12,41 @@ from mcp.types import CallToolResult
 from chibi.services.task_manager import task_manager
 
 
+def _unwrap_exception(exc: BaseException) -> BaseException:
+    """Unwrap an ExceptionGroup to its single meaningful sub-exception.
+
+    CancelledError members are ignored during unwrapping. Groups with zero or
+    several meaningful members are returned as-is, since no single member is
+    unambiguously the root cause.
+
+    Args:
+        exc: The exception to unwrap.
+
+    Returns:
+        The single meaningful sub-exception, or the original exception when
+        unwrapping is ambiguous.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        meaningful = [e for e in exc.exceptions if not isinstance(e, asyncio.CancelledError)]
+        if len(meaningful) == 1:
+            return _unwrap_exception(meaningful[0])
+    return exc
+
+
 class MCPManager:
     """Manages the lifecycle of MCP server connections and sessions.
 
     Attributes:
         _sessions: Active MCP sessions.
         _server_tasks: Background tasks maintaining the connections.
+        _session_errors: Root-cause exceptions of failed lifecycle tasks, keyed by
+            server name and consumed by the connecting caller.
         _lock: Lock for thread-safe session management.
     """
 
     _sessions: dict[str, ClientSession] = {}
     _server_tasks: dict[str, asyncio.Task] = {}
+    _session_errors: dict[str, BaseException] = {}
     _lock: asyncio.Lock = asyncio.Lock()
     _session_tools_map: dict[str, list[str]] = {}
 
@@ -59,6 +83,7 @@ class MCPManager:
             except Exception as e:
                 logger.error(f"Error in MCP server '{name}' lifecycle: {e}")
                 # If we failed during init, we must signal ready_event so the waiter doesn't hang forever
+                cls._session_errors[name] = e
                 if not ready_event.is_set():
                     ready_event.set()
                 raise
@@ -67,6 +92,49 @@ class MCPManager:
                 if name in cls._sessions:
                     cls._sessions.pop(name, None)
                 logger.log("TOOL", f"MCP server '{name}' disconnected.")
+
+    @classmethod
+    async def _wait_for_session(
+        cls, name: str, ready_event: asyncio.Event, task: asyncio.Task, timeout: float
+    ) -> ClientSession:
+        """Wait for the lifecycle task to become ready, then fetch the session.
+
+        If the lifecycle task failed during initialization, the real underlying
+        exception is re-raised (ExceptionGroups unwrapped to their single meaningful
+        member) instead of a generic error.
+
+        Args:
+            name: Unique name for the server session.
+            ready_event: Event set by the lifecycle task on success or failure.
+            task: The background lifecycle task.
+            timeout: Connection timeout in seconds.
+
+        Returns:
+            The connected ClientSession.
+
+        Raises:
+            BaseException: The underlying lifecycle failure, re-raised with its
+                original type.
+            RuntimeError: If the connection times out or the session never
+                registers without a recorded failure.
+        """
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
+        except Exception as e:
+            logger.error(f"An exception occurred while initializing MCP server '{name}': {e}")
+            task.cancel()
+            cls._server_tasks.pop(name, None)
+            cls._session_errors.pop(name, None)
+            raise
+
+        error = cls._session_errors.pop(name, None)
+        session = cls._sessions.get(name)
+        cls._server_tasks.pop(name, None)
+        if error is not None:
+            raise _unwrap_exception(error)
+        if not session:
+            raise RuntimeError(f"Failed to initialize MCP server '{name}'")
+        return session
 
     @classmethod
     async def connect_stdio(
@@ -85,7 +153,8 @@ class MCPManager:
             The connected ClientSession.
 
         Raises:
-            RuntimeError: If connection fails or times out.
+            BaseException: The underlying transport or initialization failure.
+            RuntimeError: If connection scheduling fails or times out.
         """
         async with cls._lock:
             if name in cls._sessions:
@@ -108,19 +177,7 @@ class MCPManager:
 
             cls._server_tasks[name] = task
 
-            try:
-                await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
-            except Exception:
-                task.cancel()
-                cls._server_tasks.pop(name, None)
-                raise
-
-            session = cls._sessions.get(name)
-            if not session:
-                cls._server_tasks.pop(name, None)
-                raise RuntimeError(f"Failed to initialize MCP server '{name}'")
-
-            return session
+            return await cls._wait_for_session(name, ready_event, task, timeout)
 
     @classmethod
     async def connect_sse(
@@ -138,7 +195,8 @@ class MCPManager:
             The connected ClientSession.
 
         Raises:
-            RuntimeError: If connection fails or times out.
+            BaseException: The underlying transport or initialization failure.
+            RuntimeError: If connection scheduling fails or times out.
         """
         async with cls._lock:
             if name in cls._sessions:
@@ -158,20 +216,8 @@ class MCPManager:
                 raise RuntimeError("Failed to schedule MCP connection task")
 
             cls._server_tasks[name] = task
-            try:
-                await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
-            except Exception as e:
-                logger.error(f"An exception occurred while initializing MCP server: {e}")
-                task.cancel()
-                cls._server_tasks.pop(name, None)
-                raise e
 
-            session = cls._sessions.get(name)
-            if not session:
-                cls._server_tasks.pop(name, None)
-                raise RuntimeError(f"Failed to initialize MCP server '{name}'")
-
-            return session
+            return await cls._wait_for_session(name, ready_event, task, timeout)
 
     @classmethod
     async def connect_rest(
@@ -193,7 +239,8 @@ class MCPManager:
             The connected ClientSession.
 
         Raises:
-            RuntimeError: If connection fails or times out.
+            BaseException: The underlying transport or initialization failure.
+            RuntimeError: If connection scheduling fails or times out.
         """
         async with cls._lock:
             if name in cls._sessions:
@@ -214,20 +261,8 @@ class MCPManager:
                 raise RuntimeError("Failed to schedule MCP connection task")
 
             cls._server_tasks[name] = task
-            try:
-                await asyncio.wait_for(ready_event.wait(), timeout=timeout + 5.0)
-            except Exception as e:
-                logger.error(f"An exception occurred while initializing MCP server: {e}")
-                task.cancel()
-                cls._server_tasks.pop(name, None)
-                raise e
 
-            session = cls._sessions.get(name)
-            if not session:
-                cls._server_tasks.pop(name, None)
-                raise RuntimeError(f"Failed to initialize MCP server '{name}'")
-
-            return session
+            return await cls._wait_for_session(name, ready_event, task, timeout)
 
     @classmethod
     def associate_tools_with_server(cls, server_name: str, tool_names: list[str]) -> None:
@@ -269,6 +304,7 @@ class MCPManager:
 
             # Ensure session is gone (in case task died before we cancelled)
             cls._sessions.pop(name, None)
+            cls._session_errors.pop(name, None)
 
             return deregistered_tools
 

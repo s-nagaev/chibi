@@ -8,6 +8,7 @@ import pytest
 from mcp.types import ListToolsResult, Tool
 
 from chibi.services.mcp.manager import MCPManager
+from chibi.services.providers.tools.mcp_management import InitializeStdioMCPServer
 
 pytestmark = pytest.mark.asyncio
 
@@ -17,6 +18,7 @@ def _reset_manager_state():
     """Reset MCPManager class-level state around every test."""
     MCPManager._sessions.clear()
     MCPManager._server_tasks.clear()
+    MCPManager._session_errors.clear()
     MCPManager._session_tools_map.clear()
     MCPManager._lock = asyncio.Lock()
     yield
@@ -24,6 +26,7 @@ def _reset_manager_state():
         task.cancel()
     MCPManager._sessions.clear()
     MCPManager._server_tasks.clear()
+    MCPManager._session_errors.clear()
     MCPManager._session_tools_map.clear()
     MCPManager._lock = asyncio.Lock()
 
@@ -132,7 +135,7 @@ async def test_connect_stdio_reuses_existing_session():
 
 
 async def test_connect_stdio_raises_when_initialize_fails():
-    """connect_stdio must fail cleanly when session initialization raises."""
+    """connect_stdio must surface the underlying initialization error, not a generic one."""
     session = _make_session()
     session.initialize = AsyncMock(side_effect=RuntimeError("boom"))
 
@@ -149,8 +152,81 @@ async def test_connect_stdio_raises_when_initialize_fails():
         patch("chibi.services.mcp.manager.stdio_client", fake_stdio_client),
         patch("chibi.services.mcp.manager.ClientSession", client_session_factory),
     ):
-        with pytest.raises(RuntimeError, match="Failed to initialize MCP server 'test-server'"):
+        with pytest.raises(RuntimeError, match="boom"):
             await MCPManager.connect_stdio("test-server", "echo", [])
+
+    assert MCPManager.get_session("test-server") is None
+    assert "test-server" not in MCPManager._server_tasks
+    assert "test-server" not in MCPManager._session_errors
+
+
+async def test_connect_stdio_unwraps_exception_group_from_transport():
+    """A failing stdio transport wrapped in an ExceptionGroup must surface its cause."""
+    inner = RuntimeError("stdio process exited with code 1")
+
+    @asynccontextmanager
+    async def failing_stdio_client(params):
+        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    with patch("chibi.services.mcp.manager.stdio_client", failing_stdio_client):
+        with pytest.raises(RuntimeError, match="stdio process exited with code 1"):
+            await MCPManager.connect_stdio("test-server", "echo", [])
+
+    assert MCPManager.get_session("test-server") is None
+
+
+async def test_connect_sse_unwraps_exception_group_from_transport():
+    """A failing SSE transport wrapped in an ExceptionGroup must surface its cause."""
+    inner = RuntimeError("Server returned an error response")
+
+    @asynccontextmanager
+    async def failing_sse_client(url, headers=None, **kwargs):
+        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    with patch("chibi.services.mcp.manager.sse_client", failing_sse_client):
+        with pytest.raises(RuntimeError, match="Server returned an error response"):
+            await MCPManager.connect_sse("test-server", "http://localhost/sse")
+
+    assert MCPManager.get_session("test-server") is None
+
+
+async def test_connect_rest_unwraps_exception_group_from_transport():
+    """A failing REST transport wrapped in an ExceptionGroup must surface its cause."""
+    inner = RuntimeError("401 Unauthorized")
+
+    @asynccontextmanager
+    async def failing_http_client(**kwargs):
+        yield MagicMock(name="http_client")
+
+    @asynccontextmanager
+    async def failing_streamable_http_client(url, http_client=None, **kwargs):
+        raise ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    with (
+        patch("chibi.services.mcp.manager.create_mcp_http_client", failing_http_client),
+        patch("chibi.services.mcp.manager.streamable_http_client", failing_streamable_http_client),
+    ):
+        with pytest.raises(RuntimeError, match="401 Unauthorized"):
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert MCPManager.get_session("test-server") is None
+
+
+async def test_connect_stdio_timeout_falls_back_to_generic_error():
+    """A hung transport must fall back to a timeout error after the deadline."""
+    never_ready = asyncio.Event()
+
+    @asynccontextmanager
+    async def hanging_stdio_client(params):
+        await never_ready.wait()
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+
+    with patch("chibi.services.mcp.manager.stdio_client", hanging_stdio_client):
+        with pytest.raises(asyncio.TimeoutError):
+            await MCPManager.connect_stdio("test-server", "echo", [], timeout=0.1)
 
     assert MCPManager.get_session("test-server") is None
 
@@ -180,3 +256,63 @@ async def test_disconnect_cleans_up_session_and_tools():
     assert removed == ["echo", "shout"]
     assert MCPManager.get_session("test-server") is None
     assert MCPManager.pop_server_tools("test-server") == []
+
+
+async def _run_stdio_tool(**kwargs) -> MagicMock:
+    """Run InitializeStdioMCPServer.function with connect_stdio mocked; return the mock."""
+    connect_stdio_mock = AsyncMock(return_value=MagicMock(name="session"))
+    register_mock = AsyncMock(return_value={"status": "success", "message": "ok"})
+
+    with (
+        patch.object(MCPManager, "connect_stdio", connect_stdio_mock),
+        patch(
+            "chibi.services.providers.tools.mcp_management.register_tools_from_mcp_session",
+            register_mock,
+        ),
+    ):
+        await InitializeStdioMCPServer.function(server_name="test-server", command="echo", args=["hello"], **kwargs)
+
+    return connect_stdio_mock
+
+
+async def test_stdio_tool_bare_secret_env_copied_to_child_env(monkeypatch):
+    """A bare secret_envs name must still be copied from os.environ into the child env."""
+    monkeypatch.setenv("STDIO_SECRET", "supersecret")
+    connect_stdio_mock = await _run_stdio_tool(secret_envs=["STDIO_SECRET"])
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["STDIO_SECRET"] == "supersecret"
+
+
+async def test_stdio_tool_secret_template_falls_back_to_env_file(tmp_path, monkeypatch):
+    """Template variables for stdio must fall back to the env file."""
+    monkeypatch.delenv("FILE_KEY", raising=False)
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=file-key\n")
+
+    connect_stdio_mock = await _run_stdio_tool(
+        secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}"],
+        env_file_path=str(env_file),
+    )
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer file-key"
+
+
+async def test_stdio_tool_env_file_merged_into_child_env(tmp_path):
+    """The env file must remain a variable store merged into the child process env."""
+    env_file = tmp_path / "vars.env"
+    env_file.write_text("CHILD_VAR=child-value\n")
+
+    connect_stdio_mock = await _run_stdio_tool(env_file_path=str(env_file))
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["CHILD_VAR"] == "child-value"
+
+
+async def test_stdio_tool_missing_secret_env_raises_valueerror(monkeypatch):
+    """A stdio secret_envs variable missing from both sources must raise ValueError."""
+    monkeypatch.delenv("MISSING_SECRET", raising=False)
+
+    with pytest.raises(ValueError, match="MISSING_SECRET"):
+        await _run_stdio_tool(secret_envs=["MISSING_SECRET"])

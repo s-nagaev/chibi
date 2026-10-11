@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any, Callable, Coroutine, cast
 
 from dotenv import dotenv_values
@@ -16,6 +17,131 @@ from chibi.services.providers.utils import escape_and_truncate
 
 JsonNode = dict[str, Any] | list[Any] | str | int | float | bool | None
 
+_SECRET_TEMPLATE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_HTTP_HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$")
+
+SECRET_ENVS_SCHEMA_DESCRIPTION = (
+    "A list of secret entries. Each entry is either 'Header-Name=template ${VAR}' — "
+    "a header 'Header-Name' whose value is the template with every ${VAR} substituted "
+    "from os.environ with fallback to the env file — or a bare 'VAR' name, which "
+    "produces the header 'VAR: <value>' (for stdio: the child process env var 'VAR'). "
+    "A variable missing from both sources raises an error naming it. "
+    "Resolved values are never exposed. Highest merge precedence."
+)
+ENV_FILE_PATH_SCHEMA_DESCRIPTION = (
+    "Absolute path to the env file. The file is a VARIABLE store used as the fallback "
+    "source for secret_envs template substitution; only entries whose names look like "
+    "real HTTP headers (hyphenated like 'X-Api-Key', or canonical mixed case like "
+    "'Authorization') are additionally merged as literal headers. All-uppercase or "
+    "underscore-style names (e.g. MELIOUS_API_KEY) are never sent as headers."
+)
+
+
+def _looks_like_http_header_name(name: str) -> bool:
+    """Check whether a name looks like a real HTTP header name.
+
+    The rule: a hyphenated name (``X-Api-Key``) or a canonical mixed-case single
+    word (``Authorization``) is treated as an HTTP header. Anything with
+    underscores (``MELIOUS_API_KEY``) or a fully uppercase single word
+    (``API_TOKEN``) is treated as an environment variable and never sent as a
+    header.
+
+    Args:
+        name: The name to check.
+
+    Returns:
+        True when the name looks like an HTTP header name.
+    """
+    if "-" in name:
+        return bool(_HTTP_HEADER_NAME_PATTERN.match(name))
+    if "_" in name:
+        return False
+    return not name.isupper()
+
+
+def _load_env_file_values(env_file_path: str | None) -> dict[str, str]:
+    """Load non-empty values from an env file.
+
+    Args:
+        env_file_path: Optional path to the env file.
+
+    Returns:
+        Non-empty key-value pairs from the file, or an empty dict when no path is given.
+
+    Raises:
+        ValueError: If ``env_file_path`` is provided but the file does not exist.
+    """
+    if not env_file_path:
+        return {}
+    if not os.path.exists(env_file_path):
+        raise ValueError(f"The file {env_file_path} does not exist.")
+    envs_from_file = dotenv_values(env_file_path) or {}
+    return {k: v for k, v in envs_from_file.items() if v}
+
+
+def _split_secret_entry(entry: str) -> tuple[str, str]:
+    """Split a secret_envs entry into a target name and a value template.
+
+    Args:
+        entry: Either ``"Header-Name=template ${VAR}"`` or a bare ``"VAR"`` name.
+
+    Returns:
+        A tuple of the target name and the template. For a bare name the template
+        is ``${VAR}`` referencing the name itself.
+
+    Raises:
+        ValueError: If the entry is an empty template form (``"=..."`` or ``"="``).
+    """
+    if "=" in entry:
+        name, _, template = entry.partition("=")
+        name = name.strip()
+        if not name:
+            raise ValueError("A secret_envs template entry must name a header before '='.")
+        return name, template.strip()
+    return entry.strip(), "${" + entry.strip() + "}"
+
+
+def _resolve_secret_variable(name: str, env_file_values: dict[str, str]) -> str:
+    """Resolve a variable from os.environ with fallback to the env file values.
+
+    Args:
+        name: The variable name to resolve.
+        env_file_values: Non-empty values loaded from the env file.
+
+    Returns:
+        The resolved variable value.
+
+    Raises:
+        ValueError: If the variable is missing from both os.environ and the env
+            file. The message names the variable but never contains any resolved
+            secret values.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        value = env_file_values.get(name)
+    if value is None:
+        raise ValueError(f"Variable '{name}' required by secret_envs is not set in the environment or the env file.")
+    return value
+
+
+def _expand_secret_template(template: str, env_file_values: dict[str, str]) -> str:
+    """Substitute every ``${VAR}`` occurrence in a template with its resolved value.
+
+    Args:
+        template: The template string, e.g. ``"Bearer ${MELIOUS_API_KEY}"``.
+        env_file_values: Non-empty values loaded from the env file.
+
+    Returns:
+        The template with all variables substituted.
+
+    Raises:
+        ValueError: If any referenced variable is missing from both os.environ
+            and the env file.
+    """
+    return _SECRET_TEMPLATE_PATTERN.sub(
+        lambda match: _resolve_secret_variable(match.group(1), env_file_values), template
+    )
+
 
 def _compose_auth_headers(
     headers: dict[str, str] | None,
@@ -24,39 +150,49 @@ def _compose_auth_headers(
 ) -> dict[str, str] | None:
     """Compose request headers for HTTP-based MCP transports.
 
-    The final header dict is composed with the following precedence (lowest to
-    highest): plain ``headers`` -> non-empty values from ``env_file_path`` ->
-    values of the environment variables named in ``secret_envs``. Secret values
-    are pulled from ``os.environ`` and are never logged.
+    The env file acts as a VARIABLE store: its values are the fallback source for
+    ``${VAR}`` substitution in ``secret_envs`` templates. Only env-file entries whose
+    names look like real HTTP headers (hyphenated like ``X-Api-Key``, or canonical
+    mixed case like ``Authorization``) are additionally merged as literal headers, so
+    configs that intentionally placed ``Authorization=...``-style entries in the file
+    keep working. All-uppercase or underscore-style names (e.g. ``MELIOUS_API_KEY``)
+    are never sent as headers.
+
+    Each ``secret_envs`` entry is either ``"Header-Name=template ${VAR}"`` (the header
+    value is the template with every ``${VAR}`` substituted) or a bare ``"VAR"`` name
+    (backward compatible: the header ``VAR: <value>``). Variables are resolved from
+    ``os.environ`` with fallback to the env file. Resolved secret values are never
+    logged.
+
+    Merge precedence (lowest to highest): plain ``headers`` -> header-like env-file
+    entries -> ``secret_envs`` entries.
 
     Args:
         headers: Optional plain HTTP headers sent as-is to the client.
-        secret_envs: Optional list of environment variable names whose values are
-            injected as headers (highest precedence).
-        env_file_path: Optional path to the env file with header values.
+        secret_envs: Optional list of secret entries (templates or bare names).
+        env_file_path: Optional path to the env file used as the variable store.
 
     Returns:
         The composed header dict, or None when no inputs are provided.
 
     Raises:
-        ValueError: If ``env_file_path`` does not exist.
-        KeyError: If a variable named in ``secret_envs`` is missing from the environment.
+        ValueError: If ``env_file_path`` does not exist, a secret entry is malformed,
+            or a referenced variable is missing from both os.environ and the env file.
     """
-    if env_file_path:
-        if not os.path.exists(env_file_path):
-            raise ValueError(f"The file {env_file_path} does not exist.")
-        headers = headers or {}
-        envs_from_file = dotenv_values(env_file_path)
-        envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
-        if envs_with_values_from_file:
-            headers.update(envs_with_values_from_file)
+    env_file_values = _load_env_file_values(env_file_path)
+    composed = dict(headers) if headers is not None else None
+
+    header_like_entries = {name: value for name, value in env_file_values.items() if _looks_like_http_header_name(name)}
+    if header_like_entries:
+        composed = {**(composed or {}), **header_like_entries}
 
     if secret_envs:
-        headers = headers or {}
-        for secret_env in secret_envs:
-            headers[secret_env] = os.environ[secret_env]
+        composed = composed or {}
+        for entry in secret_envs:
+            header_name, template = _split_secret_entry(entry)
+            composed[header_name] = _expand_secret_template(template, env_file_values)
 
-    return headers
+    return composed
 
 
 def _clean_schema(schema: JsonNode) -> JsonNode:
@@ -180,11 +316,21 @@ class InitializeStdioMCPServer(ChibiTool):
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "A list of environment variables that need to be passed to the mcp server "
-                            "without direct access to their contents."
+                            "A list of secret entries passed to the child process env without direct "
+                            "access to their contents. Each entry is either 'VAR=template ${VAR}' — "
+                            "the child env var 'VAR' set to the template with every ${VAR} substituted "
+                            "from os.environ with fallback to the env file — or a bare 'VAR' name copied "
+                            "from os.environ with the same fallback. A variable missing from both sources "
+                            "raises an error naming it. Resolved values are never exposed."
                         ),
                     },
-                    "env_file_path": {"type": "string", "description": "Absolute path to the env-file."},
+                    "env_file_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path to the env-file. Merged into the child process env as a "
+                            "variable store and used as the fallback source for secret_envs templates."
+                        ),
+                    },
                 },
                 "required": ["server_name", "command", "args"],
             },
@@ -204,30 +350,38 @@ class InitializeStdioMCPServer(ChibiTool):
     ) -> dict[str, Any]:
         """Connect to an MCP server via stdio and register its tools dynamically.
 
+        ``secret_envs`` entries are resolved with the shared helper: a bare ``"VAR"``
+        copies the variable into the child process env, a ``"Name=template ${VAR}"``
+        entry sets the child env var ``Name`` to the substituted template. Variables
+        are resolved from ``os.environ`` with fallback to ``env_file_path`` values.
+        The env file itself is merged into the child env as a variable store.
+
         Args:
             server_name: Unique name for the session.
             command: Command to start the server.
             args: Command arguments.
             env: Optional environment variables.
-            secret_envs: Optional list of environment variable names.
-            env_file_path: Optional path to the env file.
+            secret_envs: Optional list of secret entries (templates or bare names).
+            env_file_path: Optional path to the env file used as the variable store.
 
         Returns:
             dict[str, Any]: Success or error message.
+
+        Raises:
+            ValueError: If ``env_file_path`` does not exist or a secret entry is
+                malformed or references a missing variable.
         """
+        env_file_values = _load_env_file_values(env_file_path)
+
         if secret_envs:
             env = env or {}
-            for secret_env in secret_envs:
-                env[secret_env] = os.environ[secret_env]
+            for entry in secret_envs:
+                target_name, template = _split_secret_entry(entry)
+                env[target_name] = _expand_secret_template(template, env_file_values)
 
-        if env_file_path:
-            if not os.path.exists(env_file_path):
-                raise ValueError(f"The file {env_file_path} does not exist.")
+        if env_file_values:
             env = env or {}
-            envs_from_file = dotenv_values(env_file_path)
-            envs_with_values_from_file = {k: v for k, v in envs_from_file.items() if v}
-            if envs_with_values_from_file:
-                env.update(envs_with_values_from_file)
+            env.update(env_file_values)
 
         session = await MCPManager.connect_stdio(name=server_name, command=command, args=args, env=env)
         return await register_tools_from_mcp_session(mcp_session=session, server_name=server_name, transport="stdio")
@@ -253,24 +407,18 @@ class InitializeSseMCPServer(ChibiTool):
                         "type": "object",
                         "description": (
                             "Optional plain HTTP headers sent with the SSE request (e.g. Authorization). "
-                            "Merged with the lowest precedence: env_file_path values override them, "
-                            "secret_envs values override both."
+                            "Merged with the lowest precedence: header-like env_file_path entries "
+                            "override them, secret_envs values override both."
                         ),
                     },
                     "secret_envs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": (
-                            "A list of environment variables whose values are injected as headers "
-                            "without direct access to their contents. Highest merge precedence."
-                        ),
+                        "description": SECRET_ENVS_SCHEMA_DESCRIPTION,
                     },
                     "env_file_path": {
                         "type": "string",
-                        "description": (
-                            "Absolute path to the env-file with header values. "
-                            "Overrides plain headers, but is overridden by secret_envs."
-                        ),
+                        "description": ENV_FILE_PATH_SCHEMA_DESCRIPTION,
                     },
                 },
                 "required": ["server_name", "url"],
@@ -290,21 +438,24 @@ class InitializeSseMCPServer(ChibiTool):
     ) -> dict[str, Any]:
         """Connect to an MCP server via SSE and register its tools dynamically.
 
-        The final header dict is composed with the following precedence (lowest to
-        highest): plain ``headers`` -> non-empty values from ``env_file_path`` ->
-        values of the environment variables named in ``secret_envs``. Secret values
-        are pulled from ``os.environ`` and are never logged.
+        Headers are composed by ``_compose_auth_headers``: the env file is a variable
+        store (only header-like entries are merged as literal headers) and each
+        ``secret_envs`` entry is a template or a bare variable name resolved from
+        ``os.environ`` with fallback to the env file. Secret values are never logged.
 
         Args:
             server_name: Unique name for the session.
             url: SSE endpoint URL (sse).
             headers: Optional plain HTTP headers sent as-is to the SSE client.
-            secret_envs: Optional list of environment variable names whose values are
-                injected as headers (highest precedence).
-            env_file_path: Optional path to the env file with header values.
+            secret_envs: Optional list of secret entries (templates or bare names).
+            env_file_path: Optional path to the env file used as the variable store.
 
         Returns:
             dict[str, Any]: Success or error message.
+
+        Raises:
+            ValueError: If ``env_file_path`` does not exist or a secret entry is
+                malformed or references a missing variable.
         """
         headers = _compose_auth_headers(headers, secret_envs, env_file_path)
 
@@ -338,24 +489,18 @@ class InitializeRestMCPServer(ChibiTool):
                         "type": "object",
                         "description": (
                             "Optional plain HTTP headers sent with every request (e.g. Authorization). "
-                            "Merged with the lowest precedence: env_file_path values override them, "
-                            "secret_envs values override both."
+                            "Merged with the lowest precedence: header-like env_file_path entries "
+                            "override them, secret_envs values override both."
                         ),
                     },
                     "secret_envs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": (
-                            "A list of environment variables whose values are injected as headers "
-                            "without direct access to their contents. Highest merge precedence."
-                        ),
+                        "description": SECRET_ENVS_SCHEMA_DESCRIPTION,
                     },
                     "env_file_path": {
                         "type": "string",
-                        "description": (
-                            "Absolute path to the env-file with header values. "
-                            "Overrides plain headers, but is overridden by secret_envs."
-                        ),
+                        "description": ENV_FILE_PATH_SCHEMA_DESCRIPTION,
                     },
                 },
                 "required": ["server_name", "url"],
@@ -384,12 +529,15 @@ class InitializeRestMCPServer(ChibiTool):
             server_name: Unique name for the session.
             url: JSON-RPC endpoint URL (rest).
             headers: Optional plain HTTP headers sent as-is to the client.
-            secret_envs: Optional list of environment variable names whose values are
-                injected as headers (highest precedence).
-            env_file_path: Optional path to the env file with header values.
+            secret_envs: Optional list of secret entries (templates or bare names).
+            env_file_path: Optional path to the env file used as the variable store.
 
         Returns:
             dict[str, Any]: Success or error message.
+
+        Raises:
+            ValueError: If ``env_file_path`` does not exist or a secret entry is
+                malformed or references a missing variable.
         """
         headers = _compose_auth_headers(headers, secret_envs, env_file_path)
 
