@@ -31,6 +31,7 @@ def _reset_manager_state():
     """Reset MCPManager class-level state around every test."""
     MCPManager._sessions.clear()
     MCPManager._server_tasks.clear()
+    MCPManager._session_errors.clear()
     MCPManager._session_tools_map.clear()
     MCPManager._lock = asyncio.Lock()
     yield
@@ -38,6 +39,7 @@ def _reset_manager_state():
         task.cancel()
     MCPManager._sessions.clear()
     MCPManager._server_tasks.clear()
+    MCPManager._session_errors.clear()
     MCPManager._session_tools_map.clear()
     MCPManager._lock = asyncio.Lock()
 
@@ -172,7 +174,7 @@ async def test_connect_rest_raises_when_initialize_fails():
         patch("chibi.services.mcp.manager.streamable_http_client", fake_streamable_http_client),
         patch("chibi.services.mcp.manager.ClientSession", MagicMock(return_value=session_cm)),
     ):
-        with pytest.raises(RuntimeError, match="Failed to initialize MCP server 'test-server'"):
+        with pytest.raises(RuntimeError, match="boom"):
             await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
 
     assert MCPManager.get_session("test-server") is None
@@ -223,31 +225,53 @@ async def test_rest_tool_plain_headers_pass_through(monkeypatch):
 
 
 async def test_rest_tool_resolves_secret_envs(monkeypatch):
-    """secret_envs values must be pulled from os.environ into the headers."""
+    """Bare secret_envs names must still be pulled from os.environ into the headers."""
     monkeypatch.setenv("MELIOUS_API_KEY", "supersecret")
     connect_rest_mock = await _run_rest_tool(secret_envs=["MELIOUS_API_KEY"])
 
     assert connect_rest_mock.await_args.kwargs["headers"] == {"MELIOUS_API_KEY": "supersecret"}
 
 
-async def test_rest_tool_merges_env_file(tmp_path, monkeypatch):
-    """Non-empty values from the env file must be merged into the headers."""
+async def test_rest_tool_secret_template_falls_back_to_env_file(tmp_path, monkeypatch):
+    """Template variables must fall back to the env file when absent from os.environ."""
+    monkeypatch.delenv("MELIOUS_API_KEY", raising=False)
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    connect_rest_mock = await _run_rest_tool(
+        secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+        env_file_path=str(env_file),
+    )
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
+
+
+async def test_rest_tool_env_file_is_variable_store_not_header_store(tmp_path, monkeypatch):
+    """Underscore-style env-file entries must not be merged as literal headers."""
     monkeypatch.delenv("FILE_ONLY_VAR", raising=False)
-    env_file = tmp_path / "headers.env"
+    env_file = tmp_path / "vars.env"
     env_file.write_text("FILE_ONLY_VAR=file-value\nEMPTY_VAR=\n")
 
     connect_rest_mock = await _run_rest_tool(env_file_path=str(env_file))
 
-    headers = connect_rest_mock.await_args.kwargs["headers"]
-    assert headers["FILE_ONLY_VAR"] == "file-value"
-    assert "EMPTY_VAR" not in headers
+    assert connect_rest_mock.await_args.kwargs["headers"] is None
+
+
+async def test_rest_tool_env_file_header_like_entry_still_merged(tmp_path, monkeypatch):
+    """Header-like env-file entries (hyphenated names) must stay merged for back-compat."""
+    env_file = tmp_path / "headers.env"
+    env_file.write_text("Authorization=Bearer from-file\nVAR_STYLE=dropped\n")
+
+    connect_rest_mock = await _run_rest_tool(env_file_path=str(env_file))
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer from-file"}
 
 
 async def test_rest_tool_precedence_headers_env_file_secrets(tmp_path, monkeypatch):
-    """Precedence (lowest to highest): plain headers -> env file -> secret envs."""
+    """Precedence (lowest to highest): plain headers -> header-like env file -> secret envs."""
     monkeypatch.setenv("SHARED_SECRET", "from-env")
     env_file = tmp_path / "headers.env"
-    env_file.write_text("SHARED_SECRET=from-file\nFILE_ONLY=file-value\n")
+    env_file.write_text("SHARED_SECRET=from-file\nX-File-Only=file-value\n")
 
     connect_rest_mock = await _run_rest_tool(
         headers={"SHARED_SECRET": "from-plain", "PLAIN_ONLY": "plain-value"},
@@ -258,16 +282,16 @@ async def test_rest_tool_precedence_headers_env_file_secrets(tmp_path, monkeypat
     headers = connect_rest_mock.await_args.kwargs["headers"]
     assert headers == {
         "SHARED_SECRET": "from-env",
-        "FILE_ONLY": "file-value",
+        "X-File-Only": "file-value",
         "PLAIN_ONLY": "plain-value",
     }
 
 
-async def test_rest_tool_missing_secret_env_raises_keyerror(monkeypatch):
-    """A secret_env variable missing from the environment must raise KeyError."""
+async def test_rest_tool_missing_secret_env_raises_valueerror(monkeypatch):
+    """A secret_env variable missing from both sources must raise a clear ValueError."""
     monkeypatch.delenv("MISSING_SECRET", raising=False)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="MISSING_SECRET"):
         await _run_rest_tool(secret_envs=["MISSING_SECRET"])
 
 

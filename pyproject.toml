@@ -137,6 +137,7 @@ paths = ["."]
 
 [tool.ruff]
 line-length = 120
+target-version = "py311"
 exclude = [
     ".git",
     "__pycache__",
