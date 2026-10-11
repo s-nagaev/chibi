@@ -1,5 +1,5 @@
 from chibi.config import gpt_settings
-from chibi.exceptions import NoResponseError
+from chibi.exceptions import NoResponseError, ServiceResponseError
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.providers.provider import OpenAIFriendlyProvider, RestApiFriendlyProvider
 
@@ -51,8 +51,32 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
         models.extend(additional_models)
         return models
 
-    async def get_images(self, prompt: str, model: str | None = None) -> list[str]:
+    async def get_images(
+        self, prompt: str, model: str | None = None, images: list[tuple[bytes, str]] | None = None
+    ) -> list[str]:
+        """Generate images from a text prompt.
+
+        Args:
+            prompt: Text description of the image to generate.
+            model: Image model name. Defaults to the provider's default image model.
+            images: Optional image input as (bytes, mime type) tuples. Not supported
+                by this provider.
+
+        Returns:
+            List of image URLs.
+
+        Raises:
+            ServiceResponseError: If image input is provided, which this provider
+                does not support.
+            NoResponseError: If the provider returns no image data.
+        """
         model = model or self.default_image_model
+        if images:
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail="This provider does not support image input for image generation.",
+            )
         url = "https://api.z.ai/api/paas/v4/images/generations"
         response = await self._request(
             method="POST",

@@ -246,6 +246,9 @@ ENABLE_MCP_SSE=true
 # Enable MCP stdio (standard input/output) connections (default: false)
 ENABLE_MCP_STDIO=false
 
+# Enable MCP REST (streamable-HTTP) connections (default: false)
+ENABLE_MCP_REST=false
+
 
 # ============================================================================
 # 7. WHITELISTS AND RESTRICTIONS
