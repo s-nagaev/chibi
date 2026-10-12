@@ -270,6 +270,7 @@ class Minimax(AnthropicFriendlyProvider):
             "ratio": "16:9",
         }
 
+        started = monotonic()
         response = await self._request(
             method="POST", url=urljoin(self.base_video_url, "video_generation"), data=payload
         )
@@ -277,10 +278,17 @@ class Minimax(AnthropicFriendlyProvider):
         if not task_id:
             raise NoResponseError(provider=self.name, model=model, detail="Server returned no task id")
 
+        logger.info(f"[Video] {self.name}: submitted {model} task {task_id} (duration={requested_duration}s)")
+
         deadline = monotonic() + self.video_poll_timeout
         task: dict[str, Any] = {}
+        poll_attempts = 0
         while True:
             if monotonic() > deadline:
+                logger.error(
+                    f"[Video] {self.name}: task {task_id} did not complete within "
+                    f"{self.video_poll_timeout}s after {poll_attempts} poll attempts"
+                )
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -292,9 +300,15 @@ class Minimax(AnthropicFriendlyProvider):
             )
             task = poll_response.json().get("task") or {}
             status = task.get("status")
+            poll_attempts += 1
+            logger.debug(
+                f"[Video] {self.name}: task {task_id} poll #{poll_attempts} "
+                f"status={status} elapsed={monotonic() - started:.0f}s"
+            )
             if status == "succeeded":
                 break
             if status in ("failed", "cancelled"):
+                logger.error(f"[Video] {self.name}: task {task_id} finished with status {status}")
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -315,8 +329,13 @@ class Minimax(AnthropicFriendlyProvider):
             ) from e
 
         reported_duration = task.get("duration")
+        clip_duration = int(reported_duration) if reported_duration else requested_duration
+        logger.info(
+            f"[Video] {self.name}: task {task_id} completed in {monotonic() - started:.0f}s "
+            f"duration={clip_duration} size={len(video)} bytes"
+        )
         return VideoResult(
             video=video,
             thumbnail=None,
-            duration=int(reported_duration) if reported_duration else requested_duration,
+            duration=clip_duration,
         )

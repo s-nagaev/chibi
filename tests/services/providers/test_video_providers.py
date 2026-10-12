@@ -1,6 +1,8 @@
+from collections.abc import Generator
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from loguru import logger
 
 from chibi.exceptions import NoResponseError, ServiceResponseError
 from chibi.schemas.app import VideoResult
@@ -586,3 +588,83 @@ def test_download_media_helper_signature() -> None:
     assert inspect.iscoroutinefunction(download_media)
     signature = inspect.signature(download_media)
     assert list(signature.parameters) == ["url", "timeout"]
+
+
+class TestVideoPollingLogging:
+    @pytest.fixture
+    def log_messages(self) -> Generator[list[str], None, None]:
+        messages: list[str] = []
+        handler_id = logger.add(messages.append, level="DEBUG", format="{message}")
+        try:
+            yield messages
+        finally:
+            logger.remove(handler_id)
+
+    @pytest.mark.asyncio
+    async def test_minimax_success_logs_submit_poll_and_completion(self, log_messages: list[str]) -> None:
+        provider = Minimax("test_token")
+        submit_response = MockResponse({"task_id": "42"})
+        running_response = MockResponse({"task": {"id": "42", "status": "running"}})
+        done_response = MockResponse(
+            {
+                "task": {
+                    "id": "42",
+                    "status": "succeeded",
+                    "content": {"url": "https://cdn/video.mp4"},
+                    "duration": 5,
+                }
+            }
+        )
+
+        with (
+            patch(
+                "chibi.services.providers.provider.RestApiFriendlyProvider._request",
+                new=AsyncMock(side_effect=[submit_response, running_response, done_response]),
+            ),
+            patch("chibi.services.providers.minimax.sleep", new=AsyncMock()),
+            patch("chibi.services.providers.minimax.download_media", new=AsyncMock(return_value=b"MP4")),
+        ):
+            await provider.get_videos(model=None, prompt="a cat surfing")
+
+        submit_logs = [message for message in log_messages if "submitted MiniMax-H3 task 42" in message]
+        assert submit_logs
+        assert any("[Video] Minimax:" in message for message in submit_logs)
+        assert any("poll #1" in message and "status=running" in message for message in log_messages)
+        completion_logs = [message for message in log_messages if "task 42 completed" in message]
+        assert completion_logs
+        assert "duration=5" in completion_logs[0]
+        assert "size=3" in completion_logs[0]
+
+    @pytest.mark.asyncio
+    async def test_minimax_timeout_logs_error(self, log_messages: list[str]) -> None:
+        provider = Minimax("test_token")
+        provider.video_poll_timeout = 0
+
+        with patch(
+            "chibi.services.providers.provider.RestApiFriendlyProvider._request",
+            new=AsyncMock(
+                side_effect=[
+                    MockResponse({"task_id": "42"}),
+                    AssertionError("poll request must not be issued after the deadline"),
+                ]
+            ),
+        ):
+            with pytest.raises(ServiceResponseError, match="did not complete"):
+                await provider.get_videos(model=None, prompt="a cat")
+
+        timeout_logs = [message for message in log_messages if "task 42 did not complete" in message]
+        assert timeout_logs
+        assert "after 0 poll attempts" in timeout_logs[0]
+
+    @pytest.mark.asyncio
+    async def test_alibaba_submit_failure_logs_error(self, log_messages: list[str]) -> None:
+        provider = Alibaba("test_token")
+        submit_response = Mock(status_code=400, code="InvalidParameter", message="bad request")
+
+        with patch("chibi.services.providers.alibaba.AioVideoSynthesis") as sdk:
+            sdk.async_call = AsyncMock(return_value=submit_response)
+
+            with pytest.raises(ServiceResponseError):
+                await provider.get_videos(model=None, prompt="a cat")
+
+        assert any("HTTP 400" in message and "wan2.6-t2v" in message for message in log_messages)
