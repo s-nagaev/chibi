@@ -4,6 +4,7 @@ import json
 import os
 import re
 import urllib.parse
+from collections.abc import Callable, Coroutine
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ParamSpec, TypedDict, TypeVar, Unpack
@@ -14,7 +15,7 @@ from fake_useragent import UserAgent
 from httpx import Response
 from loguru import logger
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.constants import get_sub_executor_prompt
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
@@ -471,6 +472,132 @@ async def save_media_to_disk(
     await asyncio.to_thread(destination.write_bytes, data)
     logger.log("TOOL", f"Saved generated media to {destination}")
     return str(destination)
+
+
+async def _save_media_artifacts(
+    content: list[bytes | str],
+    *,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    save_path: str | None,
+    fallback_dir: str | None,
+) -> list[str]:
+    """Persist every generated artifact of one tool call to disk.
+
+    Args:
+        content: Raw bytes or URL for each generated artifact, in order.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifacts, with or without the leading dot.
+        save_path: Model-supplied destination, a file or a directory path.
+            With multiple artifacts and a concrete file path, later artifacts
+            overwrite earlier ones (explicit file paths are written as-is).
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute paths of the saved files, in artifact order.
+
+    Raises:
+        PermissionError: If ``gpt_settings.filesystem_access`` is disabled.
+        ToolException: If downloading from a URL fails or no free filename could be derived.
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+    """
+    return [
+        await save_media_to_disk(
+            artifact,
+            tool_name=tool_name,
+            prompt=prompt,
+            ext=ext,
+            save_path=save_path,
+            fallback_dir=fallback_dir,
+        )
+        for artifact in content
+    ]
+
+
+async def compose_media_tool_response(
+    *,
+    deliver: Callable[[], Coroutine[Any, Any, None]],
+    content: list[bytes | str],
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    interface: UserInterface,
+    save_path: str | None,
+    artifact_label: str,
+    delivery_detail: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Deliver generated media (or persist it) and compose an honest response.
+
+    Implements the owner-approved response matrix. Runners able to deliver
+    binary media (``interface.supports_binary_media``) always receive the
+    media first: without ``save_path`` nothing is written to disk and the
+    response is the delivery confirmation only; with ``save_path`` the media
+    is additionally saved and the response carries the absolute paths, or an
+    explicit save-failure note when saving fails (delivery already happened,
+    so this is reported as partial success instead of raising). Runners that
+    cannot deliver binary media never get the delivery call — saving to disk
+    is the only hand-over, the response is path-only, and a save failure
+    raises because nothing was achieved.
+
+    Args:
+        deliver: Zero-argument callable that delivers the media to the user.
+        content: Raw bytes or URL for each generated artifact.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifacts, with or without the leading dot.
+        interface: User interface bound to the current request.
+        save_path: Model-supplied destination, a file or a directory path.
+        artifact_label: Human-readable artifact name, e.g. ``"Image"``.
+        delivery_detail: Delivery confirmation text for delivery-capable runners.
+        extra: Additional response entries merged into every success response.
+
+    Returns:
+        The tool response dict per the response matrix.
+
+    Raises:
+        ToolException: If the runner can deliver binary media but saving was
+            requested while filesystem access is disabled (raised before any
+            delivery), or if saving fails on a runner that cannot deliver
+            binary media.
+    """
+    if interface.supports_binary_media:
+        if save_path and not gpt_settings.filesystem_access:
+            raise ToolException(
+                "Filesystem access is disabled (FILESYSTEM_ACCESS=false). "
+                "Saving media to a path requires filesystem access: drop the save_path "
+                "parameter or enable the setting."
+            )
+        await deliver()
+        if not save_path:
+            return {"detail": delivery_detail, **(extra or {})}
+        try:
+            saved_paths = await _save_media_artifacts(
+                content,
+                tool_name=tool_name,
+                prompt=prompt,
+                ext=ext,
+                save_path=save_path,
+                fallback_dir=None,
+            )
+        except (OSError, ToolException) as exc:
+            logger.warning(f"Saving generated media for tool '{tool_name}' failed: {exc}")
+            return {"detail": delivery_detail, "saved": False, "save_error": str(exc), **(extra or {})}
+        return {"detail": delivery_detail, "saved_to": saved_paths, **(extra or {})}
+
+    saved_paths = await _save_media_artifacts(
+        content,
+        tool_name=tool_name,
+        prompt=prompt,
+        ext=ext,
+        save_path=save_path,
+        fallback_dir=application_settings.resolved_media_output_dir,
+    )
+    joined_paths = ", ".join(saved_paths)
+    return {"detail": f"{artifact_label} was generated and saved to: {joined_paths}", **(extra or {})}
 
 
 class CallTracker(metaclass=SingletonMeta):

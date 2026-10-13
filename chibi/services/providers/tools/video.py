@@ -1,5 +1,6 @@
 import asyncio
 import re
+from functools import partial
 from io import BytesIO
 from typing import Any, Unpack
 
@@ -9,11 +10,11 @@ from openai.types.shared_params import FunctionDefinition
 from PIL import Image
 
 from chibi.config import gpt_settings
-from chibi.schemas.app import ModelChangeSchema
+from chibi.schemas.app import ModelChangeSchema, VideoResult
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, compose_media_tool_response
 from chibi.services.user import (
     generate_video,
     get_models_available,
@@ -137,6 +138,49 @@ class GetAvailableVideoGenerationModelsTool(ChibiTool):
         }
 
 
+async def _deliver_generated_video(interface: UserInterface, result: VideoResult, prompt: str) -> None:
+    """Deliver a generated video to the user's chat.
+
+    The Telegram-optimised thumbnail is prepared for delivery only: it is
+    attached to the video message and never persisted to disk.
+
+    Args:
+        interface: User interface bound to the current request.
+        result: The fully downloaded video generation result.
+        prompt: Video generation prompt, used for the delivery filename.
+    """
+    thumbnail = await asyncio.to_thread(prepare_video_thumbnail, result.thumbnail) if result.thumbnail else None
+    title = f"{prompt[:20]}..."
+    # Keep the prompt-derived filename filesystem-safe: strip slashes,
+    # newlines, quotes, emoji and other non-word characters.
+    safe_name = re.sub(r"[^\w-]+", "_", prompt[:40]).strip("_") or "video"
+    filename = f"{safe_name}.mp4"
+
+    if len(result.video) > VIDEO_SIZE_GUARD_BYTES:
+        logger.log(
+            "TOOL",
+            f"[Video] Payload of {len(result.video)} bytes exceeds the video size guard. "
+            f"Sending it to the chat #{interface.chat_id} as document...",
+        )
+        await interface.send_document(
+            document=result.video,
+            filename=filename,
+            caption="The video is delivered as a file because of its size.",
+            thumbnail=thumbnail,
+        )
+        return None
+
+    logger.log("TOOL", f"[Video] Video generated. Sending it to the chat #{interface.chat_id}...")
+    await interface.send_video(
+        video=result.video,
+        title=title,
+        duration=result.duration,
+        thumbnail=thumbnail,
+        filename=filename,
+    )
+    return None
+
+
 class GenerateVideoTool(ChibiTool):
     """Generate a video from a text prompt and deliver it to the user's chat."""
 
@@ -174,6 +218,15 @@ class GenerateVideoTool(ChibiTool):
                         "type": "integer",
                         "description": "Length of the video in seconds, if the model supports choosing it.",
                     },
+                    "save_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Save the generated file to this path (a file path, or a directory). "
+                            "If omitted, the file is saved to the configured media directory when the current "
+                            "runner cannot deliver media to the user; on Telegram nothing is written unless "
+                            "this is provided."
+                        ),
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -182,82 +235,32 @@ class GenerateVideoTool(ChibiTool):
     name = "generate_video"
 
     @classmethod
-    async def generate_and_send_video(
-        cls,
-        provider: str | None,
-        model: str | None,
-        prompt: str,
-        duration: int | None,
-        interface: UserInterface,
-    ) -> None:
-        """Generate a video and send it to the user's chat.
-
-        Args:
-            provider: Provider name, or None to use the user's active video provider.
-            model: Video model name, or None to use the provider's default.
-            prompt: Video generation prompt.
-            duration: Requested clip length in seconds, if the model supports it.
-            interface: User interface used to deliver the result.
-        """
-        result = await generate_video(
-            interface=interface,
-            prompt=prompt,
-            model=model,
-            provider_name=provider,
-            duration=duration,
-        )
-
-        thumbnail = await asyncio.to_thread(prepare_video_thumbnail, result.thumbnail) if result.thumbnail else None
-        title = f"{prompt[:20]}..."
-        # Keep the prompt-derived filename filesystem-safe: strip slashes,
-        # newlines, quotes, emoji and other non-word characters.
-        safe_name = re.sub(r"[^\w-]+", "_", prompt[:40]).strip("_") or "video"
-        filename = f"{safe_name}.mp4"
-
-        if len(result.video) > VIDEO_SIZE_GUARD_BYTES:
-            logger.log(
-                "TOOL",
-                f"[Video] Payload of {len(result.video)} bytes exceeds the video size guard. "
-                f"Sending it to the chat #{interface.chat_id} as document...",
-            )
-            await interface.send_document(
-                document=result.video,
-                filename=filename,
-                caption="The video is delivered as a file because of its size.",
-                thumbnail=thumbnail,
-            )
-            return None
-
-        logger.log("TOOL", f"[Video] Video generated. Sending it to the chat #{interface.chat_id}...")
-        await interface.send_video(
-            video=result.video,
-            title=title,
-            duration=result.duration,
-            thumbnail=thumbnail,
-            filename=filename,
-        )
-        return None
-
-    @classmethod
     async def function(
         cls,
         prompt: str,
         provider: str | None = None,
         video_model: str | None = None,
         duration: int | None = None,
+        save_path: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
-        """Generate a video from the prompt and deliver it to the user's chat.
+        """Generate a video from the prompt and hand it over to the user.
+
+        On runners that can deliver binary media the video is sent to the
+        user's chat; it is additionally saved to disk only when ``save_path``
+        is provided. On runners that cannot deliver binary media the video is
+        always saved to disk and the response is the saved path.
 
         Args:
             prompt: Video generation prompt.
             provider: Optional provider name override.
             video_model: Optional video model name override.
             duration: Optional clip length in seconds, if the model supports it.
+            save_path: Optional destination to save the generated video to.
             kwargs: Automatically injected call options (interface, user_id).
 
         Returns:
-            Mapping describing the successful delivery.
+            Mapping describing the outcome of the operation.
 
         Raises:
             ToolException: If the user has reached the monthly video generation limit.
@@ -270,11 +273,22 @@ class GenerateVideoTool(ChibiTool):
                 "Please check the available models and try again next month."
             )
 
-        await cls.generate_and_send_video(
-            provider=provider,
-            model=video_model,
-            prompt=prompt,
-            duration=duration,
+        result = await generate_video(
             interface=interface,
+            prompt=prompt,
+            model=video_model,
+            provider_name=provider,
+            duration=duration,
         )
-        return {"detail": "Video was successfully generated and sent to user."}
+
+        return await compose_media_tool_response(
+            deliver=partial(_deliver_generated_video, interface=interface, result=result, prompt=prompt),
+            content=[result.video],
+            tool_name=cls.name,
+            prompt=prompt,
+            ext="mp4",
+            interface=interface,
+            save_path=save_path,
+            artifact_label="Video",
+            delivery_detail="Video was successfully generated and sent to user.",
+        )
