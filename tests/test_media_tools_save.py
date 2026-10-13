@@ -239,6 +239,30 @@ class TestTextToSpeechTool:
         assert target.read_bytes() == b"speech-bytes"
         assert response == {"detail": f"Audio was generated and saved to: {target.resolve()}"}
 
+    async def test_delivering_runner_with_disabled_filesystem_and_no_save_path_delivers_only(
+        self, tts_user: SimpleNamespace, patched_media_dir: Path, filesystem_access_disabled: Path
+    ) -> None:
+        interface = DeliveringInterface()
+        response = await TextToSpeechTool.function(text="hello there", interface=interface)
+
+        assert response == {"detail": "Audio was successfully sent."}
+        interface.send_audio.assert_awaited_once()
+        assert not patched_media_dir.exists()
+
+    async def test_non_delivering_runner_save_failure_raises(
+        self, tts_user: SimpleNamespace, tmp_path: Path, patched_media_dir: Path, filesystem_access_enabled: Path
+    ) -> None:
+        with patch.object(tools_utils, "save_media_to_disk", AsyncMock(side_effect=ToolException("disk exploded"))):
+            interface = StubInterface()
+            with pytest.raises(ToolException, match="disk exploded"):
+                await TextToSpeechTool.function(
+                    text="hello there", save_path=str(tmp_path / "x.mp3"), interface=interface
+                )
+
+        interface.send_audio.assert_not_awaited()
+        assert not (tmp_path / "x.mp3").exists()
+        assert not patched_media_dir.exists()
+
     async def test_delivering_runner_save_with_disabled_filesystem_raises_before_delivery(
         self, tts_user: SimpleNamespace, tmp_path: Path, filesystem_access_disabled: Path
     ) -> None:

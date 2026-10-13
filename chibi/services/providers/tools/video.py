@@ -14,7 +14,12 @@ from chibi.schemas.app import ModelChangeSchema, VideoResult
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
-from chibi.services.providers.tools.utils import AdditionalOptions, compose_media_tool_response
+from chibi.services.providers.tools.utils import (
+    MEDIA_GENERATION_TOOL_NAMES,
+    AdditionalOptions,
+    compose_media_tool_response,
+    media_generation_tools_enabled,
+)
 from chibi.services.user import (
     generate_video,
     get_models_available,
@@ -42,7 +47,9 @@ def sync_video_tool_registration() -> None:
     This sync pass only matters in private mode, where the tools make sense
     solely when at least one configured provider is video-ready. The
     ``TOOLS_WHITELIST`` gate is honoured exactly like
-    ``ChibiTool.__init_subclass__`` does.
+    ``ChibiTool.__init_subclass__`` does, and the binary-media gate
+    (``media_generation_tools_enabled``) is re-applied to ``generate_video``
+    so a runtime sync never resurrects a tool the import-time gate dropped.
 
     Called at the end of the ``chibi.services.providers`` package import, once
     the provider registry is fully populated.
@@ -55,6 +62,9 @@ def sync_video_tool_registration() -> None:
 
     for tool in (GetAvailableVideoGenerationModelsTool, GenerateVideoTool):
         if gpt_settings.tools_whitelist and tool.name not in gpt_settings.tools_whitelist:
+            RegisteredChibiTools.deregister_tools([tool.name])
+            continue
+        if tool.name in MEDIA_GENERATION_TOOL_NAMES and not media_generation_tools_enabled():
             RegisteredChibiTools.deregister_tools([tool.name])
             continue
         if tool.name not in RegisteredChibiTools.tools_map:
@@ -184,7 +194,7 @@ async def _deliver_generated_video(interface: UserInterface, result: VideoResult
 class GenerateVideoTool(ChibiTool):
     """Generate a video from a text prompt and deliver it to the user's chat."""
 
-    register = True
+    register = media_generation_tools_enabled()
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(

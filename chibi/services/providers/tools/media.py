@@ -19,6 +19,7 @@ from chibi.services.providers.tools.utils import (
     AdditionalOptions,
     compose_media_tool_response,
     download,
+    media_generation_tools_enabled,
 )
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
 from chibi.storage.files import get_file_storage
@@ -58,7 +59,7 @@ async def _send_tts_audio(interface: UserInterface, audio: bytes, title: str) ->
 
 
 class TextToSpeechTool(ChibiTool):
-    register = True
+    register = media_generation_tools_enabled()
     run_in_background_by_default = True
     definition = ChatCompletionToolParam(
         type="function",
@@ -225,7 +226,7 @@ async def _send_generated_images(interface: UserInterface, images: list[BytesIO]
 
 
 class GenerateImageTool(ChibiTool):
-    register = True
+    register = media_generation_tools_enabled()
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
@@ -446,7 +447,7 @@ async def _send_suno_audio(interface: UserInterface, results: list[dict[str, Any
 
 
 class GenerateMusicViaSunoTool(ChibiTool):
-    register = bool(gpt_settings.suno_key)
+    register = bool(gpt_settings.suno_key) and media_generation_tools_enabled()
     run_in_background_by_default: bool = True
     allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(
@@ -772,7 +773,7 @@ async def _send_elevenlabs_audio(interface: UserInterface, audio: bytes, name: s
 
 
 class GenerateMusicViaElevenLabsTool(ChibiTool):
-    register = bool(gpt_settings.elevenlabs_api_key)
+    register = bool(gpt_settings.elevenlabs_api_key) and media_generation_tools_enabled()
     run_in_background_by_default: bool = True
     allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(

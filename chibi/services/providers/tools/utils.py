@@ -50,6 +50,72 @@ class AdditionalOptions(TypedDict, total=False):
     interface: UserInterface | None
 
 
+# Client frontends whose interface delivers binary media directly to the user
+# (``TelegramInterface.supports_binary_media = True``). Every other configured
+# client (tui, vscode, pycharm, neovim, terminal) either drops binary payloads
+# or renders them as text, so on those runners saving to disk is the only way
+# a generated artifact can reach the user.
+_BINARY_MEDIA_CLIENTS = frozenset({"telegram"})
+
+# Names of the binary-media generation tools gated by
+# ``media_generation_tools_enabled``. The model-availability listing tools
+# (``get_available_*``) generate nothing and are never gated; the vendor-
+# deactivated Minimax music tool keeps its static ``register = False``.
+MEDIA_GENERATION_TOOL_NAMES: tuple[str, ...] = (
+    "generate_image",
+    "generate_video",
+    "generate_music_via_suno",
+    "generate_music_via_suno_custom_mode",
+    "generate_music_via_elevenlabs",
+    "text_to_speech",
+)
+
+_media_gate_notice_logged: bool = False
+
+
+def media_generation_tools_enabled() -> bool:
+    """Decide whether the binary-media generation tools can succeed in this process.
+
+    A media generation tool achieves its goal only when the generated artifact
+    can reach the user: either the active runner delivers binary media, or it
+    can save the artifact to disk (``filesystem_access``). The runner
+    capability is derived from ``application_settings.client`` via the
+    ``_BINARY_MEDIA_CLIENTS`` mapping — the same one-shot, client-keyed
+    decision the scheduler tools make with ``_SCHEDULER_CLIENTS``. The
+    capability flag itself lives on the interface classes
+    (``UserInterface.supports_binary_media``), but interfaces are instantiated
+    per request, so at registration time the configured client is the only
+    available signal.
+
+    Like the scheduler gate, the decision is evaluated once, when the tool
+    modules are imported. Every entrypoint has the correct client value by
+    then (``chibi.cli stdio`` sets it before importing the runners, the
+    Telegram bot relies on the ``"telegram"`` default) — except the terminal
+    REPL, which imports the tool modules while the client still holds its
+    ``"telegram"`` default. ``TerminalRunner.run_chibi`` therefore
+    deregisters the media tools explicitly after flipping the client to
+    ``"terminal"`` when this function returns False there.
+
+    Returns:
+        True when generated media can reach the user: ``filesystem_access``
+        is enabled (every runner can save to disk), or the active client
+        delivers binary media (``telegram``).
+    """
+    global _media_gate_notice_logged
+    if gpt_settings.filesystem_access:
+        return True
+    if application_settings.client in _BINARY_MEDIA_CLIENTS:
+        return True
+    if not _media_gate_notice_logged:
+        _media_gate_notice_logged = True
+        logger.warning(
+            f"Media generation tools are disabled: the '{application_settings.client}' runner cannot deliver "
+            "binary media and FILESYSTEM_ACCESS is disabled, so generated files could neither be sent nor saved. "
+            "Set FILESYSTEM_ACCESS=true to enable them."
+        )
+    return False
+
+
 def resolve_session_context(**kwargs: Unpack[AdditionalOptions]) -> tuple[int, int]:
     """Resolve the current session identity from a tool-invocation payload.
 

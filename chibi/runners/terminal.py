@@ -302,6 +302,28 @@ def setup_logging() -> None:
     )
 
 
+def _deregister_terminal_incompatible_tools() -> None:
+    """Drop import-time tool registrations the terminal REPL cannot support.
+
+    Tool modules are imported while ``application_settings.client`` still
+    holds its ``"telegram"`` default, so their import-time gates evaluate
+    against the Telegram frontend. The scheduler agent tools are out of scope
+    for the terminal client entirely, and the binary-media generation tools
+    can never succeed on the terminal when filesystem access is disabled
+    (the terminal cannot deliver binary media, so saving to disk is the only
+    delivery channel) — both groups are dropped explicitly here.
+
+    """
+    from chibi.services.providers.tools import RegisteredChibiTools
+    from chibi.services.providers.tools.scheduler import SCHEDULER_AGENT_TOOL_NAMES
+    from chibi.services.providers.tools.utils import MEDIA_GENERATION_TOOL_NAMES, media_generation_tools_enabled
+
+    RegisteredChibiTools.deregister_tools(list(SCHEDULER_AGENT_TOOL_NAMES))
+
+    if not media_generation_tools_enabled():
+        RegisteredChibiTools.deregister_tools(list(MEDIA_GENERATION_TOOL_NAMES))
+
+
 async def run_chibi(user_id: int = 1) -> None:
     """Entry point for the terminal runner.
 
@@ -311,13 +333,10 @@ async def run_chibi(user_id: int = 1) -> None:
     application_settings.client = "terminal"
     setup_logging()
 
-    # The scheduler agent tools register themselves at import time, when
-    # ``application_settings.client`` still holds its "telegram" default, so the terminal
-    # REPL must drop them explicitly: the terminal client is out of scope for the scheduler.
-    from chibi.services.providers.tools import RegisteredChibiTools
-    from chibi.services.providers.tools.scheduler import SCHEDULER_AGENT_TOOL_NAMES
-
-    RegisteredChibiTools.deregister_tools(list(SCHEDULER_AGENT_TOOL_NAMES))
+    # The scheduler and media generation tools register themselves at import
+    # time, when ``application_settings.client`` still holds its "telegram"
+    # default; drop the ones the terminal client cannot support.
+    _deregister_terminal_incompatible_tools()
 
     try:
         from chibi.utils.app import log_application_settings
