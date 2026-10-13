@@ -7,6 +7,7 @@ import dashscope
 from dashscope.aigc.image_generation import AioImageGeneration
 from dashscope.aigc.video_synthesis import AioVideoSynthesis
 from dashscope.api_entities.dashscope_response import Choice, ImageGenerationResponse, Message
+from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoModelSelectedError, NoResponseError, ServiceResponseError
@@ -127,8 +128,13 @@ class Alibaba(OpenAIFriendlyProvider):
         if duration is not None:
             extra_kwargs["duration"] = duration
 
+        started = monotonic()
         response = await AioVideoSynthesis.async_call(api_key=self.token, model=model, prompt=prompt, **extra_kwargs)
         if response.status_code != HTTPStatus.OK:
+            logger.error(
+                f"[Video] {self.name}: failed to submit {model} video generation task "
+                f"(HTTP {response.status_code}): {response.message}"
+            )
             raise ServiceResponseError(
                 provider=self.name,
                 model=model,
@@ -139,9 +145,16 @@ class Alibaba(OpenAIFriendlyProvider):
             )
 
         task_id = response.output["task_id"]
+        logger.info(f"[Video] {self.name}: submitted {model} task {task_id}")
+
         deadline = monotonic() + self.video_poll_timeout
+        poll_attempts = 0
         while True:
             if monotonic() > deadline:
+                logger.error(
+                    f"[Video] {self.name}: task {task_id} did not complete within "
+                    f"{self.video_poll_timeout}s after {poll_attempts} poll attempts"
+                )
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -159,9 +172,18 @@ class Alibaba(OpenAIFriendlyProvider):
                     ),
                 )
             task_status = response.output["task_status"]
+            poll_attempts += 1
+            logger.debug(
+                f"[Video] {self.name}: task {task_id} poll #{poll_attempts} "
+                f"status={task_status} elapsed={monotonic() - started:.0f}s"
+            )
             if task_status == "SUCCEEDED":
                 break
             if task_status in ("FAILED", "CANCELED", "UNKNOWN"):
+                logger.error(
+                    f"[Video] {self.name}: task {task_id} finished with status {task_status} "
+                    f"({response.output.get('message')})"
+                )
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -185,10 +207,15 @@ class Alibaba(OpenAIFriendlyProvider):
 
         usage = response.output.get("usage") or {}
         reported_duration = usage.get("video_duration")
+        clip_duration = int(reported_duration) if reported_duration else duration
+        logger.info(
+            f"[Video] {self.name}: task {task_id} completed in {monotonic() - started:.0f}s "
+            f"duration={clip_duration} size={len(video)} bytes"
+        )
         return VideoResult(
             video=video,
             thumbnail=None,
-            duration=int(reported_duration) if reported_duration else duration,
+            duration=clip_duration,
         )
 
     async def get_available_models(

@@ -153,15 +153,23 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
         if duration is not None and duration in (5, 10):
             payload["duration"] = duration
 
+        started = monotonic()
         response = await self._request(method="POST", url=urljoin(self.base_url, "videos/generations"), data=payload)
         task_id = response.json().get("id")
         if not task_id:
             raise NoResponseError(provider=self.name, model=model, detail="Server returned no task id")
 
+        logger.info(f"[Video] {self.name}: submitted {model} task {task_id}")
+
         deadline = monotonic() + self.video_poll_timeout
         data: dict[str, Any] = {}
+        poll_attempts = 0
         while True:
             if monotonic() > deadline:
+                logger.error(
+                    f"[Video] {self.name}: task {task_id} did not complete within "
+                    f"{self.video_poll_timeout}s after {poll_attempts} poll attempts"
+                )
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -171,9 +179,18 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
             poll_response = await self._request(method="GET", url=urljoin(self.base_url, f"async-result/{task_id}"))
             data = poll_response.json()
             task_status = str(data.get("task_status", "")).upper()
+            poll_attempts += 1
+            logger.debug(
+                f"[Video] {self.name}: task {task_id} poll #{poll_attempts} "
+                f"status={task_status} elapsed={monotonic() - started:.0f}s"
+            )
             if task_status == "SUCCESS":
                 break
             if task_status == "FAIL":
+                logger.error(
+                    f"[Video] {self.name}: task {task_id} finished with status {task_status} "
+                    f"({data.get('message') or 'unknown error'})"
+                )
                 raise ServiceResponseError(
                     provider=self.name,
                     model=model,
@@ -202,4 +219,8 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
             except Exception as e:
                 logger.warning(f"Failed to download the video cover image for {self.name}/{model}: {e}")
 
+        logger.info(
+            f"[Video] {self.name}: task {task_id} completed in {monotonic() - started:.0f}s "
+            f"duration={duration} size={len(video)} bytes"
+        )
         return VideoResult(video=video, thumbnail=thumbnail, duration=duration)

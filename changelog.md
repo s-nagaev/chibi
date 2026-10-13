@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Video generation limits, 1:1 with images:** `VIDEO_GENERATIONS_LIMIT` monthly cap, `VIDEO_GENERATIONS_WHITELIST` allowlist, `User.videos` history with backward-compatible storage defaults, per-thread and per-user active video provider/model selection (`/video_models`-style plumbing), and e2e-style flow tests covering delivery, the size guard and the limit-exceeded path.
 - **Docs:** video generation providers documented in README and all translated READMEs.
 
+### Changed
+- **The video generation polling lifecycle is now logged** in the MiniMax, ZhipuAI and Alibaba providers: submission acceptance (including the provider task id, so a finished generation can be recovered by querying the provider after a restart), each poll attempt with status and elapsed time (debug level), and every terminal outcome — success (with elapsed time, clip duration and size), timeout and failure/cancellation (error level). No behaviour, timing or payload changes; previously the entire submit → poll → download loop ran in complete log silence.
+
 ## [1.19.0] - 2026-10-09
 
 ### Added
