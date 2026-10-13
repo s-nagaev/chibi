@@ -1,6 +1,8 @@
 import asyncio
 import datetime
 import json
+import os
+import re
 import urllib.parse
 from hashlib import sha256
 from pathlib import Path
@@ -306,6 +308,169 @@ async def download(url: str) -> bytes | None:
     except Exception as e:
         logger.error(f"Failed to download file from {url}: {e}")
     return None
+
+
+def _prompt_slug(prompt: str, max_length: int = 40) -> str:
+    """Convert a generation prompt into a filesystem-safe slug.
+
+    Args:
+        prompt: The generation prompt supplied by the model.
+        max_length: Maximum number of characters to keep.
+
+    Returns:
+        A lowercase hyphen-delimited slug, or ``media`` when nothing usable remains.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", prompt.strip().lower()).strip("-")[:max_length].strip("-")
+    return slug or "media"
+
+
+def _uniquify_path(path: Path) -> Path:
+    """Return a non-existing path by appending a numeric suffix on collision.
+
+    Args:
+        path: Desired destination path.
+
+    Returns:
+        The original path when it does not exist yet, otherwise the first
+        available ``{stem}-{n}{suffix}`` variant.
+
+    Raises:
+        ToolException: If no free filename is found within the attempt limit.
+    """
+    if not path.exists():
+        return path
+    for counter in range(1, 1000):
+        candidate = path.with_name(f"{path.stem}-{counter}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise ToolException(f"Could not find a free filename for {path}")
+
+
+def _derived_media_filename(tool_name: str, prompt: str, ext: str) -> str:
+    """Build a derived filename for a generated media artifact.
+
+    Args:
+        tool_name: Name of the generating tool.
+        prompt: Generation prompt, slugified into the filename.
+        ext: File extension with the leading dot.
+
+    Returns:
+        A filename of the form ``{tool_name}-{prompt_slug}-{timestamp}{ext}``.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return f"{tool_name}-{_prompt_slug(prompt=prompt)}-{timestamp}{ext}"
+
+
+def resolve_media_destination(
+    save_path: str | None,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    *,
+    fallback_dir: str | None = None,
+) -> Path:
+    """Resolve where a generated media file must be written and create its parent directory.
+
+    ``save_path`` is used as a concrete file when it is not an existing directory
+    and carries a file suffix; otherwise it is treated as a directory and the
+    filename is derived (tool name + prompt slug + timestamp), uniquified with a
+    numeric suffix on collision. An explicit file path overwrites an existing
+    file, a derived name never does. When ``save_path`` is absent, the caller
+    must pass ``fallback_dir`` explicitly — runners that can deliver binary
+    media (Telegram) never fall back to the default media dir and only save
+    when the model passes ``save_path``.
+
+    Directory creation is lazy: it happens here, only at the moment of an
+    actual save, never on a plain delivery.
+
+    Args:
+        save_path: Model-supplied destination, a file or a directory path.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension, with or without the leading dot.
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute destination path; its parent directory exists on return.
+
+    Raises:
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+        ToolException: If no free filename could be derived.
+    """
+    if not ext.startswith("."):
+        ext = f".{ext}"
+
+    if save_path:
+        path = Path(save_path).expanduser()
+        if path.is_dir() or (not path.exists() and not path.suffix):
+            destination = _uniquify_path(path / _derived_media_filename(tool_name=tool_name, prompt=prompt, ext=ext))
+        else:
+            destination = path
+    else:
+        if not fallback_dir:
+            raise ValueError(
+                "fallback_dir is required when save_path is omitted. Runners able to deliver "
+                "binary media must only save with an explicit save_path."
+            )
+        directory = Path(os.path.expandvars(fallback_dir)).expanduser()
+        destination = _uniquify_path(directory / _derived_media_filename(tool_name=tool_name, prompt=prompt, ext=ext))
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return destination.resolve()
+
+
+async def save_media_to_disk(
+    content: bytes | str,
+    *,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    save_path: str | None = None,
+    fallback_dir: str | None = None,
+) -> str:
+    """Persist generated media to disk, gated by filesystem access.
+
+    The content may be raw bytes or a URL string (media tools hand over URLs,
+    e.g. Suno results); URLs are downloaded via the shared ``download`` helper.
+
+    Args:
+        content: Raw file bytes, or a URL to download the media from.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifact, with or without the leading dot.
+        save_path: Model-supplied destination, a file or a directory path.
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute path of the saved file.
+
+    Raises:
+        PermissionError: If ``gpt_settings.filesystem_access`` is disabled.
+        ToolException: If downloading from a URL fails or no free filename could be derived.
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+    """
+    if not gpt_settings.filesystem_access:
+        raise PermissionError(
+            "Filesystem access is disabled. Enable it (FILESYSTEM_ACCESS=true) to save generated media to disk."
+        )
+    if isinstance(content, str):
+        data = await download(content)
+        if data is None:
+            raise ToolException(f"Failed to download media from URL: {content}")
+    else:
+        data = content
+    destination = resolve_media_destination(
+        save_path,
+        tool_name=tool_name,
+        prompt=prompt,
+        ext=ext,
+        fallback_dir=fallback_dir,
+    )
+    await asyncio.to_thread(destination.write_bytes, data)
+    logger.log("TOOL", f"Saved generated media to {destination}")
+    return str(destination)
 
 
 class CallTracker(metaclass=SingletonMeta):

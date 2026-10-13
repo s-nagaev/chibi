@@ -97,6 +97,7 @@ class SchedulerInterface(UserInterface):
     job creation time.
     """
 
+    supports_binary_media: bool = True
     uses_uploaded_file_storage = False
 
     def __init__(self, user_id: int, storage_id: int, chat_id: int, thread_id: int = 0) -> None:
@@ -656,6 +657,7 @@ class StdioSchedulerInterface(UserInterface):
     logged and dropped by the emitter — the job itself still ran.
     """
 
+    supports_binary_media: bool = False
     uses_uploaded_file_storage = False
 
     def __init__(self, user_id: int, storage_id: int, chat_id: int, thread_id: int = 0) -> None:
