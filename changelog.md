@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **The video generation polling lifecycle is now logged** in the MiniMax, ZhipuAI and Alibaba providers: submission acceptance (including the provider task id, so a finished generation can be recovered by querying the provider after a restart), each poll attempt with status and elapsed time (debug level), and every terminal outcome — success (with elapsed time, clip duration and size), timeout and failure/cancellation (error level). No behaviour, timing or payload changes; previously the entire submit → poll → download loop ran in complete log silence.
 
+### Fixed
+- **Local semantic memory no longer breaks after OS temp cleanup:** the `LOCAL` fastembed embedding model was cached in the system temp directory (`$TMPDIR/fastembed_cache`), which the OS wipes periodically — a wiped or interrupted download then made the ONNX model unloadable and killed Chroma archival and semantic search for the whole deployment. The model is now cached in a persistent per-user directory (`~/.cache/chibi/fastembed`), so a temp-directory cleanup can no longer destroy it; the location is overridable with the `FASTEMBED_CACHE_PATH` environment variable. Embedding vectors, model and dimension are unchanged, so existing collections need no re-embedding.
+
 ## [1.19.0] - 2026-10-09
 
 ### Added

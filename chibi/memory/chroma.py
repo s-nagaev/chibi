@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+import os
 import warnings
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 import chromadb
@@ -43,6 +45,24 @@ if TYPE_CHECKING:
     from fastembed import TextEmbedding
 
 FASTEMBED_DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+FASTEMBED_CACHE_PATH_ENV_VAR: str = "FASTEMBED_CACHE_PATH"
+
+FASTEMBED_CACHE_DIR_DEFAULT: Path = Path.home() / ".cache" / "chibi" / "fastembed"
+
+
+def _get_fastembed_cache_dir() -> str:
+    """Resolve the persistent directory where fastembed keeps its model files.
+
+    fastembed's own ``define_cache_dir`` ignores the ``FASTEMBED_CACHE_PATH``
+    environment variable whenever an explicit ``cache_dir`` is passed, so this
+    module has to read that variable itself.
+
+    Returns:
+        The ``FASTEMBED_CACHE_PATH`` value when it is set, otherwise the
+        persistent per-user default cache directory.
+    """
+    return os.getenv(FASTEMBED_CACHE_PATH_ENV_VAR) or str(FASTEMBED_CACHE_DIR_DEFAULT)
 
 
 class InternalChromaLongConversationMemory(LongConversationMemory):
@@ -852,6 +872,11 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     If it is missing, :func:`create_memory` disables semantic memory instead of
     falling back to another embedding model: vectors from different models are
     incompatible.
+
+    The ONNX model is cached in a persistent per-user directory
+    (``~/.cache/chibi/fastembed``), not in the system temp directory, which the
+    OS may wipe at any time and thereby break semantic memory. The
+    ``FASTEMBED_CACHE_PATH`` environment variable overrides that location.
     """
 
     def __init__(self, model_name: str = FASTEMBED_DEFAULT_MODEL) -> None:
@@ -871,7 +896,11 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
         self._model_name = model_name
 
     def _get_model(self) -> "TextEmbedding":
-        """Construct the fastembed model on first use, then reuse it."""
+        """Construct the fastembed model on first use, then reuse it.
+
+        Returns:
+            The lazily created fastembed model instance.
+        """
         if self._model is None:
             # Safe to ignore: fastembed is pinned to 0.8.0, so all stored
             # embeddings already come from mean pooling (the upstream-canonical
@@ -882,7 +911,10 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
                     message=r".*now uses mean pooling instead of CLS embedding.*",
                     category=UserWarning,
                 )
-                self._model = self._text_embedding_cls(model_name=self._model_name)
+                self._model = self._text_embedding_cls(
+                    model_name=self._model_name,
+                    cache_dir=_get_fastembed_cache_dir(),
+                )
         return self._model
 
     @staticmethod

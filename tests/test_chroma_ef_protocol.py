@@ -99,7 +99,8 @@ class TestFastEmbedProtocol:
         fake_fastembed.TextEmbedding.assert_not_called()
 
         ef.__call__(["hello"])
-        fake_fastembed.TextEmbedding.assert_called_once_with(model_name=TEST_MODEL)
+        fake_fastembed.TextEmbedding.assert_called_once()
+        assert fake_fastembed.TextEmbedding.call_args.kwargs["model_name"] == TEST_MODEL
 
         # Second call must reuse the already-loaded model
         ef.__call__(["world"])
