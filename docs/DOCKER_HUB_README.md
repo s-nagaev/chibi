@@ -303,7 +303,7 @@ Instead, use the **`secret_envs`** parameter:
    }
    ```
 
-3. Chibi automatically pulls the actual values and passes them to the MCP server — **the AI provider never sees the token values**. When the connection supplies a `env_file_path` secret file, variables defined in that file take precedence over Chibi's own environment; variables the file does not define fall back to the environment.
+3. Chibi automatically pulls the actual values and passes them to the MCP server — **the AI provider never sees the token values**. When the connection supplies an `env_file_path` secret file, variables defined in that file take precedence over Chibi's own environment; variables the file does not define fall back to the environment.
 
 **Comparison:**
 
