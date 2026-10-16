@@ -42,6 +42,10 @@ class ApplicationSettings(BaseSettings):
         scheduler_command_timeout_max: Upper limit for a scheduled shell command timeout in seconds.
         scheduler_misfire_grace_time: Default grace period in seconds for catching up missed job runs.
         scheduler_failure_notify: Whether the user is notified when a scheduled job fails.
+        scheduler_debug_logs: Lower the APScheduler log floor of the stdlib→loguru bridge to DEBUG
+            (per-wakeup chatter like ``Next wakeup is due at ...`` and ``Added job ...`` becomes
+            visible). Default False keeps an INFO floor; toggling the env var only requires a
+            process restart, not a rebuild.
     """
 
     model_config = SettingsConfigDict(
@@ -108,6 +112,7 @@ class ApplicationSettings(BaseSettings):
     scheduler_command_timeout_max: int = Field(default=900)
     scheduler_misfire_grace_time: int = Field(default=3600)
     scheduler_failure_notify: bool = Field(default=True)
+    scheduler_debug_logs: bool = Field(default=False)
 
     # Agent settings
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory

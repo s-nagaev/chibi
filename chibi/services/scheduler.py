@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -17,6 +18,7 @@ from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
 from chibi.config import application_settings
+from chibi.config.logging import install_scheduler_log_bridge
 from chibi.exceptions import SchedulerJobError
 from chibi.schemas.scheduler import JobInfo
 from chibi.utils.app import SingletonMeta
@@ -24,6 +26,7 @@ from chibi.utils.app import SingletonMeta
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
+    from apscheduler.events import SchedulerEvent
     from apscheduler.job import Job
     from apscheduler.triggers.base import BaseTrigger
 
@@ -118,6 +121,43 @@ def _summarize_kwargs(kwargs: dict[str, Any], max_length: int = 200) -> str | No
     return summary
 
 
+def _job_owner(job_id: str) -> str:
+    """Return the owner of a job derived from its namespace-qualified id.
+
+    Args:
+        job_id: Fully qualified job identifier (``system:<suffix>`` or
+            ``agent:<user_id>:<suffix>``).
+
+    Returns:
+        ``"system"`` for built-in jobs, or the user id segment for agent jobs.
+    """
+    if job_id.startswith(SYSTEM_JOB_PREFIX):
+        return "system"
+    return job_id.split(":", 2)[1]
+
+
+def _next_run_time(job: Job) -> datetime | None:
+    """Return the job's next run time computed from its trigger.
+
+    APScheduler 3.11 no longer exposes ``next_run_time`` on the ``Job`` object
+    returned by ``add_job`` (it lives in the job store once the scheduler runs),
+    so the value is computed from the trigger instead.
+
+    Args:
+        job: The freshly added APScheduler job.
+
+    Returns:
+        The next fire time, or None when the trigger has no future run.
+    """
+    trigger = getattr(job, "trigger", None)
+    if trigger is None:
+        return None
+    try:
+        return trigger.get_next_fire_time(None, datetime.now(trigger.timezone))
+    except Exception:  # defensive: logging must never break scheduling
+        return None
+
+
 class ChibiScheduler(metaclass=SingletonMeta):
     """Singleton wrapper around AsyncIOScheduler with a persistent job store.
 
@@ -151,6 +191,38 @@ class ChibiScheduler(metaclass=SingletonMeta):
             job_store = _build_sqlite_job_store(TELEGRAM_SCHEDULER_DB_FILENAME)
 
         self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
+        # Make APScheduler's own stdlib records (start, wakeup, missed runs)
+        # visible in the loguru sinks. Scoped to the apscheduler.* family and
+        # idempotent; the INFO/DEBUG floor is flag-gated via scheduler_debug_logs.
+        install_scheduler_log_bridge()
+        # Chibi-level WARNING on missed runs, independent of the stdlib bridge.
+        self._scheduler.add_listener(self._on_scheduler_event, EVENT_JOB_MISSED)
+
+    def _on_scheduler_event(self, event: SchedulerEvent) -> None:
+        """Log a WARNING whenever APScheduler reports a missed job run.
+
+        A run is missed when the process wakes up after the job's run time plus
+        its misfire grace time (e.g. the host was asleep). Without this handler
+        such drops are only visible — if at all — through the stdlib bridge, so
+        the explicit WARNING keeps "dropped" and "fired but delivery failed"
+        distinguishable even if the bridge is ever narrowed.
+
+        Args:
+            event: APScheduler event; only ``EVENT_JOB_MISSED`` is handled.
+        """
+        if event.code != EVENT_JOB_MISSED:
+            return
+        scheduled_run_time = getattr(event, "scheduled_run_time", None)
+        if scheduled_run_time is None:
+            logger.warning("Scheduler: run of job {} was missed", event.job_id)
+            return
+        missed_by = datetime.now(scheduled_run_time.tzinfo) - scheduled_run_time
+        logger.warning(
+            "Scheduler: run of job {} scheduled at {} was missed by {}",
+            event.job_id,
+            scheduled_run_time,
+            missed_by,
+        )
 
     def start(self) -> None:
         """Start the scheduler.
@@ -260,19 +332,30 @@ class ChibiScheduler(metaclass=SingletonMeta):
             options["next_run_time"] = next_run_time
         if end_date is not None:
             options["end_date"] = end_date
-        self._scheduler.add_job(
-            func,
-            trigger="interval",
-            seconds=interval_seconds,
-            kwargs=kwargs or {},
-            id=job_id,
-            replace_existing=replace,
-            misfire_grace_time=grace,
-            coalesce=True,
-            max_instances=1,
-            **options,
+        try:
+            job = self._scheduler.add_job(
+                func,
+                trigger="interval",
+                seconds=interval_seconds,
+                kwargs=kwargs or {},
+                id=job_id,
+                replace_existing=replace,
+                misfire_grace_time=grace,
+                coalesce=True,
+                max_instances=1,
+                **options,
+            )
+        except Exception as error:
+            logger.warning("Failed to schedule interval job {}: {}", job_id, error)
+            raise
+        logger.info(
+            "Scheduled interval job {} (owner: {}, every {}s, next run at {}, misfire_grace_time={})",
+            job_id,
+            _job_owner(job_id),
+            interval_seconds,
+            _next_run_time(job),
+            grace,
         )
-        logger.info("Scheduled interval job {} every {}s (misfire_grace_time={})", job_id, interval_seconds, grace)
         return job_id
 
     def schedule_cron_job(
@@ -319,17 +402,28 @@ class ChibiScheduler(metaclass=SingletonMeta):
         except ValueError as error:
             raise SchedulerJobError(f"Invalid cron expression {cron!r}: {error}") from error
         grace = application_settings.scheduler_misfire_grace_time if misfire_grace_time is None else misfire_grace_time
-        self._scheduler.add_job(
-            func,
-            trigger=trigger,
-            kwargs=kwargs or {},
-            id=job_id,
-            replace_existing=replace,
-            misfire_grace_time=grace,
-            coalesce=True,
-            max_instances=1,
+        try:
+            job = self._scheduler.add_job(
+                func,
+                trigger=trigger,
+                kwargs=kwargs or {},
+                id=job_id,
+                replace_existing=replace,
+                misfire_grace_time=grace,
+                coalesce=True,
+                max_instances=1,
+            )
+        except Exception as error:
+            logger.warning("Failed to schedule cron job {}: {}", job_id, error)
+            raise
+        logger.info(
+            "Scheduled cron job {} (owner: {}, trigger {!r}, next run at {}, misfire_grace_time={})",
+            job_id,
+            _job_owner(job_id),
+            cron,
+            _next_run_time(job),
+            grace,
         )
-        logger.info("Scheduled cron job {} ({!r}, misfire_grace_time={})", job_id, cron, grace)
         return job_id
 
     def schedule_once_job(
@@ -361,18 +455,28 @@ class ChibiScheduler(metaclass=SingletonMeta):
             SchedulerJobError: If the job_id violates the namespace contract.
         """
         _validate_job_id(job_id)
-        self._scheduler.add_job(
-            func,
-            trigger="date",
-            run_date=run_at,
-            kwargs=kwargs or {},
-            id=job_id,
-            replace_existing=True,
-            misfire_grace_time=misfire_grace_time,
-            coalesce=True,
-            max_instances=1,
+        try:
+            job = self._scheduler.add_job(
+                func,
+                trigger="date",
+                run_date=run_at,
+                kwargs=kwargs or {},
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=misfire_grace_time,
+                coalesce=True,
+                max_instances=1,
+            )
+        except Exception as error:
+            logger.warning("Failed to schedule one-time job {}: {}", job_id, error)
+            raise
+        logger.info(
+            "Scheduled one-time job {} (owner: {}, at {}, next run at {})",
+            job_id,
+            _job_owner(job_id),
+            run_at,
+            _next_run_time(job),
         )
-        logger.info("Scheduled one-time job {} at {}", job_id, run_at)
         return job_id
 
     def list_jobs(self, prefix: str | None = None) -> list[JobInfo]:

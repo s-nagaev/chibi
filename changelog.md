@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Scheduler observability: APScheduler logs are now visible in Chibi's loguru sinks.** APScheduler 3.x emits everything through stdlib `logging` on the `apscheduler.*` logger family, and Chibi never bridged it — so every INFO/DEBUG record (`Scheduler started`, `Added job ... to job store`, `Next wakeup is due at ...`, `No jobs; waiting until a job is added`) was discarded outright, and even the surviving WARNING+ records (e.g. `Run time of job ... was missed by 2:00:00`) leaked to stderr as bare, unformatted lines with no timestamp, no level and no `scheduler` marker, making "did not fire" and "fired but delivery failed" indistinguishable in the logs. A dedicated stdlib→loguru bridge (`chibi.config.logging`) now installs a single intercepting handler on the `apscheduler` logger (idempotent, propagation disabled — no duplicate or double-formatted output, no `logging.lastResort` leak), scoped narrowly to the `apscheduler.*` family so all other loggers and every runner sink behave exactly as before. Bridged records render in the standard `datetime | LEVEL | message` shape with the stdlib logger name embedded in the message (`[apscheduler.scheduler] ...`), so a plain `grep -i scheduler` over the logs finally matches.
+- **New `SCHEDULER_DEBUG_LOGS` setting (default `false`):** the bridge floor is flag-gated — with the flag off the floor is INFO (start, scheduling, missed-run warnings; no per-wakeup chatter), with `SCHEDULER_DEBUG_LOGS=true` it drops to DEBUG so `Next wakeup is due at ...` and `Added job ...` become visible for diagnosing wakeup-arming issues. Toggling the env var only requires a process restart, not a rebuild. Documented in the generated configuration reference and the settings docstring.
+- **Explicit Chibi-level scheduler logging, independent of the stdlib bridge:** every successful scheduling call (`schedule_interval_job` / `schedule_cron_job` / `schedule_once_job`) now logs an INFO line carrying the job id, the owner (derived from the job-id namespace — `system` or the agent's user id), a trigger summary and the next run time, and a failed `add_job` logs a WARNING with the job id and error before re-raising. Additionally, a Chibi-level WARNING is logged whenever APScheduler dispatches a missed-run event (`EVENT_JOB_MISSED`), carrying the job id and the missed-by duration — the exact signature of the macOS-sleep digest failures, previously invisible.
+
 ## [1.20.0] - 2026-10-13
 
 ### Added
