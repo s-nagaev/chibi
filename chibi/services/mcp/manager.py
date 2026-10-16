@@ -1,15 +1,24 @@
 import asyncio
+import json
+import re
 from contextlib import AsyncExitStack
 from typing import Any, Callable
 
+import httpx2
 from loguru import logger
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
-from mcp.types import CallToolResult
+from mcp.shared.exceptions import MCPError
+from mcp.types import INTERNAL_ERROR, CallToolResult
 
 from chibi.services.task_manager import task_manager
+
+_PLACEHOLDER_MESSAGE = "Server returned an error response"
+_MAX_BODY_BYTES = 4096
+_MAX_SNIPPET_LENGTH = 200
+_BEARER_TOKEN_PATTERN = re.compile(r"(?i)\bbearer\s+[-._~+/=a-z0-9]+")
 
 
 def _unwrap_exception(exc: BaseException) -> BaseException:
@@ -31,6 +40,128 @@ def _unwrap_exception(exc: BaseException) -> BaseException:
         if len(meaningful) == 1:
             return _unwrap_exception(meaningful[0])
     return exc
+
+
+def _redact_credentials(text: str) -> str:
+    """Replace Bearer-style credentials with a redaction marker.
+
+    Args:
+        text: Raw text that may contain credentials echoed back by a server.
+
+    Returns:
+        Text with Bearer tokens replaced by 'Bearer [REDACTED]'.
+    """
+    return _BEARER_TOKEN_PATTERN.sub("Bearer [REDACTED]", text)
+
+
+class _HttpErrorRecorder:
+    """Records the HTTP outcome of MCP REST transport requests.
+
+    Registered as an httpx2 response event hook for a single connection. Only
+    failed responses (status >= 400) are captured, and the body is buffered
+    only for textual or JSON content types on non-SSE streams, so successful
+    responses and event streams are never read.
+
+    Attributes:
+        status_code: HTTP status of the last failed response, if any.
+        content_type: Content type of that response.
+        body_text: Sanitized, bounded snippet of that response body.
+    """
+
+    def __init__(self) -> None:
+        self.status_code: int | None = None
+        self.content_type: str | None = None
+        self.body_text: str | None = None
+
+    async def on_response(self, response: httpx2.Response) -> None:
+        """Record a failed response, buffering its body only when safe to read.
+
+        Args:
+            response: The response the transport just received.
+        """
+        if response.status_code < 400:
+            return
+        self.status_code = response.status_code
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        self.content_type = content_type or None
+        if content_type.startswith("text/event-stream"):
+            return
+        if not (content_type.startswith("application/json") or content_type.startswith("text/")):
+            return
+        body = await response.aread()
+        self.body_text = _redact_credentials(body[:_MAX_BODY_BYTES].decode("utf-8", errors="replace"))
+
+    def summarize(self) -> str | None:
+        """Build a bounded, secret-free summary of the recorded HTTP failure.
+
+        Returns:
+            A string like 'HTTP 401: AUTH_1008 Invalid API key format', or None
+            when no failure was recorded.
+        """
+        if self.status_code is None:
+            return None
+        prefix = f"HTTP {self.status_code}"
+        if self.body_text is None:
+            return prefix
+        details = self._extract_error_details(self.body_text)
+        if not details:
+            return prefix
+        return f"{prefix}: {details}"
+
+    @staticmethod
+    def _extract_error_details(body_text: str) -> str:
+        """Extract a bounded code/message summary from a response body.
+
+        Args:
+            body_text: Sanitized response body text.
+
+        Returns:
+            A summary of at most _MAX_SNIPPET_LENGTH characters, possibly empty.
+        """
+        try:
+            payload = json.loads(body_text)
+        except ValueError:
+            payload = None
+        details = ""
+        if isinstance(payload, dict):
+            raw_error: Any = payload.get("error")
+            error: dict[Any, Any] = raw_error if isinstance(raw_error, dict) else {}
+            parts = [str(value) for value in (payload.get("code"), error.get("code")) if value not in (None, "")]
+            message = payload.get("message") or error.get("message")
+            if message:
+                parts.append(str(message))
+            details = " ".join(parts)
+        if not details:
+            details = " ".join(body_text.split())
+        return details[:_MAX_SNIPPET_LENGTH]
+
+
+def _enrich_with_http_outcome(exc: BaseException, recorder: _HttpErrorRecorder | None) -> BaseException:
+    """Attach the recorded HTTP outcome to the SDK's status-derived placeholder error.
+
+    The MCP SDK replaces any HTTP >= 400 response whose body is not a JSON-RPC
+    error object with a generic internal-error placeholder. When the
+    per-connection recorder captured the real HTTP failure, the placeholder is
+    rebuilt with the same code and data but a message describing the actual
+    outcome. Non-placeholder errors and connections without a recording are
+    returned unchanged.
+
+    Args:
+        exc: The exception raised by the transport or session.
+        recorder: The HTTP outcome recorder for this connection, if any.
+
+    Returns:
+        The enriched exception, or the original exception when enrichment does
+        not apply.
+    """
+    if recorder is None or not isinstance(exc, MCPError):
+        return exc
+    if exc.code != INTERNAL_ERROR or exc.message != _PLACEHOLDER_MESSAGE:
+        return exc
+    summary = recorder.summarize()
+    if summary is None:
+        return exc
+    return MCPError(exc.code, f"{exc.message} ({summary})", exc.data)
 
 
 class MCPManager:
@@ -57,8 +188,18 @@ class MCPManager:
         transport_factory: Callable[[AsyncExitStack], Any],
         ready_event: asyncio.Event,
         init_timeout: float,
+        http_error_recorder: _HttpErrorRecorder | None = None,
     ) -> None:
-        """Lifecycle manager for an MCP session running in a background task."""
+        """Lifecycle manager for an MCP session running in a background task.
+
+        Args:
+            name: Unique name for the server session.
+            transport_factory: Builds the transport streams inside the stack.
+            ready_event: Event set when the session is ready or has failed.
+            init_timeout: Timeout for the session initialization call.
+            http_error_recorder: Optional HTTP outcome recorder used to enrich
+                the SDK's generic error placeholder (REST transport only).
+        """
         async with AsyncExitStack() as stack:
             try:
                 # Initialize transport
@@ -81,9 +222,13 @@ class MCPManager:
                 logger.log("TOOL", f"MCP server '{name}' session cancelled, cleaning up...")
                 raise
             except Exception as e:
-                logger.error(f"Error in MCP server '{name}' lifecycle: {e}")
+                # Unwrap first: transport failures may arrive as ExceptionGroups,
+                # and only the root cause is matched against the SDK placeholder.
+                root_cause = _unwrap_exception(e)
+                enriched = _enrich_with_http_outcome(root_cause, http_error_recorder)
+                logger.error(f"Error in MCP server '{name}' lifecycle: {enriched}")
                 # If we failed during init, we must signal ready_event so the waiter doesn't hang forever
-                cls._session_errors[name] = e
+                cls._session_errors[name] = enriched
                 if not ready_event.is_set():
                     ready_event.set()
                 raise
@@ -252,14 +397,22 @@ class MCPManager:
 
             logger.log("TOOL", f"Connecting to MCP server '{name}' via REST: {url}")
 
+            http_error_recorder = _HttpErrorRecorder()
+
             async def rest_factory(stack: AsyncExitStack):
                 http_client = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+                # create_mcp_http_client accepts no event_hooks parameter, so the
+                # recorder is registered on the live client after its creation.
+                http_client.event_hooks["response"].append(http_error_recorder.on_response)
                 return await stack.enter_async_context(streamable_http_client(url, http_client=http_client))
 
             ready_event = asyncio.Event()
 
             task = task_manager.run_task(
-                coro=cls._session_lifecycle(name, rest_factory, ready_event, timeout), user_id=-1
+                coro=cls._session_lifecycle(
+                    name, rest_factory, ready_event, timeout, http_error_recorder=http_error_recorder
+                ),
+                user_id=-1,
             )
             if not task:
                 raise RuntimeError("Failed to schedule MCP connection task")

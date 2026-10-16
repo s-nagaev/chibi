@@ -22,19 +22,23 @@ _HTTP_HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$")
 
 SECRET_ENVS_SCHEMA_DESCRIPTION = (
     "A list of secret entries. Each entry is either 'Header-Name=template ${VAR}' — "
-    "a header 'Header-Name' whose value is the template with every ${VAR} substituted "
-    "from os.environ with fallback to the env file — or a bare 'VAR' name, which "
+    "a header 'Header-Name' whose value is the template with every ${VAR} substituted, "
+    "resolving each variable from the env file (env_file_path) first and falling back "
+    "to os.environ when the file does not define it — or a bare 'VAR' name, which "
     "produces the header 'VAR: <value>' (for stdio: the child process env var 'VAR'). "
-    "A variable missing from both sources raises an error naming it. "
-    "Resolved values are never exposed. Highest merge precedence."
+    "When both sources define a variable with different values, the env file value "
+    "wins and a warning naming the variable is logged at most once per variable per "
+    "tool call. A variable missing from both "
+    "sources raises an error naming it. Resolved values are never exposed. Highest "
+    "merge precedence."
 )
 ENV_FILE_PATH_SCHEMA_DESCRIPTION = (
-    "Absolute path to the env file. The file is a VARIABLE store used as the fallback "
-    "source for secret_envs template substitution; only entries whose names look like "
-    "real HTTP headers (hyphenated like 'X-Api-Key', or canonical mixed case like "
-    "'Authorization') are additionally merged as literal headers. All-uppercase, "
-    "all-lowercase or underscore-style names (e.g. MELIOUS_API_KEY, token) are never "
-    "sent as headers."
+    "Absolute path to the env file. The file is a VARIABLE store and the primary "
+    "source for secret_envs template substitution: its values take precedence over "
+    "os.environ. Only entries whose names look like real HTTP headers (hyphenated "
+    "like 'X-Api-Key', or canonical mixed case like 'Authorization') are additionally "
+    "merged as literal headers. All-uppercase, all-lowercase or underscore-style names "
+    "(e.g. MELIOUS_API_KEY, token) are never sent as headers."
 )
 
 
@@ -102,12 +106,21 @@ def _split_secret_entry(entry: str) -> tuple[str, str]:
     return entry.strip(), "${" + entry.strip() + "}"
 
 
-def _resolve_secret_variable(name: str, env_file_values: dict[str, str]) -> str:
-    """Resolve a variable from os.environ with fallback to the env file values.
+def _resolve_secret_variable(name: str, env_file_values: dict[str, str], warned: set[str]) -> str:
+    """Resolve a variable preferring the env file over ``os.environ``.
+
+    When both the env file and ``os.environ`` define the variable with different
+    values, the env file value wins and a warning naming the variable (never the
+    values) is logged at most once per variable per ``warned`` set (the caller
+    creates one set per tool call). When the env file does not define the
+    variable, ``os.environ`` is used. When neither source defines it, the lookup
+    fails.
 
     Args:
         name: The variable name to resolve.
         env_file_values: Non-empty values loaded from the env file.
+        warned: Per-call set of variable names already warned about; used to
+            deduplicate shadowing warnings.
 
     Returns:
         The resolved variable value.
@@ -117,20 +130,31 @@ def _resolve_secret_variable(name: str, env_file_values: dict[str, str]) -> str:
             file. The message names the variable but never contains any resolved
             secret values.
     """
-    value = os.environ.get(name)
-    if value is None:
-        value = env_file_values.get(name)
-    if value is None:
-        raise ValueError(f"Variable '{name}' required by secret_envs is not set in the environment or the env file.")
-    return value
+    env_file_value = env_file_values.get(name)
+    if env_file_value is not None:
+        runtime_value = os.environ.get(name)
+        if runtime_value is not None and runtime_value != env_file_value and name not in warned:
+            warned.add(name)
+            logger.warning(
+                f"Variable '{name}' is defined in both the env file and the runtime "
+                "environment with different values; the runtime environment value "
+                "was shadowed by the env file."
+            )
+        return env_file_value
+    runtime_value = os.environ.get(name)
+    if runtime_value is not None:
+        return runtime_value
+    raise ValueError(f"Variable '{name}' required by secret_envs is not set in the environment or the env file.")
 
 
-def _expand_secret_template(template: str, env_file_values: dict[str, str]) -> str:
+def _expand_secret_template(template: str, env_file_values: dict[str, str], warned: set[str]) -> str:
     """Substitute every ``${VAR}`` occurrence in a template with its resolved value.
 
     Args:
         template: The template string, e.g. ``"Bearer ${MELIOUS_API_KEY}"``.
         env_file_values: Non-empty values loaded from the env file.
+        warned: Per-call set of variable names already warned about; used to
+            deduplicate shadowing warnings.
 
     Returns:
         The template with all variables substituted.
@@ -140,7 +164,7 @@ def _expand_secret_template(template: str, env_file_values: dict[str, str]) -> s
             and the env file.
     """
     return _SECRET_TEMPLATE_PATTERN.sub(
-        lambda match: _resolve_secret_variable(match.group(1), env_file_values), template
+        lambda match: _resolve_secret_variable(match.group(1), env_file_values, warned), template
     )
 
 
@@ -151,8 +175,9 @@ def _compose_auth_headers(
 ) -> dict[str, str] | None:
     """Compose request headers for HTTP-based MCP transports.
 
-    The env file acts as a VARIABLE store: its values are the fallback source for
-    ``${VAR}`` substitution in ``secret_envs`` templates. Only env-file entries whose
+    The env file acts as a VARIABLE store: its values are the primary source for
+    ``${VAR}`` substitution in ``secret_envs`` templates (``os.environ`` is the
+    fallback). Only env-file entries whose
     names look like real HTTP headers (hyphenated like ``X-Api-Key``, or canonical
     mixed case like ``Authorization``) are additionally merged as literal headers, so
     configs that intentionally placed ``Authorization=...``-style entries in the file
@@ -162,8 +187,10 @@ def _compose_auth_headers(
     Each ``secret_envs`` entry is either ``"Header-Name=template ${VAR}"`` (the header
     value is the template with every ``${VAR}`` substituted) or a bare ``"VAR"`` name
     (backward compatible: the header ``VAR: <value>``). Variables are resolved from
-    ``os.environ`` with fallback to the env file. Resolved secret values are never
-    logged.
+    the env file first, with fallback to ``os.environ``; when both sources define a
+    variable with different values, the env file value wins and a warning naming the
+    variable is logged at most once per variable per call. Resolved secret values
+    are never logged.
 
     Merge precedence (lowest to highest): plain ``headers`` -> header-like env-file
     entries -> ``secret_envs`` entries.
@@ -181,6 +208,7 @@ def _compose_auth_headers(
             or a referenced variable is missing from both os.environ and the env file.
     """
     env_file_values = _load_env_file_values(env_file_path)
+    warned: set[str] = set()
     composed = dict(headers) if headers is not None else None
 
     header_like_entries = {name: value for name, value in env_file_values.items() if _looks_like_http_header_name(name)}
@@ -191,7 +219,7 @@ def _compose_auth_headers(
         composed = composed or {}
         for entry in secret_envs:
             header_name, template = _split_secret_entry(entry)
-            composed[header_name] = _expand_secret_template(template, env_file_values)
+            composed[header_name] = _expand_secret_template(template, env_file_values, warned)
 
     return composed
 
@@ -319,17 +347,22 @@ class InitializeStdioMCPServer(ChibiTool):
                         "description": (
                             "A list of secret entries passed to the child process env without direct "
                             "access to their contents. Each entry is either 'VAR=template ${VAR}' — "
-                            "the child env var 'VAR' set to the template with every ${VAR} substituted "
-                            "from os.environ with fallback to the env file — or a bare 'VAR' name copied "
-                            "from os.environ with the same fallback. A variable missing from both sources "
-                            "raises an error naming it. Resolved values are never exposed."
+                            "the child env var 'VAR' set to the template with every ${VAR} substituted, "
+                            "resolving each variable from the env file (env_file_path) first and falling "
+                            "back to os.environ when the file does not define it — or a bare 'VAR' name "
+                            "resolved the same way. When both sources define a variable with different "
+                            "values, the env file value wins and a warning naming the variable is logged at most "
+                            "once per variable per tool call. "
+                            "A variable missing from both sources raises an error naming it. Resolved "
+                            "values are never exposed."
                         ),
                     },
                     "env_file_path": {
                         "type": "string",
                         "description": (
                             "Absolute path to the env-file. Merged into the child process env as a "
-                            "variable store and used as the fallback source for secret_envs templates."
+                            "variable store and used as the primary source for secret_envs template "
+                            "substitution (its values take precedence over os.environ)."
                         ),
                     },
                 },
@@ -354,7 +387,10 @@ class InitializeStdioMCPServer(ChibiTool):
         ``secret_envs`` entries are resolved with the shared helper: a bare ``"VAR"``
         copies the variable into the child process env, a ``"Name=template ${VAR}"``
         entry sets the child env var ``Name`` to the substituted template. Variables
-        are resolved from ``os.environ`` with fallback to ``env_file_path`` values.
+        are resolved from ``env_file_path`` values first, with fallback to
+        ``os.environ``; when both sources define a variable with different values,
+        the env file value wins and a warning naming the variable is logged at most
+        once per variable per tool call.
         The env file itself is merged into the child env as a variable store.
 
         Args:
@@ -376,9 +412,10 @@ class InitializeStdioMCPServer(ChibiTool):
 
         if secret_envs:
             env = env or {}
+            warned: set[str] = set()
             for entry in secret_envs:
                 target_name, template = _split_secret_entry(entry)
-                env[target_name] = _expand_secret_template(template, env_file_values)
+                env[target_name] = _expand_secret_template(template, env_file_values, warned)
 
         if env_file_values:
             env = env or {}
@@ -441,8 +478,8 @@ class InitializeSseMCPServer(ChibiTool):
 
         Headers are composed by ``_compose_auth_headers``: the env file is a variable
         store (only header-like entries are merged as literal headers) and each
-        ``secret_envs`` entry is a template or a bare variable name resolved from
-        ``os.environ`` with fallback to the env file. Secret values are never logged.
+        ``secret_envs`` entry is a template or a bare variable name resolved from the
+        env file first, with fallback to ``os.environ``. Secret values are never logged.
 
         Args:
             server_name: Unique name for the session.

@@ -9,6 +9,8 @@ from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from chibi.config.logging import traceback_diagnostics_enabled
+
 ClientType = Literal["telegram", "tui", "vscode", "pycharm", "neovim", "terminal"]
 
 
@@ -174,6 +176,8 @@ def configure_stderr_sink() -> None:
     bound user id. Terminal and stdio runners install their own sinks instead.
     """
     logger.remove()
+    # Loguru defaults to diagnose=True, which would render traceback locals
+    # (potentially credentials); keep diagnostics off by default here too.
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -181,6 +185,7 @@ def configure_stderr_sink() -> None:
         "{extra[user_id]}"
         "<level>{message}</level>",
         filter=add_user_context,
+        diagnose=traceback_diagnostics_enabled(),
     )
 
 

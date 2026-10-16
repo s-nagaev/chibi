@@ -167,6 +167,12 @@ At least one provider API key is required.
 
 For the full list of environment variables (50+), see the [Configuration Reference](https://chibi.bot/configuration).
 
+### Logging and Debugging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGURU_DIAGNOSE` | unset | Set to a truthy value (`1`, `true`, `yes`, `y`, `ok`, `on` — case-insensitive) to render local variable values under each traceback frame in logs. **Debug only — never enable in production:** rendered locals may include credentials such as API keys. |
+
 ---
 
 ## Volumes and Persistence
@@ -297,7 +303,7 @@ Instead, use the **`secret_envs`** parameter:
    }
    ```
 
-3. Chibi automatically pulls the actual values from its own environment and passes them to the MCP server — **the AI provider never sees the token values**.
+3. Chibi automatically pulls the actual values and passes them to the MCP server — **the AI provider never sees the token values**. When the connection supplies an `env_file_path` secret file, variables defined in that file take precedence over Chibi's own environment; variables the file does not define fall back to the environment.
 
 **Comparison:**
 

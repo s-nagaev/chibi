@@ -16,6 +16,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from chibi.config import application_settings
+from chibi.config.logging import traceback_diagnostics_enabled
 from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
 from chibi.services.terminal_interface import TerminalInterface
@@ -295,10 +296,13 @@ def setup_logging() -> None:
     # Ensure stderr can emit UTF-8 before attaching the loguru sink
     reconfigure_stream_utf8(cast(io.TextIOWrapper, sys.stderr))
 
+    # Loguru defaults to diagnose=True, which would render traceback locals
+    # (potentially credentials); keep diagnostics off by default here too.
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <level>{message}</level>",
         level="INFO",
+        diagnose=traceback_diagnostics_enabled(),
     )
 
 
