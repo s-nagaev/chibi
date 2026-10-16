@@ -5,7 +5,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Callable
+from typing import Any, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
@@ -13,6 +13,7 @@ import pytest
 from loguru import logger
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
 from mcp.types import TextContent, Tool
 
 import chibi.services.providers.tools.mcp_management as mcp_management_module
@@ -572,3 +573,359 @@ async def test_offline_register_tools_from_rest_session():
         assert result["message"].endswith(chibi_tool_name)
     finally:
         RegisteredChibiTools.deregister_tools([chibi_tool_name])
+
+
+def _hooked_http_client() -> tuple[MagicMock, dict[str, list]]:
+    """Build a mock http client with a real response event-hooks dict.
+
+    Returns:
+        The mock client and the live hooks dict the manager registers its
+        recorder into.
+    """
+    hooks: dict[str, list] = {"response": []}
+    client = MagicMock(name="http_client")
+    client.event_hooks = hooks
+    return client, hooks
+
+
+async def _fire_response_hooks(
+    hooks: dict[str, list],
+    status_code: int,
+    content_type: str = "application/json",
+    body: bytes = b"",
+) -> SimpleNamespace:
+    """Invoke registered response hooks with a synthetic response.
+
+    Args:
+        hooks: The live event-hooks dict of a mock http client.
+        status_code: HTTP status code of the synthetic response.
+        content_type: Content type of the synthetic response.
+        body: Body returned by the synthetic response's aread().
+
+    Returns:
+        The synthetic response object, so tests can assert on aread() calls.
+    """
+    response = SimpleNamespace(
+        status_code=status_code,
+        headers={"content-type": content_type},
+        aread=AsyncMock(return_value=body),
+    )
+    for hook in hooks["response"]:
+        await hook(response)
+    return response
+
+
+def _failing_rest_transport(error: BaseException, before_raise: Callable[[], Any] | None = None) -> type:
+    """Build a fake streamable-HTTP transport class that raises after optional preparation.
+
+    Args:
+        error: The exception to raise on context entry.
+        before_raise: Optional zero-argument async callable executed before
+            raising (used to fire response hooks first).
+
+    Returns:
+        A transport class compatible with the manager's REST factory.
+    """
+
+    class FailingStreamableHttpClient:
+        def __call__(self, url: str, http_client: Any = None, **kwargs: Any) -> "FailingStreamableHttpClient":
+            return self
+
+        async def __aenter__(self) -> tuple[MagicMock, MagicMock]:
+            if before_raise is not None:
+                await before_raise()
+            raise error
+
+        async def __aexit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> bool:
+            return False
+
+    return FailingStreamableHttpClient
+
+
+@asynccontextmanager
+async def _static_http_client_factory(client: Any, **kwargs: Any):
+    """Fake create_mcp_http_client always yielding the given client."""
+    yield client
+
+
+PLACEHOLDER_CODE = -32603
+PLACEHOLDER_MESSAGE = "Server returned an error response"
+
+
+async def test_connect_rest_enriches_placeholder_with_http_status_and_server_error():
+    """A placeholder raised after an HTTP 401 must report the status and the server error."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    transport = _failing_rest_transport(
+        error,
+        before_raise=lambda: _fire_response_hooks(
+            hooks, 401, "application/json", b'{"code": "AUTH_1008", "message": "Invalid API key format"}'
+        ),
+    )
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="ERROR")
+    try:
+        with (
+            patch(
+                "chibi.services.mcp.manager.create_mcp_http_client",
+                lambda **kwargs: _static_http_client_factory(client, **kwargs),
+            ),
+            patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+        ):
+            with pytest.raises(MCPError) as excinfo:
+                await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+    finally:
+        logger.remove(sink_id)
+
+    message = str(excinfo.value)
+    assert excinfo.value.code == PLACEHOLDER_CODE
+    assert "HTTP 401" in message
+    assert "AUTH_1008" in message
+    assert "Invalid API key format" in message
+    assert any("HTTP 401" in m and "AUTH_1008" in m for m in messages), f"Expected enriched log line, got: {messages}"
+
+
+async def test_connect_rest_preserves_error_type_and_data_when_enriching():
+    """Enrichment must keep the exception type, JSON-RPC code and data intact."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE, data={"detail": "context"})
+    transport = _failing_rest_transport(
+        error, before_raise=lambda: _fire_response_hooks(hooks, 403, "application/json", b'{"code": "X"}')
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert isinstance(excinfo.value, MCPError)
+    assert excinfo.value.code == PLACEHOLDER_CODE
+    assert excinfo.value.data == {"detail": "context"}
+
+
+async def test_connect_rest_redacts_bearer_token_from_error_body():
+    """A server echoing a Bearer token back in the error body must not leak it."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    transport = _failing_rest_transport(
+        error,
+        before_raise=lambda: _fire_response_hooks(
+            hooks, 401, "application/json", b'{"error": "Bearer sk-super-secret-token rejected"}'
+        ),
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    message = str(excinfo.value)
+    assert "sk-super-secret-token" not in message
+    assert "Bearer [REDACTED]" in message
+
+
+async def test_connect_rest_truncates_long_error_body_snippet():
+    """The body-derived detail must be bounded to a short snippet."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    long_message = "x" * 500
+    transport = _failing_rest_transport(
+        error,
+        before_raise=lambda: _fire_response_hooks(
+            hooks, 500, "application/json", json.dumps({"message": long_message}).encode()
+        ),
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    message = str(excinfo.value)
+    assert "x" * 200 in message
+    assert "x" * 201 not in message
+
+
+async def test_connect_rest_without_recorded_outcome_keeps_placeholder_message():
+    """No recorded HTTP failure means the placeholder message stays untouched."""
+    client, _hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    transport = _failing_rest_transport(error)
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert str(excinfo.value) == PLACEHOLDER_MESSAGE
+
+
+async def test_connect_rest_leaves_non_placeholder_mcp_error_untouched():
+    """Other -32603 errors must not be rewritten even when an HTTP failure was recorded."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message="Custom tool failure")
+    transport = _failing_rest_transport(
+        error, before_raise=lambda: _fire_response_hooks(hooks, 401, "application/json", b'{"code": "AUTH"}')
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert str(excinfo.value) == "Custom tool failure"
+
+
+async def test_connect_rest_group_wrapped_placeholder_is_enriched():
+    """An ExceptionGroup-wrapped placeholder must still be unwrapped and enriched."""
+    client, hooks = _hooked_http_client()
+    inner = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    error = ExceptionGroup("Unhandled errors in a TaskGroup", [inner])
+    transport = _failing_rest_transport(
+        error,
+        before_raise=lambda: _fire_response_hooks(
+            hooks, 401, "application/json", b'{"code": "AUTH_1008", "message": "Invalid API key format"}'
+        ),
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert excinfo.value.code == PLACEHOLDER_CODE
+    assert "HTTP 401" in str(excinfo.value)
+    assert "AUTH_1008" in str(excinfo.value)
+
+
+async def test_connect_rest_success_with_hook_attached_unaffected():
+    """Successful responses must not be buffered and must not alter a successful connect."""
+    client, hooks = _hooked_http_client()
+    session_cm = MagicMock(name="session_cm")
+    session_cm.__aenter__ = AsyncMock(return_value=_make_session())
+    session_cm.__aexit__ = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def successful_transport(url: str, http_client: Any = None, **kwargs: Any):
+        response = await _fire_response_hooks(hooks, 201, "application/json", b'{"result": {}}')
+        yield MagicMock(name="read_stream"), MagicMock(name="write_stream")
+        assert response.aread.await_count == 0
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", successful_transport),
+        patch("chibi.services.mcp.manager.ClientSession", MagicMock(return_value=session_cm)),
+    ):
+        connected = await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert connected is not None
+    assert MCPManager.get_session("test-server") is connected
+
+
+async def test_connect_rest_does_not_buffer_sse_error_body():
+    """A >= 400 text/event-stream response must never be buffered."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    transport = _failing_rest_transport(
+        error, before_raise=lambda: _fire_response_hooks(hooks, 401, "text/event-stream", b"data: secret\n\n")
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    message = str(excinfo.value)
+    assert "HTTP 401" in message
+    assert "secret" not in message
+
+
+async def test_connect_rest_binary_error_body_records_status_only():
+    """A non-textual error body must contribute the status code only."""
+    client, hooks = _hooked_http_client()
+    error = MCPError(code=PLACEHOLDER_CODE, message=PLACEHOLDER_MESSAGE)
+    transport = _failing_rest_transport(
+        error, before_raise=lambda: _fire_response_hooks(hooks, 502, "application/octet-stream", b"\x00\x01\x02")
+    )
+
+    with (
+        patch(
+            "chibi.services.mcp.manager.create_mcp_http_client",
+            lambda **kwargs: _static_http_client_factory(client, **kwargs),
+        ),
+        patch("chibi.services.mcp.manager.streamable_http_client", transport()),
+    ):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://localhost/jsonrpc")
+
+    assert str(excinfo.value) == f"{PLACEHOLDER_MESSAGE} (HTTP 502)"
+
+
+async def test_connect_rest_surfaces_jsonrpc_error_body_at_http_400():
+    """A spec-correct JSON-RPC error body at HTTP 400 must surface verbatim, with the hook attached."""
+    created_clients: list[httpx2.AsyncClient] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        return httpx2.Response(
+            400,
+            json={
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": -32602, "message": "Invalid params"},
+            },
+        )
+
+    @asynccontextmanager
+    async def fake_create_mcp_http_client(**kwargs: Any):
+        client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler), **kwargs)
+        created_clients.append(client)
+        yield client
+
+    with patch("chibi.services.mcp.manager.create_mcp_http_client", fake_create_mcp_http_client):
+        with pytest.raises(MCPError) as excinfo:
+            await MCPManager.connect_rest("test-server", "http://fake.test/jsonrpc")
+
+    assert excinfo.value.code == -32602
+    assert excinfo.value.message == "Invalid params"
+    assert created_clients, "The transport must receive the client built by the factory"
+    assert created_clients[0].event_hooks["response"], "The recorder hook must be attached to the client"
