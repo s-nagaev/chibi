@@ -141,7 +141,10 @@ def _next_run_time(job: Job) -> datetime | None:
 
     APScheduler 3.11 no longer exposes ``next_run_time`` on the ``Job`` object
     returned by ``add_job`` (it lives in the job store once the scheduler runs),
-    so the value is computed from the trigger instead.
+    so the value is computed from the trigger instead. A ``DateTrigger``
+    (one-time jobs) carries its run date directly and has no ``timezone``
+    attribute, so it is handled explicitly; cron/interval triggers use
+    ``get_next_fire_time``.
 
     Args:
         job: The freshly added APScheduler job.
@@ -152,8 +155,16 @@ def _next_run_time(job: Job) -> datetime | None:
     trigger = getattr(job, "trigger", None)
     if trigger is None:
         return None
+    # DateTrigger (one-time jobs) exposes ``run_date`` directly and has no
+    # ``timezone`` attribute, so the generic path below would raise.
+    run_date = getattr(trigger, "run_date", None)
+    if run_date is not None:
+        return run_date
+    trigger_timezone = getattr(trigger, "timezone", None)
+    if trigger_timezone is None:
+        return None
     try:
-        return trigger.get_next_fire_time(None, datetime.now(trigger.timezone))
+        return trigger.get_next_fire_time(None, datetime.now(trigger_timezone))
     except Exception:  # defensive: logging must never break scheduling
         return None
 
@@ -192,8 +203,21 @@ class ChibiScheduler(metaclass=SingletonMeta):
 
         self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
         # Make APScheduler's own stdlib records (start, wakeup, missed runs)
-        # visible in the loguru sinks. Scoped to the apscheduler.* family and
-        # idempotent; the INFO/DEBUG floor is flag-gated via scheduler_debug_logs.
+        # visible in the loguru sinks and register the Chibi-level WARNING on
+        # missed runs. Shared with StdioScheduler via the common helper.
+        self._install_log_observability()
+
+    def _install_log_observability(self) -> None:
+        """Install the APScheduler log bridge and the missed-run listener.
+
+        Shared by every scheduler flavour (``ChibiScheduler`` and
+        ``StdioScheduler``): makes APScheduler's own stdlib records (start,
+        wakeup, missed runs) visible in the loguru sinks — scoped to the
+        ``apscheduler.*`` family, idempotent, with the INFO/DEBUG floor
+        flag-gated via ``scheduler_debug_logs`` — and registers the
+        Chibi-level WARNING listener on missed runs, independent of the
+        stdlib bridge.
+        """
         install_scheduler_log_bridge()
         # Chibi-level WARNING on missed runs, independent of the stdlib bridge.
         self._scheduler.add_listener(self._on_scheduler_event, EVENT_JOB_MISSED)
@@ -605,6 +629,10 @@ class StdioScheduler(ChibiScheduler):
             return
         job_store = _build_sqlite_job_store(STDIO_SCHEDULER_DB_FILENAME, label="Scheduler (stdio)")
         self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
+        # Same observability as the Telegram flavour (log bridge + missed-run
+        # listener); without it stdio/IDE/TUI sessions would silently keep the
+        # original "APScheduler logs are invisible" bug.
+        self._install_log_observability()
 
 
 def get_stdio_scheduler() -> StdioScheduler:

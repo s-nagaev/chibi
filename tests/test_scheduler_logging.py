@@ -1,6 +1,7 @@
 """Tests for the APScheduler stdlib→loguru bridge and scheduler event logging."""
 
 import logging
+import re
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from apscheduler.events import EVENT_JOB_MISSED, JobExecutionEvent
+from apscheduler.triggers.date import DateTrigger
 from loguru import logger
 
 from chibi.config.app import application_settings
@@ -16,7 +18,7 @@ from chibi.config.logging import (
     StdlibToLoguruHandler,
     install_scheduler_log_bridge,
 )
-from chibi.services.scheduler import ChibiScheduler
+from chibi.services.scheduler import ChibiScheduler, StdioScheduler, _next_run_time
 from chibi.utils.app import SingletonMeta
 
 
@@ -47,6 +49,16 @@ def scheduler(tmp_path):
     with patch("chibi.services.scheduler.application_settings", settings):
         yield ChibiScheduler()
     SingletonMeta._instances.pop(ChibiScheduler, None)
+
+
+@pytest.fixture()
+def stdio_scheduler(tmp_path):
+    """Provide a fresh StdioScheduler backed by a temporary SQLite job store."""
+    settings = SimpleNamespace(redis=None, local_data_path=str(tmp_path), scheduler_misfire_grace_time=3600)
+    SingletonMeta._instances.pop(StdioScheduler, None)
+    with patch("chibi.services.scheduler.application_settings", settings):
+        yield StdioScheduler()
+    SingletonMeta._instances.pop(StdioScheduler, None)
 
 
 async def dummy_job(**kwargs) -> None:
@@ -144,8 +156,11 @@ class TestSchedulingEventLogging:
         message = " ".join(record["message"] for record in infos)
         assert "agent:134604548:probe" in message
         assert "owner: 134604548" in message
-        assert "next run at" in message
-        assert run_at.strftime("%Y-%m-%d %H:%M") in message
+        # The value after "next run at" must be a real timestamp, not None
+        # (DateTrigger has no .timezone; the run_date must be used instead).
+        after = message.split("next run at ", 1)[1]
+        assert not after.startswith("None")
+        assert re.match(r"\d{4}-\d{2}-\d{2}", after)
 
     def test_success_logs_system_owner(self, scheduler, log_capture) -> None:
         scheduler.schedule_interval_job(job_id="system:probe", func=dummy_job, interval_seconds=60)
@@ -168,3 +183,55 @@ class TestSchedulingEventLogging:
         assert "agent:134604548:probe" in message
         assert "boom" in message
         assert "Failed to schedule" in message
+
+
+class TestStdioSchedulerObservability:
+    """The stdio/IDE/TUI flavour installs the same observability as the Telegram one."""
+
+    def test_bridge_and_missed_listener_are_installed(self, stdio_scheduler, restore_default_bridge) -> None:
+        scheduler_logger = logging.getLogger(SCHEDULER_LOGGER_NAME)
+        handlers = [h for h in scheduler_logger.handlers if isinstance(h, StdlibToLoguruHandler)]
+        assert len(handlers) == 1
+        assert scheduler_logger.propagate is False
+        # The EVENT_JOB_MISSED listener must be registered on the stdio
+        # scheduler's own AsyncIOScheduler instance.
+        assert (stdio_scheduler._on_scheduler_event, EVENT_JOB_MISSED) in [
+            (callback, event) for callback, event in stdio_scheduler._scheduler._listeners
+        ]
+
+    def test_missed_event_logs_warning(self, stdio_scheduler, log_capture) -> None:
+        run_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        stdio_scheduler._scheduler._dispatch_event(
+            JobExecutionEvent(EVENT_JOB_MISSED, "agent:134604548:probe", "default", run_time)
+        )
+        warnings = [entry.record for entry in log_capture if entry.record["level"].name == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0]["message"]
+        assert "agent:134604548:probe" in message
+        assert "missed by" in message
+        assert "2:00:00" in message
+
+    def test_debug_flag_lowers_bridge_floor(self, stdio_scheduler, log_capture, monkeypatch) -> None:
+        monkeypatch.setattr(application_settings, "scheduler_debug_logs", True)
+        # The bridge is installed at construction time; re-install is idempotent
+        # and re-applies the floor from the flag.
+        install_scheduler_log_bridge()
+        logging.getLogger("apscheduler.scheduler").debug("Next wakeup is due at 2026-10-17 07:00:00+02:00")
+        assert len(log_capture) == 1
+        assert log_capture[0].record["level"].name == "DEBUG"
+
+
+class TestNextRunTimeForDateTrigger:
+    """``_next_run_time`` must return the run date for one-time (date) jobs."""
+
+    def test_date_trigger_returns_run_date(self) -> None:
+        run_date = datetime.now(timezone.utc) + timedelta(minutes=5)
+        job = SimpleNamespace(trigger=DateTrigger(run_date=run_date))
+        assert _next_run_time(job) == run_date
+
+    def test_missing_timezone_trigger_returns_none(self) -> None:
+        trigger = SimpleNamespace()  # neither run_date nor timezone
+        assert _next_run_time(SimpleNamespace(trigger=trigger)) is None
+
+    def test_missing_trigger_returns_none(self) -> None:
+        assert _next_run_time(SimpleNamespace()) is None
