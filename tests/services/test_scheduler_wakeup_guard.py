@@ -20,6 +20,7 @@ TODO(apscheduler-3.11.4): remove guard — delete this module together with
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -34,7 +35,7 @@ APSCHEDULER_LOGGER = "apscheduler.scheduler"
 
 
 @pytest.fixture
-def apscheduler_records() -> list[str]:
+def apscheduler_records() -> Iterator[list[str]]:
     """Capture formatted records emitted on the ``apscheduler.scheduler`` logger.
 
     The scheduler log bridge (``chibi.config.logging``) disables propagation on
