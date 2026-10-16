@@ -477,6 +477,29 @@ async def test_stdio_tool_warning_on_divergent_env_and_file_values(tmp_path, mon
     assert warnings, f"Expected a shadowing warning for FILE_KEY, got: {messages}"
 
 
+async def test_stdio_tool_shadowing_warning_deduplicated_per_variable(tmp_path, monkeypatch):
+    """One tool call must emit at most one shadowing warning per variable."""
+    monkeypatch.setenv("FILE_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=file-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_stdio_mock = await _run_stdio_tool(
+            secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}", "SECOND_HEADER=${FILE_KEY}-${FILE_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer file-key"
+    assert env["SECOND_HEADER"] == "file-key-file-key"
+    warnings = [m for m in messages if "FILE_KEY" in m and "shadowed" in m]
+    assert len(warnings) == 1, f"Expected exactly one shadowing warning, got: {messages}"
+
+
 async def test_stdio_tool_no_warning_when_env_and_file_values_identical(tmp_path, monkeypatch):
     """Identical values in both sources must not trigger the shadowing warning."""
     monkeypatch.setenv("FILE_KEY", "same-key")

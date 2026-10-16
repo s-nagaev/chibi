@@ -190,7 +190,7 @@ async def test_sse_tool_precedence_headers_env_file_secrets(tmp_path, monkeypatc
     """Precedence (lowest to highest): plain headers -> header-like env file -> secret envs."""
     monkeypatch.setenv("SHARED_SECRET", "from-env")
     env_file = tmp_path / "headers.env"
-    env_file.write_text("X-File-Only=file-value\n")
+    env_file.write_text("X-File-Only=file-value\nSHARED_SECRET=from-file\n")
 
     connect_sse_mock = await _run_sse_tool(
         headers={"SHARED_SECRET": "from-plain", "PLAIN_ONLY": "plain-value"},
@@ -200,7 +200,7 @@ async def test_sse_tool_precedence_headers_env_file_secrets(tmp_path, monkeypatc
 
     headers = connect_sse_mock.await_args.kwargs["headers"]
     assert headers == {
-        "SHARED_SECRET": "from-env",
+        "SHARED_SECRET": "from-file",
         "X-File-Only": "file-value",
         "PLAIN_ONLY": "plain-value",
     }
@@ -250,6 +250,34 @@ async def test_sse_tool_warning_on_divergent_env_and_file_values(tmp_path, monke
     assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
     warnings = [m for m in messages if "MELIOUS_API_KEY" in m and "shadowed" in m]
     assert warnings, f"Expected a shadowing warning for MELIOUS_API_KEY, got: {messages}"
+
+
+async def test_sse_tool_shadowing_warning_deduplicated_per_variable(tmp_path, monkeypatch):
+    """One compose call must emit at most one shadowing warning per variable."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_sse_mock = await _run_sse_tool(
+            secret_envs=[
+                "X-A=Bearer ${MELIOUS_API_KEY}",
+                "X-B=${MELIOUS_API_KEY}-${MELIOUS_API_KEY}",
+            ],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    headers = connect_sse_mock.await_args.kwargs["headers"]
+    assert headers == {
+        "X-A": "Bearer file-key",
+        "X-B": "file-key-file-key",
+    }
+    warnings = [m for m in messages if "MELIOUS_API_KEY" in m and "shadowed" in m]
+    assert len(warnings) == 1, f"Expected exactly one shadowing warning, got: {messages}"
 
 
 async def test_sse_tool_no_warning_when_env_and_file_values_identical(tmp_path, monkeypatch):
