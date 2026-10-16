@@ -32,7 +32,8 @@ _CRON_FIELD_ORDER = ("minute", "hour", "day", "month", "day_of_week")
 
 _ACTION_TYPE_DESCRIPTIONS = (
     "self — the agent wakes up by itself in the fixed thread: it sees the thread context plus the "
-    "trigger_text and does the work with a live answer (a true autonomous heartbeat). "
+    "trigger_text and does the work with a live answer (a true autonomous heartbeat). The trigger_text "
+    "must be self-sufficient: at fire time the model may have no memory of the scheduling conversation. "
     "notify — sends a dumb static message to the user without waking the agent (zero LLM usage; "
     "may be disabled by server settings). "
     "command — runs a pre-moderated shell command on schedule; the agent is always woken with the full "
@@ -132,7 +133,8 @@ class ScheduleTaskTool(ChibiTool):
                 "calendar built from the minute/hour/day/month/day_of_week fields (each defaults to '*'); "
                 "kind='once' runs a single time at the ISO8601 `at` datetime. Action variants: "
                 "type='self' — the agent wakes up by itself in the fixed thread, sees the thread context "
-                "plus trigger_text and does the work with a live answer (a true autonomous heartbeat); "
+                "plus trigger_text and does the work with a live answer (a true autonomous heartbeat; the "
+                "trigger_text must be self-sufficient, see the trigger_text parameter); "
                 "type='notify' — sends a dumb static message to the user without waking the agent (zero LLM "
                 "usage, may be disabled by server settings); type='command' — runs a pre-moderated shell "
                 "command and wakes the agent with the full result (the agent reports to the user when "
@@ -236,7 +238,16 @@ class ScheduleTaskTool(ChibiTool):
                                 "type": "string",
                                 "description": (
                                     "Required for type='self': the trigger message injected into the thread "
-                                    "when the job fires."
+                                    "when the job fires. It must be EXHAUSTIVE and SELF-SUFFICIENT — at fire "
+                                    "time the model may have no memory of the scheduling conversation (the "
+                                    "thread may be cleared, the context evicted, or the job may fire in a "
+                                    "different chat). Freeze the full task context into the trigger_text: "
+                                    "goal, requirements, constraints, paths/arguments and the expected output. "
+                                    "Do NOT rely on remembering; schedule = freeze. "
+                                    "Good: 'Parse git log in /srv/app for the last 24h; if there are new "
+                                    "commits, post a 5-bullet summary to this thread, otherwise skip.' "
+                                    "Bad: 'напиши дайджест' (reminder-style text says nothing without the "
+                                    "long-gone thread context)."
                                 ),
                             },
                             "message": {
