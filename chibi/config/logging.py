@@ -1,20 +1,51 @@
 import inspect
 import logging
+import os
 import sys
 from typing import Any
 
 from loguru import logger
 
-config: dict[Any, Any] = {
-    "handlers": [
-        {
-            "sink": sys.stdout,
-            "colorize": True,
-            "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <lvl>{level}</lvl> | <lvl>{message}</lvl>",
-        },
-    ],
-}
-logger.configure(**config)
+_LOGURU_DIAGNOSE_TRUTHY: frozenset[str] = frozenset({"1", "true", "yes", "y", "ok", "on"})
+
+
+def traceback_diagnostics_enabled() -> bool:
+    """Report whether loguru traceback variable rendering is enabled.
+
+    Reads loguru's own ``LOGURU_DIAGNOSE`` variable, mirroring loguru's truthy
+    spellings (``1``, ``true``, ``yes``, ``y``, ``ok``, ``on`` — case-insensitive).
+    Loguru itself defaults to ``True``, but rendered traceback locals may contain
+    credentials, so any other value or an unset variable disables rendering.
+
+    Returns:
+        True if configured sinks should render local variables in tracebacks.
+    """
+    return os.environ.get("LOGURU_DIAGNOSE", "").lower() in _LOGURU_DIAGNOSE_TRUTHY
+
+
+def configure_stdout_sink() -> None:
+    """Install the default stdout loguru sink with freshly evaluated settings.
+
+    Options are built at call time (not frozen into module-level state) so that
+    re-invoking this function picks up the current ``LOGURU_DIAGNOSE`` value.
+    """
+    # Loguru defaults to diagnose=True, which renders local variables inside
+    # tracebacks; those locals may contain credentials, so rendering stays off
+    # unless LOGURU_DIAGNOSE explicitly opts in.
+    config: dict[str, Any] = {
+        "handlers": [
+            {
+                "sink": sys.stdout,
+                "colorize": True,
+                "format": "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <lvl>{level}</lvl> | <lvl>{message}</lvl>",
+                "diagnose": traceback_diagnostics_enabled(),
+            },
+        ],
+    }
+    logger.configure(**config)
+
+
+configure_stdout_sink()
 
 SCHEDULER_LOGGER_NAME = "apscheduler"
 
@@ -93,8 +124,11 @@ def use_stderr_logging() -> None:
     the TUI diagnostics view can parse the level field directly.
     """
     logger.remove()
+    # Loguru defaults to diagnose=True, which would render traceback locals
+    # (potentially credentials); keep diagnostics off by default here too.
     logger.add(
         sys.stderr,
         level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+        diagnose=traceback_diagnostics_enabled(),
     )
