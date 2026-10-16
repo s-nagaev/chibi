@@ -25,6 +25,18 @@ class EditorContextProvider(Protocol):
 
 
 class UserInterface(ABC):
+    """Base abstraction for a user-facing runner (Telegram, IDE, terminal, scheduler).
+
+    Attributes:
+        supports_binary_media: Whether binary media (images, audio, video) can be
+            delivered directly to the user. Runners that cannot deliver binaries
+            must persist generated media to disk instead of claiming delivery.
+        captures_llm_thoughts: Whether the interface consumes LLM thought chunks.
+        delta_emitted: Whether a streaming delta has already been forwarded.
+        streaming_enabled: Whether response streaming is active.
+    """
+
+    supports_binary_media: bool = False
     captures_llm_thoughts: bool = False
     delta_emitted: bool = False
     streaming_enabled: bool = False
@@ -321,6 +333,8 @@ class UserInterface(ABC):
 
 
 class TelegramInterface(UserInterface):
+    supports_binary_media: bool = True
+
     def __init__(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Initialize the Telegram interface from an incoming update.
 

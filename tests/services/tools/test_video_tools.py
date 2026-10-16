@@ -93,7 +93,7 @@ class TestRegistration:
         assert function["parameters"]["required"] == ["prompt"]
         # Same untyped payload: cast the nested parameters dict for key-set assertions.
         properties = cast(dict[str, Any], function["parameters"]["properties"])
-        assert set(properties) == {"provider", "video_model", "prompt", "duration"}
+        assert set(properties) == {"provider", "video_model", "prompt", "duration", "save_path"}
 
     def test_sync_registers_tools_when_a_provider_is_video_ready(self) -> None:
         with _sync_env(ready=True) as tools_map:

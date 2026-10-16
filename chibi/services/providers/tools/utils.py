@@ -1,7 +1,10 @@
 import asyncio
 import datetime
 import json
+import os
+import re
 import urllib.parse
+from collections.abc import Callable, Coroutine
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ParamSpec, TypedDict, TypeVar, Unpack
@@ -12,7 +15,7 @@ from fake_useragent import UserAgent
 from httpx import Response
 from loguru import logger
 
-from chibi.config import gpt_settings
+from chibi.config import application_settings, gpt_settings
 from chibi.constants import get_sub_executor_prompt
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
@@ -45,6 +48,72 @@ class AdditionalOptions(TypedDict, total=False):
     caller_storage_id: int
     caller_thread_id: int
     interface: UserInterface | None
+
+
+# Client frontends whose interface delivers binary media directly to the user
+# (``TelegramInterface.supports_binary_media = True``). Every other configured
+# client (tui, vscode, pycharm, neovim, terminal) either drops binary payloads
+# or renders them as text, so on those runners saving to disk is the only way
+# a generated artifact can reach the user.
+_BINARY_MEDIA_CLIENTS = frozenset({"telegram"})
+
+# Names of the binary-media generation tools gated by
+# ``media_generation_tools_enabled``. The model-availability listing tools
+# (``get_available_*``) generate nothing and are never gated; the vendor-
+# deactivated Minimax music tool keeps its static ``register = False``.
+MEDIA_GENERATION_TOOL_NAMES: tuple[str, ...] = (
+    "generate_image",
+    "generate_video",
+    "generate_music_via_suno",
+    "generate_music_via_suno_custom_mode",
+    "generate_music_via_elevenlabs",
+    "text_to_speech",
+)
+
+_media_gate_notice_logged: bool = False
+
+
+def media_generation_tools_enabled() -> bool:
+    """Decide whether the binary-media generation tools can succeed in this process.
+
+    A media generation tool achieves its goal only when the generated artifact
+    can reach the user: either the active runner delivers binary media, or it
+    can save the artifact to disk (``filesystem_access``). The runner
+    capability is derived from ``application_settings.client`` via the
+    ``_BINARY_MEDIA_CLIENTS`` mapping — the same one-shot, client-keyed
+    decision the scheduler tools make with ``_SCHEDULER_CLIENTS``. The
+    capability flag itself lives on the interface classes
+    (``UserInterface.supports_binary_media``), but interfaces are instantiated
+    per request, so at registration time the configured client is the only
+    available signal.
+
+    Like the scheduler gate, the decision is evaluated once, when the tool
+    modules are imported. Every entrypoint has the correct client value by
+    then (``chibi.cli stdio`` sets it before importing the runners, the
+    Telegram bot relies on the ``"telegram"`` default) — except the terminal
+    REPL, which imports the tool modules while the client still holds its
+    ``"telegram"`` default. ``TerminalRunner.run_chibi`` therefore
+    deregisters the media tools explicitly after flipping the client to
+    ``"terminal"`` when this function returns False there.
+
+    Returns:
+        True when generated media can reach the user: ``filesystem_access``
+        is enabled (every runner can save to disk), or the active client
+        delivers binary media (``telegram``).
+    """
+    global _media_gate_notice_logged
+    if gpt_settings.filesystem_access:
+        return True
+    if application_settings.client in _BINARY_MEDIA_CLIENTS:
+        return True
+    if not _media_gate_notice_logged:
+        _media_gate_notice_logged = True
+        logger.warning(
+            f"Media generation tools are disabled: the '{application_settings.client}' runner cannot deliver "
+            "binary media and FILESYSTEM_ACCESS is disabled, so generated files could neither be sent nor saved. "
+            "Set FILESYSTEM_ACCESS=true to enable them."
+        )
+    return False
 
 
 def resolve_session_context(**kwargs: Unpack[AdditionalOptions]) -> tuple[int, int]:
@@ -306,6 +375,295 @@ async def download(url: str) -> bytes | None:
     except Exception as e:
         logger.error(f"Failed to download file from {url}: {e}")
     return None
+
+
+def _prompt_slug(prompt: str, max_length: int = 40) -> str:
+    """Convert a generation prompt into a filesystem-safe slug.
+
+    Args:
+        prompt: The generation prompt supplied by the model.
+        max_length: Maximum number of characters to keep.
+
+    Returns:
+        A lowercase hyphen-delimited slug, or ``media`` when nothing usable remains.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", prompt.strip().lower()).strip("-")[:max_length].strip("-")
+    return slug or "media"
+
+
+def _uniquify_path(path: Path) -> Path:
+    """Return a non-existing path by appending a numeric suffix on collision.
+
+    Args:
+        path: Desired destination path.
+
+    Returns:
+        The original path when it does not exist yet, otherwise the first
+        available ``{stem}-{n}{suffix}`` variant.
+
+    Raises:
+        ToolException: If no free filename is found within the attempt limit.
+    """
+    if not path.exists():
+        return path
+    for counter in range(1, 1000):
+        candidate = path.with_name(f"{path.stem}-{counter}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise ToolException(f"Could not find a free filename for {path}")
+
+
+def _derived_media_filename(tool_name: str, prompt: str, ext: str) -> str:
+    """Build a derived filename for a generated media artifact.
+
+    Args:
+        tool_name: Name of the generating tool.
+        prompt: Generation prompt, slugified into the filename.
+        ext: File extension with the leading dot.
+
+    Returns:
+        A filename of the form ``{tool_name}-{prompt_slug}-{timestamp}{ext}``.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return f"{tool_name}-{_prompt_slug(prompt=prompt)}-{timestamp}{ext}"
+
+
+def resolve_media_destination(
+    save_path: str | None,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    *,
+    fallback_dir: str | None = None,
+) -> Path:
+    """Resolve where a generated media file must be written and create its parent directory.
+
+    ``save_path`` is used as a concrete file when it is not an existing directory
+    and carries a file suffix; otherwise it is treated as a directory and the
+    filename is derived (tool name + prompt slug + timestamp), uniquified with a
+    numeric suffix on collision. An explicit file path overwrites an existing
+    file, a derived name never does. When ``save_path`` is absent, the caller
+    must pass ``fallback_dir`` explicitly — runners that can deliver binary
+    media (Telegram) never fall back to the default media dir and only save
+    when the model passes ``save_path``.
+
+    Directory creation is lazy: it happens here, only at the moment of an
+    actual save, never on a plain delivery.
+
+    Args:
+        save_path: Model-supplied destination, a file or a directory path.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension, with or without the leading dot.
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute destination path; its parent directory exists on return.
+
+    Raises:
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+        ToolException: If no free filename could be derived.
+    """
+    if not ext.startswith("."):
+        ext = f".{ext}"
+
+    if save_path:
+        path = Path(save_path).expanduser()
+        if path.is_dir() or (not path.exists() and not path.suffix):
+            destination = _uniquify_path(path / _derived_media_filename(tool_name=tool_name, prompt=prompt, ext=ext))
+        else:
+            destination = path
+    else:
+        if not fallback_dir:
+            raise ValueError(
+                "fallback_dir is required when save_path is omitted. Runners able to deliver "
+                "binary media must only save with an explicit save_path."
+            )
+        directory = Path(os.path.expandvars(fallback_dir)).expanduser()
+        destination = _uniquify_path(directory / _derived_media_filename(tool_name=tool_name, prompt=prompt, ext=ext))
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return destination.resolve()
+
+
+async def save_media_to_disk(
+    content: bytes | str,
+    *,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    save_path: str | None = None,
+    fallback_dir: str | None = None,
+) -> str:
+    """Persist generated media to disk, gated by filesystem access.
+
+    The content may be raw bytes or a URL string (media tools hand over URLs,
+    e.g. Suno results); URLs are downloaded via the shared ``download`` helper.
+
+    Args:
+        content: Raw file bytes, or a URL to download the media from.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifact, with or without the leading dot.
+        save_path: Model-supplied destination, a file or a directory path.
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute path of the saved file.
+
+    Raises:
+        PermissionError: If ``gpt_settings.filesystem_access`` is disabled.
+        ToolException: If downloading from a URL fails or no free filename could be derived.
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+    """
+    if not gpt_settings.filesystem_access:
+        raise PermissionError(
+            "Filesystem access is disabled. Enable it (FILESYSTEM_ACCESS=true) to save generated media to disk."
+        )
+    if isinstance(content, str):
+        data = await download(content)
+        if data is None:
+            raise ToolException(f"Failed to download media from URL: {content}")
+    else:
+        data = content
+    destination = resolve_media_destination(
+        save_path,
+        tool_name=tool_name,
+        prompt=prompt,
+        ext=ext,
+        fallback_dir=fallback_dir,
+    )
+    await asyncio.to_thread(destination.write_bytes, data)
+    logger.log("TOOL", f"Saved generated media to {destination}")
+    return str(destination)
+
+
+async def _save_media_artifacts(
+    content: list[bytes | str],
+    *,
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    save_path: str | None,
+    fallback_dir: str | None,
+) -> list[str]:
+    """Persist every generated artifact of one tool call to disk.
+
+    Args:
+        content: Raw bytes or URL for each generated artifact, in order.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifacts, with or without the leading dot.
+        save_path: Model-supplied destination, a file or a directory path.
+            With multiple artifacts and a concrete file path, later artifacts
+            overwrite earlier ones (explicit file paths are written as-is).
+        fallback_dir: Directory used when ``save_path`` is absent. Must be
+            passed explicitly by runners that cannot deliver binary media.
+
+    Returns:
+        The absolute paths of the saved files, in artifact order.
+
+    Raises:
+        PermissionError: If ``gpt_settings.filesystem_access`` is disabled.
+        ToolException: If downloading from a URL fails or no free filename could be derived.
+        ValueError: If ``save_path`` is absent and no ``fallback_dir`` was given.
+    """
+    return [
+        await save_media_to_disk(
+            artifact,
+            tool_name=tool_name,
+            prompt=prompt,
+            ext=ext,
+            save_path=save_path,
+            fallback_dir=fallback_dir,
+        )
+        for artifact in content
+    ]
+
+
+async def compose_media_tool_response(
+    *,
+    deliver: Callable[[], Coroutine[Any, Any, None]],
+    content: list[bytes | str],
+    tool_name: str,
+    prompt: str,
+    ext: str,
+    interface: UserInterface,
+    save_path: str | None,
+    artifact_label: str,
+    delivery_detail: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Deliver generated media (or persist it) and compose an honest response.
+
+    Implements the owner-approved response matrix. Runners able to deliver
+    binary media (``interface.supports_binary_media``) always receive the
+    media first: without ``save_path`` nothing is written to disk and the
+    response is the delivery confirmation only; with ``save_path`` the media
+    is additionally saved and the response carries the absolute paths, or an
+    explicit save-failure note when saving fails (delivery already happened,
+    so this is reported as partial success instead of raising). Runners that
+    cannot deliver binary media never get the delivery call — saving to disk
+    is the only hand-over, the response is path-only, and a save failure
+    raises because nothing was achieved.
+
+    Args:
+        deliver: Zero-argument callable that delivers the media to the user.
+        content: Raw bytes or URL for each generated artifact.
+        tool_name: Name of the generating tool, used in derived filenames.
+        prompt: Generation prompt, slugified into the derived filename.
+        ext: File extension of the artifacts, with or without the leading dot.
+        interface: User interface bound to the current request.
+        save_path: Model-supplied destination, a file or a directory path.
+        artifact_label: Human-readable artifact name, e.g. ``"Image"``.
+        delivery_detail: Delivery confirmation text for delivery-capable runners.
+        extra: Additional response entries merged into every success response.
+
+    Returns:
+        The tool response dict per the response matrix.
+
+    Raises:
+        ToolException: If the runner can deliver binary media but saving was
+            requested while filesystem access is disabled (raised before any
+            delivery), or if saving fails on a runner that cannot deliver
+            binary media.
+    """
+    if interface.supports_binary_media:
+        if save_path and not gpt_settings.filesystem_access:
+            raise ToolException(
+                "Filesystem access is disabled (FILESYSTEM_ACCESS=false). "
+                "Saving media to a path requires filesystem access: drop the save_path "
+                "parameter or enable the setting."
+            )
+        await deliver()
+        if not save_path:
+            return {"detail": delivery_detail, **(extra or {})}
+        try:
+            saved_paths = await _save_media_artifacts(
+                content,
+                tool_name=tool_name,
+                prompt=prompt,
+                ext=ext,
+                save_path=save_path,
+                fallback_dir=None,
+            )
+        except (OSError, ToolException) as exc:
+            logger.warning(f"Saving generated media for tool '{tool_name}' failed: {exc}")
+            return {"detail": delivery_detail, "saved": False, "save_error": str(exc), **(extra or {})}
+        return {"detail": delivery_detail, "saved_to": saved_paths, **(extra or {})}
+
+    saved_paths = await _save_media_artifacts(
+        content,
+        tool_name=tool_name,
+        prompt=prompt,
+        ext=ext,
+        save_path=save_path,
+        fallback_dir=application_settings.resolved_media_output_dir,
+    )
+    joined_paths = ", ".join(saved_paths)
+    return {"detail": f"{artifact_label} was generated and saved to: {joined_paths}", **(extra or {})}
 
 
 class CallTracker(metaclass=SingletonMeta):

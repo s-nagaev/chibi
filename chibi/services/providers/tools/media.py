@@ -1,5 +1,7 @@
 import mimetypes
 from asyncio import sleep, to_thread
+from functools import partial
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Unpack
 
@@ -13,7 +15,12 @@ from chibi.services.interface import UserInterface
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions, download
+from chibi.services.providers.tools.utils import (
+    AdditionalOptions,
+    compose_media_tool_response,
+    download,
+    media_generation_tools_enabled,
+)
 from chibi.services.user import generate_image, get_chibi_user, user_has_reached_images_generation_limit
 from chibi.storage.files import get_file_storage
 
@@ -26,10 +33,33 @@ MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024
 ALLOWED_REFERENCE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
 UNKNOWN_MIME_TYPES = frozenset({None, "", "application/octet-stream"})
 UNKNOWN_MIME_FALLBACK = "image/png"
+SAVE_PATH_DESCRIPTION = (
+    "Optional. Save the generated file to this path (a file path, or a directory). "
+    "If omitted, the file is saved to the configured media directory when the current "
+    "runner cannot deliver media to the user; on Telegram nothing is written unless "
+    "this is provided."
+)
+
+
+async def _send_tts_audio(interface: UserInterface, audio: bytes, title: str) -> None:
+    """Deliver a generated speech audio file to the user.
+
+    Args:
+        interface: User interface bound to the current request.
+        audio: Raw audio bytes produced by the TTS provider.
+        title: Display title of the audio message.
+    """
+    await interface.send_audio(
+        audio=audio,
+        title=title,
+        performer=f"{telegram_settings.bot_name} AI",
+        filename=f"{title.replace(' ', '_')}.mp3",
+    )
+    return None
 
 
 class TextToSpeechTool(ChibiTool):
-    register = True
+    register = media_generation_tools_enabled()
     run_in_background_by_default = True
     definition = ChatCompletionToolParam(
         type="function",
@@ -42,6 +72,7 @@ class TextToSpeechTool(ChibiTool):
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "Text to speech"},
+                    "save_path": {"type": "string", "description": SAVE_PATH_DESCRIPTION},
                 },
                 "required": ["text"],
             },
@@ -50,7 +81,9 @@ class TextToSpeechTool(ChibiTool):
     name = "text_to_speech"
 
     @classmethod
-    async def function(cls, text: str, **kwargs: Unpack[AdditionalOptions]) -> dict[str, str]:
+    async def function(
+        cls, text: str, save_path: str | None = None, **kwargs: Unpack[AdditionalOptions]
+    ) -> dict[str, Any]:
         interface = cls.get_interface(kwargs=kwargs)
         logger.log("TOOL", "Sending voice message to user...")
 
@@ -59,13 +92,17 @@ class TextToSpeechTool(ChibiTool):
         audio_data = await provider.speech(text=text)
         title = f"{text[:15]}..."
 
-        await interface.send_audio(
-            audio=audio_data,
-            title=title,
-            performer=f"{telegram_settings.bot_name} AI",
-            filename=f"{title.replace(' ', '_')}.mp3",
+        return await compose_media_tool_response(
+            deliver=partial(_send_tts_audio, interface=interface, audio=audio_data, title=title),
+            content=[audio_data],
+            tool_name=cls.name,
+            prompt=text,
+            ext="mp3",
+            interface=interface,
+            save_path=save_path,
+            artifact_label="Audio",
+            delivery_detail="Audio was successfully sent.",
         )
-        return {"detail": "Audio was successfully sent."}
 
 
 class GetAvailableImageModelsTool(ChibiTool):
@@ -176,8 +213,20 @@ def _validate_reference_limits(images: list[tuple[bytes, str]]) -> None:
             raise ToolException("Reference image exceeds the 10 MB size limit.")
 
 
+async def _send_generated_images(interface: UserInterface, images: list[BytesIO] | list[str]) -> None:
+    """Deliver generated images to the user.
+
+    Args:
+        interface: User interface bound to the current request.
+        images: Generated images as raw payload objects (URLs or in-memory
+            buffers, as produced by the image provider).
+    """
+    await interface.send_images(images=images)
+    return None
+
+
 class GenerateImageTool(ChibiTool):
-    register = True
+    register = media_generation_tools_enabled()
     run_in_background_by_default = True
     allow_model_to_change_background_mode = False
     definition = ChatCompletionToolParam(
@@ -216,6 +265,7 @@ class GenerateImageTool(ChibiTool):
                             "Optional. Requires filesystem access. May be combined with reference_file_ids."
                         ),
                     },
+                    "save_path": {"type": "string", "description": SAVE_PATH_DESCRIPTION},
                 },
                 "required": ["provider", "image_model", "prompt"],
             },
@@ -299,31 +349,6 @@ class GenerateImageTool(ChibiTool):
         return images
 
     @classmethod
-    async def generate_and_send_image(
-        cls,
-        provider: str,
-        model: str,
-        prompt: str,
-        interface: UserInterface,
-        images: list[tuple[bytes, str]] | None = None,
-    ) -> None:
-        """Generate an image and send it to the user.
-
-        Args:
-            provider: Provider name.
-            model: Model name.
-            prompt: Image generation prompt.
-            interface: User interface bound to the current request.
-            images: Optional reference images as (bytes, mime) tuples for models with
-                image-to-image support.
-        """
-        generated_images = await generate_image(
-            interface=interface, provider_name=provider, model=model, prompt=prompt, images=images
-        )
-        await interface.send_images(images=generated_images)
-        return None
-
-    @classmethod
     async def function(
         cls,
         provider: str,
@@ -331,9 +356,15 @@ class GenerateImageTool(ChibiTool):
         prompt: str,
         reference_file_ids: list[str] | None = None,
         reference_paths: list[str] | None = None,
+        save_path: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, str]:
-        """Generate an image, optionally based on reference images, and send it to the user.
+        """Generate an image, optionally based on reference images, and hand it over.
+
+        On runners that can deliver binary media the image is sent to the user;
+        it is additionally saved to disk only when ``save_path`` is provided.
+        On runners that cannot deliver binary media the image is always saved
+        to disk and the response is the saved path.
 
         Args:
             provider: Provider name, i.e. 'Gemini'.
@@ -346,6 +377,7 @@ class GenerateImageTool(ChibiTool):
             reference_paths: Local filesystem paths of images used as reference input.
                 Requires filesystem access to be enabled. May be combined with
                 reference_file_ids.
+            save_path: Optional destination to save the generated image to.
             **kwargs: Additional options injected by the tool runner.
 
         Returns:
@@ -370,18 +402,52 @@ class GenerateImageTool(ChibiTool):
             reference_paths=reference_paths,
         )
 
-        await cls.generate_and_send_image(
-            provider=provider,
-            model=image_model,
-            prompt=prompt,
-            interface=interface,
-            images=images,
+        generated_images = await generate_image(
+            interface=interface, provider_name=provider, model=image_model, prompt=prompt, images=images
         )
-        return {"detail": "Image was successfully generated and sent to user."}
+        artifacts: list[bytes | str] = [
+            image.getvalue() if isinstance(image, BytesIO) else image for image in generated_images
+        ]
+
+        return await compose_media_tool_response(
+            deliver=partial(_send_generated_images, interface=interface, images=generated_images),
+            content=artifacts,
+            tool_name=cls.name,
+            prompt=prompt,
+            ext="png",
+            interface=interface,
+            save_path=save_path,
+            artifact_label="Image",
+            delivery_detail="Image was successfully generated and sent to user.",
+        )
+
+
+async def _send_suno_audio(interface: UserInterface, results: list[dict[str, Any]]) -> None:
+    """Deliver generated Suno tracks (with cover thumbnails) to the user.
+
+    The downloaded cover thumbnails are delivery-only: they are attached to
+    the audio messages and never persisted to disk.
+
+    Args:
+        interface: User interface bound to the current request.
+        results: Collected per-version track data from ``_poll_music_results``.
+    """
+    for item in results:
+        title = item["title"]
+        logger.log("TOOL", f"[Suno] Audio and thumbnail downloaded. Sending it to the chat #{interface.chat_id}...")
+        await interface.send_audio(
+            audio=await download(item["music_url"]) or item["music_url"],
+            title=title,
+            performer=f"{telegram_settings.bot_name} AI via Suno AI",
+            duration=item["duration"],
+            thumbnail=await download(item["image_url"]) if item["image_url"] else None,
+            filename=f"{title.replace(' ', '_')}.mp3",
+        )
+    return None
 
 
 class GenerateMusicViaSunoTool(ChibiTool):
-    register = bool(gpt_settings.suno_key)
+    register = bool(gpt_settings.suno_key) and media_generation_tools_enabled()
     run_in_background_by_default: bool = True
     allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(
@@ -406,6 +472,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
                         "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5, V5_5",
                         "default": "V5_5",
                     },
+                    "save_path": {"type": "string", "description": SAVE_PATH_DESCRIPTION},
                 },
                 "required": ["prompt"],
             },
@@ -420,6 +487,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
         prompt: str,
         suno_model: str = "V5_5",
         instrumental: bool = False,
+        save_path: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         interface = cls.get_interface(kwargs=kwargs)
@@ -431,7 +499,14 @@ class GenerateMusicViaSunoTool(ChibiTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        return await cls._poll_and_send_audio(task_id=task_id, interface=interface)
+        results = await cls._poll_music_results(task_id=task_id)
+        return await cls._compose_music_response(
+            prompt=prompt,
+            interface=interface,
+            save_path=save_path,
+            results=results,
+            task_id=task_id,
+        )
 
     @classmethod
     def _get_provider(cls) -> "Suno":
@@ -446,11 +521,20 @@ class GenerateMusicViaSunoTool(ChibiTool):
         return provider
 
     @classmethod
-    async def _poll_and_send_audio(
-        cls,
-        task_id: int | str,
-        interface: UserInterface,
-    ) -> dict[str, Any]:
+    async def _poll_music_results(cls, task_id: int | str) -> list[dict[str, Any]]:
+        """Poll the Suno generation result and collect per-version track data.
+
+        Args:
+            task_id: Suno generation task identifier.
+
+        Returns:
+            A list of dicts with ``version``, ``id``, ``title``, ``music_url``,
+            ``image_url`` and ``duration`` entries, one per generated version.
+
+        Raises:
+            ToolException: If the generation result contains no usable data or
+                no version carries an audio URL.
+        """
         logger.log("TOOL", f"[Task #{task_id}] Polling the generation result...")
         await sleep(POLLING_ATTEMPTS_WAIT_BETWEEN)
         music_generation_result = await cls._get_provider().poll_result(task_id=task_id)
@@ -470,7 +554,7 @@ class GenerateMusicViaSunoTool(ChibiTool):
                 f"SunoGetGenerationDetails.data.response does not contain suno_data: "
                 f"{music_generation_result.model_dump()}"
             )
-        generated_data: dict[str | int, Any] = {"task_id": task_id}
+        results: list[dict[str, Any]] = []
 
         for version, suno_data in enumerate(music_generation_result.data.response.suno_data, start=1):
             music_url = (
@@ -484,28 +568,63 @@ class GenerateMusicViaSunoTool(ChibiTool):
                 continue
 
             image_url = suno_data.source_image_url or suno_data.image_url
-            title = f"{suno_data.title} v{version}"
-
-            logger.log("TOOL", f"[Suno] Audio and thumbnail downloaded. Sending it to the chat #{interface.chat_id}...")
-            await interface.send_audio(
-                audio=await download(str(music_url)) or str(music_url),
-                title=title,
-                performer=f"{telegram_settings.bot_name} AI via Suno AI",
-                duration=int(suno_data.duration) if suno_data.duration else None,
-                thumbnail=await download(str(image_url)) if image_url else None,
-                filename=f"{title.replace(' ', '_')}.mp3",
+            results.append(
+                {
+                    "version": version,
+                    "id": suno_data.id,
+                    "title": f"{suno_data.title} v{version}",
+                    "music_url": str(music_url),
+                    "image_url": str(image_url) if image_url else None,
+                    "duration": int(suno_data.duration) if suno_data.duration else None,
+                }
             )
-            generated_version_data = {
-                "id": suno_data.id,
-                "title": title,
-                "music_url": str(music_url),
-                "image_url": str(image_url),
+
+        if not results:
+            raise ToolException(f"Suno task #{task_id} does not contain an audio URL.")
+        return results
+
+    @classmethod
+    async def _compose_music_response(
+        cls,
+        *,
+        prompt: str,
+        interface: UserInterface,
+        save_path: str | None,
+        results: list[dict[str, Any]],
+        task_id: int | str,
+    ) -> dict[str, Any]:
+        """Deliver or save the generated Suno tracks and compose the response.
+
+        Args:
+            prompt: Generation prompt the music was generated from.
+            interface: User interface bound to the current request.
+            save_path: Model-supplied destination, a file or a directory path.
+            results: Collected per-version track data from ``_poll_music_results``.
+            task_id: Suno generation task identifier.
+
+        Returns:
+            The tool response dict per the response matrix.
+        """
+        generated_data: dict[str | int, Any] = {"task_id": task_id}
+        for item in results:
+            generated_data[item["version"]] = {
+                "id": item["id"],
+                "title": item["title"],
+                "music_url": item["music_url"],
+                "image_url": item["image_url"],
             }
-            generated_data[version] = generated_version_data
-        return {
-            "detail": "Music was successfully generated and sent to user",
-            "suno_task_data": generated_data,
-        }
+        return await compose_media_tool_response(
+            deliver=partial(_send_suno_audio, interface=interface, results=results),
+            content=[item["music_url"] for item in results],
+            tool_name=cls.name,
+            prompt=prompt,
+            ext="mp3",
+            interface=interface,
+            save_path=save_path,
+            artifact_label="Music",
+            delivery_detail="Music was successfully generated and sent to user",
+            extra={"suno_task_data": generated_data},
+        )
 
 
 class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
@@ -574,6 +693,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
                         "description": "Model version. Available options: V4, V4_5, V4_5PLUS, V4_5ALL, V5, V5_5",
                         "default": "V5_5",
                     },
+                    "save_path": {"type": "string", "description": SAVE_PATH_DESCRIPTION},
                 },
                 "required": ["prompt", "style", "title"],
             },
@@ -593,6 +713,7 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
         vocal_gender: str | None = None,
         style_weight: float = 0.5,
         weirdness_constraint: float = 0.5,
+        save_path: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         interface = cls.get_interface(kwargs=kwargs)
@@ -621,12 +742,38 @@ class GenerateAdvancedMusicViaSunoTool(GenerateMusicViaSunoTool):
 
         logger.log("TOOL", f"[Task #{task_id}] Music generation request accepted by API.")
 
-        result = await cls._poll_and_send_audio(task_id=task_id, interface=interface)
-        return result
+        results = await cls._poll_music_results(task_id=task_id)
+        return await cls._compose_music_response(
+            prompt=prompt,
+            interface=interface,
+            save_path=save_path,
+            results=results,
+            task_id=task_id,
+        )
+
+
+async def _send_elevenlabs_audio(interface: UserInterface, audio: bytes, name: str, duration: int) -> None:
+    """Deliver a generated ElevenLabs track to the user.
+
+    Args:
+        interface: User interface bound to the current request.
+        audio: Raw audio bytes produced by the provider.
+        name: Display title of the audio message.
+        duration: Track duration in seconds.
+    """
+    logger.log("TOOL", f"[ElevenLabs] Music generated. Sending it to the chat #{interface.chat_id}...")
+    await interface.send_audio(
+        audio=audio,
+        title=name,
+        performer=f"{telegram_settings.bot_name} AI via ElevenLabs",
+        duration=duration,
+        filename=f"{name.replace(' ', '_')}.mp3",
+    )
+    return None
 
 
 class GenerateMusicViaElevenLabsTool(ChibiTool):
-    register = bool(gpt_settings.elevenlabs_api_key)
+    register = bool(gpt_settings.elevenlabs_api_key) and media_generation_tools_enabled()
     run_in_background_by_default: bool = True
     allow_model_to_change_background_mode: bool = False
     definition = ChatCompletionToolParam(
@@ -656,6 +803,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
                         ),
                         "default": 180000,
                     },
+                    "save_path": {"type": "string", "description": SAVE_PATH_DESCRIPTION},
                 },
                 "required": ["prompt", "title"],
             },
@@ -670,6 +818,7 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
         prompt: str,
         music_length_ms: int = 180000,
         title: str | None = None,
+        save_path: str | None = None,
         **kwargs: Unpack[AdditionalOptions],
     ) -> dict[str, Any]:
         interface = cls.get_interface(kwargs=kwargs)
@@ -679,15 +828,19 @@ class GenerateMusicViaElevenLabsTool(ChibiTool):
         audio = await cls._get_provider().generate_music(prompt=prompt, music_length_ms=music_length_ms)
 
         name = title or f"{prompt[:18]}..."
-        logger.log("TOOL", f"[ElevenLabs] Music generated. Sending it to the chat #{interface.chat_id}...")
-        await interface.send_audio(
-            audio=audio,
-            title=name,
-            performer=f"{telegram_settings.bot_name} AI via ElevenLabs",
-            duration=music_length_ms // 1000,
-            filename=f"{name.replace(' ', '_')}.mp3",
+        return await compose_media_tool_response(
+            deliver=partial(
+                _send_elevenlabs_audio, interface=interface, audio=audio, name=name, duration=music_length_ms // 1000
+            ),
+            content=[audio],
+            tool_name=cls.name,
+            prompt=prompt,
+            ext="mp3",
+            interface=interface,
+            save_path=save_path,
+            artifact_label="Music",
+            delivery_detail="Music was successfully generated and sent to user",
         )
-        return {"detail": "Music was successfully generated and sent to user"}
 
     @classmethod
     def _get_provider(cls) -> "ElevenLabs":

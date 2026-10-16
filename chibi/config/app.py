@@ -46,6 +46,11 @@ class ApplicationSettings(BaseSettings):
             (per-wakeup chatter like ``Next wakeup is due at ...`` and ``Added job ...`` becomes
             visible). Default False keeps an INFO floor; toggling the env var only requires a
             process restart, not a rebuild.
+        home_dir: AI agent's home directory.
+        working_dir: AI agent's CWD.
+        skills_dir: Absolute path to the directory with user-provided custom skills.
+        media_output_dir: Directory where generated media files are saved when filesystem access
+            is enabled. ``None`` means ``{working_dir}/media``.
     """
 
     model_config = SettingsConfigDict(
@@ -118,8 +123,24 @@ class ApplicationSettings(BaseSettings):
     home_dir: str = Field(default="~/chibi")  # AI agent's home directory
     working_dir: str = Field(default="~/chibi")  # AI agent's CWD
     skills_dir: str = Field(default=(Path(".") / "skills").absolute().as_posix())  # absolute path to dir with skills
+    media_output_dir: str | None = Field(
+        default=None,
+        description="Directory for saved generated media. None means {working_dir}/media.",
+    )
 
     selected_file_storage: Literal["local", "telegram"] = Field(default="telegram", alias="FILE_STORAGE")
+
+    @property
+    def resolved_media_output_dir(self) -> str:
+        """Return the directory for saved generated media with ``~`` and env vars expanded.
+
+        Returns:
+            The expanded value of ``media_output_dir`` when set, otherwise the
+            ``media`` subdirectory of the working directory.
+        """
+        if self.media_output_dir:
+            return os.path.expandvars(os.path.expanduser(self.media_output_dir))
+        return os.path.join(os.path.expandvars(os.path.expanduser(self.working_dir)), "media")
 
     @property
     def is_influx_configured(self) -> bool:
