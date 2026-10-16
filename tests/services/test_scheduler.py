@@ -418,7 +418,7 @@ class TestRedisPasswordMerge:
         with (
             patch("chibi.services.scheduler.application_settings", settings),
             patch("chibi.services.scheduler.RedisJobStore") as mock_store,
-            patch("chibi.services.scheduler.AsyncIOScheduler"),
+            patch("chibi.services.scheduler.GuardedAsyncIOScheduler"),
         ):
             ChibiScheduler()
             kwargs = mock_store.call_args.kwargs
@@ -431,7 +431,7 @@ class TestRedisPasswordMerge:
         with (
             patch("chibi.services.scheduler.application_settings", settings),
             patch("chibi.services.scheduler.RedisJobStore") as mock_store,
-            patch("chibi.services.scheduler.AsyncIOScheduler"),
+            patch("chibi.services.scheduler.GuardedAsyncIOScheduler"),
         ):
             ChibiScheduler()
             kwargs = mock_store.call_args.kwargs

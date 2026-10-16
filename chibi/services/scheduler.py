@@ -12,7 +12,7 @@ from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler, run_in_event_loop
 from apscheduler.schedulers.base import STATE_STOPPED
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
@@ -169,6 +169,51 @@ def _next_run_time(job: Job) -> datetime | None:
         return None
 
 
+class GuardedAsyncIOScheduler(AsyncIOScheduler):
+    """``AsyncIOScheduler`` with a local wakeup-timer guard (upstream bug #1132).
+
+    Upstream bug (agronholm/apscheduler#1132, fixed on the 3.x branch on
+    2026-08-31 but unreleased as of 2026-10-16 — no 3.11.4 exists):
+    ``AsyncIOScheduler.wakeup()`` runs ``_stop_timer()`` → ``_process_jobs()`` →
+    ``_start_timer(wait_seconds)`` with no try/except. If ``_process_jobs()``
+    raises (e.g. a transient Redis error in ``jobstore.update_job()``), the
+    wakeup timer is never re-armed, the exception is lost in the event loop,
+    and the scheduler looks alive but silently stops running jobs until an
+    unrelated external ``wakeup()`` (add_job / user message) re-arms the timer.
+
+    This subclass mirrors the upstream fix semantics verbatim (same message,
+    same ``jobstore_retry_interval`` re-arm), so the future removal diff is a
+    pure deletion: replace every ``GuardedAsyncIOScheduler`` instantiation
+    with ``AsyncIOScheduler`` and delete this class plus the
+    ``run_in_event_loop`` import.
+
+    TODO(apscheduler-3.11.4): remove guard — delete this class, the
+    ``run_in_event_loop`` import and revert instantiations to plain
+    ``AsyncIOScheduler`` once APScheduler 3.11.4 (containing the upstream
+    fix) is released and adopted.
+    """
+
+    @run_in_event_loop
+    def wakeup(self) -> None:
+        """Run one wakeup cycle, re-arming the timer even if processing fails.
+
+        Mirrors the upstream fix from PR #1132: an exception escaping
+        ``_process_jobs()`` is logged and the wakeup timer is re-armed with
+        ``jobstore_retry_interval`` instead of being left disarmed. The
+        ``@run_in_event_loop`` decorator is kept (as upstream) so the body
+        still runs on the scheduler's event loop; the try/except inside the
+        decorated body is what prevents the exception from being lost in the
+        event loop callback.
+        """
+        self._stop_timer()
+        try:
+            wait_seconds = self._process_jobs()
+        except Exception:
+            self._logger.exception("Error processing jobs")
+            wait_seconds = self.jobstore_retry_interval
+        self._start_timer(wait_seconds)
+
+
 class ChibiScheduler(metaclass=SingletonMeta):
     """Singleton wrapper around AsyncIOScheduler with a persistent job store.
 
@@ -201,7 +246,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
         else:
             job_store = _build_sqlite_job_store(TELEGRAM_SCHEDULER_DB_FILENAME)
 
-        self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
+        self._scheduler = GuardedAsyncIOScheduler(jobstores={"default": job_store})
         # Make APScheduler's own stdlib records (start, wakeup, missed runs)
         # visible in the loguru sinks and register the Chibi-level WARNING on
         # missed runs. Shared with StdioScheduler via the common helper.
@@ -628,7 +673,7 @@ class StdioScheduler(ChibiScheduler):
         if hasattr(self, "_scheduler"):
             return
         job_store = _build_sqlite_job_store(STDIO_SCHEDULER_DB_FILENAME, label="Scheduler (stdio)")
-        self._scheduler = AsyncIOScheduler(jobstores={"default": job_store})
+        self._scheduler = GuardedAsyncIOScheduler(jobstores={"default": job_store})
         # Same observability as the Telegram flavour (log bridge + missed-run
         # listener); without it stdio/IDE/TUI sessions would silently keep the
         # original "APScheduler logs are invisible" bug.
