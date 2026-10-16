@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from chibi.services.mcp.manager import MCPManager
 from chibi.services.providers.tools.mcp_management import InitializeSseMCPServer
@@ -125,8 +126,8 @@ async def test_sse_tool_secret_template_falls_back_to_env_file(tmp_path, monkeyp
     assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
 
 
-async def test_sse_tool_secret_template_prefers_os_environ_over_file(tmp_path, monkeypatch):
-    """Template variables must be resolved from os.environ first, env file second."""
+async def test_sse_tool_secret_template_file_wins_over_os_environ(tmp_path, monkeypatch):
+    """Template variables must be resolved from the env file first, os.environ second."""
     monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
     env_file = tmp_path / "secrets.env"
     env_file.write_text("MELIOUS_API_KEY=file-key\n")
@@ -136,7 +137,7 @@ async def test_sse_tool_secret_template_prefers_os_environ_over_file(tmp_path, m
         env_file_path=str(env_file),
     )
 
-    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer env-key"}
+    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
 
 
 async def test_sse_tool_secret_template_multiple_variables(tmp_path, monkeypatch):
@@ -189,7 +190,7 @@ async def test_sse_tool_precedence_headers_env_file_secrets(tmp_path, monkeypatc
     """Precedence (lowest to highest): plain headers -> header-like env file -> secret envs."""
     monkeypatch.setenv("SHARED_SECRET", "from-env")
     env_file = tmp_path / "headers.env"
-    env_file.write_text("SHARED_SECRET=from-file\nX-File-Only=file-value\n")
+    env_file.write_text("X-File-Only=file-value\n")
 
     connect_sse_mock = await _run_sse_tool(
         headers={"SHARED_SECRET": "from-plain", "PLAIN_ONLY": "plain-value"},
@@ -228,3 +229,87 @@ async def test_sse_tool_malformed_template_entry_raises_valueerror():
     """A template entry without a header name must raise ValueError."""
     with pytest.raises(ValueError, match="must name a header"):
         await _run_sse_tool(secret_envs=["=${SOME_VAR}"])
+
+
+async def test_sse_tool_warning_on_divergent_env_and_file_values(tmp_path, monkeypatch):
+    """A divergent runtime environment value must be shadowed by the env file with a warning."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_sse_mock = await _run_sse_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
+    warnings = [m for m in messages if "MELIOUS_API_KEY" in m and "shadowed" in m]
+    assert warnings, f"Expected a shadowing warning for MELIOUS_API_KEY, got: {messages}"
+
+
+async def test_sse_tool_no_warning_when_env_and_file_values_identical(tmp_path, monkeypatch):
+    """Identical values in both sources must not trigger the shadowing warning."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "same-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=same-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_sse_mock = await _run_sse_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer same-key"}
+    assert not [m for m in messages if "shadowed" in m]
+
+
+async def test_sse_tool_no_warning_when_file_lacks_variable(tmp_path, monkeypatch):
+    """Env fallback (file does not define the variable) must not warn."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("OTHER_VAR=other-value\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_sse_mock = await _run_sse_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer env-key"}
+    assert not [m for m in messages if "shadowed" in m]
+
+
+async def test_sse_tool_no_secret_values_in_log_records_on_divergence(tmp_path, monkeypatch):
+    """No log record produced by the divergence path may contain any secret value."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "supersecret-env-value")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=supersecret-file-value\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="DEBUG")
+    try:
+        connect_sse_mock = await _run_sse_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_sse_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer supersecret-file-value"}
+    assert any("MELIOUS_API_KEY" in m for m in messages)
+    for message in messages:
+        assert "supersecret-env-value" not in message
+        assert "supersecret-file-value" not in message

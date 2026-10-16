@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import pytest
+from loguru import logger
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent, Tool
@@ -271,7 +272,7 @@ async def test_rest_tool_precedence_headers_env_file_secrets(tmp_path, monkeypat
     """Precedence (lowest to highest): plain headers -> header-like env file -> secret envs."""
     monkeypatch.setenv("SHARED_SECRET", "from-env")
     env_file = tmp_path / "headers.env"
-    env_file.write_text("SHARED_SECRET=from-file\nX-File-Only=file-value\n")
+    env_file.write_text("X-File-Only=file-value\n")
 
     connect_rest_mock = await _run_rest_tool(
         headers={"SHARED_SECRET": "from-plain", "PLAIN_ONLY": "plain-value"},
@@ -293,6 +294,98 @@ async def test_rest_tool_missing_secret_env_raises_valueerror(monkeypatch):
 
     with pytest.raises(ValueError, match="MISSING_SECRET"):
         await _run_rest_tool(secret_envs=["MISSING_SECRET"])
+
+
+async def test_rest_tool_secret_template_file_wins_over_os_environ(tmp_path, monkeypatch):
+    """Template variables must be resolved from the env file first, os.environ second."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    connect_rest_mock = await _run_rest_tool(
+        secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+        env_file_path=str(env_file),
+    )
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
+
+
+async def test_rest_tool_bare_secret_name_file_wins_over_os_environ(tmp_path, monkeypatch):
+    """A bare secret_envs name must also prefer the env file over os.environ."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    connect_rest_mock = await _run_rest_tool(
+        secret_envs=["MELIOUS_API_KEY"],
+        env_file_path=str(env_file),
+    )
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"MELIOUS_API_KEY": "file-key"}
+
+
+async def test_rest_tool_warning_on_divergent_env_and_file_values(tmp_path, monkeypatch):
+    """A divergent runtime environment value must be shadowed by the env file with a warning."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=file-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_rest_mock = await _run_rest_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer file-key"}
+    warnings = [m for m in messages if "MELIOUS_API_KEY" in m and "shadowed" in m]
+    assert warnings, f"Expected a shadowing warning for MELIOUS_API_KEY, got: {messages}"
+
+
+async def test_rest_tool_no_warning_when_env_and_file_values_identical(tmp_path, monkeypatch):
+    """Identical values in both sources must not trigger the shadowing warning."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "same-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=same-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_rest_mock = await _run_rest_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer same-key"}
+    assert not [m for m in messages if "shadowed" in m]
+
+
+async def test_rest_tool_no_secret_values_in_log_records_on_divergence(tmp_path, monkeypatch):
+    """No log record produced by the divergence path may contain any secret value."""
+    monkeypatch.setenv("MELIOUS_API_KEY", "supersecret-env-value")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("MELIOUS_API_KEY=supersecret-file-value\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="DEBUG")
+    try:
+        connect_rest_mock = await _run_rest_tool(
+            secret_envs=["Authorization=Bearer ${MELIOUS_API_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert connect_rest_mock.await_args.kwargs["headers"] == {"Authorization": "Bearer supersecret-file-value"}
+    assert any("MELIOUS_API_KEY" in m for m in messages)
+    for message in messages:
+        assert "supersecret-env-value" not in message
+        assert "supersecret-file-value" not in message
 
 
 def _reload_mcp_management():

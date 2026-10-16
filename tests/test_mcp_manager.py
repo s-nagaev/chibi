@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from loguru import logger
 from mcp.types import ListToolsResult, Tool
 
 from chibi.services.mcp.manager import MCPManager
@@ -422,3 +423,100 @@ async def test_stdio_tool_missing_secret_env_raises_valueerror(monkeypatch):
 
     with pytest.raises(ValueError, match="MISSING_SECRET"):
         await _run_stdio_tool(secret_envs=["MISSING_SECRET"])
+
+
+async def test_stdio_tool_secret_template_file_wins_over_os_environ(tmp_path, monkeypatch):
+    """Template variables for stdio must be resolved from the env file first, os.environ second."""
+    monkeypatch.setenv("FILE_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=file-key\n")
+
+    connect_stdio_mock = await _run_stdio_tool(
+        secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}"],
+        env_file_path=str(env_file),
+    )
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer file-key"
+
+
+async def test_stdio_tool_bare_secret_name_file_wins_over_os_environ(tmp_path, monkeypatch):
+    """A bare secret_envs name for stdio must also prefer the env file over os.environ."""
+    monkeypatch.setenv("STDIO_SECRET", "env-secret")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("STDIO_SECRET=file-secret\n")
+
+    connect_stdio_mock = await _run_stdio_tool(
+        secret_envs=["STDIO_SECRET"],
+        env_file_path=str(env_file),
+    )
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["STDIO_SECRET"] == "file-secret"
+
+
+async def test_stdio_tool_warning_on_divergent_env_and_file_values(tmp_path, monkeypatch):
+    """A divergent runtime environment value must be shadowed by the env file with a warning."""
+    monkeypatch.setenv("FILE_KEY", "env-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=file-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_stdio_mock = await _run_stdio_tool(
+            secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer file-key"
+    warnings = [m for m in messages if "FILE_KEY" in m and "shadowed" in m]
+    assert warnings, f"Expected a shadowing warning for FILE_KEY, got: {messages}"
+
+
+async def test_stdio_tool_no_warning_when_env_and_file_values_identical(tmp_path, monkeypatch):
+    """Identical values in both sources must not trigger the shadowing warning."""
+    monkeypatch.setenv("FILE_KEY", "same-key")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=same-key\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        connect_stdio_mock = await _run_stdio_tool(
+            secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer same-key"
+    assert not [m for m in messages if "shadowed" in m]
+
+
+async def test_stdio_tool_no_secret_values_in_log_records_on_divergence(tmp_path, monkeypatch):
+    """No log record produced by the divergence path may contain any secret value."""
+    monkeypatch.setenv("FILE_KEY", "supersecret-env-value")
+    env_file = tmp_path / "secrets.env"
+    env_file.write_text("FILE_KEY=supersecret-file-value\n")
+
+    messages: list = []
+    sink_id = logger.add(messages.append, level="DEBUG")
+    try:
+        connect_stdio_mock = await _run_stdio_tool(
+            secret_envs=["AUTH_HEADER=Bearer ${FILE_KEY}"],
+            env_file_path=str(env_file),
+        )
+    finally:
+        logger.remove(sink_id)
+
+    env = connect_stdio_mock.await_args.kwargs["env"]
+    assert env["AUTH_HEADER"] == "Bearer supersecret-file-value"
+    assert any("FILE_KEY" in m for m in messages)
+    for message in messages:
+        assert "supersecret-env-value" not in message
+        assert "supersecret-file-value" not in message
