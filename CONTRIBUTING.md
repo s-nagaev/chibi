@@ -114,28 +114,24 @@ async def fetch_user_history(
 ```
 
 #### Commit Messages
+Write the summary line in the imperative mood, starting with a capital letter:
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+- `Feat: Add support for a new AI provider`
+- `Fix: Resolve a memory leak in the task manager`
+- `Docs: Update the MCP integration guide`
+- `Refactor: Simplify the provider registry logic`
 
-- `feat: add support for new AI provider`
-- `fix: resolve memory leak in task manager`
-- `docs: update MCP integration guide`
-- `refactor: simplify provider registry logic`
+The prefix is one of `Fix`, `Feat`, `Chore`, `Refactor`, `Docs`, `Revert`, followed by `: `. Do not use a scope suffix and do not use the lowercase Conventional Commits form. `AGENTS.md` §6.1 is the source of truth for commit, pull request and changelog conventions.
 - `test: add tests for file editor tools`
 
 #### Pull Requests
-
 1. **Push your branch** to your fork
 2. **Open a Pull Request** against `main`
-3. **Fill out the PR template** with:
-   - What changed and why
-   - How to test it
-   - Any breaking changes
-   - Related issues (use `Fixes #123` to auto-close)
-
+3. **Write the PR body** per `AGENTS.md` §6.1: a sentence or two on what changed and why, then the `Added`, `Changed`, `Fixed` and `Removed` sections that apply. Mention the related issues, using `Fixes #123` to auto-close.
 4. **Respond to review feedback**
    - Be open to suggestions
    - Keep discussions focused and respectful
+   
    - Update your PR based on feedback
 
 ### Contributing Documentation
