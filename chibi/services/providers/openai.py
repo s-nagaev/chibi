@@ -23,7 +23,13 @@ from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchem
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
-from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    delta_latched,
+    delta_streaming_allowed,
+    emit_delta,
+    flush_ack_sentinel_gate,
+    reset_ack_sentinel_gate,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import get_usage_msg, prepare_system_prompt, send_llm_thoughts
@@ -283,6 +289,7 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
+        reset_ack_sentinel_gate(interface)
         try:
             async with self.get_client().responses.stream(**stream_kwargs) as stream:
                 async for event in stream:
@@ -291,6 +298,7 @@ class OpenAI(OpenAIFriendlyProvider):
                             await emit_delta(interface=interface, text=event.delta)
                     elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
                         tool_call_signal = True
+                await flush_ack_sentinel_gate(interface)
                 return await stream.get_final_response()
         except (BadRequestError, NotFoundError) as stream_error:
             # Some gateways reject the streaming Responses request with a

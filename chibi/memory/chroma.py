@@ -40,6 +40,7 @@ from chibi.models import Message, User
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
+from chibi.utils.ack_sentinel import is_pure_ack
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
@@ -1075,7 +1076,7 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                     snippet = str(message.content)[:50]
             else:
                 snippet = message.content[:50]
-            if "<chibi>ACK</chibi>" in snippet and len(snippet) <= 20:
+            if is_pure_ack(snippet):
                 return None
             if not snippet:
                 return None

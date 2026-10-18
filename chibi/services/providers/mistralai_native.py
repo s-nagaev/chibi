@@ -37,7 +37,12 @@ from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsA
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
-from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    delta_streaming_allowed,
+    emit_delta,
+    flush_ack_sentinel_gate,
+    reset_ack_sentinel_gate,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -212,6 +217,7 @@ class MistralAI(RestApiFriendlyProvider):
         completion_id = ""
         response_model = ""
         created = 0
+        reset_ack_sentinel_gate(interface)
         async with await self.client.chat.stream_async(
             model=model,
             messages=messages,
@@ -252,6 +258,7 @@ class MistralAI(RestApiFriendlyProvider):
                             slot["arguments"] += arguments
                         elif arguments:
                             slot["arguments"] = json.dumps(arguments)
+        await flush_ack_sentinel_gate(interface)
         tool_calls = [
             ToolCall(
                 id=slot["id"] or str(uuid4()),

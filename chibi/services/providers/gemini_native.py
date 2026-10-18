@@ -50,7 +50,12 @@ from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsA
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    delta_streaming_allowed,
+    emit_delta,
+    flush_ack_sentinel_gate,
+    reset_ack_sentinel_gate,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -345,6 +350,7 @@ class Gemini(RestApiFriendlyProvider):
             contents=contents,
             config=config,
         )
+        reset_ack_sentinel_gate(interface)
         async with aclosing(cast(AsyncGenerator[GenerateContentResponse, None], stream)) as chunks:
             async for chunk in chunks:
                 if chunk.usage_metadata:
@@ -362,6 +368,7 @@ class Gemini(RestApiFriendlyProvider):
                     parts.append(part)
                     if part.text and not part.function_call and not tool_call_signal:
                         await emit_delta(interface=interface, text=part.text)
+            await flush_ack_sentinel_gate(interface)
         if thought_signature:
             for part in parts:
                 if part.function_call and not part.thought_signature:

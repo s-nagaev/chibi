@@ -6,6 +6,7 @@ import pytest
 
 from chibi.memory.chroma import with_chroma_archival
 from chibi.models import Message, User
+from chibi.utils.ack_sentinel import ACK_SENTINEL
 
 
 class MockDatabase:
@@ -174,4 +175,33 @@ class TestWithChromaArchival:
 
             # The inner add_message should be hit exactly once, not multiple times
             assert mock_inner.add_message_called is True
+            mock_task_manager.run_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pure_ack_assistant_message_is_not_archived(self, mock_inner, mock_memory, user):
+        """A pure ACK assistant message must be excluded from semantic archival."""
+
+        ack_message = Message(role="assistant", content=ACK_SENTINEL)
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            await wrapped.add_message(user, ack_message)
+
+            assert mock_inner.add_message_called is True
+            mock_task_manager.run_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mixed_ack_assistant_message_is_archived(self, mock_inner, mock_memory, user):
+        """A real answer containing the marker inside longer text is still archived."""
+
+        mixed_message = Message(role="assistant", content=f"Real answer. {ACK_SENTINEL} More text.")
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            await wrapped.add_message(user, mixed_message)
+
             mock_task_manager.run_task.assert_called_once()

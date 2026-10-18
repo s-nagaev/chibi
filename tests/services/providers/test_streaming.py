@@ -32,6 +32,7 @@ from anthropic.types import (
 from google.genai.types import (
     Candidate,
     Content,
+    GenerateContentConfig,
     GenerateContentResponse,
     GenerateContentResponseUsageMetadata,
     Part,
@@ -59,6 +60,8 @@ from chibi.services.providers.streaming import (
     delta_latched,
     delta_streaming_allowed,
     emit_delta,
+    flush_ack_sentinel_gate,
+    reset_ack_sentinel_gate,
 )
 
 TEST_TOKEN = "test-streaming-token"
@@ -829,3 +832,318 @@ class TestAnthropicFamilyStreamFallback:
         assert interface.delta_emitted is True
         assert create_mock.await_count == 1
         assert cast(TextBlock, result.content[0]).text == "minimax ok"
+
+
+class TestAckSentinelStreaming:
+    """The ACK gate must keep a pure-ACK answer completely off the delta channel."""
+
+    async def _run_stream(self, chunks: list[Any]) -> tuple[Any, Any, Any]:
+        provider = OpenAI(token=TEST_TOKEN)
+        interface = _make_interface()
+        stream = _FakeOpenAIStream(chunks)
+        completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            response = await provider._stream_chat_completion(
+                completion_kwargs={"model": "m-1", "messages": []},
+                interface=interface,
+            )
+        return response, interface, stream
+
+    async def test_pure_ack_emits_no_delta(self) -> None:
+        """A pure-ACK answer streamed in fragments never emits a single delta."""
+        chunks = [_make_chunk(text="<chibi"), _make_chunk(text=">ACK</chibi"), _make_chunk(text=">")]
+        result, interface, stream = await self._run_stream(chunks)
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert stream.closed is True
+        assert result.choices[0].message.content == "<chibi>ACK</chibi>"
+
+    async def test_pure_ack_with_whitespace_emits_no_delta(self) -> None:
+        """A pure-ACK answer padded with whitespace never emits a delta either."""
+        chunks = [_make_chunk(text=" "), _make_chunk(text="<chibi>ACK</chibi>"), _make_chunk(text="\n")]
+        _, interface, _ = await self._run_stream(chunks)
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+
+    async def test_answer_starting_like_the_marker_streams_normally(self) -> None:
+        """A normal answer diverging from the marker releases the buffered prefix intact."""
+        chunks = [_make_chunk(text="<chibi"), _make_chunk(text="X is the answer")]
+        result, interface, _ = await self._run_stream(chunks)
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["<chibiX is the answer"]
+        assert result.choices[0].message.content == "<chibiX is the answer"
+
+    async def test_marker_inside_streamed_text_is_stripped_from_deltas(self) -> None:
+        """A streamed mixed answer carries no sentinel fragment on the delta channel."""
+        chunks = [_make_chunk(text="Result: "), _make_chunk(text="<chibi>ACK</chibi> done"), _make_chunk(text="!")]
+        result, interface, _ = await self._run_stream(chunks)
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == "Result:  done!"
+        assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
+        assert result.choices[0].message.content == "Result: <chibi>ACK</chibi> done!"
+
+
+class TestAckSentinelNativeAdapters:
+    """The ACK gate must cover every native-adapter delta-emit path too."""
+
+    async def test_responses_api_pure_ack_emits_no_delta(self) -> None:
+        final = _fake_responses_api_response("<chibi>ACK</chibi>")
+        stream = _FakeResponsesStream([_text_delta_event("<chibi"), _text_delta_event(">ACK</chibi>")], final)
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        mock_client = SimpleNamespace(responses=SimpleNamespace(stream=lambda **kwargs: stream))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            response = await provider._stream_response_completion(
+                request_kwargs={"model": "gpt-5-mini"},
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert stream.closed is True
+        assert response.output_text == "<chibi>ACK</chibi>"
+
+    async def test_responses_api_marker_inside_streamed_text_is_stripped(self) -> None:
+        final = _fake_responses_api_response("Result: <chibi>ACK</chibi> done!")
+        stream = _FakeResponsesStream(
+            [_text_delta_event("Result: "), _text_delta_event("<chibi>ACK</chibi> done"), _text_delta_event("!")],
+            final,
+        )
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        mock_client = SimpleNamespace(responses=SimpleNamespace(stream=lambda **kwargs: stream))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            await provider._stream_response_completion(
+                request_kwargs={"model": "gpt-5-mini"},
+                interface=interface,
+            )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == "Result:  done!"
+        assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
+        assert interface.delta_emitted is True
+
+    async def test_anthropic_pure_ack_emits_no_delta(self) -> None:
+        events: list[Any] = [
+            RawContentBlockDeltaEvent(
+                type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="<chibi")
+            ),
+            RawContentBlockDeltaEvent(
+                type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text=">ACK</chibi>")
+            ),
+        ]
+        final = SimpleNamespace(content=[TextBlock(text="<chibi>ACK</chibi>", type="text")])
+        fake_stream = _FakeAnthropicStream(events, final)
+        fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: fake_stream))
+        provider = AnthropicFriendlyProvider(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        with patch.object(AnthropicFriendlyProvider, "client", new_callable=PropertyMock, return_value=fake_client):
+            message = await provider._stream_generate_content(
+                model="claude-sonnet-5",
+                system=[],
+                messages=[],
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert fake_stream.closed is True
+        assert cast(TextBlock, message.content[0]).text == "<chibi>ACK</chibi>"
+
+    async def test_anthropic_marker_inside_streamed_text_is_stripped(self) -> None:
+        events: list[Any] = [
+            RawContentBlockDeltaEvent(
+                type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="Result: ")
+            ),
+            RawContentBlockDeltaEvent(
+                type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="<chibi>ACK</chibi> done")
+            ),
+            RawContentBlockDeltaEvent(
+                type="content_block_delta", index=0, delta=TextDelta(type="text_delta", text="!")
+            ),
+        ]
+        final = SimpleNamespace(content=[TextBlock(text="Result: <chibi>ACK</chibi> done!", type="text")])
+        fake_stream = _FakeAnthropicStream(events, final)
+        fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: fake_stream))
+        provider = AnthropicFriendlyProvider(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        with patch.object(AnthropicFriendlyProvider, "client", new_callable=PropertyMock, return_value=fake_client):
+            await provider._stream_generate_content(
+                model="claude-sonnet-5",
+                system=[],
+                messages=[],
+                interface=interface,
+            )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == "Result:  done!"
+        assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
+
+    async def test_gemini_pure_ack_emits_no_delta(self) -> None:
+        chunks = [
+            GenerateContentResponse(candidates=[Candidate(content=Content(role="model", parts=[Part(text="<chibi")]))]),
+            GenerateContentResponse(
+                candidates=[Candidate(content=Content(role="model", parts=[Part(text=">ACK</chibi>")]))]
+            ),
+        ]
+        provider = Gemini(token=TEST_TOKEN)
+        interface = _make_interface()
+        fake_client = _FakeGeminiClient(chunks)
+
+        response = await provider._generate_content_streamed(
+            client=cast(Any, fake_client),
+            model="gemini-2.5-flash",
+            contents=Content(role="user", parts=[Part(text="hi")]),
+            config=GenerateContentConfig(),
+            interface=interface,
+        )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert response.text == "<chibi>ACK</chibi>"
+
+    async def test_gemini_marker_inside_streamed_text_is_stripped(self) -> None:
+        chunks = [
+            GenerateContentResponse(
+                candidates=[Candidate(content=Content(role="model", parts=[Part(text="Result: ")]))]
+            ),
+            GenerateContentResponse(
+                candidates=[Candidate(content=Content(role="model", parts=[Part(text="<chibi>ACK</chibi> done")]))]
+            ),
+            GenerateContentResponse(candidates=[Candidate(content=Content(role="model", parts=[Part(text="!")]))]),
+        ]
+        provider = Gemini(token=TEST_TOKEN)
+        interface = _make_interface()
+        fake_client = _FakeGeminiClient(chunks)
+
+        await provider._generate_content_streamed(
+            client=cast(Any, fake_client),
+            model="gemini-2.5-flash",
+            contents=Content(role="user", parts=[Part(text="hi")]),
+            config=GenerateContentConfig(),
+            interface=interface,
+        )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == "Result:  done!"
+        assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
+
+    async def test_mistral_pure_ack_emits_no_delta(self) -> None:
+        events = [
+            self._mistral_chunk("<chibi"),
+            self._mistral_chunk(">ACK</chibi>"),
+            self._mistral_chunk(
+                finish_reason="stop", usage=UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3)
+            ),
+        ]
+        fake_stream = _FakeMistralStream(events)
+
+        async def _stream_async(**kwargs: Any) -> Any:
+            return fake_stream
+
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(chat=SimpleNamespace(stream_async=_stream_async))
+        interface = _make_interface()
+
+        response = await provider._stream_generate_content(
+            model="mistral-medium-latest",
+            messages=[],
+            interface=interface,
+        )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert fake_stream.closed is True
+        assert response.choices[0].message.content == "<chibi>ACK</chibi>"
+
+    async def test_mistral_marker_inside_streamed_text_is_stripped(self) -> None:
+        events = [
+            self._mistral_chunk("Result: "),
+            self._mistral_chunk("<chibi>ACK</chibi> done"),
+            self._mistral_chunk("!"),
+            self._mistral_chunk(
+                finish_reason="stop", usage=UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3)
+            ),
+        ]
+        fake_stream = _FakeMistralStream(events)
+
+        async def _stream_async(**kwargs: Any) -> Any:
+            return fake_stream
+
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(chat=SimpleNamespace(stream_async=_stream_async))
+        interface = _make_interface()
+
+        await provider._stream_generate_content(
+            model="mistral-medium-latest",
+            messages=[],
+            interface=interface,
+        )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == "Result:  done!"
+        assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
+
+    @staticmethod
+    def _mistral_chunk(
+        content: str | None = None,
+        usage: Any = None,
+        finish_reason: str | None = None,
+    ) -> Any:
+        delta = SimpleNamespace(content=content, tool_calls=None)
+        choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+        return SimpleNamespace(
+            data=SimpleNamespace(id="cmpl-1", model="mistral", created=7, choices=[choice], usage=usage)
+        )
+
+
+class TestAckSentinelGateWiring:
+    """The gate lives on the interface, so emit_delta alone can never leak the marker."""
+
+    async def test_emit_delta_without_reset_still_gates_pure_ack(self) -> None:
+        """Even an adapter that never calls reset cannot leak the sentinel."""
+        interface = _make_interface()
+        await emit_delta(interface, "<chibi")
+        await emit_delta(interface, ">ACK</chibi>")
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+
+    async def test_emit_delta_releases_legitimate_text_without_reset(self) -> None:
+        interface = _make_interface()
+        await emit_delta(interface, "<chibi")
+        await emit_delta(interface, "X is the answer")
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["<chibiX is the answer"]
+        assert interface.delta_emitted is True
+
+    async def test_reset_gives_each_streaming_attempt_a_fresh_gate(self) -> None:
+        """Buffered state from a failed attempt must not leak into the next one."""
+        interface = _make_interface()
+        await emit_delta(interface, "<chibi")
+        reset_ack_sentinel_gate(interface)
+        await emit_delta(interface, "Answer after retry")
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Answer after retry"]
+
+    async def test_flush_emits_held_back_tail_of_legitimate_answer(self) -> None:
+        interface = _make_interface()
+        await emit_delta(interface, "Done <chibi")
+        await flush_ack_sentinel_gate(interface)
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Done ", "<chibi"]
+
+    async def test_flush_after_pure_ack_emits_nothing(self) -> None:
+        interface = _make_interface()
+        await emit_delta(interface, "<chibi>ACK</chibi>")
+        await flush_ack_sentinel_gate(interface)
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+
+    async def test_none_interface_is_safe_for_gate_helpers(self) -> None:
+        reset_ack_sentinel_gate(None)
+        await flush_ack_sentinel_gate(None)

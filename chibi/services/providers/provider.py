@@ -85,7 +85,13 @@ from chibi.schemas.app import (
 )
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
-from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    delta_latched,
+    delta_streaming_allowed,
+    emit_delta,
+    flush_ack_sentinel_gate,
+    reset_ack_sentinel_gate,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
@@ -833,9 +839,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         """Request a streamed Chat Completions completion and aggregate it.
 
         Emits one live delta per non-empty body-text chunk via the interface
-        until the earliest tool-call signal in the stream; the accumulated
-        chunks are rebuilt into a ChatCompletion equivalent to the
-        non-streaming response (fragmented tool-call arguments, parallel
+        until the earliest tool-call signal in the stream; chunks that could
+        still complete into a pure ACK sentinel are buffered by the
+        interface-attached ``AckSentinelStreamGate``, so a pure-ACK answer
+        never emits a delta.
+        The accumulated chunks are rebuilt into a ChatCompletion equivalent to
+        the non-streaming response (fragmented tool-call arguments, parallel
         tool calls, ``reasoning_content`` split and the usage-only final
         chunk included). The stream is always closed explicitly, also on
         cancellation.
@@ -880,6 +889,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             )
             return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
         accumulator = _OpenAIChatStreamAccumulator()
+        reset_ack_sentinel_gate(interface)
         try:
             async for chunk in stream:
                 text_delta = accumulator.process_chunk(chunk=chunk)
@@ -887,6 +897,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                     await emit_delta(interface=interface, text=text_delta)
         finally:
             await stream.close()
+        await flush_ack_sentinel_gate(interface)
         return accumulator.build_response()
 
     async def _get_chat_completion_response(
@@ -1430,6 +1441,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         Returns:
             The final aggregated Anthropic message.
         """
+        reset_ack_sentinel_gate(interface)
         async with self.client.messages.stream(
             model=model,
             max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
@@ -1447,6 +1459,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 elif event.type == "content_block_delta" and not tool_call_signal:
                     if isinstance(event.delta, TextDelta) and event.delta.text:
                         await emit_delta(interface=interface, text=event.delta.text)
+            await flush_ack_sentinel_gate(interface)
             return await stream.get_final_message()
 
     @retry(

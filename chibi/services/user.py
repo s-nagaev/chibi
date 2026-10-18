@@ -28,6 +28,7 @@ from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.utils.ack_sentinel import is_pure_ack, strip_ack_sentinel
 
 if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
@@ -437,6 +438,11 @@ async def get_llm_chat_completion_answer(
                 await asyncio.gather(*pending_notifications, return_exceptions=True)
         chat_response, new_messages = failover_result.response, failover_result.new_messages
         assert chat_response is not None  # Type narrowing for mypy: a returned walk always carries a response
+        if not is_pure_ack(chat_response.answer):
+            chat_response.answer = strip_ack_sentinel(chat_response.answer)
+            for message in new_messages:
+                if message.role == "assistant":
+                    message.content = strip_ack_sentinel(message.content)
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
             await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
