@@ -198,7 +198,7 @@ class TestSharedOpenAICompatibleLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -234,7 +234,7 @@ class TestSharedOpenAICompatibleLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -268,7 +268,7 @@ class TestSharedOpenAICompatibleLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -331,7 +331,7 @@ class TestSharedOpenAICompatibleLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -365,12 +365,13 @@ class TestSharedOpenAICompatibleLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
         assert response.answer == "Done"
         assert call_functions_mock.await_count == 1
+        assert call_functions_mock.await_args is not None
         executed_names = [call.tool_name for call in call_functions_mock.await_args.kwargs["calls"]]
         assert executed_names == ["get_current_datetime"]
         # No say/ack tool call may appear anywhere in the persisted history.
@@ -418,7 +419,7 @@ class TestOpenAIResponsesLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
             )
 
         assert response.answer == "Responses answer"
@@ -451,7 +452,7 @@ class TestOpenAIResponsesLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
             )
 
         assert response.answer == ""
@@ -541,7 +542,7 @@ class TestAnthropicLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -574,7 +575,7 @@ class TestAnthropicLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -606,7 +607,7 @@ class TestAnthropicLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -644,7 +645,7 @@ class TestGeminiLoop:
                 caller_storage_id=1,
                 caller_thread_id=0,
                 model=TEST_MODEL,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -675,7 +676,7 @@ class TestGeminiLoop:
                 caller_storage_id=1,
                 caller_thread_id=0,
                 model=TEST_MODEL,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -716,7 +717,7 @@ class TestMistralLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 
@@ -752,7 +753,7 @@ class TestMistralLoop:
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
-                system_prompt=None,
+                system_prompt="",
                 conversation_messages=conversation,
             )
 

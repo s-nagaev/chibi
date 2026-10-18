@@ -1,4 +1,5 @@
 import asyncio
+from typing import cast
 
 import boto3  # Import boto3
 import pytest
@@ -287,7 +288,8 @@ async def test_legacy_message_without_visibility_reads_back_visible(storage: Dat
         # message dict, mimicking a record written before the field existed.
         from pickle import dump, load
 
-        filename = storage._get_storage_filename(user_id)
+        local = cast(LocalStorage, storage)
+        filename = local._get_storage_filename(user_id)
         with open(filename, "rb") as f:
             data = load(f)
         data["messages"].append({"role": "assistant", "content": "legacy", "id": legacy_id, "expire_at": None})
@@ -311,7 +313,7 @@ async def test_legacy_message_without_visibility_reads_back_visible(storage: Dat
     else:
         from pickle import load
 
-        with open(storage._get_storage_filename(user_id), "rb") as f:
+        with open(local._get_storage_filename(user_id), "rb") as f:
             data = load(f)
         stored = [msg for msg in data["messages"] if msg.get("content") == "legacy"]
         assert len(stored) == 1
