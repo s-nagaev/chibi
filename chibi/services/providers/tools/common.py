@@ -170,3 +170,77 @@ class GetCurrentDatetimeTool(ChibiTool):
         return {
             "datetime_now": now.strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+
+class SayTool(ChibiTool):
+    """Terminal delivery tool: the only channel for user-facing communication.
+
+    Never dispatched as an ordinary tool: the agent loop must intercept a
+    ``say()`` call, persist ``text`` as the visible assistant message and end
+    the turn without producing a tool result (sub-task 4b). Until that branch
+    lands, the base-class dispatch path would treat this call like any other
+    tool, which is the acknowledged intermediate state of sub-task 4a.
+    """
+
+    register = True
+    run_in_background_by_default = False
+    allow_model_to_change_background_mode = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="say",
+            description=(
+                "Deliver a message to the user. This is the ONLY channel for user-facing "
+                "communication: text written outside this tool is never shown to the user. "
+                "Call say() whenever the user is owed an answer or anything worth reporting. "
+                "Calling say() ENDS your turn — it must be the last call of the turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The message the user will see.",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+    )
+    name = "say"
+
+
+class AckSilentlyTool(ChibiTool):
+    """Terminal service acknowledgement: ends the turn with nothing delivered.
+
+    The user never sees this response; it is not a quiet version of ``say()``.
+    Never dispatched as an ordinary tool: the agent loop must intercept an
+    ``ack_silently()`` call, persist a hidden assistant message and end the
+    turn without producing a tool result (sub-task 4b). Until that branch
+    lands, the base-class dispatch path would treat this call like any other
+    tool, which is the acknowledged intermediate state of sub-task 4a.
+    """
+
+    register = True
+    run_in_background_by_default = False
+    allow_model_to_change_background_mode = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="ack_silently",
+            description=(
+                "Silently absorb a background event (a tool or scheduler result) and end the "
+                "turn with NOTHING delivered to the user. This is a service response: the user "
+                "NEVER sees it, and it is not a quiet version of say(). Use it only when you "
+                "have nothing to tell the user and work continues; if the user is owed an "
+                "answer, call say() instead. Calling ack_silently() ENDS your turn — it must "
+                "be the last call of the turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+    )
+    name = "ack_silently"

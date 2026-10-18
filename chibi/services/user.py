@@ -341,8 +341,8 @@ async def get_llm_chat_completion_answer(
             "desc": (
                 "Service trigger from the Chibi scheduler. This is NOT a user message and not a tool "
                 "response: the agent was woken up by a scheduled job in this thread. Handle the "
-                "trigger_text below using the thread context. Reply with <chibi>ACK</chibi> (and "
-                "nothing else) if there is nothing worth reporting to the user."
+                "trigger_text below using the thread context. If there is nothing worth reporting to "
+                "the user, end the turn with ack_silently(); otherwise deliver via say()."
             ),
             "job_id": scheduler_job_id,
             "trigger_text": scheduler_trigger_text,
