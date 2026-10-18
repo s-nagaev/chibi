@@ -4,10 +4,14 @@ from typing import Any, cast
 
 import pytest
 
-# Imported after the tools package on purpose: chibi.constants must never be
-# the first import in a process (chibi.config <-> chibi.constants circularity),
-# and pytest may collect this module first.
-from chibi.constants import SCHEDULER_HINT_PROMPT, get_llm_prompt  # noqa: E402
+# The tools package is imported before chibi.constants on purpose: it pulls in
+# chibi.config first, which fully initializes chibi.constants. If chibi.constants
+# were the first chibi import instead, its own `from chibi.config import ...`
+# would re-enter the partially initialized chibi.config and fail — which is
+# exactly what happens when this module is collected standalone
+# (`pytest tests/services/tools/test_say_ack_tools.py` with no earlier imports).
+import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
+from chibi.constants import SCHEDULER_HINT_PROMPT, get_llm_prompt
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
 
