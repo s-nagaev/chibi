@@ -90,6 +90,12 @@ from chibi.services.providers.streaming import (
     delta_latched,
     delta_streaming_allowed,
 )
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    fold_terminal_calls_into_thoughts,
+    partition_terminal_calls,
+    plan_terminal_turn,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
@@ -810,8 +816,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
+        history_size = len(messages)
         initial_messages = [msg.to_openai() for msg in messages]
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             model=model,
             system_prompt=system_prompt,
@@ -823,11 +830,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
-        return (
-            chat_response,
-            [Message.from_openai(msg) for msg in new_messages],
-        )
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
+        return (chat_response, new_messages)
 
     async def _stream_chat_completion(
         self,
@@ -972,7 +980,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
                 await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
                 logger.log("THINK", data.message.reasoning_content)
-            messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
+            final_message = ChatCompletionAssistantMessageParam(**data.message.model_dump())  # type: ignore
+            messages.append(final_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_openai(cast(ChatCompletionMessageParam, final_message)))
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
@@ -990,6 +1001,35 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             )
             for tool_call in tool_calls
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                answer = fold_terminal_calls_into_thoughts(thoughts=answer, terminal_calls=terminal_calls)
+                tool_calls = [
+                    tool_call for tool_call in tool_calls if tool_call.function.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -1481,12 +1521,14 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
+
+        history_size = len(messages)
         initial_messages = [msg.to_anthropic() for msg in messages]
 
         if len(initial_messages) >= 2:
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
@@ -1498,11 +1540,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
-        return (
-            chat_response,
-            [Message.from_anthropic(msg) for msg in new_messages],
-        )
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
+        return (chat_response, new_messages)
 
     async def _get_chat_completion_response(
         self,
@@ -1545,12 +1588,13 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         tool_call_parts = [part for part in response_message.content if isinstance(part, ToolUseBlock)]
         if not tool_call_parts:
-            messages.append(
-                MessageParam(
-                    role="assistant",
-                    content=[content.model_dump() for content in response_message.content],  # type: ignore
-                )
+            assistant_message = MessageParam(
+                role="assistant",
+                content=[content.model_dump() for content in response_message.content],  # type: ignore
             )
+            messages.append(assistant_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_anthropic(assistant_message))
             answer = None
             for block in response_message.content:
                 if answer := getattr(block, "text", None):
@@ -1583,6 +1627,44 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             )
             for tool_call_part in tool_call_parts
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                folded_thoughts = fold_terminal_calls_into_thoughts(
+                    thoughts=thoughts_part.text if thoughts_part else "", terminal_calls=terminal_calls
+                )
+                if thoughts_part is not None:
+                    thoughts_part = TextBlock(type="text", text=folded_thoughts)
+                tool_call_parts = [
+                    tool_call_part
+                    for tool_call_part in tool_call_parts
+                    if tool_call_part.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(
+                    terminal_calls=terminal_calls,
+                    thoughts=thoughts_part.text if thoughts_part else "",
+                )
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,

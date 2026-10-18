@@ -97,6 +97,9 @@ class ToolSchema(BaseModel):
         return base64.b64encode(value).decode("ascii")
 
 
+MessageVisibility = Literal["visible", "hidden"]
+
+
 class Message(BaseModel):
     id: int = Field(default_factory=time.time_ns)
     role: str
@@ -106,6 +109,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     tool_name: str | None = None
     source: str | None = None
+    visibility: MessageVisibility = "visible"
 
     @property
     def estimate_tokens(self) -> int:
@@ -116,7 +120,8 @@ class Message(BaseModel):
         if not wrapper_class:
             raise ValueError(f"Role {self.role} seems not supported yet")
 
-        open_ai_message = wrapper_class(**self.model_dump(exclude={"expire_at"}))
+        # visibility is platform metadata: it must never reach the API payload.
+        open_ai_message = wrapper_class(**self.model_dump(exclude={"expire_at", "visibility"}))
         return open_ai_message
 
     @classmethod

@@ -41,6 +41,12 @@ from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
     delta_streaming_allowed,
 )
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    fold_terminal_calls_into_thoughts,
+    partition_terminal_calls,
+    plan_terminal_turn,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -302,8 +308,10 @@ class MistralAI(RestApiFriendlyProvider):
         max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
+
+        history_size = len(messages)
         initial_messages = [msg.to_mistral() for msg in messages]
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
@@ -315,10 +323,14 @@ class MistralAI(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
         return (
             chat_response,
-            [Message.from_mistral(msg) for msg in new_messages if not isinstance(msg, SystemMessage)],
+            [msg for msg in new_messages if msg.role != "system"],
         )
 
     async def _get_chat_completion_response(
@@ -362,14 +374,16 @@ class MistralAI(RestApiFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, user=user, model=model, provider=self.name)
 
         message_data = response.choices[0].message
+        assistant_content = message_data.content or ""
 
         tool_calls = message_data.tool_calls
         if not tool_calls:
-            messages.append(
-                AssistantMessage(
-                    content=message_data.content or "",
-                )
+            final_message = AssistantMessage(
+                content=message_data.content or "",
             )
+            messages.append(final_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_mistral(final_message))
             return ChatResponseSchema(
                 answer=message_data.content or "no data",
                 provider=self.name,
@@ -397,6 +411,38 @@ class MistralAI(RestApiFriendlyProvider):
             )
             for tool_call in tool_calls
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                if isinstance(assistant_content, str):
+                    assistant_content = fold_terminal_calls_into_thoughts(
+                        thoughts=assistant_content, terminal_calls=terminal_calls
+                    )
+                tool_calls = [
+                    tool_call for tool_call in tool_calls if tool_call.function.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=thoughts)
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -409,7 +455,7 @@ class MistralAI(RestApiFriendlyProvider):
 
         for tool_call, result in zip(tool_calls, results):
             tool_call_message = AssistantMessage(
-                content=message_data.content or "",
+                content=assistant_content,
                 tool_calls=[
                     ToolCall(
                         id=tool_call.id,

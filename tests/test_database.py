@@ -1,3 +1,5 @@
+import asyncio
+
 import boto3  # Import boto3
 import pytest
 from fakeredis import FakeAsyncRedis
@@ -232,3 +234,85 @@ async def test_drop_messages_specific_thread(storage: Database) -> None:
     # Verify thread 1 messages are gone
     thread1_messages = await storage.get_messages(user=user, thread_id=1)
     assert len(thread1_messages) == 0
+
+
+async def test_message_visibility_round_trip(storage: Database) -> None:
+    """A Message's visibility field survives the write/read cycle in every backend."""
+    user_id = 42
+    user = await storage.get_or_create_user(user_id)
+
+    visible = Message(role="assistant", content="Delivered text", visibility="visible")
+    hidden = Message(role="assistant", content="private CoT", visibility="hidden")
+
+    await storage.add_message(user=user, message=visible, thread_id=0)
+    await storage.add_message(user=user, message=hidden, thread_id=0)
+
+    raw = await storage.get_messages(user=user, thread_id=0)
+    raw.sort(key=lambda msg: msg["content"])
+    assert [msg["visibility"] for msg in raw] == ["visible", "hidden"]
+
+    conversation = await storage.get_conversation_messages(user=user, thread_id=0)
+    conversation.sort(key=lambda msg: msg.content)
+    assert [msg.visibility for msg in conversation] == ["visible", "hidden"]
+
+
+async def test_legacy_message_without_visibility_reads_back_visible(storage: Database) -> None:
+    """A stored message predating the visibility field reads back as visible.
+
+    No destructive backfill: the raw stored record must remain fieldless after
+    the read. The record is injected below through each backend's raw layer,
+    exactly as a message written before the field existed would look.
+    """
+    import json as _json
+
+    user_id = 43
+    legacy_id = 99001
+    user = await storage.get_or_create_user(user_id)
+
+    if isinstance(storage, RedisStorage):
+        message_key = f"user:{user_id}:message:{legacy_id}"
+        await storage.redis.set(name=message_key, value=_json.dumps({"role": "assistant", "content": "legacy"}))
+    elif isinstance(storage, DynamoDBStorage):
+        await asyncio.to_thread(
+            storage.messages_table.put_item,
+            Item={
+                "user_id": str(user_id),
+                "message_id": str(legacy_id),
+                "thread_id": 0,
+                "data": _json.dumps({"role": "assistant", "content": "legacy", "id": legacy_id}),
+            },
+        )
+    else:
+        # LocalStorage: rewrite the persisted user pickle with a fieldless
+        # message dict, mimicking a record written before the field existed.
+        from pickle import dump, load
+
+        filename = storage._get_storage_filename(user_id)
+        with open(filename, "rb") as f:
+            data = load(f)
+        data["messages"].append({"role": "assistant", "content": "legacy", "id": legacy_id, "expire_at": None})
+        with open(filename, "wb") as f:
+            dump(data, f)
+
+    conversation = await storage.get_conversation_messages(user=user, thread_id=0)
+    legacy = [msg for msg in conversation if msg.content == "legacy"]
+    assert len(legacy) == 1
+    assert legacy[0].visibility == "visible"
+
+    # No destructive backfill: the raw record still has no visibility field.
+    if isinstance(storage, RedisStorage):
+        raw_record = _json.loads(await storage.redis.get(f"user:{user_id}:message:{legacy_id}"))
+        assert "visibility" not in raw_record
+    elif isinstance(storage, DynamoDBStorage):
+        item = await asyncio.to_thread(
+            storage.messages_table.get_item, Key={"user_id": str(user_id), "message_id": str(legacy_id)}
+        )
+        assert "visibility" not in _json.loads(item["Item"]["data"])
+    else:
+        from pickle import load
+
+        with open(storage._get_storage_filename(user_id), "rb") as f:
+            data = load(f)
+        stored = [msg for msg in data["messages"] if msg.get("content") == "legacy"]
+        assert len(stored) == 1
+        assert "visibility" not in stored[0]
