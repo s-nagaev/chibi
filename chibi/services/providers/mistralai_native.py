@@ -38,10 +38,8 @@ from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
     delta_streaming_allowed,
-    emit_delta,
-    flush_ack_sentinel_gate,
-    reset_ack_sentinel_gate,
 )
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
@@ -217,16 +215,18 @@ class MistralAI(RestApiFriendlyProvider):
         completion_id = ""
         response_model = ""
         created = 0
-        reset_ack_sentinel_gate(interface)
-        async with await self.client.chat.stream_async(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-            temperature=self.temperature,
-            tools=cast(list[Tool], self.tools_list),
-            tool_choice="auto",
-            http_headers={"Cache-Control": "max-age=86400"},
-        ) as stream:
+        async with (
+            AckSentinelStreamSession(interface) as deltas,
+            await self.client.chat.stream_async(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                temperature=self.temperature,
+                tools=cast(list[Tool], self.tools_list),
+                tool_choice="auto",
+                http_headers={"Cache-Control": "max-age=86400"},
+            ) as stream,
+        ):
             async for event in stream:
                 chunk = event.data
                 completion_id = chunk.id or completion_id
@@ -243,7 +243,7 @@ class MistralAI(RestApiFriendlyProvider):
                 if delta.content:
                     content_parts.append(delta.content)
                     if not tool_call_signal:
-                        await emit_delta(interface=interface, text=delta.content)
+                        await deltas.emit(delta.content)
                 for tool_call_delta in delta.tool_calls or []:
                     tool_call_signal = True
                     index = tool_call_delta.index or 0
@@ -258,7 +258,6 @@ class MistralAI(RestApiFriendlyProvider):
                             slot["arguments"] += arguments
                         elif arguments:
                             slot["arguments"] = json.dumps(arguments)
-        await flush_ack_sentinel_gate(interface)
         tool_calls = [
             ToolCall(
                 id=slot["id"] or str(uuid4()),

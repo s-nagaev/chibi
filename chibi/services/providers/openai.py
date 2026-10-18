@@ -24,11 +24,9 @@ from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
-    emit_delta,
-    flush_ack_sentinel_gate,
-    reset_ack_sentinel_gate,
 )
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -289,31 +287,30 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
-        reset_ack_sentinel_gate(interface)
-        try:
-            async with self.get_client().responses.stream(**stream_kwargs) as stream:
-                async for event in stream:
-                    if isinstance(event, ResponseTextDeltaEvent):
-                        if not tool_call_signal and event.delta:
-                            await emit_delta(interface=interface, text=event.delta)
-                    elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
-                        tool_call_signal = True
-                await flush_ack_sentinel_gate(interface)
-                return await stream.get_final_response()
-        except (BadRequestError, NotFoundError) as stream_error:
-            # Some gateways reject the streaming Responses request with a
-            # 400/404. The fallback to a non-streaming request is handled
-            # here — inside the helper — because the class-level
-            # ``__getattribute__`` error-conversion wrapper turns raw SDK
-            # errors into ServiceResponseError before they can reach any
-            # outer handler.
-            if delta_latched(interface):
-                raise
-            logger.warning(
-                f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
-                f"({stream_error}). Falling back to a non-streaming request."
-            )
-            return await self.get_client().responses.create(**request_kwargs)
+        async with AckSentinelStreamSession(interface) as deltas:
+            try:
+                async with self.get_client().responses.stream(**stream_kwargs) as stream:
+                    async for event in stream:
+                        if isinstance(event, ResponseTextDeltaEvent):
+                            if not tool_call_signal and event.delta:
+                                await deltas.emit(event.delta)
+                        elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
+                            tool_call_signal = True
+                    return await stream.get_final_response()
+            except (BadRequestError, NotFoundError) as stream_error:
+                # Some gateways reject the streaming Responses request with a
+                # 400/404. The fallback to a non-streaming request is handled
+                # here — inside the helper — because the class-level
+                # ``__getattribute__`` error-conversion wrapper turns raw SDK
+                # errors into ServiceResponseError before they can reach any
+                # outer handler.
+                if delta_latched(interface):
+                    raise
+                logger.warning(
+                    f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
+                    f"({stream_error}). Falling back to a non-streaming request."
+                )
+                return await self.get_client().responses.create(**request_kwargs)
 
     async def _get_response_completion_response(
         self,

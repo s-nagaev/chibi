@@ -57,11 +57,9 @@ from chibi.services.providers.provider import (
     _OpenAIChatStreamAccumulator,
 )
 from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
-    emit_delta,
-    flush_ack_sentinel_gate,
-    reset_ack_sentinel_gate,
 )
 
 TEST_TOKEN = "test-streaming-token"
@@ -748,9 +746,10 @@ class TestMistralStreaming:
 
 
 class TestLatch:
-    async def test_emit_delta_latches_the_request(self) -> None:
+    async def test_session_emit_latches_the_request(self) -> None:
         interface = _make_interface()
-        await emit_delta(interface, "chunk-1")
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("chunk-1")
         assert interface.delta_emitted is True
         assert delta_latched(interface) is True
         assert delta_streaming_allowed(interface) is False
@@ -758,14 +757,16 @@ class TestLatch:
     async def test_non_streaming_interface_never_emits(self) -> None:
         interface: Any = SimpleNamespace(streaming_enabled=False, delta_emitted=False, send_delta=AsyncMock())
         assert delta_streaming_allowed(interface) is False
-        await emit_delta(interface, "chunk")
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("chunk")
         interface.send_delta.assert_not_awaited()
         assert delta_latched(interface) is False
 
     async def test_none_interface_is_safe(self) -> None:
         assert delta_streaming_allowed(None) is False
         assert delta_latched(None) is False
-        await emit_delta(None, "chunk")
+        async with AckSentinelStreamSession(None) as deltas:
+            await deltas.emit("chunk")
 
 
 class TestAnthropicFamilyStreamFallback:
@@ -1105,45 +1106,160 @@ class TestAckSentinelNativeAdapters:
         )
 
 
-class TestAckSentinelGateWiring:
-    """The gate lives on the interface, so emit_delta alone can never leak the marker."""
+class TestAckSentinelStreamSession:
+    """The gate lives inside the stream session: no session, no emission.
 
-    async def test_emit_delta_without_reset_still_gates_pure_ack(self) -> None:
-        """Even an adapter that never calls reset cannot leak the sentinel."""
+    Emission exists only as ``AckSentinelStreamSession.emit``, and the gate is
+    a plain attribute of the session object, so a streaming attempt cannot
+    share, inherit or leave behind gate state, and the drain at session exit
+    runs on every exit path of the ``async with`` block.
+    """
+
+    async def test_pure_ack_never_leaks_through_a_session(self) -> None:
+        """Even an adapter wiring nothing beyond the session cannot leak the sentinel."""
         interface = _make_interface()
-        await emit_delta(interface, "<chibi")
-        await emit_delta(interface, ">ACK</chibi>")
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("<chibi")
+            await deltas.emit(">ACK</chibi>")
         interface.send_delta.assert_not_awaited()
         assert interface.delta_emitted is False
 
-    async def test_emit_delta_releases_legitimate_text_without_reset(self) -> None:
+    async def test_emit_outside_the_with_block_fails_loudly(self) -> None:
+        """There is no emission path that bypasses the session lifecycle."""
         interface = _make_interface()
-        await emit_delta(interface, "<chibi")
-        await emit_delta(interface, "X is the answer")
+        session = AckSentinelStreamSession(interface)
+        with pytest.raises(RuntimeError, match="async with"):
+            await session.emit("chunk")
+        interface.send_delta.assert_not_awaited()
+
+    async def test_session_releases_legitimate_text(self) -> None:
+        interface = _make_interface()
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("<chibi")
+            await deltas.emit("X is the answer")
         assert [call.args[0] for call in interface.send_delta.await_args_list] == ["<chibiX is the answer"]
         assert interface.delta_emitted is True
 
-    async def test_reset_gives_each_streaming_attempt_a_fresh_gate(self) -> None:
-        """Buffered state from a failed attempt must not leak into the next one."""
-        interface = _make_interface()
-        await emit_delta(interface, "<chibi")
-        reset_ack_sentinel_gate(interface)
-        await emit_delta(interface, "Answer after retry")
-        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Answer after retry"]
+    async def test_no_state_leaks_between_attempts_even_without_clean_exit(self) -> None:
+        """A fresh attempt starts on a clean gate without any reset call.
 
-    async def test_flush_emits_held_back_tail_of_legitimate_answer(self) -> None:
+        The first attempt is an async generator abandoned mid-hold: it enters
+        the session, emits '<chibi' (which the gate holds back), suspends at the
+        yield and is then dropped without being closed, so its ``__aexit__``
+        never runs and the held buffer is never flushed. Because the gate lives
+        in the session object and not on the interface, the second session still
+        starts empty and 'Hello' is emitted alone — never spliced into
+        '<chibiHello'.
+        """
         interface = _make_interface()
-        await emit_delta(interface, "Done <chibi")
-        await flush_ack_sentinel_gate(interface)
+
+        def abandoned_stream() -> Any:
+            async def stream_body() -> Any:
+                async with AckSentinelStreamSession(interface) as deltas:
+                    await deltas.emit("<chibi")
+                    yield "suspended mid-attempt"
+
+            return stream_body()
+
+        abandoned = abandoned_stream()
+        await abandoned.__anext__()
+        del abandoned
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("Hello")
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Hello"]
+        assert interface.delta_emitted is True
+
+    async def test_exit_emits_held_back_tail_of_legitimate_answer(self) -> None:
+        interface = _make_interface()
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("Done <chibi")
         assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Done ", "<chibi"]
 
-    async def test_flush_after_pure_ack_emits_nothing(self) -> None:
+    async def test_exit_after_pure_ack_emits_nothing(self) -> None:
         interface = _make_interface()
-        await emit_delta(interface, "<chibi>ACK</chibi>")
-        await flush_ack_sentinel_gate(interface)
+        async with AckSentinelStreamSession(interface) as deltas:
+            await deltas.emit("<chibi>ACK</chibi>")
         interface.send_delta.assert_not_awaited()
         assert interface.delta_emitted is False
 
-    async def test_none_interface_is_safe_for_gate_helpers(self) -> None:
-        reset_ack_sentinel_gate(None)
-        await flush_ack_sentinel_gate(None)
+    async def test_early_return_still_drains_the_gate(self) -> None:
+        interface = _make_interface()
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("Done <chibi")
+                return
+
+        await stream_loop()
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Done ", "<chibi"]
+
+    async def test_exception_still_emits_released_tail_and_propagates(self) -> None:
+        """A stream dying mid-answer must not lose the already-diverged tail."""
+        interface = _make_interface()
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("Answer ends with <chib")
+                raise RuntimeError("stream died")
+
+        with pytest.raises(RuntimeError, match="stream died"):
+            await stream_loop()
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Answer ends with ", "<chib"]
+
+    async def test_cancellation_still_emits_released_tail_and_propagates(self) -> None:
+        interface = _make_interface()
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("Answer ends with <chib")
+                raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await stream_loop()
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Answer ends with ", "<chib"]
+
+    async def test_exception_discards_unreleased_hold_back(self) -> None:
+        """An abort before the answer diverged must not emit speculative text.
+
+        The held '<chibi' never became a real answer, and a non-streaming
+        fallback may regenerate the response, so emitting it would splice
+        aborted-attempt text ahead of the replacement answer.
+        """
+        interface = _make_interface()
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("<chibi")
+                raise RuntimeError("stream died")
+
+        with pytest.raises(RuntimeError, match="stream died"):
+            await stream_loop()
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+
+    async def test_flush_failure_during_abort_does_not_mask_the_exception(self) -> None:
+        interface = _make_interface()
+        interface.send_delta = AsyncMock(side_effect=[None, ConnectionError("interface gone")])
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("Answer ends with <chib")
+                raise RuntimeError("stream died")
+
+        with pytest.raises(RuntimeError, match="stream died"):
+            await stream_loop()
+
+    async def test_flush_failure_on_clean_exit_propagates(self) -> None:
+        interface = _make_interface()
+        interface.send_delta = AsyncMock(side_effect=[None, ConnectionError("interface gone")])
+
+        async def stream_loop() -> None:
+            async with AckSentinelStreamSession(interface) as deltas:
+                await deltas.emit("Done <chib")
+
+        with pytest.raises(ConnectionError, match="interface gone"):
+            await stream_loop()
+
+    async def test_none_interface_is_safe_for_the_session(self) -> None:
+        async with AckSentinelStreamSession(None) as deltas:
+            await deltas.emit("chunk")

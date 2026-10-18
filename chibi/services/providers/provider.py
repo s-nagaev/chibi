@@ -86,11 +86,9 @@ from chibi.schemas.app import (
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
-    emit_delta,
-    flush_ack_sentinel_gate,
-    reset_ack_sentinel_gate,
 )
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
@@ -889,15 +887,14 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             )
             return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
         accumulator = _OpenAIChatStreamAccumulator()
-        reset_ack_sentinel_gate(interface)
-        try:
-            async for chunk in stream:
-                text_delta = accumulator.process_chunk(chunk=chunk)
-                if text_delta and not accumulator.tool_call_signal:
-                    await emit_delta(interface=interface, text=text_delta)
-        finally:
-            await stream.close()
-        await flush_ack_sentinel_gate(interface)
+        async with AckSentinelStreamSession(interface) as deltas:
+            try:
+                async for chunk in stream:
+                    text_delta = accumulator.process_chunk(chunk=chunk)
+                    if text_delta and not accumulator.tool_call_signal:
+                        await deltas.emit(text_delta)
+            finally:
+                await stream.close()
         return accumulator.build_response()
 
     async def _get_chat_completion_response(
@@ -1441,16 +1438,18 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         Returns:
             The final aggregated Anthropic message.
         """
-        reset_ack_sentinel_gate(interface)
-        async with self.client.messages.stream(
-            model=model,
-            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-            temperature=self.temperature,
-            timeout=self.timeout,
-            tools=self.tools_list,
-            system=system,
-            messages=messages,
-        ) as stream:
+        async with (
+            AckSentinelStreamSession(interface) as deltas,
+            self.client.messages.stream(
+                model=model,
+                max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                temperature=self.temperature,
+                timeout=self.timeout,
+                tools=self.tools_list,
+                system=system,
+                messages=messages,
+            ) as stream,
+        ):
             tool_call_signal = False
             async for event in stream:
                 if event.type == "content_block_start":
@@ -1458,8 +1457,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                         tool_call_signal = True
                 elif event.type == "content_block_delta" and not tool_call_signal:
                     if isinstance(event.delta, TextDelta) and event.delta.text:
-                        await emit_delta(interface=interface, text=event.delta.text)
-            await flush_ack_sentinel_gate(interface)
+                        await deltas.emit(event.delta.text)
             return await stream.get_final_message()
 
     @retry(

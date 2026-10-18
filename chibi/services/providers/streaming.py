@@ -1,7 +1,22 @@
-"""Shared live response-delta streaming helpers for LLM provider adapters."""
+"""Shared live response-delta streaming helpers for LLM provider adapters.
+
+Live deltas leave the provider layer only through
+:class:`AckSentinelStreamSession`, an async context manager that owns the ACK
+sentinel gate for exactly one streaming attempt. Emission and lifecycle are the
+same object: an adapter that does not open a session has no way to emit a
+delta, and one that does cannot leave the gate undrained or shared across
+attempts.
+"""
+
+from __future__ import annotations
+
+import logging
+from types import TracebackType
 
 from chibi.services.interface import UserInterface
 from chibi.utils.ack_sentinel import ACK_SENTINEL
+
+logger = logging.getLogger(__name__)
 
 
 def delta_streaming_allowed(interface: UserInterface | None) -> bool:
@@ -121,85 +136,119 @@ class AckSentinelStreamGate:
         self._tail = ""
         return tail
 
+    @property
+    def released(self) -> bool:
+        """Report whether filtering has already released buffered text.
 
-_ACK_SENTINEL_GATE_ATTR = "_ack_sentinel_stream_gate"
+        A gate that never released has only seen text still compatible with
+        the sentinel; everything it holds is speculative partial output of an
+        answer that has not materialized yet.
+        """
+        return self._released
 
 
-def _get_ack_sentinel_gate(interface: UserInterface) -> AckSentinelStreamGate:
-    """Return the interface-attached ACK gate, creating it lazily.
+class AckSentinelStreamSession:
+    """Live delta channel scoped to a single streaming attempt.
 
-    Args:
-        interface: The active user interface.
+    The session owns the ACK sentinel gate for exactly one streaming attempt:
+    the gate is created with the session, lives only inside the session, and is
+    drained when the session exits. Nothing is stored on the interface, so
+    buffered state cannot leak across attempts, fallbacks, requests or runner
+    lifetimes, and the terminal drain runs on every exit path of the
+    ``async with`` block: normal completion, early ``return``, raised
+    exceptions and cancellation alike.
 
-    Returns:
-        The gate instance bound to this interface for the current attempt.
+    Emission is possible only through :meth:`emit` on the session object. There
+    is no free delta-emission function in this module, so an adapter that
+    forgets the lifecycle has no way to stream at all, instead of silently
+    streaming through a stale or undrained gate.
     """
-    gate = getattr(interface, _ACK_SENTINEL_GATE_ATTR, None)
-    if gate is None:
-        gate = AckSentinelStreamGate()
-        setattr(interface, _ACK_SENTINEL_GATE_ATTR, gate)
-    return gate
 
+    def __init__(self, interface: UserInterface | None) -> None:
+        """Bind the session to one streaming attempt's interface.
 
-def reset_ack_sentinel_gate(interface: UserInterface | None) -> None:
-    """Attach a fresh ACK gate to the interface for a new streaming attempt.
+        Args:
+            interface: The active user interface, if any.
+        """
+        self._interface = interface
+        self._gate = AckSentinelStreamGate()
+        self._entered = False
 
-    Every streaming adapter calls this once before its stream loop, so the
-    buffered state never leaks across attempts, fallbacks or turns.
+    async def __aenter__(self) -> AckSentinelStreamSession:
+        """Enter the streaming attempt with a fresh gate."""
+        self._entered = True
+        return self
 
-    Args:
-        interface: The active user interface, if any.
-    """
-    if interface is None:
-        return
-    setattr(interface, _ACK_SENTINEL_GATE_ATTR, AckSentinelStreamGate())
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        """Drain the gate on every exit path of the streaming attempt."""
+        await self._finish(aborted=exc_type is not None)
 
+    async def emit(self, text: str) -> None:
+        """Emit a single live response-text chunk and latch the current request.
 
-async def flush_ack_sentinel_gate(interface: UserInterface | None) -> None:
-    """Drain the interface-attached ACK gate and emit any held-back text.
+        Empty chunks and non-streaming interfaces are skipped silently. The text
+        is routed through the session's ACK sentinel gate first, so a pure-ACK
+        answer never reaches the interface and complete sentinels are stripped
+        from mixed answers on every adapter. Calling this sets the latch on the
+        interface, so retries, fallbacks and recursive turns of the same request
+        never stream live deltas again. The latch does not gate emission within
+        the currently-live turn; that is governed by the provider's turn-level
+        tool-call signal.
 
-    Called once per streaming attempt after the stream loop. For a pure-ACK
-    answer the gate returns nothing; otherwise a held-back partial-sentinel
-    tail (a legitimate answer ending inside the sentinel pattern) is emitted
-    here. The drained text bypasses re-gating — it is already sentinel-safe.
-
-    Args:
-        interface: The active user interface, if any.
-    """
-    if interface is None:
-        return
-    gate = getattr(interface, _ACK_SENTINEL_GATE_ATTR, None)
-    if gate is None:
-        return
-    held_back = gate.flush()
-    if held_back and getattr(interface, "streaming_enabled", False) is True:
-        await interface.send_delta(held_back)
+        Args:
+            text: The partial body-text chunk to stream.
+        """
+        if not self._entered:
+            raise RuntimeError(
+                "AckSentinelStreamSession.emit called outside its 'async with' block. Open the "
+                "session with 'async with AckSentinelStreamSession(interface) as deltas' so the "
+                "gate is guaranteed to be drained on every exit path of the streaming attempt."
+            )
+        interface = self._interface
+        if interface is None or not text:
+            return
+        if getattr(interface, "streaming_enabled", False) is not True:
+            return
+        emit_text = self._gate.filter(text)
+        if not emit_text:
+            return
+        await interface.send_delta(emit_text)
         interface.delta_emitted = True
 
+    async def _finish(self, aborted: bool) -> None:
+        """Drain the session gate and emit any held-back text.
 
-async def emit_delta(interface: UserInterface | None, text: str) -> None:
-    """Emit a single live response-text chunk and latch the current request.
+        On a normal exit every held-back fragment is emitted: the stream is
+        over, so a trailing fragment can no longer complete into the sentinel
+        and is legitimate answer text. On an aborted attempt a gate that never
+        released holds only speculative output of an answer that did not
+        complete, output a non-streaming fallback may regenerate, so it is
+        drained and discarded; a released gate's short tail, provably part of an
+        answer whose earlier chunks were already emitted, is still delivered.
+        A failure while emitting during an abort is logged and swallowed so it
+        cannot mask the in-flight exception.
 
-    Empty chunks and non-streaming interfaces are skipped silently. The text
-    is routed through the interface-attached ACK sentinel gate first, so a
-    pure-ACK answer never reaches the interface and complete sentinels are
-    stripped from mixed answers on every adapter, including ones that forgot
-    to wire the gate explicitly. Calling this sets the latch on the
-    interface, so retries, fallbacks and recursive turns of the same request
-    never stream live deltas again. The latch does not gate emission within
-    the currently-live turn; that is governed by the provider's turn-level
-    tool-call signal.
-
-    Args:
-        interface: The active user interface, if any.
-        text: The partial body-text chunk to stream.
-    """
-    if interface is None or not text:
-        return
-    if getattr(interface, "streaming_enabled", False) is not True:
-        return
-    emit_text = _get_ack_sentinel_gate(interface).filter(text)
-    if not emit_text:
-        return
-    await interface.send_delta(emit_text)
-    interface.delta_emitted = True
+        Args:
+            aborted: Whether an exception is propagating out of the attempt.
+        """
+        interface = self._interface
+        if interface is None:
+            return
+        if aborted and not self._gate.released:
+            self._gate.flush()
+            return
+        held_back = self._gate.flush()
+        if not held_back or getattr(interface, "streaming_enabled", False) is not True:
+            return
+        try:
+            await interface.send_delta(held_back)
+            interface.delta_emitted = True
+        except Exception:
+            if not aborted:
+                raise
+            logger.warning("Could not flush the ACK sentinel gate tail of an aborted stream.", exc_info=True)
