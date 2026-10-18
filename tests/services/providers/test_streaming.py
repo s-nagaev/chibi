@@ -184,6 +184,31 @@ class _RejectingResponsesStream:
         return None
 
 
+class _AbortingResponsesStream:
+    """Responses stream that yields one text delta, then raises a SDK error."""
+
+    def __init__(self, delta: str, error: BaseException) -> None:
+        self._events: list[Any] = [_text_delta_event(delta), error]
+        self.closed = False
+
+    async def __aenter__(self) -> "_AbortingResponsesStream":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.closed = True
+
+    def __aiter__(self) -> "_AbortingResponsesStream":
+        return self
+
+    async def __anext__(self) -> Any:
+        if not self._events:
+            raise StopAsyncIteration
+        item = self._events.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
 class _FakeAnthropicStream:
     def __init__(self, events: list[Any], final: Any) -> None:
         self._events = list(events)
@@ -929,6 +954,36 @@ class TestAckSentinelNativeAdapters:
         assert "".join(emitted) == "Result:  done!"
         assert all("<chibi>ACK</chibi>" not in delta for delta in emitted)
         assert interface.delta_emitted is True
+
+    async def test_responses_api_fallback_discards_aborted_attempts_hold_back(self) -> None:
+        """A mid-stream 400 before any emitted delta must not flush the speculative prefix.
+
+        The stream holds back a sentinel-compatible prefix ("<chibi"), then the
+        gateway rejects it. The non-streaming fallback regenerates the answer,
+        so the aborted attempt's held-back text must be discarded, not emitted
+        ahead of the regenerated answer.
+        """
+        error = _make_bad_request_error()
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        create_mock = AsyncMock(return_value=_fake_responses_api_response("Hello"))
+        mock_client = SimpleNamespace(
+            responses=SimpleNamespace(
+                stream=lambda **kwargs: _AbortingResponsesStream("<chibi", error),
+                create=create_mock,
+            )
+        )
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            response = await provider._stream_response_completion(
+                request_kwargs={"model": "gpt-5-mini"},
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert create_mock.await_count == 1
+        assert response.output_text == "Hello"
 
     async def test_anthropic_pure_ack_emits_no_delta(self) -> None:
         events: list[Any] = [

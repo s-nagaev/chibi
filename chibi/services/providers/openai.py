@@ -268,7 +268,10 @@ class OpenAI(OpenAIFriendlyProvider):
         reasoning summary deltas are never streamed. The final aggregated
         Response is obtained from the stream itself, so the downstream
         non-streaming processing stays unchanged. The stream is always
-        closed explicitly, also on cancellation.
+        closed explicitly, also on cancellation. A mid-stream 400/404
+        before any delta was emitted retries non-streaming outside the
+        session, so the aborted attempt's speculative held-back text is
+        discarded instead of flushed ahead of the regenerated answer.
 
         Args:
             request_kwargs: Non-streaming request parameters shared with the
@@ -287,8 +290,8 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
-        async with AckSentinelStreamSession(interface) as deltas:
-            try:
+        try:
+            async with AckSentinelStreamSession(interface) as deltas:
                 async with self.get_client().responses.stream(**stream_kwargs) as stream:
                     async for event in stream:
                         if isinstance(event, ResponseTextDeltaEvent):
@@ -297,20 +300,24 @@ class OpenAI(OpenAIFriendlyProvider):
                         elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
                             tool_call_signal = True
                     return await stream.get_final_response()
-            except (BadRequestError, NotFoundError) as stream_error:
-                # Some gateways reject the streaming Responses request with a
-                # 400/404. The fallback to a non-streaming request is handled
-                # here — inside the helper — because the class-level
-                # ``__getattribute__`` error-conversion wrapper turns raw SDK
-                # errors into ServiceResponseError before they can reach any
-                # outer handler.
-                if delta_latched(interface):
-                    raise
-                logger.warning(
-                    f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
-                    f"({stream_error}). Falling back to a non-streaming request."
-                )
-                return await self.get_client().responses.create(**request_kwargs)
+        except (BadRequestError, NotFoundError) as stream_error:
+            # Some gateways reject the streaming Responses request with a
+            # 400/404. The fallback to a non-streaming request is handled
+            # here — inside the helper — because the class-level
+            # ``__getattribute__`` error-conversion wrapper turns raw SDK
+            # errors into ServiceResponseError before they can reach any
+            # outer handler. The handler sits outside the session on
+            # purpose: the propagating error exits it as an abort, so a
+            # never-released gate's speculative held-back text is
+            # discarded rather than flushed ahead of the regenerated
+            # answer.
+            if delta_latched(interface):
+                raise
+            logger.warning(
+                f"{self.name}/{request_kwargs.get('model', 'unknown')} rejected the streaming request "
+                f"({stream_error}). Falling back to a non-streaming request."
+            )
+            return await self.get_client().responses.create(**request_kwargs)
 
     async def _get_response_completion_response(
         self,

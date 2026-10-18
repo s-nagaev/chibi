@@ -838,9 +838,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
         Emits one live delta per non-empty body-text chunk via the interface
         until the earliest tool-call signal in the stream; chunks that could
-        still complete into a pure ACK sentinel are buffered by the
-        interface-attached ``AckSentinelStreamGate``, so a pure-ACK answer
-        never emits a delta.
+        still complete into a pure ACK sentinel are buffered by the gate owned
+        by this streaming attempt's ``AckSentinelStreamSession``, so a
+        pure-ACK answer never emits a delta.
         The accumulated chunks are rebuilt into a ChatCompletion equivalent to
         the non-streaming response (fragmented tool-call arguments, parallel
         tool calls, ``reasoning_content`` split and the usage-only final
