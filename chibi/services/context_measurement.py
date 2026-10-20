@@ -118,11 +118,11 @@ class SizeProvenance(str, Enum):
     The binary behind the observability contract: a reader of a decision log must never
     have to guess whether a size came from the provider or from a local estimate.
 
-    - :attr:`PROVIDER_MEASURED` — the figure's base is the durable provider-reported
+    - :attr:`PROVIDER_MEASURED`: the figure's base is the durable provider-reported
       ``prompt_tokens`` of the thread's last measured turn (``ThreadUsageRecord``), plus a
       local tokenizer count of the messages appended since that measurement. The anchor is
       provider-measured; the appended part is always a local count.
-    - :attr:`ESTIMATED` — no valid provider measurement exists for this thread and model
+    - :attr:`ESTIMATED`: no valid provider measurement exists for this thread and model
       (absent record, model mismatch, wrong-sized or stale record): the whole list was
       counted with the local heuristic tokenizer. Such a figure UNDER-reports a real
       request and carries no provider authority.
@@ -248,7 +248,7 @@ async def get_last_measured_usage(db: Database, user_id: int, thread_id: int, mo
 
 @inject_database
 async def measure_request_size(db: Database, user_id: int, thread_id: int, model: str, messages: list[Message]) -> int:
-    """Answer "how big is this request" for a thread — the single size entry point.
+    """Answer "how big is this request" for a thread: the single size entry point.
 
     Combines the durable per-thread measurement with a tokenizer count of the
     messages appended since it was taken: ``measured + counted(appended)``.
@@ -278,7 +278,7 @@ async def measure_request_size_with_provenance(
     """Answer "how big is this request" and state whether the figure is measured or estimated.
 
     The provenance-bearing variant of :func:`measure_request_size` (the single size entry
-    point): same arithmetic, same degradation contract, same single-source rule — the
+    point): same arithmetic, same degradation contract, same single-source rule: the
     figure still comes from the durable per-thread provider measurement plus a tokenizer
     count of the appended messages, or degrades to the whole-list heuristic estimate.
     Decision points (the budget guard, the in-loop check, the compaction machine, the
@@ -320,8 +320,8 @@ async def persist_measured_usage(
     applies to an unknown ``message_count`` (``None``): a record without a
     trustworthy count is a wrong-sized entry in the making (the accessor
     cannot tell which part of the history the measured prompt contained), so
-    it is never persisted — the thread keeps its previous good record or
-    falls back to the estimate. Storage failures are logged and swallowed —
+    it is never persisted: the thread keeps its previous good record or
+    falls back to the estimate. Storage failures are logged and swallowed:
     the durable record is an optimization over the heuristic estimate and
     must never break the chat answer.
 
