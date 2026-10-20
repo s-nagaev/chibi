@@ -246,6 +246,10 @@ class IDEInterface(UserInterface, EditorContextProvider):
         self.response_provider: str | None = None
         self.response_usage: UsageSchema | CompletionUsage | None = None
         self.response_thoughts: str | None = None
+        # Set by handle_user_prompt via setattr for every turn (task 5):
+        # "hidden" when the turn ended via ack_silently() and its thoughts
+        # are private CoT that must not travel on the wire.
+        self.response_visibility: str = "visible"
         self._thoughts_at_close: str | None = None
         self.error_code: str | None = None
         self.error_message: str | None = None
@@ -420,6 +424,18 @@ class IDEInterface(UserInterface, EditorContextProvider):
             self.response_thoughts = thoughts
         else:
             self.response_thoughts = f"{self.response_thoughts}\n{thoughts}"
+
+    async def absorb_hidden_turn_reasoning(self) -> None:
+        """Re-baseline the continuation snapshot after a hidden turn (task 5).
+
+        A background continuation turn that ended via ``ack_silently()``
+        delivered nothing (the bot-level gate suppressed it), so its private
+        reasoning was captured after the :meth:`mark_closed` snapshot and
+        would otherwise ride the next background continuation's delta as if
+        it belonged to that turn. Absorbing it into the baseline keeps the
+        hidden turn's CoT off the wire without changing any frame shape.
+        """
+        self._thoughts_at_close = self.response_thoughts
 
     async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
         """Emit assistant text through the request-local callback."""
@@ -1266,7 +1282,11 @@ class IDEStdioRunner:
             )
             if usage_payload is not None:
                 result["usage"] = usage_payload
-            if self._thoughts_enabled and interface.response_thoughts:
+            # Private CoT stays off the wire on a hidden turn (task 5 PM
+            # ruling): the client discards the whole result frame anyway, so
+            # sending the reasoning it contains is a leak waiting for a
+            # client change.
+            if self._thoughts_enabled and interface.response_thoughts and interface.response_visibility != "hidden":
                 thoughts = _cap_thoughts(interface.response_thoughts)
                 logger.debug("attaching LLM thoughts to result frame bytes={}", len(thoughts.encode("utf-8")))
                 result["thoughts"] = thoughts

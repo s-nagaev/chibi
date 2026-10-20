@@ -148,7 +148,15 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
     # input exactly as before: assistant tool_calls and their role="tool"
     # results are not useful summarization context and their pairing is
     # provider-protocol sensitive.
-    summarizable = [msg for msg in chat_history if not msg.tool_calls and not msg.tool_call_id]
+    # Hidden messages (private CoT from ack_silently turns) are excluded too
+    # (task 5 PM ruling): folding them into a summary would launder private
+    # reasoning into durable context. Note: the summary replaces the whole
+    # history below, so post-summarization those messages leave the
+    # conversation entirely (existing summarization behaviour, not a
+    # retention change; the storage rows are untouched.
+    summarizable = [
+        msg for msg in chat_history if not msg.tool_calls and not msg.tool_call_id and msg.visibility != "hidden"
+    ]
     budget = int(gpt_settings.max_history_tokens * EMERGENCY_SUMMARIZATION_INPUT_BUDGET)
     kept = _fit_messages_to_budget(summarizable, budget)
     chat_history_string = "\n".join(msg.content for msg in kept)

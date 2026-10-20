@@ -568,7 +568,9 @@ class MistralAI(RestApiFriendlyProvider):
                             repair_used=retried,
                         ),
                     )
-                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
 
         results = await self.call_functions(
             calls=calls,

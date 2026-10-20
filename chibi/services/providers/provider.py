@@ -1145,7 +1145,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                             repair_used=retried,
                         ),
                     )
-                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
 
         results = await self.call_functions(
             calls=calls,
@@ -1907,7 +1909,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                             repair_used=retried,
                         ),
                     )
-                return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
 
         results = await self.call_functions(
             calls=calls,

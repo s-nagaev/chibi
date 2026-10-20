@@ -52,7 +52,19 @@ async def handle_tool_response(tool_response: ToolResponseSchema, interface: Use
     )
     usage_message = get_usage_msg(chat_response.usage)
 
-    if is_pure_ack(chat_response.answer):
+    # Render-time suppression (task 5): a turn whose message(s) are hidden
+    # (ack_silently) delivers nothing. The legacy pure-ACK marker check stays
+    # as the fallback for historical marker bodies and backends that ignored
+    # forcing. Both checks precede any interface send; nothing is dropped
+    # from storage here: the hidden messages were already persisted.
+    if chat_response.visibility == "hidden" or is_pure_ack(chat_response.answer):
+        # Interfaces that buffer reasoning for later delivery (IDE stdio)
+        # must absorb the hidden turn's private CoT so it can never ride a
+        # later continuation frame. The getattr guard keeps non-UserInterface
+        # test stubs working; every real interface inherits the no-op.
+        absorb = getattr(interface, "absorb_hidden_turn_reasoning", None)
+        if absorb is not None:
+            await absorb()
         logger.info(
             f"[{interface.user_data}-{interface.chat_data}] LLM silently received tool result "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"
@@ -119,7 +131,11 @@ async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: Us
     else:
         logged_answer = ""
 
-    if is_pure_ack(chat_response.answer):
+    # Render-time suppression (task 5), same rule as handle_tool_response.
+    if chat_response.visibility == "hidden" or is_pure_ack(chat_response.answer):
+        absorb = getattr(interface, "absorb_hidden_turn_reasoning", None)
+        if absorb is not None:
+            await absorb()
         logger.bind(user_id=interface.user_id).info(
             f"[{interface.user_data}-{interface.chat_data}] LLM silently acknowledged scheduler trigger "
             f"'{job_id}' (answer: {chat_response.answer}). No user notification required. {usage_message}"
@@ -188,7 +204,15 @@ async def handle_user_prompt(interface: UserInterface) -> None:
     else:
         logged_answer = ""
 
-    if is_pure_ack(chat_response.answer):
+    # Carry the turn's visibility so transports that build result frames
+    # (IDE stdio) can suppress private-CoT thoughts on a hidden turn.
+    # Interfaces without the attribute simply ignore it.
+    setattr(interface, "response_visibility", chat_response.visibility)
+
+    # Render-time suppression (task 5), same rule as handle_tool_response.
+    # The 👌 reaction still fires: the user is shown the request was received,
+    # only the content is withheld.
+    if chat_response.visibility == "hidden" or is_pure_ack(chat_response.answer):
         logger.info(
             f"[{interface.user_data}-{interface.chat_data}] LLM silently received user request "
             f"(answer: {chat_response.answer}). No user notification required. {usage_message}"

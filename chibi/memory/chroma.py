@@ -1062,6 +1062,11 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                 return None
             if any((message.tool_name, message.tool_calls, message.tool_call_id)):
                 return None
+            # Private CoT (ack_silently turns) is never archived: long-term
+            # memory is a render-time consumer, so hidden content must not be
+            # laundered into it. The row itself stays in the primary storage.
+            if message.visibility == "hidden":
+                return None
 
             if message.role == "user":
                 try:

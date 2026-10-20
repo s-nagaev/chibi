@@ -319,6 +319,18 @@ class UserInterface(ABC):
         await self.send_message(f"💡💭 {thoughts}", reply=False)
         return None
 
+    async def absorb_hidden_turn_reasoning(self) -> None:
+        """Drop reasoning captured for a turn that ended hidden.
+
+        Called by the render-time suppression gate (task 5) after a turn
+        whose messages are hidden delivered nothing: interfaces that buffer
+        reasoning for later delivery must make sure the hidden turn's private
+        CoT can never ride a later frame. Default implementation is a no-op;
+        the IDE transport interface overrides it to re-baseline its
+        continuation snapshot.
+        """
+        return None
+
 
 class TelegramInterface(UserInterface):
     def __init__(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

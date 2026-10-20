@@ -686,7 +686,13 @@ class Gemini(RestApiFriendlyProvider):
                         ),
                     )
                 return (
-                    ChatResponseSchema(answer=plan.answer, provider=self.name, model=model_name, usage=usage),
+                    ChatResponseSchema(
+                        answer=plan.answer,
+                        provider=self.name,
+                        model=model_name,
+                        usage=usage,
+                        visibility=plan.visibility,
+                    ),
                     messages,
                 )
 

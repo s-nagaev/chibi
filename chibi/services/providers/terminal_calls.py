@@ -30,7 +30,7 @@ from openai.types.chat import ChatCompletionToolParam
 
 from chibi.config import gpt_settings
 from chibi.exceptions import SilentTurnError
-from chibi.models import Message
+from chibi.models import Message, MessageVisibility
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
@@ -60,10 +60,16 @@ class TerminalTurnPlan(NamedTuple):
         message: The normalized assistant message to persist, or None when
             the turn would persist an empty-content message and must be
             omitted entirely (design R2).
+        visibility: The turn's visibility: ``"visible"`` for a ``say`` turn,
+            ``"hidden"`` for a silent ``ack_silently`` turn. Renderers key
+            their suppression gate on this (task 5); an empty ``say`` text
+            still reports ``"visible"`` because the 4c validator owns that
+            ending (misuse ``empty_turn``), not the renderer gate.
     """
 
     answer: str
     message: Message | None
+    visibility: MessageVisibility
 
 
 def is_terminal_call(tool_name: str) -> bool:
@@ -120,14 +126,14 @@ def plan_terminal_turn(terminal_calls: list[ToolCallSchema], thoughts: str | Non
     if say_call is not None:
         text = str(say_call.args.get("text") or "")
         message = Message(role="assistant", content=text, visibility="visible") if text else None
-        return TerminalTurnPlan(answer=text, message=message)
+        return TerminalTurnPlan(answer=text, message=message, visibility="visible")
 
     if len(terminal_calls) > 1:
         logger.warning(f"Ignoring {len(terminal_calls) - 1} redundant ack_silently call(s) in one turn.")
 
     content = thoughts or ""
     message = Message(role="assistant", content=content, visibility="hidden") if content else None
-    return TerminalTurnPlan(answer="", message=message)
+    return TerminalTurnPlan(answer="", message=message, visibility="hidden")
 
 
 def fold_terminal_calls_into_thoughts(thoughts: str | None, terminal_calls: list[ToolCallSchema]) -> str:
