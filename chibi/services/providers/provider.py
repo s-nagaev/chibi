@@ -56,6 +56,7 @@ from openai.types.chat import (
     ChatCompletionMessageToolCall,
     ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
+    ChatCompletionUserMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -92,11 +93,16 @@ from chibi.services.providers.streaming import (
 )
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
+    append_repair_nudge,
+    evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    honored_terminal_name,
+    log_turn_misuse,
     offered_tool_definitions,
     offered_tools,
     partition_terminal_calls,
     plan_terminal_turn,
+    resolve_turn_end_misuse,
 )
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
@@ -919,6 +925,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
@@ -988,6 +995,52 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             messages.append(final_message)
             if conversation_messages is not None:
                 conversation_messages.append(Message.from_openai(cast(ChatCompletionMessageParam, final_message)))
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer,
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: ChatCompletionUserMessageParam(role="user", content=text),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
@@ -1030,8 +1083,46 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             else:
                 plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
                 if conversation_messages is not None and plan.message is not None:
                     conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: ChatCompletionUserMessageParam(role="user", content=text),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
                 return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
 
         results = await self.call_functions(
@@ -1089,6 +1180,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -1563,6 +1655,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -1604,6 +1697,57 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 if answer := getattr(block, "text", None):
                     break
 
+            # The validator judges the raw text, before the legacy "no data"
+            # fallback: an empty ending must cost a repair round-trip, never
+            # pass silently under a placeholder string.
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer or "",
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: MessageParam(
+                            role="user", content=[TextBlockParam(type="text", text=text)]
+                        ),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(
                 answer=answer or "no data",
                 provider=self.name,
@@ -1665,8 +1809,48 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     thoughts=thoughts_part.text if thoughts_part else "",
                 )
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
                 if conversation_messages is not None and plan.message is not None:
                     conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: MessageParam(
+                                role="user", content=[TextBlockParam(type="text", text=text)]
+                            ),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
                 return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
 
         results = await self.call_functions(
@@ -1713,6 +1897,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

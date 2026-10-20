@@ -30,10 +30,14 @@ from chibi.services.providers.streaming import (
 )
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
+    evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    honored_terminal_name,
+    log_turn_misuse,
     offered_tool_definitions,
     partition_terminal_calls,
     plan_terminal_turn,
+    resolve_turn_end_misuse,
 )
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -343,6 +347,7 @@ class OpenAI(OpenAIFriendlyProvider):
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -457,6 +462,46 @@ class OpenAI(OpenAIFriendlyProvider):
 
         if not tool_call_items:
             messages.append(Message(role="assistant", content=answer))
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer,
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=messages,
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: messages.append(Message(role="user", content=nudge_text)),
+                    reissue=lambda retried: self._get_response_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         logger.log("CALL", f"{model} requested the call of {len(tool_call_items)} tools.")
@@ -496,8 +541,40 @@ class OpenAI(OpenAIFriendlyProvider):
             else:
                 plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=messages,
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
                 if plan.message is not None:
                     messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: messages.append(Message(role="user", content=nudge_text)),
+                        reissue=lambda retried: self._get_response_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
                 return ChatResponseSchema(answer=plan.answer, provider=self.name, model=model, usage=usage), messages
 
         results = await self.call_functions(
@@ -546,6 +623,7 @@ class OpenAI(OpenAIFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

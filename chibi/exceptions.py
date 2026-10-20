@@ -29,6 +29,15 @@ class ServiceRateLimitError(GptException): ...
 class ServiceResponseError(GptException): ...
 
 
+class SilentTurnError(ServiceResponseError):
+    """A turn ended with nothing delivered where the contract demands an outcome.
+
+    Raised by the turn-end validator (sub-task 4c) after the single bounded
+    repair round-trip also ended in misuse. The loud failure is the terminal
+    state of the mechanical-silence contract: a turn may never pass silently.
+    """
+
+
 class ContextLengthExceededError(GptException): ...
 
 

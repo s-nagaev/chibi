@@ -14,15 +14,23 @@ terminal call is normalized at ingest into a plain assistant ``Message``:
   and the turn's answer is empty. When there is no CoT and no delivered text
   the assistant turn is omitted entirely (design R2: never persist an empty
   text block).
+
+The module also hosts the turn-end validator (sub-task 4c): the shared rule
+that judges how a turn ended on every adapter seam, costs at most one bounded
+repair round-trip, and fails loudly instead of letting a turn pass silently.
 """
 
-from collections.abc import Callable, Sequence
-from typing import NamedTuple, TypeVar
+import json
+from collections.abc import Awaitable, Callable, Sequence
+from json import JSONDecodeError
+from typing import Any, Literal, NamedTuple, TypeVar
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
+from chibi.exceptions import SilentTurnError
 from chibi.models import Message
+from chibi.schemas.app import ChatResponseSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -181,6 +189,345 @@ def offered_tools(
     if interface is not None:
         return list(tools)
     return [tool for tool in tools if name_of(tool) not in TERMINAL_TOOL_NAMES]
+
+
+# ---------------------------------------------------------------------------
+# Turn-end validator (sub-task 4c).
+#
+# Forcing is an optimisation; the validator is the guarantee. It runs at the
+# turn-end seam of every adapter loop and judges the OUTCOME of the turn, not
+# the offered tool list: terminal interception is by tool-name membership and
+# offer-blind, so a hallucinated terminal call produces exactly the same
+# empty outcome as an empty text report and is rejected identically.
+# ---------------------------------------------------------------------------
+
+WAKE_USER_MESSAGE = "user message"
+WAKE_TOOL_RESPONSE = "tool response"
+WAKE_SCHEDULER_TRIGGER = "scheduled_trigger"
+WAKE_CAPTION = "system message"
+WAKE_TYPES = frozenset({WAKE_USER_MESSAGE, WAKE_TOOL_RESPONSE, WAKE_SCHEDULER_TRIGGER, WAKE_CAPTION})
+REPAIR_NUDGE_TYPE = "repair_nudge"
+_BACKGROUND_DISPATCH_STATUS = "tool is running in background"
+
+TurnEndOutcome = Literal["ok", "degraded_visible", "misuse"]
+TurnEndMisuse = Literal["empty_turn", "hallucinated_ack", "overeager_ack", "no_terminal_call_text"]
+
+_MISUSE_GREP_TOKEN = "TURN_MISUSE"
+
+
+class TurnEndVerdict(NamedTuple):
+    """The validator's verdict for one turn ending.
+
+    Attributes:
+        outcome: ``ok`` — the turn may end as the model produced it;
+            ``degraded_visible`` — an interface turn ended with plain text and
+            no terminal call, which is delivered as visible (graceful
+            degradation, behaviour preserved); ``misuse`` — the turn must
+            either cost a repair round-trip or fail loudly.
+        misuse: The misuse kind, set for both ``degraded_visible`` (measured
+            under-use) and ``misuse``; None for ``ok``.
+    """
+
+    outcome: TurnEndOutcome
+    misuse: TurnEndMisuse | None
+
+
+def _json_payload(content: str | None) -> dict[str, Any] | None:
+    """Parse a message content string into a JSON object, tolerating anything else.
+
+    Args:
+        content: The message content (wake prompts and tool results are
+            JSON objects; plain user text and summaries are not).
+
+    Returns:
+        The parsed dict, or None when the content is not a JSON object.
+    """
+    if not content or not content.lstrip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(content)
+    except (ValueError, JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def detect_wake_type(conversation: Sequence[Message]) -> str | None:
+    """Detect what woke this turn from the conversation's last real user message.
+
+    Every master-entry turn appends exactly one JSON wake prompt (user
+    message, tool response, scheduler trigger or file caption); sub-agent
+    prompts are JSON without a ``type`` key. The scan skips tool-result
+    messages, which some adapters normalize as ``role="user"`` with a
+    ``tool_call_id``.
+
+    Args:
+        conversation: The normalized conversation messages of the turn.
+
+    Returns:
+        One of ``WAKE_TYPES``, or None when the wake is not recognizable
+        (unknown prompt shape). None is treated strictly by the validator.
+    """
+    for message in reversed(conversation):
+        if message.role != "user" or message.tool_call_id:
+            continue
+        payload = _json_payload(message.content)
+        if payload is None:
+            return None
+        wake_type = payload.get("type")
+        return str(wake_type) if wake_type in WAKE_TYPES else None
+    return None
+
+
+def background_work_pending(conversation: Sequence[Message]) -> bool:
+    """Check whether any background tool dispatch in the conversation is unanswered.
+
+    A background dispatch is a tool result carrying the
+    ``tool is running in background`` status; it is answered when a later
+    wake prompt of type ``tool response`` reports back for the same tool
+    name. Unknown shapes resolve permissively (no pending work), because a
+    false "pending" only suppresses a check while a false "not pending"
+    would nag a legitimate silence.
+
+    Args:
+        conversation: The normalized conversation messages of the turn.
+
+    Returns:
+        True when at least one background dispatch has no matching result.
+    """
+    pending: set[str] = set()
+    for message in conversation:
+        payload = _json_payload(message.content)
+        if payload is None:
+            continue
+        if message.role == "tool" and payload.get("status") == _BACKGROUND_DISPATCH_STATUS:
+            pending.add(str(payload.get("tool_name")))
+        elif message.role == "user" and payload.get("type") == WAKE_TOOL_RESPONSE:
+            tool_response = payload.get("tool_response")
+            if isinstance(tool_response, dict):
+                pending.discard(str(tool_response.get("tool_name")))
+    return bool(pending)
+
+
+def evaluate_turn_end(
+    *,
+    interface: UserInterface | None,
+    answer: str | None,
+    ended_by_terminal_call: bool,
+    terminal_tool_name: str | None,
+    conversation: Sequence[Message] = (),
+) -> TurnEndVerdict:
+    """Judge the outcome of a turn that is about to end.
+
+    The rules, from the design authority:
+    (a) an interface turn with no terminal call, no open background work and
+        non-empty text degrades to visible (today's behaviour, preserved);
+    (b) a turn with no terminal call and nothing delivered is a misuse
+        (defensive: also covers the never-reproduced 200-OK-empty-parts);
+    (c) an ``ack_silently()`` with nothing pending is a misuse;
+    the class-aware ending rule: an interface-less turn may end only with a
+    non-empty text report — an empty one (empty report, empty ``say``, or a
+    hallucinated ``ack_silently()``) is a loud failure, wherever it comes
+    from, because the validator sees the outcome, not the offer.
+
+    Args:
+        interface: The user interface carried by the request, or None for
+            interface-less turns (delegated sub-agents, the summarizer).
+        answer: The turn's delivered answer (empty for silent turns).
+        ended_by_terminal_call: Whether the turn ended by a terminal call.
+        terminal_tool_name: The honoured terminal tool name, when applicable.
+        conversation: The normalized conversation messages, used only to
+            classify interface ``ack_silently`` endings as legitimate absorbs
+            (tool-response or scheduler wake, or unanswered background work).
+
+    Returns:
+        The verdict for the ending.
+    """
+    delivered = (answer or "").strip()
+    if ended_by_terminal_call and terminal_tool_name == SAY_TOOL_NAME and delivered:
+        # say(text): delivery for interface turns; the report itself for
+        # interface-less turns (a hallucinated say passes its text through
+        # as the report — benign, per the architecture pass §7).
+        return TurnEndVerdict("ok", None)
+    if not ended_by_terminal_call and delivered:
+        if interface is not None:
+            return TurnEndVerdict("degraded_visible", "no_terminal_call_text")
+        return TurnEndVerdict("ok", None)
+    if ended_by_terminal_call and terminal_tool_name == ACK_SILENTLY_TOOL_NAME:
+        if interface is None:
+            # Class-aware ending rule: silence has no receiver one floor
+            # down; an ack there is a hallucinated terminal call.
+            return TurnEndVerdict("misuse", "hallucinated_ack")
+        wake_type = detect_wake_type(conversation)
+        if wake_type in (WAKE_TOOL_RESPONSE, WAKE_SCHEDULER_TRIGGER):
+            return TurnEndVerdict("ok", None)
+        # wake_type is None (unrecognized prompt) or a plain user message:
+        # the silence is only legitimate when background work is unanswered.
+        if background_work_pending(conversation):
+            return TurnEndVerdict("ok", None)
+        return TurnEndVerdict("misuse", "overeager_ack")
+    # (b) nothing delivered: empty plain-text ending or an empty say().
+    return TurnEndVerdict("misuse", "empty_turn")
+
+
+def honored_terminal_name(terminal_calls: list[ToolCallSchema]) -> str:
+    """Return the terminal tool name a terminal turn actually honours.
+
+    ``plan_terminal_turn`` honours exactly one ``say`` when one is present,
+    regardless of position; otherwise the turn is an ``ack_silently``.
+
+    Args:
+        terminal_calls: The terminal calls parsed from the response.
+
+    Returns:
+        The honoured terminal tool name.
+    """
+    return SAY_TOOL_NAME if _first_say_call(terminal_calls) else ACK_SILENTLY_TOOL_NAME
+
+
+def repair_nudge_text(misuse: str, interface: bool) -> str:
+    """Build the JSON wake prompt for the single bounded repair round-trip.
+
+    The nudge follows the house wake-prompt shape (a JSON user message with a
+    ``type``), so it persists and re-reads exactly like every other system
+    wake. It never instructs the model to call a terminal tool by name on the
+    interface-less path — there the only legal ending is the plain-text
+    report.
+
+    Args:
+        misuse: The validator's misuse kind.
+        interface: Whether the turn carries a user interface.
+
+    Returns:
+        The nudge content string.
+    """
+    if interface:
+        desc = (
+            "Your previous response reached the user as NOTHING (it ended silently or delivered an empty "
+            "message). If the user is owed an answer, deliver it now via the say tool with the full text. "
+            "Do not end the turn silently again."
+        )
+    else:
+        desc = (
+            "Your previous response ended without the required text report (it was empty or ended with no "
+            "output). Reply NOW with your final report as plain text in this message. Do not call any tool "
+            "to end the turn."
+        )
+    return json.dumps({"type": REPAIR_NUDGE_TYPE, "desc": desc})
+
+
+def log_turn_misuse(
+    *,
+    model: str,
+    provider_name: str,
+    interface: UserInterface | None,
+    kind: str | None,
+    action: str,
+) -> None:
+    """Emit one greppable misuse-instrumentation line (the counter sink).
+
+    The documented counting mechanism: every event is a single log line
+    starting with the fixed token ``TURN_MISUSE``; per-model and per-role
+    counters are `grep 'TURN_MISUSE' | grep 'model=<m>' | grep 'role=<r>' |
+    grep 'action=<a>' | wc -l`. Format:
+    ``TURN_MISUSE model=<m> role=<master|delegated> kind=<k|-> action=<a> provider=<p>``
+    where action is one of ``degraded_visible`` (info), ``repair`` /
+    ``recovered`` (warning) or ``loud_failure`` (error). The role dimension
+    reuses the D1 interface-presence signal, not a second role notion.
+
+    Args:
+        model: The model that produced the turn.
+        provider_name: The provider serving the model.
+        interface: The interface carried by the request, or None.
+        kind: The misuse kind, or None for recovery events.
+        action: One of ``degraded_visible``, ``repair``, ``recovered``,
+            ``loud_failure``.
+    """
+    role = "master" if interface is not None else "delegated"
+    line = f"{_MISUSE_GREP_TOKEN} model={model} role={role} kind={kind or '-'} action={action} provider={provider_name}"
+    if action == "loud_failure":
+        logger.error(line)
+    elif action in ("repair", "recovered"):
+        logger.warning(line)
+    else:
+        logger.info(line)
+
+
+async def resolve_turn_end_misuse(
+    *,
+    verdict: TurnEndVerdict,
+    model: str,
+    provider_name: str,
+    interface: UserInterface | None,
+    repair_used: bool,
+    append_nudge: Callable[[str], None],
+    reissue: Callable[[bool], Awaitable[tuple[ChatResponseSchema, T]]],
+) -> tuple[ChatResponseSchema, T]:
+    """Act on a misuse verdict: one bounded repair round-trip, else a loud failure.
+
+    The hard cap: at most one repair per turn (threaded by the caller through
+    ``repair_used``). A repair attempt is another model call inside the loop,
+    so it carries the same loop-trap risk recon C7 reproduced — the cap is
+    what makes it safe. A repair never creates a tool result for a terminal
+    call: it only appends a nudge user message and re-enters the same loop.
+
+    Args:
+        verdict: The misuse verdict from ``evaluate_turn_end``.
+        model: The model that produced the turn.
+        provider_name: The provider serving the model.
+        interface: The interface carried by the request, or None.
+        repair_used: Whether the single repair round-trip was already spent.
+        append_nudge: Seam callback appending the nudge in the adapter's
+            native message format (and to the conversation mirror).
+        reissue: Seam callback re-entering the same loop; the boolean is the
+            ``repair_used`` value for the continued turn.
+
+    Returns:
+        The reissued turn's result when the repair recovered it.
+
+    Raises:
+        SilentTurnError: When the repair was already used — the turn then
+            takes the loud failure path and never passes silently.
+    """
+    if not repair_used:
+        log_turn_misuse(
+            model=model, provider_name=provider_name, interface=interface, kind=verdict.misuse, action="repair"
+        )
+        append_nudge(repair_nudge_text(verdict.misuse or "empty_turn", interface is not None))
+        return await reissue(True)
+    log_turn_misuse(
+        model=model, provider_name=provider_name, interface=interface, kind=verdict.misuse, action="loud_failure"
+    )
+    raise SilentTurnError(
+        provider=provider_name,
+        model=model,
+        detail=(
+            f"Turn ended in misuse ({verdict.misuse}) and the single repair round-trip did not recover it: "
+            "the turn still delivered nothing. Failing loudly instead of passing silently."
+        ),
+    )
+
+
+def append_repair_nudge(
+    *,
+    nudge_text: str,
+    messages: list[Any],
+    conversation_messages: list[Message] | None,
+    to_wire: Callable[[str], Any],
+) -> None:
+    """Append the repair nudge to the wire dialog and the conversation mirror.
+
+    On the Responses path the wire list and the conversation mirror are the
+    same object, so the identity guard appends exactly once.
+
+    Args:
+        nudge_text: The nudge content string.
+        messages: The adapter's native (wire) dialog list.
+        conversation_messages: The normalized conversation mirror, or None.
+        to_wire: Builds the adapter-native message from the nudge text.
+    """
+    messages.append(to_wire(nudge_text))
+    if conversation_messages is not None and conversation_messages is not messages:
+        conversation_messages.append(Message(role="user", content=nudge_text))
 
 
 def offered_tool_definitions(

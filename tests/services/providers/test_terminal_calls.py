@@ -4,8 +4,16 @@ The invariant under test: a terminal call ends the turn in every adapter
 path, is normalized at ingest into a plain assistant ``Message``, and NEVER
 receives a tool result — a result is the fuel of the infinite
 ``say() → result → ack_silently() → ack_silently() → ...`` loop (recon C7).
+
+Since sub-task 4c the turn-end validator judges every ending: a legitimate
+``ack_silently()`` (interface turn absorbing a background event) still
+persists the hidden message exactly as 4b normalized it, while an
+interface-less or over-eager ack now costs a repair round-trip and then a
+loud failure — those paths are covered by
+``tests/services/providers/test_turn_end_validator.py``.
 """
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, PropertyMock, patch
@@ -26,6 +34,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
 from openai.types.responses import ResponseFunctionToolCall
 
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
+from chibi.exceptions import SilentTurnError
 from chibi.models import Message, User
 from chibi.services.interface import UserInterface
 from chibi.services.providers.gemini_native import Gemini
@@ -46,6 +55,24 @@ from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseS
 TEST_TOKEN = "test-token-for-terminal-calls"
 TEST_MODEL = "kimi-k2.6"
 TEST_OPENAI_MODEL = "gpt-5.6-terra"
+
+# Interface stub for validator-era ack tests: an ack ending is legitimate
+# only for an interface turn absorbing a background event, so the ack
+# fixtures carry the same JSON tool-response wake the master path appends.
+INTERFACE_STUB = SimpleNamespace(thread_id=1, streaming_enabled=False, delta_emitted=False, captures_llm_thoughts=False)
+
+
+def _tool_response_wake(tool_name: str = "delegate_task") -> str:
+    """The JSON wake prompt a completed background task produces (user.py)."""
+    return json.dumps(
+        {
+            "type": "tool response",
+            "desc": "background task is done",
+            "tool_name": tool_name,
+            "tool_response": {"tool_name": tool_name, "status": "ok", "result": {}},
+            "datetime_now": "2026-10-20 12:00:00 UTC+0000",
+        }
+    )
 
 
 def _say_call(text: str = "Hello there") -> ToolCallSchema:
@@ -218,12 +245,15 @@ class TestSharedOpenAICompatibleLoop:
 
     @pytest.mark.asyncio
     async def test_ack_call_ends_the_turn_with_a_hidden_message(self) -> None:
+        # Legitimate ack: an interface turn absorbing a background tool
+        # result. The validator admits it and the 4b normalization holds.
         provider = MoonshotAI(token=TEST_TOKEN)
         create_mock = AsyncMock(
             return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="waiting for results")
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -232,12 +262,13 @@ class TestSharedOpenAICompatibleLoop:
             registry_patch,
         ):
             response, _wire = await provider._get_chat_completion_response(
-                messages=[Message(role="user", content="Hi").to_openai()],
+                messages=[Message(role="user", content=wake).to_openai()],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -252,12 +283,14 @@ class TestSharedOpenAICompatibleLoop:
 
     @pytest.mark.asyncio
     async def test_degenerate_ack_call_omits_the_assistant_turn(self) -> None:
+        # Legitimate ack with nothing to persist: design R2 omits the turn.
         provider = MoonshotAI(token=TEST_TOKEN)
         create_mock = AsyncMock(
             return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="")
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -266,12 +299,13 @@ class TestSharedOpenAICompatibleLoop:
             registry_patch,
         ):
             response, _wire = await provider._get_chat_completion_response(
-                messages=[Message(role="user", content="Hi").to_openai()],
+                messages=[Message(role="user", content=wake).to_openai()],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -313,14 +347,15 @@ class TestSharedOpenAICompatibleLoop:
     async def test_terminal_call_does_not_fuel_the_ack_loop(self) -> None:
         # Recon C7 loop shape: the model emits ack_silently forever as long as
         # it keeps receiving a tool result. With the interception in place the
-        # first terminal call must end the turn regardless of what the mock
-        # would keep returning.
+        # first legitimate terminal call must end the turn regardless of what
+        # the mock would keep returning.
         provider = MoonshotAI(token=TEST_TOKEN)
         create_mock = AsyncMock(
             return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="thoughts")
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -329,12 +364,13 @@ class TestSharedOpenAICompatibleLoop:
             registry_patch,
         ):
             await provider._get_chat_completion_response(
-                messages=[Message(role="user", content="Hi").to_openai()],
+                messages=[Message(role="user", content=wake).to_openai()],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -435,6 +471,8 @@ class TestOpenAIResponsesLoop:
 
     @pytest.mark.asyncio
     async def test_degenerate_ack_call_appends_nothing(self) -> None:
+        # Legitimate ack (interface turn absorbing a background result) with
+        # nothing to persist: design R2 — no empty assistant message.
         provider = ChibiOpenAI(token=TEST_TOKEN)
         tool_call = ResponseFunctionToolCall(
             type="function_call", name="ack_silently", arguments="{}", call_id="call_1", status="completed"
@@ -442,7 +480,8 @@ class TestOpenAIResponsesLoop:
         create_mock = AsyncMock(return_value=_responses_output(tool_call))
         mock_client: Any = SimpleNamespace(responses=SimpleNamespace(create=create_mock))
         provider.client = mock_client
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -456,6 +495,7 @@ class TestOpenAIResponsesLoop:
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
             )
 
         assert response.answer == ""
@@ -560,11 +600,13 @@ class TestAnthropicLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_with_thoughts_persists_a_hidden_message(self) -> None:
+        # Legitimate ack: interface turn absorbing a background tool result.
         from chibi.services.providers.anthropic import Anthropic
 
         provider = Anthropic(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_anthropic_message("absorbing the tool result", [("ack_silently", {})]))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -573,12 +615,13 @@ class TestAnthropicLoop:
             registry_patch,
         ):
             response, _wire = await provider._get_chat_completion_response(
-                messages=[{"role": "user", "content": "Hi"}],
+                messages=[{"role": "user", "content": wake}],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -596,7 +639,8 @@ class TestAnthropicLoop:
 
         provider = Anthropic(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_anthropic_message(None, [("ack_silently", {})]))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -605,12 +649,13 @@ class TestAnthropicLoop:
             registry_patch,
         ):
             response, _wire = await provider._get_chat_completion_response(
-                messages=[{"role": "user", "content": "Hi"}],
+                messages=[{"role": "user", "content": wake}],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -663,9 +708,11 @@ class TestGeminiLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_persists_a_hidden_message_with_the_cot(self) -> None:
+        # Legitimate ack: interface turn absorbing a background tool result.
         provider = Gemini(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_gemini_response("waiting for more results", [("ack_silently", {})]))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -680,6 +727,7 @@ class TestGeminiLoop:
                 caller_thread_id=0,
                 model=TEST_MODEL,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -735,6 +783,8 @@ class TestMistralLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_without_thoughts_omits_the_assistant_turn(self) -> None:
+        # Legitimate ack (interface turn absorbing a background result) with
+        # nothing to persist: design R2 — the assistant turn is omitted.
         provider = MistralAI(token=TEST_TOKEN)
         message = SimpleNamespace(
             content="",
@@ -742,7 +792,8 @@ class TestMistralLoop:
         )
         usage = SimpleNamespace(completion_tokens=1, prompt_tokens=1, total_tokens=2)
         generate_mock = AsyncMock(return_value=SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage))
-        conversation: list[Message] = [Message(role="user", content="Hi")]
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -751,12 +802,13 @@ class TestMistralLoop:
             registry_patch,
         ):
             response, _wire = await provider._get_chat_completion_response(
-                messages=[Message(role="user", content="Hi").to_mistral()],
+                messages=[Message(role="user", content=wake).to_mistral()],
                 model=TEST_MODEL,
                 user=User(id=1),
                 caller_storage_id=1,
                 caller_thread_id=0,
                 system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
                 conversation_messages=conversation,
             )
 
@@ -850,19 +902,21 @@ class TestRoleScopedToolOffers:
         assert {"say", "ack_silently"} <= offered
 
     @pytest.mark.asyncio
-    async def test_hallucinated_ack_still_ends_the_turn_empty_despite_the_filter(self) -> None:
-        """The filter is a likelihood reduction, not a guarantee.
+    @pytest.mark.asyncio
+    async def test_hallucinated_ack_costs_a_repair_then_fails_loudly(self) -> None:
+        """The offer-blind interception is now judged by the turn-end validator.
 
         Terminal interception is by tool-name membership and never consults the
         offered list: an interface-less request that was NOT offered
-        ``ack_silently`` but emits it anyway still ends the turn with an empty
-        answer. This empty answer is exactly what the loud-empty delegation
-        rule in ``DelegateTool`` converts into a loud error for the parent.
+        ``ack_silently`` but emits it anyway still ends the turn empty — and
+        the validator rejects that outcome identically to an empty text
+        report: one bounded repair round-trip, then a loud ``SilentTurnError``
+        (the loud-empty contract, now enforced in the loop, not only at the
+        delegation boundary).
         """
         provider = MoonshotAI(token=TEST_TOKEN)
-        create_mock = AsyncMock(
-            return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="")
-        )
+        ack_response = _completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="")
+        create_mock = AsyncMock(side_effect=[ack_response, ack_response, AssertionError("repair cap exceeded")])
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
 
         registry_patch, _ = _forbid_terminal_dispatch()
@@ -871,21 +925,22 @@ class TestRoleScopedToolOffers:
             patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
             registry_patch,
         ):
-            response, _wire = await provider._get_chat_completion_response(
-                messages=[Message(role="user", content="Hi").to_openai()],
-                model=TEST_MODEL,
-                user=User(id=1),
-                caller_storage_id=1,
-                caller_thread_id=0,
-                system_prompt="",
-                conversation_messages=[Message(role="user", content="Hi")],
-            )
+            with pytest.raises(SilentTurnError):
+                await provider._get_chat_completion_response(
+                    messages=[Message(role="user", content="Hi").to_openai()],
+                    model=TEST_MODEL,
+                    user=User(id=1),
+                    caller_storage_id=1,
+                    caller_thread_id=0,
+                    system_prompt="",
+                    conversation_messages=[Message(role="user", content="Hi")],
+                )
 
         # The tool was not offered...
         assert "ack_silently" not in self._offered_names(create_mock)
-        # ...and the hallucinated call still ended the turn with an empty answer.
-        assert response.answer == ""
-        assert create_mock.await_count == 1
+        # ...the hallucinated call still ended the turn, the validator spent
+        # exactly ONE repair attempt, and the turn never passed silently.
+        assert create_mock.await_count == 2
 
 
 class TestOfferedToolsHelper:
