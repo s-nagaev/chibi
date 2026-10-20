@@ -16,7 +16,7 @@ loud failure — those paths are covered by
 import json
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from anthropic.types import Message as AnthropicMessage
@@ -43,6 +43,7 @@ from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.openai import OpenAI as ChibiOpenAI
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
+    background_work_pending,
     fold_terminal_calls_into_thoughts,
     offered_tool_definitions,
     offered_tools,
@@ -375,6 +376,14 @@ class TestSharedOpenAICompatibleLoop:
             )
 
         assert create_mock.await_count == 1
+        # (b) A normalized message is persisted, with its visibility respected.
+        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        assert len(persisted) == 1
+        assert persisted[0].content == "thoughts"
+        assert persisted[0].visibility == "hidden"
+        assert persisted[0].tool_calls is None
+        # (c) No tool result exists for the terminal call.
+        assert not [msg for msg in conversation if msg.role == "tool"]
 
     @pytest.mark.asyncio
     async def test_mixed_turn_runs_work_calls_and_drops_the_terminal_entry(self) -> None:
@@ -986,3 +995,311 @@ class TestOfferedToolsHelper:
             definitions=definitions, interface=cast("UserInterface", bare_object_interface)
         )
         assert len(offered) == len(definitions)
+
+
+class TestLoopTrapRegression:
+    """The centrepiece loop-trap regression (recon C7, plan recon 13.6).
+
+    Conditions of the reproduced infinite-ack loop: forcing enabled plus both
+    terminal tools offered, prompt "answer by calling say()". Observed live on
+    OpenAI chat-completions (``tool_choice: required``) and Anthropic
+    (``tool_choice: any``): ``say("2 + 2 = 4.")`` → tool result
+    ``{"status": "delivered"}`` → ``ack_silently {}`` → ``ack_silently {}`` →
+    … with no natural stop. Under the interception the first terminal call
+    must exit the loop: no second request, a normalized message persisted
+    with its ``visibility`` respected, and no tool result for the terminal
+    call. The ack-forever variant on the CC seam is pinned (and extended with
+    the persistence and no-tool-result assertions) by
+    ``test_terminal_call_does_not_fuel_the_ack_loop`` above.
+
+    Seam coverage: the two seams C7 was reproduced live on — the OpenAI
+    chat-completions seam (MoonshotAI stand-in) and the Anthropic-compatible
+    seam. The remaining seams (OpenAI Responses, Gemini, Mistral) share the
+    same terminal-interception branch and already carry per-seam
+    no-tool-result persistence tests; a third loop-trap variant would assert
+    nothing the shared branch does not already pin.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cc_seam_say_then_infinite_acks_exits_on_the_terminal_call(self) -> None:
+        """The C7 sequence shape: say() first, then an endless ack supply."""
+        provider = MoonshotAI(token=TEST_TOKEN)
+        say_response = _completion_with_tool_calls([_tool_call("say", '{"text": "2 + 2 = 4."}')])
+        ack_response = _completion_with_tool_calls(
+            [_tool_call("ack_silently", "{}")], content="semantically reasonable ack"
+        )
+        create_mock = AsyncMock(side_effect=[say_response] + [ack_response] * 9)
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
+
+        registry_patch, _ = _forbid_terminal_dispatch()
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content=wake).to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=conversation,
+            )
+
+        # (a) The loop exits on the terminal call: one request, never a second.
+        assert response.answer == "2 + 2 = 4."
+        assert create_mock.await_count == 1
+        # (b) A normalized message is persisted, visibility respected.
+        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        assert len(persisted) == 1
+        assert persisted[0].content == "2 + 2 = 4."
+        assert persisted[0].visibility == "visible"
+        assert persisted[0].tool_calls is None
+        # (c) No tool result exists for the terminal call.
+        assert not [msg for msg in conversation if msg.role == "tool"]
+
+    @pytest.mark.asyncio
+    async def test_anthropic_seam_say_then_infinite_acks_exits_on_the_terminal_call(self) -> None:
+        """The same C7 sequence on the Anthropic-compatible seam (repro'd live there)."""
+        from chibi.services.providers.anthropic import Anthropic
+
+        provider = Anthropic(token=TEST_TOKEN)
+        say_response = _anthropic_message("thinking", [("say", {"text": "2 + 2 = 4."})])
+        ack_response = _anthropic_message("semantically reasonable ack", [("ack_silently", {})])
+        generate_mock = AsyncMock(side_effect=[say_response] + [ack_response] * 9)
+        wake = _tool_response_wake()
+        conversation: list[Message] = [Message(role="user", content=wake)]
+
+        registry_patch, _ = _forbid_terminal_dispatch()
+        with (
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            patch.object(Anthropic, "_generate_content", generate_mock),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[{"role": "user", "content": wake}],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=conversation,
+            )
+
+        # (a) The loop exits on the terminal call.
+        assert response.answer == "2 + 2 = 4."
+        assert generate_mock.await_count == 1
+        # (b) A normalized message is persisted, visibility respected.
+        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        assert len(persisted) == 1
+        assert persisted[0].content == "2 + 2 = 4."
+        assert persisted[0].visibility == "visible"
+        assert persisted[0].tool_calls is None
+        # (c) No tool result exists for the terminal call.
+        assert not [msg for msg in conversation if msg.role == "tool"]
+
+
+def _background_dispatch(tool_name: str) -> Message:
+    """The in-loop tool result a background dispatch produces (tool.py)."""
+    return Message(
+        role="tool",
+        content=json.dumps(
+            {
+                "tool_name": tool_name,
+                "status": "tool is running in background",
+                "result": "in progress",
+            }
+        ),
+    )
+
+
+class TestStragglerAndPendingObligation:
+    """Evidence-file fixture class (evidence_cot_wait_case.md, case B).
+
+    Two parallel background obligations; the first result is a straggler that
+    changes nothing, the second is still pending. The evidence file predates
+    the tool-channel design: its "ACK" is now the ``ack_silently()`` terminal
+    call, and per-obligation tracking is the validator's own
+    ``background_work_pending`` scan over unanswered background dispatches.
+    Assertions, translated: (1) the straggler is absorbed by a legitimate
+    hidden ack turn, (2) the pending obligation is still tracked as
+    unsatisfied and nothing is delivered for it, (3) when the second result
+    arrives it is delivered via a visible ``say()`` message.
+    """
+
+    @pytest.mark.asyncio
+    async def test_straggler_is_acked_while_the_pending_obligation_stays_open(self) -> None:
+        provider = MoonshotAI(token=TEST_TOKEN)
+        straggler_wake = _tool_response_wake("generate_image")
+        second_wake = _tool_response_wake("generate_video")
+        conversation: list[Message] = [
+            _background_dispatch("generate_image"),
+            _background_dispatch("generate_video"),
+            Message(role="user", content=straggler_wake),
+        ]
+
+        # Round 1: the straggler result arrived; the video is still running.
+        ack_completion = _completion_with_tool_calls(
+            [_tool_call("ack_silently", "{}")],
+            content="one of two results arrived; it changes nothing, the other is still running",
+        )
+        ack_mock = AsyncMock(return_value=ack_completion)
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=ack_mock)))
+        registry_patch, _ = _forbid_terminal_dispatch()
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content=straggler_wake).to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=conversation,
+            )
+
+        # (1) The straggler is ACKed: the turn ends on the terminal call, the
+        # private reasoning persists hidden, no tool result, nothing delivered.
+        assert response.answer == ""
+        assert ack_mock.await_count == 1
+        tool_results_before = [msg for msg in conversation if msg.role == "tool"]
+        assert len(tool_results_before) == 2  # only the seeded background dispatches
+        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        assert len(persisted) == 1
+        assert persisted[0].visibility == "hidden"
+        assert persisted[0].tool_calls is None
+        assert not [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "visible"]
+        # (2) The pending obligation is NOT considered satisfied: the
+        # validator's own tracker still sees the unanswered video dispatch.
+        assert background_work_pending(conversation) is True
+
+        # Round 2: the second result arrives; it must be delivered.
+        conversation.append(Message(role="user", content=second_wake))
+        say_completion = _completion_with_tool_calls(
+            [_tool_call("say", '{"text": "Both results are in: the comparison verdict."}')]
+        )
+        say_mock = AsyncMock(return_value=say_completion)
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=say_mock)))
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content=second_wake).to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=conversation,
+            )
+
+        # (3) The second result IS delivered: visible message, no new tool
+        # result, and no tool result for the terminal calls.
+        assert response.answer == "Both results are in: the comparison verdict."
+        assert say_mock.await_count == 1
+        assert [msg for msg in conversation if msg.role == "tool"] == tool_results_before
+        delivered = [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "visible"]
+        assert len(delivered) == 1
+        assert delivered[0].content == "Both results are in: the comparison verdict."
+        # Every background obligation has now been answered.
+        assert background_work_pending(conversation) is False
+
+
+class TestTurnMisuseAccountingPins:
+    """Pins the current turn-misuse counter labels (PM ruling on the 4c-1 routed note).
+
+    On an interface turn, a repair that recovers via plain text is logged as
+    ``action="degraded_visible" kind="no_terminal_call_text"`` — not
+    ``action="recovered"`` — because the no-tool-call exit checks
+    ``verdict.misuse is not None`` before the ``repair_used`` branch
+    (``provider.py`` no-tool-call exit; same shape on sibling seams). The
+    ruling: pin the labels with instrumentation tests, do not reorder the
+    checks. A recovery through a terminal call keeps the ``recovered`` label
+    (the terminal-call branch checks ``repair_used`` directly).
+    """
+
+    @pytest.mark.asyncio
+    async def test_plain_text_recovery_after_a_repair_logs_degraded_visible_not_recovered(self) -> None:
+        provider = MoonshotAI(token=TEST_TOKEN)
+        empty_prose = _completion_with_answer("")
+        recovered_prose = _completion_with_answer("Recovered via plain text")
+        create_mock = AsyncMock(side_effect=[empty_prose, recovered_prose])
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+        log_mock = Mock()
+
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            patch("chibi.services.providers.provider.log_turn_misuse", log_mock),
+            patch("chibi.services.providers.terminal_calls.log_turn_misuse", log_mock),
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content="Hi").to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=1,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=[Message(role="user", content="Hi")],
+            )
+
+        # The repair happened (exactly one round-trip) and recovered via text.
+        assert response.answer == "Recovered via plain text"
+        assert create_mock.await_count == 2
+        logged = [call.kwargs for call in log_mock.call_args_list]
+        assert logged[0].get("action") == "repair"
+        # The recovered ending is accounted as degraded_visible, never recovered.
+        assert any(
+            entry.get("action") == "degraded_visible" and entry.get("kind") == "no_terminal_call_text"
+            for entry in logged
+        )
+        assert not any(entry.get("action") == "recovered" for entry in logged)
+
+    @pytest.mark.asyncio
+    async def test_terminal_call_recovery_after_a_repair_logs_recovered(self) -> None:
+        provider = MoonshotAI(token=TEST_TOKEN)
+        empty_prose = _completion_with_answer("")
+        say_completion = _completion_with_tool_calls([_tool_call("say", '{"text": "Final answer"}')])
+        create_mock = AsyncMock(side_effect=[empty_prose, say_completion])
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+        log_mock = Mock()
+        conversation: list[Message] = [Message(role="user", content="Hi")]
+
+        registry_patch, _ = _forbid_terminal_dispatch()
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            patch("chibi.services.providers.provider.log_turn_misuse", log_mock),
+            patch("chibi.services.providers.terminal_calls.log_turn_misuse", log_mock),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content="Hi").to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=1,
+                system_prompt="",
+                interface=cast("UserInterface", INTERFACE_STUB),
+                conversation_messages=conversation,
+            )
+
+        assert response.answer == "Final answer"
+        assert create_mock.await_count == 2
+        logged = [call.kwargs for call in log_mock.call_args_list]
+        assert any(entry.get("action") == "recovered" and entry.get("kind") is None for entry in logged)
+        # The terminal call received no tool result.
+        assert not [msg for msg in conversation if msg.role == "tool"]

@@ -1,5 +1,6 @@
 """Tests for the say()/ack_silently() terminal tools and the migrated prompt contract."""
 
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -228,3 +229,65 @@ class TestDelegationRulesPromptContract:
         """
         assert "ack_silently()" in SCHEDULER_HINT_PROMPT
         assert TERMINAL_TOOL_NAMES == {"say", "ack_silently"}
+
+
+class TestLoudEmptyDelegationBackgroundVariant:
+    """The loud-empty rule holds on the background delegation path too.
+
+    ``DelegateTool`` defaults to background execution (``run_in_background_by_default``
+    with a user interface): ``ChibiTool.tool`` schedules the dispatch coroutine
+    through ``task_manager``, and the coroutine funnels through the same
+    ``DelegateTool.function`` boundary before its result is handed to
+    ``handle_tool_response`` for the wake. This test captures the scheduled
+    coroutine and awaits it directly, so the background resumption variant is
+    covered without live services.
+    """
+
+    @pytest.mark.asyncio
+    async def test_background_delegation_reports_an_empty_result_as_an_error_tool_response(self) -> None:
+        captured: dict[str, Any] = {}
+
+        def _capture_run_task(coro: Any, **kwargs: Any) -> None:
+            captured["coro"] = coro
+
+        interface = SimpleNamespace(
+            storage_id=1, thread_id=1, streaming_enabled=False, delta_emitted=False, captures_llm_thoughts=False
+        )
+
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                new=AsyncMock(return_value=_subagent_response("")),
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", _fake_models_available),
+            patch("chibi.services.providers.tools.tool.task_manager") as task_manager_mock,
+            patch("chibi.services.bot.handle_tool_response", new=AsyncMock()) as handle_mock,
+        ):
+            task_manager_mock.run_task.side_effect = _capture_run_task
+            acknowledgement = await DelegateTool.tool(
+                prompt="do something",
+                model_name="gpt-x",
+                provider_name="prov",
+                user_id=1,
+                caller_model="caller-model",
+                caller_provider="caller-provider",
+                caller_storage_id=1,
+                caller_thread_id=42,
+                interface=cast(Any, interface),
+            )
+
+            # The dispatch went to the background scheduler, not the
+            # foreground path.
+            assert acknowledgement.status == "tool is running in background"
+            assert "coro" in captured
+
+            # The background coroutine resumes (still inside the patched
+            # seams): the loud rule converts the empty report into an error
+            # tool response for the wake.
+            await captured["coro"]
+
+        handle_mock.assert_awaited_once()
+        assert handle_mock.await_args is not None
+        delivered = handle_mock.await_args.kwargs["tool_response"]
+        assert delivered.status == "error"
+        assert "EMPTY report" in str(delivered.result)
