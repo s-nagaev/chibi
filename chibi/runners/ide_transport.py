@@ -28,6 +28,7 @@ from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, regist
 from chibi.services.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
+from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
     clone_thread_messages,
     get_info,
@@ -76,7 +77,7 @@ def build_usage_payload(
     ``UsageCacheStore`` computes the real prompt size. The emitted
     ``context_window`` is the effective ceiling ``min(model window,
     MAX_HISTORY_TOKENS)``: proactive summarization fires at
-    ``MAX_HISTORY_TOKENS`` (default 100000), so the denominator the client
+    ``MAX_HISTORY_TOKENS`` (default 200000), so the denominator the client
     sees must reflect that ceiling rather than the raw model window. When the
     backend has no curated context window for the model, ``context_window``
     is null and stays null (no clamp possible, nothing fabricated).
@@ -1177,6 +1178,13 @@ class IDEStdioRunner:
                 return
         finally:
             self._active_clones.discard(source)
+
+        # The clone produces a thread whose conversation is a copy of the
+        # source's: any cached prompt size for the destination key must not
+        # survive (a fresh destination has no cache entry, but the helper is
+        # the single invalidation entry point for every history-replacing
+        # path and is a no-op when nothing is cached).
+        UsageCacheStore().invalidate(user_id=IDE_STORAGE_ID, thread_id=interface.thread_id)
 
         # The clone copies the source thread's working-directory override
         # onto the destination thread (clone_thread_messages); report the

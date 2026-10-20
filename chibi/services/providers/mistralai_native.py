@@ -32,9 +32,15 @@ from openai.types.chat import ChatCompletionToolParam
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
-from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
+from chibi.exceptions import (
+    ContextLengthExceededError,
+    NoApiKeyProvidedError,
+    NoResponseError,
+)
 from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.services import context_measurement
+from chibi.services.context_note import attach_context_note
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.mistral_errors import classify_mistral_exception
@@ -65,12 +71,15 @@ from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import (
+    collect_volatile_context_note,
     get_usage_from_mistral_response,
     get_usage_msg,
+    is_context_overflow_signal,
     prepare_system_prompt,
     send_llm_thoughts,
 )
 from chibi.services.usage_cache import UsageCacheStore
+from chibi.services.user import enforce_in_loop_budget
 
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
 
@@ -219,19 +228,27 @@ class MistralAI(RestApiFriendlyProvider):
             The final aggregated Mistral response.
 
         Raises:
+            ContextLengthExceededError: When the API reports a context-length
+                overflow (HTTP 400/413 with a context-length style message).
             NoResponseError: When every attempt returns an empty response.
         """
         for attempt in range(gpt_settings.retries):
-            if delta_streaming_allowed(interface):
-                response = await self._stream_generate_content(
-                    model=model, messages=messages, interface=interface, max_tokens=max_tokens
-                )
-            else:
-                response = await self.client.chat.complete_async(
-                    **self._chat_request_kwargs(
+            try:
+                if delta_streaming_allowed(interface):
+                    response = await self._stream_generate_content(
                         model=model, messages=messages, interface=interface, max_tokens=max_tokens
                     )
-                )
+                else:
+                    response = await self.client.chat.complete_async(
+                        **self._chat_request_kwargs(
+                            model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                        )
+                    )
+            except SDKError as err:
+                detail = str(err)
+                if is_context_overflow_signal(status_code=err.raw_response.status_code, detail=detail):
+                    raise ContextLengthExceededError(provider=self.name, model=model, detail=detail) from err
+                raise
 
             if response.choices and len(response.choices) > 0:
                 return response
@@ -406,6 +423,15 @@ class MistralAI(RestApiFriendlyProvider):
 
         history_size = len(messages)
         initial_messages = [msg.to_mistral() for msg in messages]
+        # The volatile context note travels on the last converted user message,
+        # never on a Message object and never in the system payload. The
+        # converted SDK message objects are fresh, call-owned structures; a
+        # tenacity retry re-converts from the (never-mutated) Message list, so
+        # no attempt can inherit a previous attempt's note.
+        attach_context_note(
+            initial_messages,
+            collect_volatile_context_note(user_id=user.id, interface=interface, conversation_messages=messages),
+        )
         chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
@@ -485,6 +511,14 @@ class MistralAI(RestApiFriendlyProvider):
                 thread_id=interface.thread_id if interface else 0,
                 usage=usage,
                 provider=self.name,
+            )
+            await context_measurement.persist_measured_usage(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+                model=model,
+                message_count=len(conversation_messages) if conversation_messages is not None else None,
             )
 
         if application_settings.is_influx_configured:
@@ -693,6 +727,25 @@ class MistralAI(RestApiFriendlyProvider):
                 conversation_messages.append(Message.from_mistral(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
+        if conversation_messages is not None:
+            # In-loop budget check: the request about to be re-sent has grown
+            # with the tool traffic above. messages[0] is the SystemMessage
+            # prepended at the top of this invocation; the mask is computed
+            # over the Message mirror that follows it. The same mask filters
+            # BOTH lists and the filtered mirror is passed into the
+            # recursion, so the mirror stays in lockstep with the request
+            # list on every later check of the turn (the recursive call
+            # re-prepends a fresh system message either way).
+            keep_mask = await enforce_in_loop_budget(
+                provider=self,
+                model=model,
+                storage_id=caller_storage_id,
+                thread_id=caller_thread_id,
+                conversation_messages=conversation_messages,
+            )
+            if not all(keep_mask):
+                messages = [item for index, item in enumerate(messages) if index == 0 or keep_mask[index - 1]]
+                conversation_messages = [msg for msg, keep in zip(conversation_messages, keep_mask) if keep]
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,

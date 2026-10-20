@@ -110,6 +110,10 @@ def _wire_providers(user: Mock, instances: dict[str, "Provider"]) -> None:
 def _primary(name: str, *, fails: bool, answer: str = "primary answer") -> AsyncMock:
     provider = AsyncMock()
     provider.name = name
+    # The chat call site resolves the output reservation through the sync
+    # shared expression; an AsyncMock default would leak a never-awaited
+    # coroutine probe.
+    provider._get_max_tokens_value = Mock(return_value=32000)
     if fails:
 
         async def _fail(**kwargs):
