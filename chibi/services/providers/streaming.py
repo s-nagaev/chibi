@@ -183,7 +183,7 @@ class AckSentinelStreamSession:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,
+        _tb: TracebackType | None,
     ) -> None:
         """Drain the gate on every exit path of the streaming attempt."""
         await self._finish(aborted=exc_type is not None)
