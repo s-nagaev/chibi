@@ -113,7 +113,6 @@ async def test_interval_self_job_end_to_end(redis_scheduler_settings, tool_setti
         patch(f"{TOOL_MODULE}.application_settings", tool_settings),
         patch.object(SchedulerInterface, "send_message", new=AsyncMock()) as send_mock,
         patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(side_effect=fake_llm_answer)),
-        patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
     ):
         result = await ScheduleTaskTool.function(
             title="Daily check",
