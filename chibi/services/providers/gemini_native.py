@@ -23,6 +23,7 @@ from google.genai.types import (
     ContentListUnion,
     ContentListUnionDict,
     FunctionCallDict,
+    FunctionCallingConfig,
     FunctionDeclaration,
     FunctionResponseDict,
     GenerateContentConfig,
@@ -36,8 +37,10 @@ from google.genai.types import (
     Part,
     PartDict,
     PrebuiltVoiceConfig,
+    Schema,
     SpeechConfig,
     Tool,
+    ToolConfig,
     VoiceConfig,
 )
 from loguru import logger
@@ -59,7 +62,9 @@ from chibi.services.providers.terminal_calls import (
     append_repair_nudge,
     evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
     honored_terminal_name,
+    log_forced_choice_outcome,
     log_turn_misuse,
     offered_tools,
     partition_terminal_calls,
@@ -76,6 +81,44 @@ from chibi.services.providers.utils import (
     send_llm_thoughts,
 )
 from chibi.services.usage_cache import UsageCacheStore
+
+
+def ensure_declaration_parameters(tools: list[Tool]) -> list[Tool]:
+    """Guarantee every function declaration carries an explicit parameters object.
+
+    Defensive, per recon C4: the "silent no-call when ``parameters`` is
+    omitted" observation did NOT reproduce on the live re-run (downgraded to
+    NOT REPRODUCED/UNVERIFIED), so this is verified-harmless defensiveness,
+    not a measured failure mode. Every forced declaration always sends
+    ``parameters={"type": "OBJECT", "properties": {}}``. The ``Tool`` objects
+    come fresh from the ``tools_list`` property on every access, so mutating
+    them here never touches shared state.
+
+    Args:
+        tools: Gemini Tool objects, each holding function declarations.
+
+    Returns:
+        The same list, with every declaration's parameters guaranteed set.
+    """
+    for tool in tools:
+        for declaration in tool.function_declarations or []:
+            if declaration.parameters is None:
+                declaration.parameters = Schema(type="OBJECT", properties={})
+    return tools
+
+
+def _gemini_tool_name(tool: Tool) -> str:
+    """Return the function name of a single-declaration Gemini tool.
+
+    Args:
+        tool: The Gemini Tool object (one declaration per tool, as built by
+            ``tools_list``).
+
+    Returns:
+        The declaration's function name.
+    """
+    declarations = tool.function_declarations or []
+    return str(declarations[0].name)
 
 
 class Gemini(RestApiFriendlyProvider):
@@ -433,19 +476,40 @@ class Gemini(RestApiFriendlyProvider):
         else:
             temperature = self.temperature
 
+        offered = (
+            offered_tools(
+                tools=self.tools_list,
+                interface=interface,
+                name_of=_gemini_tool_name,
+            )
+            if "gemini" in model_name
+            else None
+        )
+        tool_config: ToolConfig | None = None
+        if forced_choice_applicable(interface=interface) and offered is not None:
+            # Forced choice for the agent loop (optimisation only; the
+            # turn-end validator is the guarantee). Mode ANY without
+            # allowed_function_names is the Gemini analog of OpenAI's
+            # "required": the turn may legitimately end via either terminal
+            # tool and may still need ordinary work calls first, so the
+            # allowed set must not be narrowed to the terminal tools.
+            # recon C1 verified mode ANY live (with an allowed-names list;
+            # the unrestricted variant follows the same documented mode).
+            # Defensive (recon C4): every forced declaration always carries an
+            # explicit parameters object — verified harmless live, and the
+            # validator keeps treating a 200-OK-with-empty-parts as an
+            # R1-class failure regardless.
+            ensure_declaration_parameters(tools=offered)
+            tool_config = ToolConfig(function_calling_config=FunctionCallingConfig(mode="ANY"))
+
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
             temperature=temperature,
             max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
-            tools=offered_tools(
-                tools=self.tools_list,
-                interface=interface,
-                name_of=lambda tool: tool.function_declarations[0].name,
-            )
-            if "gemini" in model_name
-            else None,
+            tools=offered,
+            tool_config=tool_config,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -469,6 +533,11 @@ class Gemini(RestApiFriendlyProvider):
         usage_message = get_usage_msg(usage=usage)
 
         if not response.function_calls:
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(
+                    model=model_name, provider_name=self.name, interface=interface, outcome="ignored"
+                )
             final_message: ContentDict = ContentDict(
                 role="model",
                 parts=[
@@ -572,6 +641,10 @@ class Gemini(RestApiFriendlyProvider):
                 logger.log(
                     "CALL", f"{model_name} called the terminal tool {terminal_calls[0].tool_name}; ending the turn."
                 )
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model_name, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
                 verdict = evaluate_turn_end(
                     interface=interface,
                     answer=plan.answer,

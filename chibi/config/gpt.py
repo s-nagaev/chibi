@@ -124,6 +124,19 @@ class GPTSettings(BaseSettings):
 
     filesystem_access: bool = Field(default=False)
     allow_delegation: bool = Field(default=True)
+    force_terminal_tool_choice: bool = Field(
+        default=False,
+        description=(
+            "When True, agent-loop requests that carry a user interface (and therefore offer the "
+            "terminal tools say/ack_silently) ask the provider at the protocol level to end the turn "
+            "with a tool call instead of prose (per-adapter forced tool_choice). Forcing is an "
+            "OPTIMISATION only: the turn-end validator is the guarantee, and a backend that ignores "
+            "the forced choice still produces a correct, validated turn. Keep OFF until the task-6 "
+            "loop-trap regression exists: forcing is the empirically identified trigger of the "
+            "infinite-ack loop (recon C7: say() -> tool result -> ack_silently() -> ... with no "
+            "natural stop). One switch covers all five adapter paths."
+        ),
+    )
     llm_role_raw: str | None = Field(alias="LLM_ROLE", default=None)
     failover_chain_master_raw: str | None = Field(
         alias="FAILOVER_CHAIN_MASTER",

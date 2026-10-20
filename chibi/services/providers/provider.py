@@ -16,12 +16,14 @@ from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
+from anthropic import omit as anthropic_omit
 from anthropic.types import (
     CacheControlEphemeralParam,
     MessageParam,
     TextBlock,
     TextBlockParam,
     TextDelta,
+    ToolChoiceAnyParam,
     ToolChoiceToolParam,
     ToolParam,
     ToolResultBlockParam,
@@ -93,10 +95,13 @@ from chibi.services.providers.streaming import (
 )
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
+    anthropic_forced_tool_choice,
     append_repair_nudge,
     evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
     honored_terminal_name,
+    log_forced_choice_outcome,
     log_turn_misuse,
     offered_tool_definitions,
     offered_tools,
@@ -941,6 +946,15 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
 
+        # Forced choice (optimisation, never load-bearing — the turn-end
+        # validator is the guarantee): the "required" form rather than the
+        # named form {"type": "function", "function": {"name": ...}} because
+        # the turn may legitimately end via either terminal tool and may
+        # still need ordinary work calls first; "required" only demands that
+        # the turn not end with prose. Applied only when the single switch is
+        # on AND the request carries a user interface (exactly when the
+        # terminal tools are offered per ruling D1).
+        forced_tool_choice = forced_choice_applicable(interface=interface)
         completion_kwargs: dict[str, Any] = {
             "model": model,
             "messages": dialog,
@@ -952,7 +966,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             "tools": offered_tool_definitions(
                 definitions=RegisteredChibiTools.get_tool_definitions(), interface=interface
             ),
-            "tool_choice": "auto",
+            "tool_choice": "required" if forced_tool_choice else "auto",
             "reasoning_effort": self.get_reasoning_effort_value(model_name=model),
         }
         response: ChatCompletion
@@ -988,6 +1002,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls  # type: ignore
 
         if not tool_calls:
+            if forced_tool_choice:
+                # The backend answered a forced request with prose: the force
+                # was ignored. The validator still judges this ending.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
                 await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
                 logger.log("THINK", data.message.reasoning_content)
@@ -1083,6 +1101,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             else:
                 plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_tool_choice:
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
                 verdict = evaluate_turn_end(
                     interface=interface,
                     answer=plan.answer,
@@ -1515,6 +1537,25 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
         ]
+        # Forced choice for the agent loop (optimisation only). The guard in
+        # anthropic_forced_tool_choice drops the forced choice when legacy
+        # thinking.type="enabled" is present — that combination is a hard 400
+        # ("Thinking may not be enabled when tool_choice forces tool use",
+        # recon C5, VERIFIED live); adaptive thinking plus a forced choice is
+        # accepted. The repo sends no thinking parameter today (pinned by
+        # test). Documentary, UNVERIFIED live (the recon probe hit a 402
+        # balance error): MiniMax on the Anthropic-compatible endpoint
+        # (api.minimax.io/anthropic) is reported to ignore the forced choice
+        # and answer in plain text — Minimax shares this loop through
+        # AnthropicFriendlyProvider, so if that report is real, its forced
+        # requests fall through to the validator like any other prose ending.
+        # Never build behaviour on that report.
+        tool_choice = anthropic_forced_tool_choice(interface=interface)
+        # The Anthropic SDK's tool_choice default is `omit`: an explicit None
+        # would be serialized as null and rejected, so None maps to omit.
+        wire_tool_choice: ToolChoiceAnyParam | Omit = (
+            cast("ToolChoiceAnyParam", tool_choice) if tool_choice is not None else anthropic_omit
+        )
         for attempt in range(gpt_settings.retries):
             if delta_streaming_allowed(interface):
                 response_message: AnthropicMessage = await self._stream_generate_content(
@@ -1523,6 +1564,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     messages=messages,
                     interface=interface,
                     max_tokens=max_tokens,
+                    tool_choice=wire_tool_choice,
                 )
             else:
                 response_message = await self.client.messages.create(
@@ -1531,6 +1573,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     temperature=self.temperature,
                     timeout=self.timeout,
                     tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
+                    tool_choice=wire_tool_choice,
                     system=system_blocks,
                     messages=messages,
                 )
@@ -1555,6 +1598,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         messages: list[MessageParam],
         interface: UserInterface | None,
         max_tokens: int | None = None,
+        tool_choice: ToolChoiceAnyParam | Omit = anthropic_omit,
     ) -> AnthropicMessage:
         """Request a streamed Anthropic completion and return the final message.
 
@@ -1570,6 +1614,10 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             interface: The active user interface, if any.
             max_tokens: Optional per-call output-token cap; overrides the
                 instance-level value when provided, exact old behavior when None.
+            tool_choice: Optional protocol-level forced tool choice (the
+                forced-choice optimisation; omit/None keeps the default
+                "auto" behaviour). Computed once by ``_generate_content``
+                through ``anthropic_forced_tool_choice``.
 
         Returns:
             The final aggregated Anthropic message.
@@ -1582,6 +1630,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 temperature=self.temperature,
                 timeout=self.timeout,
                 tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
+                tool_choice=tool_choice,
                 system=system,
                 messages=messages,
             ) as stream,
@@ -1685,6 +1734,9 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         tool_call_parts = [part for part in response_message.content if isinstance(part, ToolUseBlock)]
         if not tool_call_parts:
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             assistant_message = MessageParam(
                 role="assistant",
                 content=[content.model_dump() for content in response_message.content],  # type: ignore
@@ -1809,6 +1861,10 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     thoughts=thoughts_part.text if thoughts_part else "",
                 )
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
                 verdict = evaluate_turn_end(
                     interface=interface,
                     answer=plan.answer,

@@ -21,13 +21,14 @@ repair round-trip, and fails loudly instead of letting a turn pass silently.
 """
 
 import json
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from json import JSONDecodeError
-from typing import Any, Literal, NamedTuple, TypeVar
+from typing import Any, Literal, NamedTuple, TypeVar, cast
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
+from chibi.config import gpt_settings
 from chibi.exceptions import SilentTurnError
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
@@ -38,6 +39,14 @@ from chibi.services.providers.tools.schemas import ToolCallSchema
 SAY_TOOL_NAME = SayTool.name
 ACK_SILENTLY_TOOL_NAME = AckSilentlyTool.name
 TERMINAL_TOOL_NAMES = frozenset({SAY_TOOL_NAME, ACK_SILENTLY_TOOL_NAME})
+
+_MISUSE_GREP_TOKEN = "TURN_MISUSE"
+_FORCED_CHOICE_GREP_TOKEN = "FORCED_CHOICE"
+
+# The minimal argument schema every adapter accepts for the terminal tools
+# (recon C4: verified working on all five backends; mandatory on Mistral at
+# the SDK layer even when empty).
+EMPTY_OBJECT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 
 T = TypeVar("T")
 
@@ -211,8 +220,6 @@ _BACKGROUND_DISPATCH_STATUS = "tool is running in background"
 
 TurnEndOutcome = Literal["ok", "degraded_visible", "misuse"]
 TurnEndMisuse = Literal["empty_turn", "hallucinated_ack", "overeager_ack", "no_terminal_call_text"]
-
-_MISUSE_GREP_TOKEN = "TURN_MISUSE"
 
 
 class TurnEndVerdict(NamedTuple):
@@ -544,3 +551,127 @@ def offered_tool_definitions(
         The offered tool list per the D1 rule.
     """
     return offered_tools(definitions, interface, name_of=lambda definition: definition["function"]["name"])
+
+
+def forced_choice_applicable(interface: UserInterface | None) -> bool:
+    """Decide whether a request should carry a protocol-level forced tool choice.
+
+    This is the single gate behind which every adapter's forced-choice mapping
+    sits (one mechanism, not five). Forcing is an optimisation, never
+    load-bearing for correctness: the turn-end validator is the guarantee, and
+    a backend that ignores the forced choice still produces a correct,
+    validated turn.
+
+    Two conditions must hold:
+
+    - the operator switched forcing on (``gpt_settings.force_terminal_tool_choice``;
+      default OFF, because forcing is the empirically identified trigger of the
+      infinite-ack loop, recon C7, and the task-6 loop-trap regression does not
+      exist yet);
+    - the request carries a user interface, which per ruling D1 is exactly the
+      condition under which the terminal tools ``say``/``ack_silently`` are
+      offered. Forcing a call to a tool the request was not offered is the
+      hallucination shape the loud-empty rule has to catch.
+
+    Args:
+        interface: The user interface carried by the request, or None.
+
+    Returns:
+        True when the adapter may attach its forced tool_choice field.
+    """
+    return gpt_settings.force_terminal_tool_choice and interface is not None
+
+
+def anthropic_forced_tool_choice(
+    interface: UserInterface | None,
+    thinking: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Build the Anthropic agent-loop forced tool_choice, or None when unsafe.
+
+    Uses ``{"type": "any"}`` (recon C1, VERIFIED live) rather than the named
+    form ``{"type": "tool", "name": ...}``: the turn may legitimately end via
+    either terminal tool (and may still need ordinary work calls first), so
+    naming one tool would both suppress legitimate ``ack_silently`` turns and
+    force premature termination.
+
+    Hard-400 guard (recon C5, VERIFIED live both directions): legacy
+    ``thinking.type = "enabled"`` combined with a forced choice is rejected by
+    the API ("Thinking may not be enabled when tool_choice forces tool use"),
+    while adaptive thinking plus a forced choice is accepted. The repo sends
+    no thinking parameter today; if a future change adds one, this guard drops
+    the forced choice for legacy-enabled thinking instead of shipping the 400.
+
+    Args:
+        interface: The user interface carried by the request, or None.
+        thinking: The request's thinking configuration, when the adapter sends
+            one (None today; see the no-thinking pin test).
+
+    Returns:
+        The forced tool_choice dict, or None when forcing must not be applied.
+    """
+    if not forced_choice_applicable(interface):
+        return None
+    if thinking is not None and thinking.get("type") == "enabled":
+        logger.warning(
+            "Dropping the forced tool choice: legacy thinking.type='enabled' combined with a forced "
+            "choice is a hard 400 ('Thinking may not be enabled when tool_choice forces tool use', "
+            "recon C5). Use adaptive thinking if forcing is needed."
+        )
+        return None
+    return {"type": "any"}
+
+
+def ensure_function_parameters(
+    definitions: Sequence[ChatCompletionToolParam],
+) -> list[ChatCompletionToolParam]:
+    """Guarantee every OpenAI-format tool definition carries a ``parameters`` field.
+
+    The Mistral SDK rejects a function tool without ``parameters`` client-side
+    before any request is sent, even when the schema is empty (recon C4, the
+    exact validation error is quoted in the recon report). The registry's
+    definitions all carry ``parameters`` today; this defensive normalisation
+    works on copies so the shared registry dicts are never mutated.
+
+    Args:
+        definitions: Tool definitions in the OpenAI chat-completions format.
+
+    Returns:
+        Definitions with a guaranteed ``parameters`` object on every function.
+    """
+    normalized: list[ChatCompletionToolParam] = []
+    for definition in definitions:
+        function = definition.get("function", {})
+        if function.get("parameters") is None:
+            definition = cast(
+                ChatCompletionToolParam,
+                {**definition, "function": {**function, "parameters": dict(EMPTY_OBJECT_SCHEMA)}},
+            )
+        normalized.append(definition)
+    return normalized
+
+
+def log_forced_choice_outcome(
+    *,
+    model: str,
+    provider_name: str,
+    interface: UserInterface | None,
+    outcome: Literal["honoured", "ignored"],
+) -> None:
+    """Emit one greppable forced-choice outcome line (the same sink as TURN_MISUSE).
+
+    Counting mechanism identical to the misuse counters: a single log line per
+    event, ``grep 'FORCED_CHOICE' | grep 'model=<m>' | grep 'role=<r>' |
+    grep 'outcome=<o>' | wc -l``. ``honoured``: a forced request ended its
+    turn through a terminal call; ``ignored``: the backend answered a forced
+    request with prose and no tool call at all (the validator still handles
+    that ending — forcing is only an optimisation). No new metrics service,
+    no new storage.
+
+    Args:
+        model: The model that produced the turn.
+        provider_name: The provider serving the model.
+        interface: The interface carried by the request, or None.
+        outcome: Whether the backend honoured or ignored the forced choice.
+    """
+    role = "master" if interface is not None else "delegated"
+    logger.info(f"{_FORCED_CHOICE_GREP_TOKEN} model={model} role={role} outcome={outcome} provider={provider_name}")

@@ -2,7 +2,7 @@ import base64
 import json
 import random
 from asyncio import sleep
-from typing import Union, cast
+from typing import Any, Union, cast
 from uuid import uuid4
 
 import httpx
@@ -44,9 +44,12 @@ from chibi.services.providers.streaming import (
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     append_repair_nudge,
+    ensure_function_parameters,
     evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
     honored_terminal_name,
+    log_forced_choice_outcome,
     log_turn_misuse,
     offered_tool_definitions,
     partition_terminal_calls,
@@ -169,13 +172,27 @@ class MistralAI(RestApiFriendlyProvider):
                     model=model, messages=messages, interface=interface, max_tokens=max_tokens
                 )
             else:
+                offered = offered_tool_definitions(definitions=self.tools_list, interface=interface)
+                # Forced choice (optimisation only; the turn-end validator is
+                # the guarantee): "any" demands a tool call without naming
+                # one, for the same reason as the other adapters — the turn
+                # may end via either terminal tool and may need work calls
+                # first. Gated on the single switch AND interface presence
+                # (D1). The parameters field is mandatory Mistral-SDK-side
+                # even when the schema is empty (recon C4), so the forced
+                # path guarantees it on every offered tool.
+                if forced_choice_applicable(interface=interface):
+                    offered = ensure_function_parameters(definitions=offered)
+                    tool_choice: Any = "any"
+                else:
+                    tool_choice = "auto"
                 response = await self.client.chat.complete_async(
                     model=model,
                     messages=messages,
                     max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
-                    tools=offered_tool_definitions(definitions=self.tools_list, interface=interface),  # type: ignore[arg-type]
-                    tool_choice="auto",
+                    tools=cast(list[Tool], offered),
+                    tool_choice=tool_choice,
                     http_headers={"Cache-Control": "max-age=86400"},
                 )
 
@@ -234,8 +251,17 @@ class MistralAI(RestApiFriendlyProvider):
                 messages=messages,
                 max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                 temperature=self.temperature,
-                tools=cast(list[Tool], offered_tool_definitions(definitions=self.tools_list, interface=interface)),
-                tool_choice="auto",
+                tools=cast(
+                    list[Tool],
+                    (
+                        ensure_function_parameters(
+                            definitions=offered_tool_definitions(definitions=self.tools_list, interface=interface)
+                        )
+                        if forced_choice_applicable(interface=interface)
+                        else offered_tool_definitions(definitions=self.tools_list, interface=interface)
+                    ),
+                ),
+                tool_choice="any" if forced_choice_applicable(interface=interface) else "auto",
                 http_headers={"Cache-Control": "max-age=86400"},
             ) as stream,
         ):
@@ -385,6 +411,9 @@ class MistralAI(RestApiFriendlyProvider):
 
         tool_calls = message_data.tool_calls
         if not tool_calls:
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             # The validator judges the raw content, before the legacy
             # "no data" fallback: an empty ending must cost a repair
             # round-trip, never pass silently under a placeholder string.
@@ -495,6 +524,10 @@ class MistralAI(RestApiFriendlyProvider):
             else:
                 plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=thoughts)
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
                 verdict = evaluate_turn_end(
                     interface=interface,
                     answer=plan.answer,

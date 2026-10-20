@@ -32,7 +32,9 @@ from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     evaluate_turn_end,
     fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
     honored_terminal_name,
+    log_forced_choice_outcome,
     log_turn_misuse,
     offered_tool_definitions,
     partition_terminal_calls,
@@ -401,7 +403,13 @@ class OpenAI(OpenAIFriendlyProvider):
             "instructions": instructions,
             "input": input_items,
             "tools": tools,
-            "tool_choice": "auto",
+            # Forced choice (optimisation only; the turn-end validator is the
+            # guarantee): "required" rather than the named function form, for
+            # the same reason as the chat-completions loop — the turn may end
+            # via either terminal tool and may need work calls first. Gated on
+            # the single switch AND interface presence (D1: the terminal tools
+            # are offered exactly then).
+            "tool_choice": "required" if forced_choice_applicable(interface=interface) else "auto",
             "max_output_tokens": max_tokens if max_tokens is not None else self._get_max_tokens_value(model_name=model),
             "temperature": self._get_temperature_value(model_name=model),
             "timeout": self.timeout,
@@ -461,6 +469,9 @@ class OpenAI(OpenAIFriendlyProvider):
         tool_call_items = [item for item in response.output if isinstance(item, ResponseFunctionToolCall)]
 
         if not tool_call_items:
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             messages.append(Message(role="assistant", content=answer))
             verdict = evaluate_turn_end(
                 interface=interface,
@@ -541,6 +552,10 @@ class OpenAI(OpenAIFriendlyProvider):
             else:
                 plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
                 logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
                 verdict = evaluate_turn_end(
                     interface=interface,
                     answer=plan.answer,

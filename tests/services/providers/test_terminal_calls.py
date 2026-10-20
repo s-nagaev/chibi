@@ -902,7 +902,6 @@ class TestRoleScopedToolOffers:
         assert {"say", "ack_silently"} <= offered
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_hallucinated_ack_costs_a_repair_then_fails_loudly(self) -> None:
         """The offer-blind interception is now judged by the turn-end validator.
 
