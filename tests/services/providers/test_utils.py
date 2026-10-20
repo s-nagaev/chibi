@@ -17,7 +17,9 @@ from chibi.schemas.app import UsageSchema
 from chibi.services.interface import UserInterface
 from chibi.services.providers.utils import (
     _is_tool_response_message,
+    collect_volatile_context_note,
     get_usage_from_anthropic_response,
+    is_context_overflow_signal,
     prepare_system_prompt,
 )
 from chibi.services.usage_cache import UsageCacheStore
@@ -34,54 +36,12 @@ def _reset_usage_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prepare_system_prompt_context_size_na_when_store_empty() -> None:
-    """Empty store → approximate_context_size is 'n/a' and no warning is emitted."""
-    _reset_usage_cache()
-    user = _make_user()
-    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
-    conversation = [
-        Message(role="user", content="Hello there"),
-        Message(role="assistant", content="General Kenobi"),
-    ]
+async def test_prepare_system_prompt_omits_volatile_keys() -> None:
+    """The volatile keys never travel in the system payload, even above the warning threshold.
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
-
-    prompt = json.loads(prompt_json)
-    assert prompt["approximate_context_size"] == "n/a"
-    assert "context_size_warning" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_context_size_shows_real_value_and_percentage() -> None:
-    """Non-empty store → prompt shows real token count plus percentage of max_history_tokens."""
-    _reset_usage_cache()
-    user = _make_user()
-    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
-
-    store = UsageCacheStore()
-    store._data[store._make_key(user_id=1, thread_id=1)] = 58372
-
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-        patch("chibi.config.gpt.gpt_settings.max_history_tokens", 200000),
-        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
-
-    prompt = json.loads(prompt_json)
-    expected_pct = round(58372 / 200000 * 100)
-    assert prompt["approximate_context_size"] == f"58,372 tokens ({expected_pct}% of {200000:,} limit)"
-    assert "context_size_warning" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_warning_fires_above_threshold() -> None:
-    """Warning is emitted when the real context exceeds the configured threshold percentage."""
+    They moved to the per-turn context note attached to the last converted user
+    message by the provider entry points (collect_volatile_context_note).
+    """
     _reset_usage_cache()
     user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
@@ -97,79 +57,116 @@ async def test_prepare_system_prompt_warning_fires_above_threshold() -> None:
         prompt_json = await prepare_system_prompt("base", 1, interface)
 
     prompt = json.loads(prompt_json)
-    assert "context_size_warning" in prompt
-    assert "50%" in prompt["context_size_warning"]
+    assert "approximate_context_size" not in prompt
+    assert "context_size_warning" not in prompt
+    assert "tool_results_warning" not in prompt
 
 
-@pytest.mark.asyncio
+def test_collect_volatile_context_note_empty_without_interface() -> None:
+    """Sub-agent and other interface-less requests carry no note, as before the volatile keys."""
+    _reset_usage_cache()
+    assert collect_volatile_context_note(user_id=1, interface=None) == ""
+
+
+def test_collect_volatile_context_note_na_when_store_empty() -> None:
+    """Empty store → the note reports 'n/a' and carries no warning."""
+    _reset_usage_cache()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
+    conversation = [
+        Message(role="user", content="Hello there"),
+        Message(role="assistant", content="General Kenobi"),
+    ]
+
+    note = collect_volatile_context_note(user_id=1, interface=interface, conversation_messages=conversation)
+
+    assert "approximate_context_size: n/a" in note
+    assert "context_size_warning" not in note
+
+
+def test_collect_volatile_context_note_shows_real_value_and_percentage() -> None:
+    """Non-empty store → the note shows the real token count plus percentage of max_history_tokens."""
+    _reset_usage_cache()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=1)] = 58372
+
+    with (
+        patch("chibi.config.gpt.gpt_settings.max_history_tokens", 200000),
+        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
+    ):
+        note = collect_volatile_context_note(user_id=1, interface=interface)
+
+    expected_pct = round(58372 / 200000 * 100)
+    assert f"approximate_context_size: 58,372 tokens ({expected_pct}% of {200000:,} limit)" in note
+    assert "context_size_warning" not in note
+
+
+def test_collect_volatile_context_note_warning_fires_above_threshold() -> None:
+    """Warning is emitted when the real context exceeds the configured threshold percentage."""
+    _reset_usage_cache()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=0)] = 120000
+
+    with patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50):
+        note = collect_volatile_context_note(user_id=1, interface=interface)
+
+    assert "context_size_warning" in note
+    assert "50%" in note
+
+
 @pytest.mark.parametrize("stored_tokens", [50000, 40000])
-async def test_prepare_system_prompt_warning_silent_at_or_below_threshold(stored_tokens: int) -> None:
+def test_collect_volatile_context_note_warning_silent_at_or_below_threshold(stored_tokens: int) -> None:
     """Warning is NOT emitted when the real context is at or below the threshold.
 
     50000 tokens equals exactly 50% of the pinned limit (boundary of the strict ``>`` check),
     40000 tokens is clearly below it.
     """
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = stored_tokens
 
     with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
         patch("chibi.config.gpt.gpt_settings.max_history_tokens", 100000),
         patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
     ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
+        note = collect_volatile_context_note(user_id=1, interface=interface)
 
-    prompt = json.loads(prompt_json)
     expected_pct = round(stored_tokens / 100000 * 100)
     assert expected_pct <= 50
-    assert "context_size_warning" not in prompt
+    assert "context_size_warning" not in note
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_warning_threshold_from_config() -> None:
+def test_collect_volatile_context_note_warning_threshold_from_config() -> None:
     """The warning threshold is read from config, not hardcoded."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = 60000
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 25),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
+    with patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 25):
+        note = collect_volatile_context_note(user_id=1, interface=interface)
 
-    prompt = json.loads(prompt_json)
-    assert "context_size_warning" in prompt
-    assert "25%" in prompt["context_size_warning"]
+    assert "context_size_warning" in note
+    assert "25%" in note
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_uses_correct_key_matching_write_side() -> None:
+def test_collect_volatile_context_note_uses_correct_key_matching_write_side() -> None:
     """The read key (user_id, thread_id) matches the write-side convention."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=3, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
     store.store(user_id=1, thread_id=3, usage=UsageSchema(prompt_tokens=12345), provider="openai")
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
+    note = collect_volatile_context_note(user_id=1, interface=interface)
 
-    prompt = json.loads(prompt_json)
-    assert "12,345 tokens" in prompt["approximate_context_size"]
+    assert "12,345 tokens" in note
 
 
 @pytest.fixture
@@ -338,37 +335,53 @@ def _make_tool_response_blob(tool_name: str, filler: str) -> Message:
     return Message(role="user", content=json.dumps(payload))
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_mandatory_warning_is_imperative() -> None:
-    """The context warning text must be imperative and keep the '{threshold}%' substring."""
+def test_collect_volatile_context_note_warning_is_informative_not_imperative() -> None:
+    """The context warning reports the size and names the tools, and commands nothing.
+
+    Compaction is decided and performed by the pre-call budget guard before the
+    request is sent, and the compaction policy lives in the base system prompt;
+    the volatile warning stays a statement of state and keeps the
+    '{threshold}%' substring.
+    """
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = 120000
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-        patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
+    with patch("chibi.config.gpt.gpt_settings.context_size_warning_threshold", 50):
+        note = collect_volatile_context_note(user_id=1, interface=interface)
 
-    prompt = json.loads(prompt_json)
-    warning = prompt["context_size_warning"]
-    assert "MANDATORY" in warning
-    assert "MUST" in warning
+    warning_start = note.index("context_size_warning")
+    warning = note[warning_start:]
+    lowered = warning.lower()
+    assert "mandatory" not in lowered
+    assert "must" not in lowered
+    assert "before producing" not in lowered
+    assert "do not ignore" not in lowered
+    assert "continue answering" not in lowered
     assert "summarize_history" in warning
     assert "clear_tool_call_history" in warning
     assert "50%" in warning
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_tool_results_warning_fires_above_share_threshold() -> None:
+def test_collect_volatile_context_note_is_marker_delimited() -> None:
+    """The note is a delimited block so attach and strip can detect it on any payload shape."""
+    _reset_usage_cache()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=1, uses_uploaded_file_storage=False))
+
+    store = UsageCacheStore()
+    store._data[store._make_key(user_id=1, thread_id=1)] = 100
+
+    note = collect_volatile_context_note(user_id=1, interface=interface)
+
+    assert note.startswith("<context_note>\n")
+    assert note.endswith("\n</context_note>")
+
+
+def test_collect_volatile_context_note_tool_results_warning_fires_above_share_threshold() -> None:
     """The volume-based warning fires when shape-(ii) blobs exceed 25% of the real context size."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     blob = _make_tool_response_blob("web_search", "SECRET_BLOB_CONTENT" + "x" * 1200)
@@ -378,25 +391,18 @@ async def test_prepare_system_prompt_tool_results_warning_fires_above_share_thre
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = tool_results_tokens * 3
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+    note = collect_volatile_context_note(user_id=1, interface=interface, conversation_messages=conversation)
 
-    prompt = json.loads(prompt_json)
-    assert "tool_results_warning" in prompt
-    warning = prompt["tool_results_warning"]
-    assert f"web_search: ~{blob.estimate_tokens} tokens" in warning
-    assert "clear_tool_call_history" in warning
-    assert "SECRET_BLOB_CONTENT" not in warning
+    assert "tool_results_warning" in note
+    assert f"web_search: ~{blob.estimate_tokens} tokens" in note
+    assert "clear_tool_call_history" in note
+    assert "you should call" not in note.lower()
+    assert "SECRET_BLOB_CONTENT" not in note
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_tool_results_warning_ignores_shape_i_tool_messages() -> None:
+def test_collect_volatile_context_note_tool_results_warning_ignores_shape_i_tool_messages() -> None:
     """In-loop shape-(i) role="tool" results must not trigger the volume-based warning."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     conversation = [Message(role="tool", content="x" * 1200, tool_call_id="call_1")]
@@ -404,21 +410,14 @@ async def test_prepare_system_prompt_tool_results_warning_ignores_shape_i_tool_m
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = 100
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+    note = collect_volatile_context_note(user_id=1, interface=interface, conversation_messages=conversation)
 
-    prompt = json.loads(prompt_json)
-    assert "tool_results_warning" not in prompt
+    assert "tool_results_warning" not in note
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_tool_results_warning_silent_below_share_threshold() -> None:
+def test_collect_volatile_context_note_tool_results_warning_silent_below_share_threshold() -> None:
     """No volume-based warning while the shape-(ii) share stays at or below 25%."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     conversation = [_make_tool_response_blob("web_search", "x" * 1200)]
@@ -427,31 +426,73 @@ async def test_prepare_system_prompt_tool_results_warning_silent_below_share_thr
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = tool_results_tokens * 10
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface, conversation_messages=conversation)
+    note = collect_volatile_context_note(user_id=1, interface=interface, conversation_messages=conversation)
 
-    prompt = json.loads(prompt_json)
-    assert "tool_results_warning" not in prompt
+    assert "tool_results_warning" not in note
 
 
-@pytest.mark.asyncio
-async def test_prepare_system_prompt_no_tool_results_warning_without_conversation() -> None:
+def test_collect_volatile_context_note_no_tool_results_warning_without_conversation() -> None:
     """A cached context size without retained conversation messages emits no volume-based warning."""
     _reset_usage_cache()
-    user = _make_user()
     interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
 
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = 50000
 
-    with (
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
-    ):
-        prompt_json = await prepare_system_prompt("base", 1, interface)
+    note = collect_volatile_context_note(user_id=1, interface=interface)
 
-    prompt = json.loads(prompt_json)
-    assert "tool_results_warning" not in prompt
+    assert "tool_results_warning" not in note
+
+
+@pytest.mark.parametrize(
+    ("status_code", "detail"),
+    [
+        (400, {"error": {"message": "test", "type": "invalid_request_error", "code": "context_length_exceeded"}}),
+        (400, {"error": {"code": 400, "message": "This model's maximum context length is 8192 tokens."}}),
+        (
+            400,
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "prompt is too long: 250000 tokens > 200000 maximum",
+                },
+            },
+        ),
+        (
+            400,
+            {
+                "error": {
+                    "code": 400,
+                    "message": "The input token count (12345) exceeds the maximum number of tokens allowed (1000).",
+                    "status": "INVALID_ARGUMENT",
+                }
+            },
+        ),
+        (400, 'Status 400. Body: {"object": "error", "message": "Too many tokens in request"}'),
+        (413, {"error": {"message": "Request too large: too many tokens in the request"}}),
+    ],
+)
+def test_is_context_overflow_signal_matches_provider_wordings(status_code: int, detail: Any) -> None:
+    """Every known provider wording of an overflow is recognized."""
+    assert is_context_overflow_signal(status_code=status_code, detail=detail)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "detail"),
+    [
+        (429, {"error": {"message": "prompt is too long: too many requests"}}),
+        (500, {"error": {"message": "exceeds the maximum number of tokens"}}),
+        (400, {"error": {"message": "Invalid image data", "type": "invalid_request_error"}}),
+        (400, None),
+        # Loose phrases that are not overflow-specific: an unrelated 400 whose
+        # body merely contains them must keep its original error type.
+        (400, {"error": {"message": "Request too large", "type": "invalid_request_error"}}),
+        (400, {"error": {"message": "Please reduce the length of your input"}}),
+        (400, {"error": {"message": "The input token count is missing", "status": "INVALID_ARGUMENT"}}),
+        (400, {"error": {"message": "The input token count (1) does not match the message"}}),
+    ],
+)
+def test_is_context_overflow_signal_rejects_non_overflow_errors(status_code: int, detail: Any) -> None:
+    """Non-overflow errors (wrong status, unrelated message, missing payload) are not flagged."""
+    assert not is_context_overflow_signal(status_code=status_code, detail=detail)
