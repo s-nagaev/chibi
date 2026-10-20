@@ -1,10 +1,13 @@
 """Unit tests for MistralAI provider OCR method."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+from mistralai.models import SDKError, UserMessage
 
+from chibi.exceptions import ContextLengthExceededError
 from chibi.schemas.app import VisionResultSchema
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.provider import ServiceResponseError
@@ -346,3 +349,49 @@ async def test_ocr_short_description_formatting():
     # Verify newlines are replaced with spaces in short_description
     assert "\n" not in result.short_description
     assert "Line one Line two" in result.short_description
+
+
+def _make_mistral_sdk_error(status_code: int, message: str) -> SDKError:
+    """Build a mistralai SDKError carrying the given HTTP status and body message."""
+    request = httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+    response = httpx.Response(
+        status_code,
+        request=request,
+        json={"object": "error", "message": message, "type": "invalid_request_error"},
+    )
+    return SDKError(message="Chat completion failed", raw_response=response, body=response.text)
+
+
+@pytest.mark.asyncio
+async def test_overflow_sdk_error_raises_context_length_exceeded_error() -> None:
+    """A Mistral 400 whose body reports a token overflow raises ContextLengthExceededError."""
+    provider = MistralAI(token=TEST_TOKEN)
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(
+        side_effect=_make_mistral_sdk_error(400, "Too many tokens in request: limit is 32768 tokens")
+    )
+    provider.__dict__["_client"] = mock_client
+
+    with pytest.raises(ContextLengthExceededError):
+        await provider._generate_content(
+            model="mistral-medium-latest",
+            messages=[UserMessage(content="Hi")],
+        )
+
+    assert mock_client.chat.complete_async.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_non_overflow_sdk_error_still_escapes_unclassified() -> None:
+    """A Mistral 400 unrelated to context length keeps escaping as the raw SDK error."""
+    provider = MistralAI(token=TEST_TOKEN)
+    sdk_error = _make_mistral_sdk_error(400, "Invalid model name: does-not-exist")
+    mock_client = MagicMock()
+    mock_client.chat.complete_async = AsyncMock(side_effect=sdk_error)
+    provider.__dict__["_client"] = mock_client
+
+    with pytest.raises(SDKError):
+        await provider._generate_content(
+            model="mistral-medium-latest",
+            messages=[UserMessage(content="Hi")],
+        )

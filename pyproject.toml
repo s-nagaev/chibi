@@ -130,7 +130,7 @@ disable_error_code = ["method-assign", "attr-defined"]
 
 
 [tool.vulture]
-ignore_names = ["expected_type", "restore_default_bridge",]
+ignore_names = ["expected_type", "restore_default_bridge", "chroma_settings",]
 min_confidence = 80
 sort_by_size = true
 paths = ["."]
