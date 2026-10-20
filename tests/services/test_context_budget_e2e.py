@@ -443,8 +443,8 @@ async def test_measured_size_survives_a_restart_and_the_prediction_is_close(stor
     The prediction's appended part is therefore compared against a count computed here in
     the test from the raw appended strings (the same documented ``len // 4`` rule, applied
     by this code, not by calling the production estimator), on top of the provider-reported
-    100000 base. The tolerance is 1 token per appended message — the exact divergence the
-    shared rule permits (floor-division splitting of content and role counts) — and it is
+    100000 base. The tolerance is 1 token per appended message, the exact divergence the
+    shared rule permits (floor-division splitting of content and role counts), and it is
     load-bearing: any change to the estimator's arithmetic moves the prediction by more
     than that and fails this assertion, because the reference does not move with it. The
     estimate-only fallback is pinned below as the contrast: it sits orders of magnitude
@@ -487,7 +487,7 @@ async def test_measured_size_survives_a_restart_and_the_prediction_is_close(stor
     appended_counted = estimate_messages_tokens([turn])
     assert predicted == 100000 + appended_counted
     # Independent reference for the closeness check: the appended delta counted HERE, from
-    # the raw strings the test authored, under the same documented rule — never through the
+    # the raw strings the test authored, under the same documented rule, never through the
     # production estimator, so a change in the estimator's arithmetic moves only one side.
     appended = after_turn[len(measured_history) :]
     independent_delta = sum((len(message.content) + len(message.role)) // 4 for message in appended)
@@ -624,7 +624,7 @@ async def test_truncation_keeps_tool_pairs_intact(local_db: LocalStorage, monkey
     resolvable window scaled down via the window lookup). The scenario is sized so the
     oldest-unit drop tier and the content-truncation tier BOTH act on tool traffic: the
     opening user unit is dropped whole, and a tool result is content-truncated in place
-    while its owning assistant message stays — so the pair rule is exercised by the shrink
+    while its owning assistant message stays, so the pair rule is exercised by the shrink
     itself, not incidental to the scenario. The resulting list is asserted directly: every
     assistant ``tool_calls`` message keeps all of its ``role="tool"`` results, no orphan
     tool result remains, the most recent message survives, ids are never renumbered, and
@@ -644,7 +644,7 @@ async def test_truncation_keeps_tool_pairs_intact(local_db: LocalStorage, monkey
     # Sizing (heuristic counts, window 2400 / reservation 600 / budget 1800 / excess ~520):
     # the opening unit (~254 tokens) is droppable whole, while each tool unit
     # (assistant carrier ~30 + result ~1000) overshoots the remaining excess and is left
-    # for the truncation tier — which halves a tool result in place. If the pair rule were
+    # for the truncation tier, which halves a tool result in place. If the pair rule were
     # broken into per-message units, the assistant carriers (~30 tokens each) would be
     # dropped in the same tier while their oversized results stayed behind, leaving
     # orphaned tool results that the assertions below reject.
@@ -692,7 +692,7 @@ async def test_volatile_note_reaches_the_wire_but_never_storage_or_archive(
     caller holding the ATTACHED converted envelope (the re-persist/retry shape) writes the
     fresh turn back through the archival-wrapped real storage with the note still on its
     content. Stored history and the archive must end up byte-identical to the note-free
-    turn — under a disabled strip the marker survives on both surfaces and these assertions
+    turn: under a disabled strip the marker survives on both surfaces and these assertions
     fail. Message ids are explicit so the archival assertions never depend on Message.id
     distinctness.
     """
@@ -723,7 +723,7 @@ async def test_volatile_note_reaches_the_wire_but_never_storage_or_archive(
     assert all(CONTEXT_NOTE_OPEN not in message.content for message in turn_messages)
 
     # The attached converted envelope of the fresh turn, exactly as the entry point
-    # produced it for the wire — a caller persisting that envelope carries the note.
+    # produced it for the wire: a caller persisting that envelope carries the note.
     attached_envelope = wire_payload[-1]["content"]
     assert isinstance(attached_envelope, str)
     assert CONTEXT_NOTE_OPEN in attached_envelope

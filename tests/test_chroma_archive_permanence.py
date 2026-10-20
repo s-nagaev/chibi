@@ -71,7 +71,7 @@ class HashEmbeddingFunction(EmbeddingFunction):
 
     An exact-document query embeds to the identical vector as the archived
     document, so the semantic top hit of a query is the message carrying that
-    text — which is what makes the "old memory is still reachable" assertion
+    text, which is what makes the "old memory is still reachable" assertion
     sharp rather than incidental.
     """
 
@@ -584,7 +584,7 @@ async def test_retention_window_is_the_only_deleter_and_the_check_detects_it(
     Retention cleanup is the only code path in the archive layer that removes
     entries, and it removes exactly what its window covers. Running it tight
     shows two things the compaction tests depend on: the assertion they rest on
-    does report a deletion, and a search over an empty archive returns nothing —
+    does report a deletion, and a search over an empty archive returns nothing,
     so the pre-compaction results they observe come from the archive itself and
     not from the live history.
     """

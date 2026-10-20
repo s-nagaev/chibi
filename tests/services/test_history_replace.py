@@ -42,7 +42,7 @@ def _make_seed() -> list[Message]:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("thread_id", [0, 5])
 async def test_replace_leaves_exactly_the_seed(storage: LocalStorage, thread_id: int) -> None:
-    """After the replacement the thread holds exactly the seed — nothing appended, nothing kept."""
+    """After the replacement the thread holds exactly the seed: nothing appended, nothing kept."""
     storage_id = 1
     await _seed_history(storage, storage_id, thread_id, ["old one", "old two", "old three"])
 
@@ -61,8 +61,8 @@ async def test_repeated_replace_is_idempotent(storage: LocalStorage) -> None:
     """Replacing twice leaves exactly one seed: idempotent by construction.
 
     The whole-thread replace wipes and rewrites unconditionally, so the
-    result does not depend on the ``Message.source`` marker being read —
-    nothing in the codebase reads the marker yet (it exists for future
+    result does not depend on the ``Message.source`` marker being read,
+    as nothing in the codebase reads the marker yet (it exists for future
     recognition by a retry). What this test pins is the property that is
     actually true: two replacements with the same seed leave exactly that
     seed, never four messages.
