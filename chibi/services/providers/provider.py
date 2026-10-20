@@ -93,6 +93,8 @@ from chibi.services.providers.streaming import (
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     fold_terminal_calls_into_thoughts,
+    offered_tool_definitions,
+    offered_tools,
     partition_terminal_calls,
     plan_terminal_turn,
 )
@@ -940,7 +942,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             "presence_penalty": self.presence_penalty,
             "frequency_penalty": self.frequency_penalty,
             "timeout": self.timeout,
-            "tools": RegisteredChibiTools.get_tool_definitions(),
+            "tools": offered_tool_definitions(
+                definitions=RegisteredChibiTools.get_tool_definitions(), interface=interface
+            ),
             "tool_choice": "auto",
             "reasoning_effort": self.get_reasoning_effort_value(model_name=model),
         }
@@ -1434,7 +1438,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
                     timeout=self.timeout,
-                    tools=self.tools_list,
+                    tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
                     system=system_blocks,
                     messages=messages,
                 )
@@ -1485,7 +1489,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                 temperature=self.temperature,
                 timeout=self.timeout,
-                tools=self.tools_list,
+                tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
                 system=system,
                 messages=messages,
             ) as stream,

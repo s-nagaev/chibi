@@ -148,6 +148,24 @@ class DelegateTool(ChibiTool):
 
         logger.log("SUBAGENT", f"[{model_name or caller_model}] Delegated task is done: {response.answer}")
 
+        # Loud-empty delegation contract (ruling D1). Terminal interception in
+        # the agent loops is by tool-name membership and never consults the
+        # offered list (terminal_calls.is_terminal_call), so an interface-less
+        # sub-agent that hallucinates ack_silently() still ends its turn with
+        # an empty answer. An empty delegation result must therefore never
+        # reach the parent as a success: {"response": ""} is indistinguishable
+        # from a swallowed report. Raising ToolException here turns the empty
+        # answer into an error tool result for the parent; both the foreground
+        # call and the background resumption path funnel through this function,
+        # so one rule covers both. No tool result is ever created for the
+        # terminal call itself — the loudness lives only at this boundary.
+        if not response.answer.strip():
+            raise ToolException(
+                "The delegated sub-agent returned an EMPTY report: its turn ended without any text "
+                "(it may have ended silently or produced no output). Treat this as a failed "
+                "delegation: re-run it with a refined instruction or handle the task yourself."
+            )
+
         return {"response": response.answer}
 
 

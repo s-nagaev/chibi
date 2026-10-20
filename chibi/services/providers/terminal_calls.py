@@ -16,17 +16,22 @@ terminal call is normalized at ingest into a plain assistant ``Message``:
   text block).
 """
 
-from typing import NamedTuple
+from collections.abc import Callable, Sequence
+from typing import NamedTuple, TypeVar
 
 from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 
 from chibi.models import Message
+from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
 from chibi.services.providers.tools.schemas import ToolCallSchema
 
 SAY_TOOL_NAME = SayTool.name
 ACK_SILENTLY_TOOL_NAME = AckSilentlyTool.name
 TERMINAL_TOOL_NAMES = frozenset({SAY_TOOL_NAME, ACK_SILENTLY_TOOL_NAME})
+
+T = TypeVar("T")
 
 
 class TerminalTurnPlan(NamedTuple):
@@ -133,3 +138,62 @@ def fold_terminal_calls_into_thoughts(thoughts: str | None, terminal_calls: list
         return thoughts or ""
 
     return f"{thoughts}\n{text}" if thoughts else text
+
+
+def offered_tools(
+    tools: Sequence[T],
+    interface: UserInterface | None,
+    name_of: Callable[[T], str],
+) -> list[T]:
+    """Return the tools a request may be offered (ruling D1: role-derived visibility).
+
+    The rule: a request's tool list contains the terminal tools ``say`` and
+    ``ack_silently`` if and only if the request carries a user interface.
+    Interface-less turns — delegated sub-agents at any depth and the emergency
+    summarizer — are offered neither tool and must end with a non-empty
+    plain-text report. This is a likelihood reduction, not a guarantee: the
+    terminal interception in the agent loops is by tool-name membership and
+    never consults the offered list, so a hallucinated terminal call still ends
+    the turn. The structural closure of that residual is the loud-empty
+    delegation rule in ``DelegateTool``.
+
+    The signal is **interface presence**, not an explicit role parameter. That
+    is a deliberate coupling: at the three loop entry points (master
+    ``chibi/services/user.py``, sub-agent
+    ``chibi/services/providers/tools/utils.py``, summarizer
+    ``chibi/services/user.py``) "``interface is None``" holds exactly when the
+    request has no user channel, so no role plumbing through five loops is
+    needed. If a future actor class breaks that equivalence (an interface-less
+    turn that may legitimately speak to the user), this helper and the tests
+    pinning the assumption are the places to revisit first.
+
+    Args:
+        tools: The candidate tool list in the caller's native format.
+        interface: The user interface carried by the request, or None.
+        name_of: Extracts the tool name from one list entry (the formats
+            differ per adapter: OpenAI-style dicts, Anthropic ``ToolParam``,
+            Google ``Tool``).
+
+    Returns:
+        The offered tool list: unchanged when the request carries a user
+        interface, otherwise the list minus the terminal tools.
+    """
+    if interface is not None:
+        return list(tools)
+    return [tool for tool in tools if name_of(tool) not in TERMINAL_TOOL_NAMES]
+
+
+def offered_tool_definitions(
+    definitions: Sequence[ChatCompletionToolParam],
+    interface: UserInterface | None,
+) -> list[ChatCompletionToolParam]:
+    """``offered_tools`` for OpenAI-format tool definitions (name under function).
+
+    Args:
+        definitions: Tool definitions in the OpenAI chat-completions format.
+        interface: The user interface carried by the request, or None.
+
+    Returns:
+        The offered tool list per the D1 rule.
+    """
+    return offered_tools(definitions, interface, name_of=lambda definition: definition["function"]["name"])

@@ -7,7 +7,7 @@ receives a tool result — a result is the fuel of the infinite
 """
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
@@ -27,6 +27,7 @@ from openai.types.responses import ResponseFunctionToolCall
 
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
 from chibi.models import Message, User
+from chibi.services.interface import UserInterface
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI
@@ -34,6 +35,8 @@ from chibi.services.providers.openai import OpenAI as ChibiOpenAI
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     fold_terminal_calls_into_thoughts,
+    offered_tool_definitions,
+    offered_tools,
     partition_terminal_calls,
     plan_terminal_turn,
 )
@@ -772,3 +775,160 @@ class TestVisibilityMetadataOnTheWire:
         legacy = {"role": "assistant", "content": "old message", "id": 1}
         message = Message(**legacy)
         assert message.visibility == "visible"
+
+
+class TestRoleScopedToolOffers:
+    """Ruling D1: the terminal tools are offered iff the request carries a user interface.
+
+    The offer is filtered at the request seam (the completion kwargs built by
+    the loops), driven through the single helper
+    ``terminal_calls.offered_tools``. Interface-less turns — delegated
+    sub-agents at any depth and the emergency summarizer — are offered neither
+    ``say`` nor ``ack_silently``.
+    """
+
+    interface_stub: Any = SimpleNamespace(thread_id=1, streaming_enabled=False, delta_emitted=False)
+
+    @staticmethod
+    def _offered_names(create_mock: AsyncMock) -> set[str]:
+        tools = create_mock.await_args.kwargs["tools"]  # type: ignore[union-attr]
+        return {definition["function"]["name"] for definition in tools}
+
+    @pytest.mark.asyncio
+    async def test_interface_less_request_is_offered_neither_terminal_tool(self) -> None:
+        """The sub-agent shape (interface=None): no say/ack_silently in the offered list."""
+        provider = MoonshotAI(token=TEST_TOKEN)
+        create_mock = AsyncMock(return_value=_completion_with_answer("plain report"))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+        ):
+            await provider._get_chat_completion_response(
+                messages=[Message(role="user", content="Hi").to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                conversation_messages=[Message(role="user", content="Hi")],
+            )
+
+        offered = self._offered_names(create_mock)
+        assert "say" not in offered
+        assert "ack_silently" not in offered
+        # Everything else is unaffected: the interface-less list is the global
+        # list minus exactly the two terminal tools.
+        global_names = {definition["function"]["name"] for definition in RegisteredChibiTools.get_tool_definitions()}
+        assert offered == global_names - {"say", "ack_silently"}
+        assert "delegate_task" in offered
+
+    @pytest.mark.asyncio
+    async def test_interface_request_still_receives_both_terminal_tools(self) -> None:
+        """Control: a user-carrying request keeps the approved contract unchanged."""
+        provider = MoonshotAI(token=TEST_TOKEN)
+        create_mock = AsyncMock(return_value=_completion_with_answer("answer"))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+        ):
+            await provider._get_chat_completion_response(
+                messages=[Message(role="user", content="Hi").to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=1,
+                system_prompt="",
+                interface=cast("UserInterface", self.interface_stub),
+                conversation_messages=[Message(role="user", content="Hi")],
+            )
+
+        offered = self._offered_names(create_mock)
+        assert {"say", "ack_silently"} <= offered
+
+    @pytest.mark.asyncio
+    async def test_hallucinated_ack_still_ends_the_turn_empty_despite_the_filter(self) -> None:
+        """The filter is a likelihood reduction, not a guarantee.
+
+        Terminal interception is by tool-name membership and never consults the
+        offered list: an interface-less request that was NOT offered
+        ``ack_silently`` but emits it anyway still ends the turn with an empty
+        answer. This empty answer is exactly what the loud-empty delegation
+        rule in ``DelegateTool`` converts into a loud error for the parent.
+        """
+        provider = MoonshotAI(token=TEST_TOKEN)
+        create_mock = AsyncMock(
+            return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="")
+        )
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+
+        registry_patch, _ = _forbid_terminal_dispatch()
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            registry_patch,
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content="Hi").to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                system_prompt="",
+                conversation_messages=[Message(role="user", content="Hi")],
+            )
+
+        # The tool was not offered...
+        assert "ack_silently" not in self._offered_names(create_mock)
+        # ...and the hallucinated call still ended the turn with an empty answer.
+        assert response.answer == ""
+        assert create_mock.await_count == 1
+
+
+class TestOfferedToolsHelper:
+    """Unit coverage for the single filter helper behind the D1 rule."""
+
+    def test_interface_less_list_is_the_global_list_minus_the_terminal_tools(self) -> None:
+        definitions = RegisteredChibiTools.get_tool_definitions()
+        offered = offered_tool_definitions(definitions=definitions, interface=None)
+        names = {definition["function"]["name"] for definition in offered}
+        assert names == {definition["function"]["name"] for definition in definitions} - {"say", "ack_silently"}
+
+    def test_interface_presence_keeps_every_tool(self) -> None:
+        definitions = RegisteredChibiTools.get_tool_definitions()
+        offered = offered_tool_definitions(definitions=definitions, interface=cast("UserInterface", SimpleNamespace()))
+        assert len(offered) == len(definitions)
+
+    def test_name_extractor_supports_non_openai_tool_shapes(self) -> None:
+        anthropic_like = [{"name": "say"}, {"name": "get_current_datetime"}]
+        assert [tool["name"] for tool in offered_tools(anthropic_like, None, name_of=lambda tool: tool["name"])] == [
+            "get_current_datetime"
+        ]
+
+        class _GeminiTool:
+            def __init__(self, name: str) -> None:
+                self.function_declarations = [SimpleNamespace(name=name)]
+
+        gemini_like = [_GeminiTool("say"), _GeminiTool("ack_silently"), _GeminiTool("get_current_datetime")]
+        assert [
+            tool.function_declarations[0].name
+            for tool in offered_tools(gemini_like, None, name_of=lambda tool: tool.function_declarations[0].name)
+        ] == ["get_current_datetime"]
+
+    def test_the_signal_is_interface_presence_not_a_role(self) -> None:
+        """Pins the D1 signal assumption: any non-None interface re-enables the tools.
+
+        The ruling keys on ``interface is None`` because at the three loop
+        entry points that condition holds exactly when the request has no user
+        channel. If a future actor class breaks that equivalence, this test
+        and the helper's docstring are the places that must be revisited.
+        """
+        definitions = RegisteredChibiTools.get_tool_definitions()
+        bare_object_interface = object()
+        offered = offered_tool_definitions(
+            definitions=definitions, interface=cast("UserInterface", bare_object_interface)
+        )
+        assert len(offered) == len(definitions)

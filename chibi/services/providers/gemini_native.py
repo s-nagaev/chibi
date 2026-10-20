@@ -57,6 +57,7 @@ from chibi.services.providers.streaming import (
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     fold_terminal_calls_into_thoughts,
+    offered_tools,
     partition_terminal_calls,
     plan_terminal_turn,
 )
@@ -432,7 +433,13 @@ class Gemini(RestApiFriendlyProvider):
             max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
-            tools=self.tools_list if "gemini" in model_name else None,
+            tools=offered_tools(
+                tools=self.tools_list,
+                interface=interface,
+                name_of=lambda tool: tool.function_declarations[0].name,
+            )
+            if "gemini" in model_name
+            else None,
         )
 
         response: GenerateContentResponse = await self._generate_content(

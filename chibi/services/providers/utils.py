@@ -165,7 +165,13 @@ async def prepare_system_prompt(
     if application_settings.is_chroma_configured:
         prompt["system_prompt"] += PERSISTENT_MEMORY_PROMPT
 
-    if _scheduler_hint_applicable():
+    # The hint instructs the model to "end the turn with ack_silently()" —
+    # meaningless without a user channel. It is gated on the same interface
+    # precondition as the terminal-tool offer filter
+    # (terminal_calls.offered_tools, ruling D1): interface-less turns
+    # (sub-agents, the summarizer) get neither the tools nor the instruction,
+    # so there is one rule rather than two.
+    if interface is not None and _scheduler_hint_applicable():
         prompt["system_prompt"] += SCHEDULER_HINT_PROMPT
 
     if gpt_settings.filesystem_access:

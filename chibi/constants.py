@@ -208,8 +208,9 @@ powerful mechanism for handling complex, multi-step work while keeping your cont
 - Simple file read/write operation with small file
 - Simple non-search terminal command whose output is not expected to be large.
 - Calling tools that interact with the user independently (for example, generating and sending an image).
-Reason: sub-agents do not have access to the user interaction interface and will not be able to say or send
-anything to the user
+Reason: sub-agents have no user channel. The say/ack_silently delivery tools are not offered to a request
+without a user interface, and nothing a sub-agent writes outside its final report reaches the user. The
+sub-agent's report is returned to you as the delegate_task result; YOU deliver it to the user via say().
 
 **How to delegate effectively:**
 1. Check available models and providers.

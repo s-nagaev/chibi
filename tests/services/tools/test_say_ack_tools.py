@@ -1,6 +1,7 @@
 """Tests for the say()/ack_silently() terminal tools and the migrated prompt contract."""
 
 from typing import Any, cast
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -11,9 +12,13 @@ import pytest
 # exactly what happens when this module is collected standalone
 # (`pytest tests/services/tools/test_say_ack_tools.py` with no earlier imports).
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
-from chibi.constants import SCHEDULER_HINT_PROMPT, get_llm_prompt
+from chibi.constants import DELEGATION_RULES, SCHEDULER_HINT_PROMPT, get_llm_prompt
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.providers.terminal_calls import TERMINAL_TOOL_NAMES
 from chibi.services.providers.tools import RegisteredChibiTools
-from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
+from chibi.services.providers.tools.common import AckSilentlyTool, DelegateTool, SayTool
+from chibi.services.providers.tools.exceptions import ToolException
+from chibi.services.providers.tools.schemas import ToolResponseSchema
 
 
 class TestTerminalToolRegistration:
@@ -106,3 +111,120 @@ class TestMigratedPromptContract:
         assert "ack_silently()" in SCHEDULER_HINT_PROMPT
         assert "<chibi>ACK</chibi>" not in SCHEDULER_HINT_PROMPT
         assert "else ACK" not in SCHEDULER_HINT_PROMPT
+
+
+async def _fake_models_available(user_id: int, **kwargs: Any) -> list[ModelChangeSchema]:
+    return [ModelChangeSchema(provider="prov", name="gpt-x", display_name="GPT-X", image_generation=False)]
+
+
+def _subagent_response(answer: str) -> ChatResponseSchema:
+    return ChatResponseSchema(answer=answer, provider="prov", model="gpt-x", usage=None)
+
+
+class TestLoudEmptyDelegationContract:
+    """An empty sub-agent answer is a loud error tool result to the parent, never success.
+
+    Structural context (ruling D1): terminal interception in the loops is by
+    tool-name membership and never consults the offered list, so a
+    hallucinated ``ack_silently()`` from an interface-less sub-agent still ends
+    its turn with an empty answer. ``DelegateTool`` is the sole caller of
+    ``get_sub_agent_response`` and the background resumption path funnels
+    through it, so this single rule closes the swallow for both delegation
+    modes. Raising ``ToolException`` here is what turns the empty answer into
+    an error tool result (``ChibiTool._get_tool_call_result`` catches it into
+    ``ToolResponseSchema(status="error")``) — no tool result is ever created
+    for the terminal call itself.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("empty_answer", ["", "   \n\t "])
+    async def test_empty_sub_agent_answer_raises_a_loud_error(self, empty_answer: str) -> None:
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                new=AsyncMock(return_value=_subagent_response(empty_answer)),
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", _fake_models_available),
+        ):
+            with pytest.raises(ToolException, match="EMPTY report"):
+                await DelegateTool.function(
+                    prompt="do something",
+                    model_name="gpt-x",
+                    provider_name="prov",
+                    user_id=1,
+                    caller_model="caller-model",
+                    caller_provider="caller-provider",
+                    caller_storage_id=1,
+                    caller_thread_id=42,
+                )
+
+    @pytest.mark.asyncio
+    async def test_normal_report_still_returns_the_response_dict(self) -> None:
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                new=AsyncMock(return_value=_subagent_response("the actual report")),
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", _fake_models_available),
+        ):
+            result = await DelegateTool.function(
+                prompt="do something",
+                model_name="gpt-x",
+                provider_name="prov",
+                user_id=1,
+                caller_model="caller-model",
+                caller_provider="caller-provider",
+                caller_storage_id=1,
+                caller_thread_id=42,
+            )
+
+        assert result == {"response": "the actual report"}
+
+    @pytest.mark.asyncio
+    async def test_empty_report_reaches_the_parent_as_an_error_tool_result(self) -> None:
+        """The parent-visible shape: dispatch converts the raise into status='error'."""
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                new=AsyncMock(return_value=_subagent_response("")),
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", _fake_models_available),
+        ):
+            result: ToolResponseSchema = await DelegateTool.tool(
+                prompt="do something",
+                model_name="gpt-x",
+                provider_name="prov",
+                user_id=1,
+                caller_model="caller-model",
+                caller_provider="caller-provider",
+                caller_storage_id=1,
+                caller_thread_id=0,
+            )
+
+        assert result.status == "error"
+        assert "EMPTY report" in str(result.result)
+
+
+class TestDelegationRulesPromptContract:
+    """DELEGATION_RULES must describe the post-ruling mechanism, not the old guard."""
+
+    def test_stale_silence_claim_is_gone(self) -> None:
+        """The old claim was true via the delivery guard the new say() bypassed."""
+        assert "will not be able to say or send anything to the user" not in DELEGATION_RULES
+
+    def test_rules_describe_the_actual_mechanism(self) -> None:
+        assert "no user channel" in DELEGATION_RULES
+        assert "say/ack_silently" in DELEGATION_RULES
+        assert "delegate_task result" in DELEGATION_RULES
+        assert "via say()" in DELEGATION_RULES
+
+    def test_no_prompt_constant_tells_an_interface_less_actor_to_be_silent_via_a_terminal_tool(self) -> None:
+        """The scheduler hint is the only silence instruction left; it is interface-gated.
+
+        The hint text itself is untouched (approved in 4a); the gate in
+        ``prepare_system_prompt`` (interface is not None) is what keeps it away
+        from interface-less actors, covered behaviourally in
+        ``tests/services/providers/test_utils.py``.
+        """
+        assert "ack_silently()" in SCHEDULER_HINT_PROMPT
+        assert TERMINAL_TOOL_NAMES == {"say", "ack_silently"}

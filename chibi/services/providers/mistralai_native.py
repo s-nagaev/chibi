@@ -44,6 +44,7 @@ from chibi.services.providers.streaming import (
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     fold_terminal_calls_into_thoughts,
+    offered_tool_definitions,
     partition_terminal_calls,
     plan_terminal_turn,
 )
@@ -168,7 +169,7 @@ class MistralAI(RestApiFriendlyProvider):
                     messages=messages,
                     max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
-                    tools=self.tools_list,  # type: ignore[arg-type]
+                    tools=offered_tool_definitions(definitions=self.tools_list, interface=interface),  # type: ignore[arg-type]
                     tool_choice="auto",
                     http_headers={"Cache-Control": "max-age=86400"},
                 )
@@ -228,7 +229,7 @@ class MistralAI(RestApiFriendlyProvider):
                 messages=messages,
                 max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                 temperature=self.temperature,
-                tools=cast(list[Tool], self.tools_list),
+                tools=cast(list[Tool], offered_tool_definitions(definitions=self.tools_list, interface=interface)),
                 tool_choice="auto",
                 http_headers={"Cache-Control": "max-age=86400"},
             ) as stream,

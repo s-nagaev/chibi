@@ -316,6 +316,44 @@ async def test_prepare_system_prompt_scheduler_hint_follows_tool_gate(
     assert hint_in_prompt is expected
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scheduler_tool_enabled", "client"),
+    [
+        (True, "telegram"),
+        (True, "vscode"),
+        (False, "telegram"),
+    ],
+)
+async def test_prepare_system_prompt_scheduler_hint_never_reaches_interface_less_requests(
+    scheduler_tool_enabled: bool, client: str
+) -> None:
+    """An interface-less request gets no scheduler hint, even when the gate would allow it.
+
+    The hint's "end the turn with ack_silently()" instruction is meaningless
+    without a user channel (ruling D1): delegated sub-agents and the emergency
+    summarizer enter the loops with ``interface=None``. The gate rides on the
+    same interface precondition as the terminal-tool offer filter
+    (``terminal_calls.offered_tools``), so there is one rule rather than two.
+    """
+    _reset_usage_cache()
+    user = _make_user()
+
+    with (
+        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+        patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+        patch(
+            "chibi.services.providers.tools.scheduler.application_settings",
+            _scheduler_tool_settings(scheduler_tool_enabled, client),
+        ),
+    ):
+        prompt_json = await prepare_system_prompt("base", 1, None, thread_id=42)
+
+    prompt = json.loads(prompt_json)
+    assert SCHEDULER_HINT_PROMPT not in prompt["system_prompt"]
+    assert "ack_silently" not in prompt["system_prompt"]
+
+
 def test_scheduler_hint_prompt_is_compact() -> None:
     """The hint must stay a compact block (at most 4 non-empty lines)."""
     content_lines = [line for line in SCHEDULER_HINT_PROMPT.strip().splitlines() if line.strip()]

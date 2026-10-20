@@ -31,6 +31,7 @@ from chibi.services.providers.streaming import (
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
     fold_terminal_calls_into_thoughts,
+    offered_tool_definitions,
     partition_terminal_calls,
     plan_terminal_turn,
 )
@@ -383,7 +384,12 @@ class OpenAI(OpenAIFriendlyProvider):
             )
 
         reasoning_effort = self.get_reasoning_effort_value(model_name=model)
-        tools = [self.adapt_tool_for_responses(t) for t in RegisteredChibiTools.get_tool_definitions()]
+        tools = [
+            self.adapt_tool_for_responses(t)
+            for t in offered_tool_definitions(
+                definitions=RegisteredChibiTools.get_tool_definitions(), interface=interface
+            )
+        ]
 
         request_kwargs: dict[str, Any] = {
             "model": model,
