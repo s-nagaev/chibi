@@ -810,9 +810,14 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
+    # SDK errors reaching this boundary are already converted into typed
+    # GptException subclasses (see ``__getattribute__``), so only the
+    # transport-level representatives are worth a retry; application-level
+    # outcomes (the silent-turn error among them) are final.
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
+        retry=retry_if_exception_type((ConnectionError, ServiceConnectionError, ServiceRateLimitError)),
         reraise=True,
     )
     async def get_chat_response(
