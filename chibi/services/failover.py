@@ -80,6 +80,7 @@ from chibi.exceptions import (
     ServiceConnectionError,
     ServiceRateLimitError,
     ServiceResponseError,
+    SilentTurnError,
 )
 from chibi.services.mistral_errors import MistralErrorKind, classify_mistral_exception
 from chibi.storage.database import _db_provider
@@ -144,6 +145,11 @@ _NOT_FAILOVER_EXCEPTIONS: tuple[type[BaseException], ...] = (
     NoApiKeyProvidedError,
     NoProviderSelectedError,
     NoModelSelectedError,
+    # Turn-bookkeeping, not a provider fault: the loud failure of the
+    # turn-end validator says the conversation produced no deliverable
+    # outcome. Failover would re-ask an innocent provider (and cool it down
+    # for 20 minutes) for a problem that lives in the turn, not in the API.
+    SilentTurnError,
 )
 
 
@@ -234,7 +240,8 @@ def classify_exception(exception: BaseException) -> TriggerKind | None:
     Returns:
         One of ``rate_limit`` / ``server_error`` / ``timeout`` / ``network``,
         or None when the exception must NOT trigger failover (context
-        overflow, auth/config problems, or unrelated errors).
+        overflow, auth/config problems, turn-bookkeeping failures such as
+        ``SilentTurnError``, or unrelated errors).
     """
     if isinstance(exception, _NOT_FAILOVER_EXCEPTIONS):
         return None

@@ -76,6 +76,34 @@ def _tool_response_wake(tool_name: str = "delegate_task") -> str:
     )
 
 
+def _user_message_wake() -> str:
+    """The JSON wake prompt a plain user message produces (user.py)."""
+    return json.dumps(
+        {
+            "type": "user message",
+            "user": {"first_name": "Tester"},
+            "prompt": "do the thing",
+            "datetime_now": "2026-10-20 12:00:00 UTC+0000",
+        }
+    )
+
+
+def _conversation_with_delivered_answer(wake: str) -> list[Message]:
+    """A user turn that already delivered a visible answer, then the wake.
+
+    Under the answer-owed admission rule a silent ack is legitimate when the
+    user already has the substance of the user turn, so the ack fixtures seed
+    a delivered visible answer before the tool-response wake. A bare
+    tool-response wake with nothing delivered and nothing pending is exactly
+    the over-eager ack the validator must refuse.
+    """
+    return [
+        Message(role="user", content=_user_message_wake()),
+        Message(role="assistant", content="The substantive answer", visibility="visible"),
+        Message(role="user", content=wake),
+    ]
+
+
 def _say_call(text: str = "Hello there") -> ToolCallSchema:
     return ToolCallSchema(tool_name="say", args={"text": text})
 
@@ -246,15 +274,16 @@ class TestSharedOpenAICompatibleLoop:
 
     @pytest.mark.asyncio
     async def test_ack_call_ends_the_turn_with_a_hidden_message(self) -> None:
-        # Legitimate ack: an interface turn absorbing a background tool
-        # result. The validator admits it and the 4b normalization holds.
+        # Legitimate ack: an interface turn absorbing a trailing background
+        # tool result after the user already got the answer. The validator
+        # admits it and the 4b normalization holds.
         provider = MoonshotAI(token=TEST_TOKEN)
         create_mock = AsyncMock(
             return_value=_completion_with_tool_calls([_tool_call("ack_silently", "{}")], content="waiting for results")
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -275,7 +304,7 @@ class TestSharedOpenAICompatibleLoop:
 
         assert response.answer == ""
         assert create_mock.await_count == 1
-        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        persisted = [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"]
         assert len(persisted) == 1
         assert persisted[0].content == "waiting for results"
         assert persisted[0].visibility == "hidden"
@@ -291,7 +320,7 @@ class TestSharedOpenAICompatibleLoop:
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -311,7 +340,7 @@ class TestSharedOpenAICompatibleLoop:
             )
 
         assert response.answer == ""
-        assert [msg for msg in conversation if msg.role == "assistant"] == []
+        assert [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"] == []
 
     @pytest.mark.asyncio
     async def test_get_chat_response_returns_the_normalized_messages_with_visibility(self) -> None:
@@ -356,7 +385,7 @@ class TestSharedOpenAICompatibleLoop:
         )
         mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -377,7 +406,7 @@ class TestSharedOpenAICompatibleLoop:
 
         assert create_mock.await_count == 1
         # (b) A normalized message is persisted, with its visibility respected.
-        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        persisted = [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"]
         assert len(persisted) == 1
         assert persisted[0].content == "thoughts"
         assert persisted[0].visibility == "hidden"
@@ -490,7 +519,7 @@ class TestOpenAIResponsesLoop:
         mock_client: Any = SimpleNamespace(responses=SimpleNamespace(create=create_mock))
         provider.client = mock_client
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -508,7 +537,7 @@ class TestOpenAIResponsesLoop:
             )
 
         assert response.answer == ""
-        assert [msg for msg in conversation if msg.role == "assistant"] == []
+        assert [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"] == []
 
     @pytest.mark.asyncio
     async def test_get_chat_response_persists_the_terminal_message(self) -> None:
@@ -609,13 +638,14 @@ class TestAnthropicLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_with_thoughts_persists_a_hidden_message(self) -> None:
-        # Legitimate ack: interface turn absorbing a background tool result.
+        # Legitimate ack: interface turn absorbing a trailing background tool
+        # result after the user already got the answer.
         from chibi.services.providers.anthropic import Anthropic
 
         provider = Anthropic(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_anthropic_message("absorbing the tool result", [("ack_silently", {})]))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -635,7 +665,7 @@ class TestAnthropicLoop:
             )
 
         assert response.answer == ""
-        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        persisted = [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"]
         assert len(persisted) == 1
         assert persisted[0].content == "absorbing the tool result"
         assert persisted[0].visibility == "hidden"
@@ -649,7 +679,7 @@ class TestAnthropicLoop:
         provider = Anthropic(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_anthropic_message(None, [("ack_silently", {})]))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -669,7 +699,7 @@ class TestAnthropicLoop:
             )
 
         assert response.answer == ""
-        assert [msg for msg in conversation if msg.role == "assistant"] == []
+        assert [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"] == []
 
 
 def _gemini_response(text: str | None, function_calls: list[tuple[str, dict[str, Any]]]) -> GenerateContentResponse:
@@ -717,11 +747,12 @@ class TestGeminiLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_persists_a_hidden_message_with_the_cot(self) -> None:
-        # Legitimate ack: interface turn absorbing a background tool result.
+        # Legitimate ack: interface turn absorbing a trailing background tool
+        # result after the user already got the answer.
         provider = Gemini(token=TEST_TOKEN)
         generate_mock = AsyncMock(return_value=_gemini_response("waiting for more results", [("ack_silently", {})]))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -741,7 +772,7 @@ class TestGeminiLoop:
             )
 
         assert response.answer == ""
-        persisted = [msg for msg in conversation if msg.role == "assistant"]
+        persisted = [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"]
         assert len(persisted) == 1
         assert persisted[0].content == "waiting for more results"
         assert persisted[0].visibility == "hidden"
@@ -792,8 +823,9 @@ class TestMistralLoop:
 
     @pytest.mark.asyncio
     async def test_ack_turn_without_thoughts_omits_the_assistant_turn(self) -> None:
-        # Legitimate ack (interface turn absorbing a background result) with
-        # nothing to persist: design R2 — the assistant turn is omitted.
+        # Legitimate ack (interface turn absorbing a trailing background
+        # result after the user already got the answer) with nothing to
+        # persist: design R2 — the assistant turn is omitted.
         provider = MistralAI(token=TEST_TOKEN)
         message = SimpleNamespace(
             content="",
@@ -802,7 +834,7 @@ class TestMistralLoop:
         usage = SimpleNamespace(completion_tokens=1, prompt_tokens=1, total_tokens=2)
         generate_mock = AsyncMock(return_value=SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage))
         wake = _tool_response_wake()
-        conversation: list[Message] = [Message(role="user", content=wake)]
+        conversation: list[Message] = _conversation_with_delivered_answer(wake)
 
         registry_patch, _ = _forbid_terminal_dispatch()
         with (
@@ -822,7 +854,7 @@ class TestMistralLoop:
             )
 
         assert response.answer == ""
-        assert [msg for msg in conversation if msg.role == "assistant"] == []
+        assert [msg for msg in conversation if msg.role == "assistant" and msg.visibility == "hidden"] == []
 
 
 class TestVisibilityMetadataOnTheWire:

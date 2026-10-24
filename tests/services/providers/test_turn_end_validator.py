@@ -6,10 +6,13 @@ only an optimisation. At every turn-end seam it judges the OUTCOME (not the
 offer): (a) an interface turn with plain text and no terminal call degrades to
 visible (behaviour preserved); (b) a turn that ended with nothing delivered
 costs one bounded repair round-trip and then a loud failure; (c) an
-ack_silently() with nothing pending is a misuse; and an interface-less turn
-may end only with a non-empty text report, wherever its emptiness came from —
-including a hallucinated terminal call, because terminal interception is
-offer-blind.
+ack_silently() is admissible exactly when an answer is no longer owed for the
+current user turn — the user already has the substance, more background work
+is still running, or the wake was a scheduled trigger — and refused when the
+tool response it follows carries the only answer of the turn or when the turn
+never delivered anything; and an interface-less turn may end only with a
+non-empty text report, wherever its emptiness came from — including a
+hallucinated terminal call, because terminal interception is offer-blind.
 """
 
 import json
@@ -32,7 +35,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
 
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
 from chibi.exceptions import SilentTurnError
-from chibi.models import Message, User
+from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.services.interface import UserInterface
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.mistralai_native import MistralAI
@@ -46,6 +49,7 @@ from chibi.services.providers.terminal_calls import (
     honored_terminal_name,
     log_turn_misuse,
     repair_nudge_text,
+    user_turn_answer_delivered,
 )
 from chibi.services.providers.tools.schemas import ToolCallSchema
 
@@ -139,15 +143,73 @@ class TestEvaluateTurnEnd:
         assert verdict.outcome == "misuse"
         assert verdict.misuse == "overeager_ack"
 
-    def test_tool_response_wake_makes_the_ack_legitimate(self) -> None:
+    def test_tool_response_wake_carrying_the_only_answer_is_refused(self) -> None:
+        # The tool response holds the only answer of the turn and nothing was
+        # delivered: the ack would swallow it, so it is over-eager.
         verdict = evaluate_turn_end(
             interface=_interface(),
             answer="",
             ended_by_terminal_call=True,
             terminal_tool_name="ack_silently",
-            conversation=_conversation(_wake("tool response")),
+            conversation=_conversation(_wake("user message"), _wake("tool response")),
+        )
+        assert verdict.outcome == "misuse"
+        assert verdict.misuse == "overeager_ack"
+
+    def test_tool_response_after_a_delivered_answer_makes_the_ack_legitimate(self) -> None:
+        # The user already has the substance of the user turn: a trailing
+        # background event may be absorbed silently.
+        conversation = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="The full answer", visibility="visible"),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        verdict = evaluate_turn_end(
+            interface=_interface(),
+            answer="",
+            ended_by_terminal_call=True,
+            terminal_tool_name="ack_silently",
+            conversation=conversation,
         )
         assert verdict.outcome == "ok"
+        assert verdict.misuse is None
+
+    def test_tool_response_after_a_hidden_ack_only_is_still_refused(self) -> None:
+        # A hidden ack (waiting) is not a delivery: when the awaited result
+        # arrives it must be said, not acked into silence.
+        conversation = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="waiting", visibility="hidden"),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        verdict = evaluate_turn_end(
+            interface=_interface(),
+            answer="",
+            ended_by_terminal_call=True,
+            terminal_tool_name="ack_silently",
+            conversation=conversation,
+        )
+        assert verdict.outcome == "misuse"
+        assert verdict.misuse == "overeager_ack"
+
+    def test_delivered_answer_from_an_earlier_user_turn_does_not_license_silence(self) -> None:
+        # The visible answer predates the current user turn's boundary wake:
+        # the current turn has delivered nothing, so the ack is refused.
+        conversation = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="The previous answer", visibility="visible"),
+            Message(role="user", content=_wake("scheduled_trigger")),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        verdict = evaluate_turn_end(
+            interface=_interface(),
+            answer="",
+            ended_by_terminal_call=True,
+            terminal_tool_name="ack_silently",
+            conversation=conversation,
+        )
+        assert verdict.outcome == "misuse"
+        assert verdict.misuse == "overeager_ack"
 
     def test_scheduler_wake_makes_the_ack_legitimate(self) -> None:
         verdict = evaluate_turn_end(
@@ -225,6 +287,39 @@ class TestWakeAndPendingDetection:
 
     def test_plain_text_history_is_never_pending(self) -> None:
         assert background_work_pending(_conversation("Hi", "there")) is False
+
+    def test_user_turn_answer_delivered_sees_only_the_current_user_turn(self) -> None:
+        delivered = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="answer", visibility="visible"),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        assert user_turn_answer_delivered(delivered) is True
+
+        boundary = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="old answer", visibility="visible"),
+            Message(role="user", content=_wake("user message")),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        assert user_turn_answer_delivered(boundary) is False
+        assert user_turn_answer_delivered(_conversation(_wake("tool response"))) is False
+
+    def test_user_turn_answer_delivered_ignores_carriers_and_hidden_messages(self) -> None:
+        conversation = [
+            Message(role="user", content=_wake("user message")),
+            Message(
+                role="assistant",
+                content="No thoughts",
+                visibility="visible",
+                tool_calls=[
+                    ToolSchema(id="t1", type="function", function=FunctionSchema(name="delegate_task", arguments="{}"))
+                ],
+            ),
+            Message(role="assistant", content="waiting", visibility="hidden"),
+            Message(role="user", content=_wake("tool response")),
+        ]
+        assert user_turn_answer_delivered(conversation) is False
 
 
 class TestHonoredTerminalNameAndNudge:
@@ -430,6 +525,49 @@ class TestTurnEndValidatorSharedLoop:
         assert response.answer == "Here you go"
         assert create_mock.await_count == 2
         # No tool result may exist for either terminal call.
+        assert not [msg for msg in conversation if msg.role == "tool"]
+
+    @pytest.mark.asyncio
+    async def test_ack_after_a_bare_tool_response_wake_costs_one_repair_then_say_recovers(self) -> None:
+        # The tool response carries the only answer of the turn (the
+        # delegated result the user waits for): the ack would swallow it, so
+        # the validator refuses it and the repair round-trip forces the say.
+        provider = MoonshotAI(token=TEST_TOKEN)
+        create_mock = AsyncMock(
+            side_effect=[
+                _completion_with_tool_calls([_tool_call("ack_silently", "{}")]),
+                _completion_with_tool_calls([_tool_call("say", '{"text": "Delegated result: 42"}')]),
+            ]
+        )
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_mock)))
+        conversation: list[Message] = [
+            Message(role="user", content=_wake("user message")),
+            Message(role="assistant", content="waiting", visibility="hidden"),
+            Message(role="user", content=_wake("tool response")),
+        ]
+
+        with (
+            patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="sp")),
+            patch.object(
+                MoonshotAI,
+                "call_functions",
+                AsyncMock(side_effect=AssertionError("a terminal call reached the dispatcher")),
+            ),
+        ):
+            response, _wire = await provider._get_chat_completion_response(
+                messages=[Message(role="user", content=_wake("tool response")).to_openai()],
+                model=TEST_MODEL,
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=1,
+                system_prompt="",
+                interface=_interface(),
+                conversation_messages=conversation,
+            )
+
+        assert response.answer == "Delegated result: 42"
+        assert create_mock.await_count == 2
         assert not [msg for msg in conversation if msg.role == "tool"]
 
     @pytest.mark.asyncio

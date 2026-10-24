@@ -249,10 +249,13 @@ class AckSilentlyTool(ChibiTool):
             description=(
                 "Silently absorb a background event (a tool or scheduler result) and end the "
                 "turn with NOTHING delivered to the user. This is a service response: the user "
-                "NEVER sees it, and it is not a quiet version of say(). Use it only when you "
-                "have nothing to tell the user and work continues; if the user is owed an "
-                "answer, call say() instead. Calling ack_silently() ENDS your turn — it must "
-                "be the last call of the turn."
+                "NEVER sees it, and it is not a quiet version of say(). Admission rule: "
+                "ack_silently() is accepted only when an answer is no longer owed for this user "
+                "turn — the user already has the substance (a full answer was delivered) or more "
+                "background work is still running. It is REFUSED when the tool response you are "
+                "absorbing carries the only answer of the turn, or when nothing was ever "
+                "delivered: say() the answer instead. Calling ack_silently() ENDS your turn — it "
+                "must be the last call of the turn."
             ),
             parameters={
                 "type": "object",

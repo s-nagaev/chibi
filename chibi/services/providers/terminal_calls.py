@@ -224,6 +224,11 @@ WAKE_TYPES = frozenset({WAKE_USER_MESSAGE, WAKE_TOOL_RESPONSE, WAKE_SCHEDULER_TR
 REPAIR_NUDGE_TYPE = "repair_nudge"
 _BACKGROUND_DISPATCH_STATUS = "tool is running in background"
 
+# Wake prompts that BEGIN a user turn: everything after one of them (and
+# before the next one) belongs to the same user turn. Tool-response wakes and
+# repair nudges are events inside a user turn, not turn boundaries.
+_TURN_BOUNDARY_WAKE_TYPES = frozenset({WAKE_USER_MESSAGE, WAKE_SCHEDULER_TRIGGER, WAKE_CAPTION})
+
 TurnEndOutcome = Literal["ok", "degraded_visible", "misuse"]
 TurnEndMisuse = Literal["empty_turn", "hallucinated_ack", "overeager_ack", "no_terminal_call_text"]
 
@@ -321,6 +326,42 @@ def background_work_pending(conversation: Sequence[Message]) -> bool:
     return bool(pending)
 
 
+def user_turn_answer_delivered(conversation: Sequence[Message]) -> bool:
+    """Check whether a visible answer was already delivered in the current user turn.
+
+    The scan walks the conversation backwards: a delivered answer is a visible
+    assistant message with real content and no tool calls (a tool-call carrier
+    carries only private thoughts; a hidden message is a silent ack) found
+    before the wake prompt that started the current user turn. Tool-response
+    wakes and repair nudges are events inside the user turn and are scanned
+    past; a plain user message, a file caption or a scheduled trigger begins a
+    new user turn and stops the scan. Unknown shapes resolve permissively to
+    "not delivered", because a false "delivered" would admit a silence that
+    swallows the only answer of the turn.
+
+    Args:
+        conversation: The normalized conversation messages of the turn.
+
+    Returns:
+        True when the user already has a delivered answer for the current
+        user turn.
+    """
+    for message in reversed(conversation):
+        if (
+            message.role == "assistant"
+            and message.visibility == "visible"
+            and bool(message.content.strip())
+            and not message.tool_calls
+        ):
+            return True
+        if message.role != "user" or message.tool_call_id:
+            continue
+        payload = _json_payload(message.content)
+        if payload is None or payload.get("type") in _TURN_BOUNDARY_WAKE_TYPES:
+            return False
+    return False
+
+
 def evaluate_turn_end(
     *,
     interface: UserInterface | None,
@@ -336,7 +377,13 @@ def evaluate_turn_end(
         non-empty text degrades to visible (today's behaviour, preserved);
     (b) a turn with no terminal call and nothing delivered is a misuse
         (defensive: also covers the never-reproduced 200-OK-empty-parts);
-    (c) an ``ack_silently()`` with nothing pending is a misuse;
+    (c) an ``ack_silently()`` is admissible when an answer is no longer owed
+        for the current user turn — the user already has the substance (a
+        visible answer was delivered in this user turn), more background work
+        is still running, or the turn was woken by a scheduled trigger (its
+        own autonomous obligation, where silence is a normal outcome); it is
+        refused when the tool response it follows carries the only answer of
+        the turn, or when the turn never delivered anything at all;
     the class-aware ending rule: an interface-less turn may end only with a
     non-empty text report — an empty one (empty report, empty ``say``, or a
     hallucinated ``ack_silently()``) is a loud failure, wherever it comes
@@ -348,9 +395,10 @@ def evaluate_turn_end(
         answer: The turn's delivered answer (empty for silent turns).
         ended_by_terminal_call: Whether the turn ended by a terminal call.
         terminal_tool_name: The honoured terminal tool name, when applicable.
-        conversation: The normalized conversation messages, used only to
-            classify interface ``ack_silently`` endings as legitimate absorbs
-            (tool-response or scheduler wake, or unanswered background work).
+        conversation: The normalized conversation messages, used to judge
+            whether an answer is still owed for the current user turn (a
+            delivered visible answer, unanswered background work and the wake
+            kind are all read from it).
 
     Returns:
         The verdict for the ending.
@@ -370,13 +418,23 @@ def evaluate_turn_end(
             # Class-aware ending rule: silence has no receiver one floor
             # down; an ack there is a hallucinated terminal call.
             return TurnEndVerdict("misuse", "hallucinated_ack")
-        wake_type = detect_wake_type(conversation)
-        if wake_type in (WAKE_TOOL_RESPONSE, WAKE_SCHEDULER_TRIGGER):
+        # The admission rule is about the answer, not the wake source: the
+        # question is whether an answer is still owed for this user turn.
+        # A scheduled trigger is its own autonomous obligation — the user
+        # asked for nothing there, so silence is always a legal ending.
+        if detect_wake_type(conversation) == WAKE_SCHEDULER_TRIGGER:
             return TurnEndVerdict("ok", None)
-        # wake_type is None (unrecognized prompt) or a plain user message:
-        # the silence is only legitimate when background work is unanswered.
+        # The user already has the substance of this user turn: a trailing
+        # background event changes nothing and may be absorbed silently.
+        if user_turn_answer_delivered(conversation):
+            return TurnEndVerdict("ok", None)
+        # More work is still running: the silence is "waiting", the answer
+        # is not owed yet.
         if background_work_pending(conversation):
             return TurnEndVerdict("ok", None)
+        # Nothing delivered, nothing pending: the tool response this ack
+        # follows carries the only answer of the turn (or the turn never
+        # produced anything) — silence would swallow it.
         return TurnEndVerdict("misuse", "overeager_ack")
     # (b) nothing delivered: empty plain-text ending or an empty say().
     return TurnEndVerdict("misuse", "empty_turn")

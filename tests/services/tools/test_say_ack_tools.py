@@ -69,6 +69,11 @@ class TestTerminalToolContractDescriptions:
         assert "NEVER sees" in description
         assert "ENDS" in description
 
+    def test_ack_silently_description_states_the_answer_owed_admission_rule(self) -> None:
+        description = AckSilentlyTool.definition["function"]["description"]
+        assert "no longer owed" in description
+        assert "REFUSED" in description
+
 
 class TestTerminalToolsHaveNoResultPath:
     """Neither tool may carry an implementation that produces a tool result.
