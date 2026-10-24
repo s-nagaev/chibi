@@ -5,13 +5,16 @@ HTTP response is an ``SDKError`` carrying the raw response and transport
 failures are plain ``httpx2`` exceptions. These tests pin:
 
 - the failover classifier: 429 -> ``rate_limit``, 5xx -> ``server_error``,
-  401/403 -> not a failover trigger, httpx2 timeouts -> ``timeout``,
-  other httpx2 transport errors -> ``network``;
+  401/403 -> ``auth`` (owner decision: unconditional failover, no retries —
+  these codes also arrive when the account is out of credit), httpx2
+  timeouts -> ``timeout``, other httpx2 transport errors -> ``network``;
 - the Mistral adapter's retry predicate, including the httpx2 transport
-  coverage the project ``httpx`` classes do not provide;
-- the end-to-end regression: a rate-limited Mistral call escapes the
+  coverage the project ``httpx`` classes do not provide, and the fact that
+  401/403 are never retried;
+- the end-to-end regressions: a rate-limited Mistral call escapes the
   in-provider tenacity retries, fails over to the next provider and puts
-  Mistral on a cooldown.
+  Mistral on a cooldown; a 401/403 call does the same but on the FIRST
+  attempt (no in-provider retries).
 """
 
 from unittest.mock import AsyncMock, Mock
@@ -49,11 +52,13 @@ class TestFailoverClassifier:
     def test_sdk_error_500_is_server_error(self):
         assert classify_exception(_mistral_sdk_error(500)) == "server_error"
 
-    def test_sdk_error_401_is_not_a_failover_trigger(self):
-        assert classify_exception(_mistral_sdk_error(401)) is None
+    def test_sdk_error_401_is_an_auth_failover_trigger(self):
+        # Owner decision: 401/403 fail over unconditionally (they also mean
+        # "out of credit / cut off"), with NO retries in the adapter.
+        assert classify_exception(_mistral_sdk_error(401)) == "auth"
 
-    def test_sdk_error_403_is_not_a_failover_trigger(self):
-        assert classify_exception(_mistral_sdk_error(403)) is None
+    def test_sdk_error_403_is_an_auth_failover_trigger(self):
+        assert classify_exception(_mistral_sdk_error(403)) == "auth"
 
     def test_httpx2_timeout_is_timeout(self):
         assert classify_exception(httpx2.ReadTimeout("timed out while reading")) == "timeout"
@@ -69,7 +74,8 @@ class TestMistralErrorKindModule:
     def test_classifier_matches_sdk_status_codes(self):
         assert classify_mistral_exception(_mistral_sdk_error(429)) == "rate_limit"
         assert classify_mistral_exception(_mistral_sdk_error(503)) == "server_error"
-        assert classify_mistral_exception(_mistral_sdk_error(401)) is None
+        assert classify_mistral_exception(_mistral_sdk_error(401)) == "auth"
+        assert classify_mistral_exception(_mistral_sdk_error(403)) == "auth"
 
     def test_classifier_maps_transport_errors(self):
         assert classify_mistral_exception(httpx2.ConnectTimeout("connect timed out")) == "timeout"
@@ -85,6 +91,9 @@ class TestMistralRetryPredicate:
 
     def test_sdk_error_401_is_not_retryable(self):
         assert _is_retryable_mistral_error(_mistral_sdk_error(401)) is False
+
+    def test_sdk_error_403_is_not_retryable(self):
+        assert _is_retryable_mistral_error(_mistral_sdk_error(403)) is False
 
     def test_httpx2_connect_error_is_retryable(self):
         assert _is_retryable_mistral_error(httpx2.ConnectError("connection refused")) is True
@@ -174,7 +183,76 @@ class TestMistralRateLimitFailover:
         # ...and the engine still recorded the 20-minute cooldown for Mistral.
         assert await engine.cooldown.is_blocked("mistralai") is True
 
-    async def test_rate_limited_mistral_is_a_trigger_while_auth_error_is_not(self, monkeypatch):
+
+class TestMistralAuthFailover:
+    @pytest.mark.parametrize("status_code", [401, 403])
+    async def test_auth_error_fails_over_on_the_first_attempt_and_marks_cooldown(self, monkeypatch, status_code):
+        monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "auto", raising=False)
+        sleep_mock = AsyncMock()
+        monkeypatch.setattr(MistralAI.get_chat_response.retry, "sleep", sleep_mock)
+
+        mistral = MistralAI(token="stub-token")
+        auth_error = _mistral_sdk_error(status_code)
+        attempts: list[int] = []
+
+        async def _always_unauthorized(**kwargs):
+            attempts.append(1)
+            raise auth_error
+
+        monkeypatch.setattr(mistral, "_get_chat_completion_response", _always_unauthorized)
+
+        gemini = AsyncMock()
+        gemini.name = "gemini"
+        gemini.get_available_models = AsyncMock(
+            return_value=[type("ModelStub", (), {"name": "mistral-medium-latest"})()]
+        )
+        fallback_response = ChatResponseSchema(
+            answer="fallback answer", provider="gemini", model="mistral-medium-latest", usage=None
+        )
+        gemini.get_chat_response = AsyncMock(
+            return_value=(fallback_response, [Message(role="assistant", content="fallback answer")])
+        )
+
+        user = Mock()
+        user.providers = Mock()
+        user.providers.chat_ready = {"gemini": type("GeminiStub", (), {"name": "gemini"})}
+        user.providers.get_instance = lambda provider_class: gemini
+
+        db = AsyncMock()
+        monkeypatch.setattr(_db_provider, "get_database", AsyncMock(return_value=db))
+
+        engine = FailoverEngine(user=user)
+
+        async def call(provider, model):
+            return await provider.get_chat_response(
+                messages=[], user=user, caller_storage_id=1, caller_thread_id=0, model=model
+            )
+
+        result = await engine.run(role="master", primary_provider=mistral, model="mistral-medium-latest", call=call)
+
+        assert result.fallback_used is True
+        assert result.serving_provider == "gemini"
+        assert result.response is not None and result.response.answer == "fallback answer"
+        assert result.attempts[0].ok is False
+        assert result.attempts[0].kind == "auth"
+        assert result.attempts[0].provider == "MistralAI"
+        assert result.attempts[1].ok is True and result.attempts[1].provider == "gemini"
+        gemini.get_chat_response.assert_awaited_once()
+        # The dead HTTP call escaped on the FIRST attempt: the tenacity
+        # policy never retried it (retryable=False for auth) and the
+        # underlying helper was invoked exactly once.
+        assert attempts == [1]
+        assert sleep_mock.await_count == 0
+        # The engine still recorded the 20-minute cooldown for Mistral.
+        assert await engine.cooldown.is_blocked("mistralai") is True
+
+    async def test_auth_error_without_fallback_candidates_fails_over_silently_by_design(self, monkeypatch):
+        # Known trade-off (owner decision, intended): a GENUINELY WRONG key
+        # cannot be told apart from an exhausted account by status code, so
+        # a wrong key now fails over to the next provider instead of
+        # surfacing as an auth error. This test pins that behaviour
+        # deliberately: with no other provider configured the SDKError
+        # propagates honestly, but Mistral is still put on cooldown.
         monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "auto", raising=False)
         sleep_mock = AsyncMock()
         monkeypatch.setattr(MistralAI.get_chat_response.retry, "sleep", sleep_mock)
@@ -205,6 +283,5 @@ class TestMistralRateLimitFailover:
         with pytest.raises(SDKError):
             await engine.run(role="master", primary_provider=mistral, model="mistral-medium-latest", call=call)
 
-        assert engine.cooldown._memory == {}
-        # 401 is retryable=False for the tenacity policy: a single attempt, no sleeps.
+        assert await engine.cooldown.is_blocked("mistralai") is True
         assert sleep_mock.await_count == 0

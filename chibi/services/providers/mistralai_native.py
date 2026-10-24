@@ -81,7 +81,9 @@ def _is_retryable_mistral_error(exception: BaseException) -> bool:
     the raw ``httpx2.Response``, so the status code is classified in
     ``chibi.services.mistral_errors`` instead. The client's own transport
     failures are plain ``httpx2`` exceptions (the SDK's HTTP library), which the
-    project ``httpx`` classes above do not cover.
+    project ``httpx`` classes above do not cover. HTTP 401/403 classify to the
+    ``auth`` trigger and are deliberately NOT retried (owner decision): they
+    fail over unconditionally on the first response.
     """
     if isinstance(exception, (ConnectionError, httpx.TransportError, httpx2.TransportError)):
         return True

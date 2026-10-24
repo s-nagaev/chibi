@@ -17,7 +17,7 @@ from typing import Literal
 import httpx2
 from mistralai.client.errors import SDKError
 
-MistralErrorKind = Literal["rate_limit", "server_error", "timeout", "network"]
+MistralErrorKind = Literal["rate_limit", "server_error", "auth", "timeout", "network"]
 
 
 def classify_mistral_exception(exception: BaseException) -> MistralErrorKind | None:
@@ -25,10 +25,13 @@ def classify_mistral_exception(exception: BaseException) -> MistralErrorKind | N
 
     HTTP errors are classified from ``SDKError.raw_response.status_code``
     (the SDK has no per-status exception classes): 429 is a rate limit, any
-    5xx is a server error, and everything else, including 401/403
-    authentication failures, is not a failover trigger. Transport failures
-    inside the Mistral client are plain ``httpx2`` exceptions: timeouts map
-    to ``timeout`` and every other transport error to ``network``.
+    5xx is a server error, and 401/403 are auth triggers (owner decision:
+    these codes also arrive when the account is out of credit or cut off,
+    which is exactly when another provider can still serve the request, so
+    they fail over unconditionally — with no retries, see the adapter's
+    retry predicate). Transport failures inside the Mistral client are
+    plain ``httpx2`` exceptions: timeouts map to ``timeout`` and every
+    other transport error to ``network``.
 
     Args:
         exception: The exception raised by a Mistral client call.
@@ -47,5 +50,7 @@ def classify_mistral_exception(exception: BaseException) -> MistralErrorKind | N
             return "rate_limit"
         if status_code >= 500:
             return "server_error"
+        if status_code in (401, 403):
+            return "auth"
         return None
     return None
