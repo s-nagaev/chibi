@@ -6,6 +6,7 @@ from typing import Any, Union, cast
 from uuid import uuid4
 
 import httpx
+import httpx2
 from loguru import logger
 from mistralai.client import Mistral
 from mistralai.client.errors import SDKError
@@ -36,6 +37,7 @@ from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
+from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
@@ -73,17 +75,18 @@ MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMe
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
     """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
 
-    The Mistral SDK (3.3.0) still exposes no per-status exception classes: the errors
-    module exports only ``HTTPValidationError``, ``MistralError``, ``NoResponseError``,
-    ``ObservabilityError`` and ``ResponseValidationError`` (plus data helpers), and any
-    failed HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
-    the raw ``httpx2.Response``, so the status code is inspected instead.
+    The Mistral SDK (3.3.0) exposes no per-status exception classes: any failed
+    HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
+    the raw ``httpx2.Response``, so the status code is classified in
+    ``chibi.services.mistral_errors`` instead. The client's own transport
+    failures are plain ``httpx2`` exceptions (the SDK's HTTP library), which the
+    project ``httpx`` classes above do not cover.
     """
-    if isinstance(exception, (ConnectionError, httpx.TransportError)):
+    if isinstance(exception, (ConnectionError, httpx.TransportError, httpx2.TransportError)):
         return True
     if isinstance(exception, SDKError):
-        status_code = exception.raw_response.status_code
-        return status_code == 429 or status_code >= 500
+        kind = classify_mistral_exception(exception)
+        return kind in ("rate_limit", "server_error")
     return False
 
 

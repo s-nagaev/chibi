@@ -81,6 +81,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.services.mistral_errors import MistralErrorKind, classify_mistral_exception
 from chibi.storage.database import _db_provider
 from chibi.storage.redis import RedisStorage
 from chibi.utils.app import SingletonMeta
@@ -91,7 +92,7 @@ if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
 
 Role = Literal["master", "subagent"]
-TriggerKind = Literal["rate_limit", "server_error", "timeout", "network"]
+TriggerKind = MistralErrorKind
 
 # Notification hooks (failover_notification task): invoked by the engine when
 # a fallback step is ABOUT to be attempted and when every step is exhausted.
@@ -222,7 +223,10 @@ def classify_exception(exception: BaseException) -> TriggerKind | None:
     Tenacity retry policies use ``reraise=True`` on every chat path, so the
     engine sees the final provider exception, not ``RetryError``. Both raw
     SDK exceptions and Chibi service exceptions (produced by the provider
-    error-conversion wrappers) are recognised.
+    error-conversion wrappers) are recognised. Mistral SDK errors carry no
+    per-status exception classes; they are classified from the HTTP status
+    code and the ``httpx2`` transport kind via
+    ``chibi.services.mistral_errors``.
 
     Args:
         exception: The exception raised by the provider call.
@@ -242,6 +246,9 @@ def classify_exception(exception: BaseException) -> TriggerKind | None:
         return "network"
     if isinstance(exception, _SERVER_EXCEPTIONS):
         return "server_error"
+    mistral_kind = classify_mistral_exception(exception)
+    if mistral_kind is not None:
+        return mistral_kind
     return None
 
 
