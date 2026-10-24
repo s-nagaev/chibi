@@ -14,6 +14,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import httpx
+import httpx2
 import pytest
 from anthropic.types import (
     Message as AnthropicMessage,
@@ -37,7 +38,15 @@ from google.genai.types import (
     GenerateContentResponseUsageMetadata,
     Part,
 )
-from mistralai.client.models import TextChunk, ThinkChunk, UsageInfo
+from mistralai.client.errors import SDKError
+from mistralai.client.models import (
+    AssistantMessage,
+    ChatCompletionChoice,
+    ChatCompletionResponse,
+    TextChunk,
+    ThinkChunk,
+    UsageInfo,
+)
 from openai import BadRequestError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
@@ -50,7 +59,7 @@ from chibi.models import Message, User
 from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.minimax import Minimax
-from chibi.services.providers.mistralai_native import MistralAI
+from chibi.services.providers.mistralai_native import MistralAI, _is_retryable_mistral_error
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import (
     AnthropicFriendlyProvider,
@@ -95,6 +104,25 @@ def _make_bad_request_error() -> BadRequestError:
     request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
     response = httpx.Response(400, request=request, json={"error": {"message": "stream_options unsupported"}})
     return BadRequestError("stream_options unsupported", response=response, body=None)
+
+
+def _make_mistral_sdk_error(status_code: int) -> SDKError:
+    """Build a real mistralai SDKError carrying the given HTTP status."""
+    request = httpx2.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+    response = httpx2.Response(status_code, request=request, json={"message": "stream_options unsupported"})
+    return SDKError("API error occurred", response, None)
+
+
+def _make_mistral_completion(text: str = "Hello") -> ChatCompletionResponse:
+    """Build a real non-streaming Mistral response for fallback assertions."""
+    return ChatCompletionResponse(
+        id="cmpl-2",
+        object="chat.completion",
+        model="mistral",
+        created=7,
+        usage=UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+        choices=[ChatCompletionChoice(index=0, finish_reason="stop", message=AssistantMessage(content=text))],
+    )
 
 
 def _make_non_streaming_completion(text: str = "Hello") -> ChatCompletion:
@@ -250,7 +278,10 @@ class _FakeMistralStream:
     async def __anext__(self) -> Any:
         if not self._events:
             raise StopAsyncIteration
-        return self._events.pop(0)
+        item = self._events.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
 
 class _FakeGeminiClient:
@@ -819,6 +850,79 @@ class TestMistralStreaming:
         tool_calls = cast(Any, message.tool_calls)
         assert [tc.function.name for tc in tool_calls] == ["get"]
         assert tool_calls[0].function.arguments == '{"a": 1}'
+
+    async def test_rejecting_gateway_falls_back_to_single_non_streaming_call(self) -> None:
+        stream_async = AsyncMock(side_effect=_make_mistral_sdk_error(400))
+        complete_async = AsyncMock(return_value=_make_mistral_completion())
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface()
+
+        result, _ = await self._call_public_path(provider, provider.__dict__["_client"], interface)
+
+        assert stream_async.await_count == 1
+        assert complete_async.await_count == 1
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+        assert result.answer == "Hello"
+        assert result.usage.total_tokens == 3
+
+    async def test_not_found_gateway_falls_back_to_non_streaming_call(self) -> None:
+        stream_async = AsyncMock(side_effect=_make_mistral_sdk_error(404))
+        complete_async = AsyncMock(return_value=_make_mistral_completion())
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface()
+
+        result, _ = await self._call_public_path(provider, provider.__dict__["_client"], interface)
+
+        assert stream_async.await_count == 1
+        assert complete_async.await_count == 1
+        assert result.answer == "Hello"
+
+    async def test_no_fallback_after_first_emitted_delta(self) -> None:
+        fake_stream = _FakeMistralStream([self._chunk(content="Hel"), _make_mistral_sdk_error(400)])
+        stream_async = AsyncMock(return_value=fake_stream)
+        complete_async = AsyncMock()
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface()
+
+        with pytest.raises(SDKError):
+            await self._call_public_path(provider, provider.__dict__["_client"], interface)
+
+        assert complete_async.await_count == 0
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Hel"]
+        assert interface.delta_emitted is True
+
+    async def test_latched_rejection_is_not_retried(self) -> None:
+        stream_async = AsyncMock(side_effect=_make_mistral_sdk_error(400))
+        complete_async = AsyncMock()
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface(delta_emitted=True)
+
+        with pytest.raises(SDKError):
+            await provider._stream_generate_content(
+                model="mistral-medium-latest",
+                messages=[],
+                interface=interface,
+            )
+
+        assert stream_async.await_count == 1
+        assert complete_async.await_count == 0
+
+    async def test_rejected_stream_status_is_outside_the_retry_policy(self) -> None:
+        assert _is_retryable_mistral_error(_make_mistral_sdk_error(400)) is False
+        assert _is_retryable_mistral_error(_make_mistral_sdk_error(404)) is False
 
 
 class TestLatch:

@@ -41,6 +41,7 @@ from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    delta_latched,
     delta_streaming_allowed,
 )
 from chibi.services.providers.terminal_calls import (
@@ -129,6 +130,51 @@ class MistralAI(RestApiFriendlyProvider):
         self._client = Mistral(api_key=self.token)
         return self._client
 
+    def _chat_request_kwargs(
+        self,
+        model: str,
+        messages: list[MistralMessageParam],
+        interface: UserInterface | None,
+        max_tokens: int | None,
+    ) -> dict[str, Any]:
+        """Build the request kwargs shared by every Mistral chat call.
+
+        The streaming helper's non-streaming fallback re-issues the same
+        request without the stream, so the streaming and non-streaming calls
+        must be built by one builder: a divergence here would make the
+        fallback answer a different request than the rejected stream.
+
+        Args:
+            model: The Mistral model identifier.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
+
+        Returns:
+            Keyword arguments for ``chat.complete_async`` and ``chat.stream_async``.
+        """
+        offered = offered_tool_definitions(definitions=self.tools_list, interface=interface)
+        forced_choice = forced_choice_applicable(interface=interface)
+        if forced_choice:
+            # Forced choice (optimisation only; the turn-end validator is the
+            # guarantee): "any" demands a tool call without naming one, for the
+            # same reason as the other adapters — the turn may end via either
+            # terminal tool and may need work calls first. Gated on the single
+            # switch AND interface presence (D1). The parameters field is
+            # mandatory Mistral-SDK-side even when the schema is empty (recon C4),
+            # so the forced path guarantees it on every offered tool.
+            offered = ensure_function_parameters(definitions=offered)
+        return {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
+            "temperature": self.temperature,
+            "tools": cast(list[Tool], offered),
+            "tool_choice": "any" if forced_choice else "auto",
+            "http_headers": {"Cache-Control": "max-age=86400"},
+        }
+
     def get_thoughts(self, assistant_message: AssistantMessage) -> str | None:
         if not assistant_message.content:
             return None
@@ -177,28 +223,10 @@ class MistralAI(RestApiFriendlyProvider):
                     model=model, messages=messages, interface=interface, max_tokens=max_tokens
                 )
             else:
-                offered = offered_tool_definitions(definitions=self.tools_list, interface=interface)
-                # Forced choice (optimisation only; the turn-end validator is
-                # the guarantee): "any" demands a tool call without naming
-                # one, for the same reason as the other adapters — the turn
-                # may end via either terminal tool and may need work calls
-                # first. Gated on the single switch AND interface presence
-                # (D1). The parameters field is mandatory Mistral-SDK-side
-                # even when the schema is empty (recon C4), so the forced
-                # path guarantees it on every offered tool.
-                if forced_choice_applicable(interface=interface):
-                    offered = ensure_function_parameters(definitions=offered)
-                    tool_choice: Any = "any"
-                else:
-                    tool_choice = "auto"
                 response = await self.client.chat.complete_async(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                    temperature=self.temperature,
-                    tools=cast(list[Tool], offered),
-                    tool_choice=tool_choice,
-                    http_headers={"Cache-Control": "max-age=86400"},
+                    **self._chat_request_kwargs(
+                        model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                    )
                 )
 
             if response.choices and len(response.choices) > 0:
@@ -244,6 +272,12 @@ class MistralAI(RestApiFriendlyProvider):
 
         Returns:
             The aggregated final ChatCompletionResponse.
+
+        Raises:
+            SDKError: When the streaming request is rejected after live deltas
+                were already emitted (the retry latch forbids a transparent
+                re-request at that point), or when the rejection is neither a
+                400 nor a 404.
         """
         content_parts: list[str] = []
         tool_call_slots: dict[int, dict[str, str]] = {}
@@ -253,27 +287,29 @@ class MistralAI(RestApiFriendlyProvider):
         completion_id = ""
         response_model = ""
         created = 0
-        async with (
-            AckSentinelStreamSession(interface) as deltas,
-            await self.client.chat.stream_async(
-                model=model,
-                messages=messages,
-                max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                temperature=self.temperature,
-                tools=cast(
-                    list[Tool],
-                    (
-                        ensure_function_parameters(
-                            definitions=offered_tool_definitions(definitions=self.tools_list, interface=interface)
-                        )
-                        if forced_choice_applicable(interface=interface)
-                        else offered_tool_definitions(definitions=self.tools_list, interface=interface)
-                    ),
-                ),
-                tool_choice="any" if forced_choice_applicable(interface=interface) else "auto",
-                http_headers={"Cache-Control": "max-age=86400"},
-            ) as stream,
-        ):
+        try:
+            stream = await self.client.chat.stream_async(
+                **self._chat_request_kwargs(model=model, messages=messages, interface=interface, max_tokens=max_tokens)
+            )
+        except SDKError as stream_error:
+            # Some deployments reject the streaming request (e.g. an
+            # unsupported streaming parameter) with a 400/404 before any
+            # chunk can arrive. Mirroring the OpenAI path, the fallback to a
+            # non-streaming request is handled here, inside the helper: the
+            # delta latch decides whether a transparent re-request is still
+            # allowed, and a failure after live deltas were emitted must
+            # surface instead of silently re-issuing the request.
+            status_code = stream_error.raw_response.status_code
+            if delta_latched(interface) or status_code not in (400, 404):
+                raise
+            logger.warning(
+                f"{self.name}/{model} rejected the streaming request ({stream_error}). "
+                f"Falling back to a non-streaming request."
+            )
+            return await self.client.chat.complete_async(
+                **self._chat_request_kwargs(model=model, messages=messages, interface=interface, max_tokens=max_tokens)
+            )
+        async with AckSentinelStreamSession(interface) as deltas, stream:
             async for event in stream:
                 chunk = event.data
                 completion_id = chunk.id or completion_id
