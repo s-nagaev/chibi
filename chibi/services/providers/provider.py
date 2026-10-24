@@ -92,6 +92,8 @@ from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
+    mark_non_streaming_fallback_spent,
+    non_streaming_fallback_spent_error,
 )
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
@@ -887,6 +889,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 transparent re-request at that point).
             NotFoundError: When the API reports an unknown model after live
                 deltas were already emitted.
+            Exception: The error stored by this request's already-spent
+                non-streaming fallback attempt, re-raised on retry re-entry
+                instead of issuing a second fallback.
         """
         stream_kwargs: dict[str, Any] = {**completion_kwargs, "stream": True}
         if self.stream_include_usage:
@@ -907,11 +912,18 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 raise
             if isinstance(stream_error, BadRequestError) and stream_error.code == "context_length_exceeded":
                 raise
+            spent_error = non_streaming_fallback_spent_error(interface)
+            if spent_error is not None:
+                raise spent_error
             logger.warning(
                 f"{self.name}/{completion_kwargs.get('model', 'unknown')} rejected the streaming request "
                 f"({stream_error}). Falling back to a non-streaming request."
             )
-            return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
+            try:
+                return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
+            except Exception as fallback_error:
+                mark_non_streaming_fallback_spent(interface, fallback_error)
+                raise
         accumulator = _OpenAIChatStreamAccumulator()
         async with AckSentinelStreamSession(interface) as deltas:
             try:

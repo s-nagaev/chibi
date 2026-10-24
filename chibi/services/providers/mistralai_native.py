@@ -43,6 +43,8 @@ from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
+    mark_non_streaming_fallback_spent,
+    non_streaming_fallback_spent_error,
 )
 from chibi.services.providers.terminal_calls import (
     TERMINAL_TOOL_NAMES,
@@ -278,8 +280,11 @@ class MistralAI(RestApiFriendlyProvider):
         Raises:
             SDKError: When the streaming request is rejected after live deltas
                 were already emitted (the retry latch forbids a transparent
-                re-request at that point), or when the rejection is neither a
-                400 nor a 404.
+                re-request at that point), when the rejection is neither a
+                400 nor a 404, or when the single non-streaming fallback
+                attempt of this request has already failed (its error is
+                re-raised on retry re-entry instead of issuing a second
+                fallback).
         """
         content_parts: list[str] = []
         tool_call_slots: dict[int, dict[str, str]] = {}
@@ -304,13 +309,22 @@ class MistralAI(RestApiFriendlyProvider):
             status_code = stream_error.raw_response.status_code
             if delta_latched(interface) or status_code not in (400, 404):
                 raise
+            spent_error = non_streaming_fallback_spent_error(interface)
+            if spent_error is not None:
+                raise spent_error
             logger.warning(
                 f"{self.name}/{model} rejected the streaming request ({stream_error}). "
                 f"Falling back to a non-streaming request."
             )
-            return await self.client.chat.complete_async(
-                **self._chat_request_kwargs(model=model, messages=messages, interface=interface, max_tokens=max_tokens)
-            )
+            try:
+                return await self.client.chat.complete_async(
+                    **self._chat_request_kwargs(
+                        model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                    )
+                )
+            except Exception as fallback_error:
+                mark_non_streaming_fallback_spent(interface, fallback_error)
+                raise
         async with AckSentinelStreamSession(interface) as deltas, stream:
             async for event in stream:
                 chunk = event.data

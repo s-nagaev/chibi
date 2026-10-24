@@ -53,6 +53,38 @@ def delta_latched(interface: UserInterface | None) -> bool:
     return getattr(interface, "delta_emitted", False) is True
 
 
+def non_streaming_fallback_spent_error(interface: UserInterface | None) -> BaseException | None:
+    """Return the error raised by this request's already-spent non-streaming fallback.
+
+    Args:
+        interface: The active user interface, if any.
+
+    Returns:
+        The exception the single non-streaming fallback attempt raised, or
+        None while the fallback has not failed yet.
+    """
+    return getattr(interface, "non_streaming_fallback_error", None)
+
+
+def mark_non_streaming_fallback_spent(interface: UserInterface | None, error: BaseException) -> None:
+    """Store the error raised by the request's single non-streaming fallback attempt.
+
+    A stream rejected with 400/404 falls back to one non-streaming call. When
+    that call fails with a transient error, the retry decorator around
+    ``get_chat_response`` re-enters the whole method, the stream creation fails
+    deterministically again, and the stored error is re-raised on re-entry: the
+    fallback is never issued twice, while the transient error keeps driving the
+    retries and the provider failover classification.
+
+    Args:
+        interface: The active user interface, if any.
+        error: The exception raised by the fallback attempt.
+    """
+    if interface is None:
+        return
+    interface.non_streaming_fallback_error = error
+
+
 class AckSentinelStreamGate:
     """Buffer live deltas until the streamed answer can no longer be a pure ACK sentinel.
 

@@ -9,6 +9,7 @@ swallowing raw SDK errors) actually fail the suite. Pure-logic unit tests
 """
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, PropertyMock, patch
@@ -47,14 +48,15 @@ from mistralai.client.models import (
     ThinkChunk,
     UsageInfo,
 )
-from openai import BadRequestError
+from openai import BadRequestError, RateLimitError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from openai.types.completion_usage import CompletionUsage
 from openai.types.responses import ResponseTextDeltaEvent
+from tenacity import wait_fixed
 
 from chibi.config import gpt_settings
-from chibi.exceptions import ServiceResponseError
+from chibi.exceptions import ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
 from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.gemini_native import Gemini
@@ -63,12 +65,15 @@ from chibi.services.providers.mistralai_native import MistralAI, _is_retryable_m
 from chibi.services.providers.openai import OpenAI
 from chibi.services.providers.provider import (
     AnthropicFriendlyProvider,
+    OpenAIFriendlyProvider,
     _OpenAIChatStreamAccumulator,
 )
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
     delta_latched,
     delta_streaming_allowed,
+    mark_non_streaming_fallback_spent,
+    non_streaming_fallback_spent_error,
 )
 
 TEST_TOKEN = "test-streaming-token"
@@ -104,6 +109,13 @@ def _make_bad_request_error() -> BadRequestError:
     request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
     response = httpx.Response(400, request=request, json={"error": {"message": "stream_options unsupported"}})
     return BadRequestError("stream_options unsupported", response=response, body=None)
+
+
+def _make_rate_limit_error() -> RateLimitError:
+    """Build a real openai.RateLimitError (429)."""
+    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+    response = httpx.Response(429, request=request, json={"error": {"message": "rate limited"}})
+    return RateLimitError("rate limited", response=response, body=None)
 
 
 def _make_mistral_sdk_error(status_code: int) -> SDKError:
@@ -923,6 +935,130 @@ class TestMistralStreaming:
     async def test_rejected_stream_status_is_outside_the_retry_policy(self) -> None:
         assert _is_retryable_mistral_error(_make_mistral_sdk_error(400)) is False
         assert _is_retryable_mistral_error(_make_mistral_sdk_error(404)) is False
+        assert _is_retryable_mistral_error(_make_mistral_sdk_error(401)) is False
+        assert _is_retryable_mistral_error(_make_mistral_sdk_error(403)) is False
+
+
+@contextmanager
+def _zeroed_retry_waits() -> Any:
+    """Silence the 30/40/80 s tenacity waits without touching the attempt counts."""
+    decorated = [MistralAI.get_chat_response, OpenAIFriendlyProvider.get_chat_response]
+    saved = [(fn, fn.retry.wait) for fn in decorated]
+    for fn, _ in saved:
+        fn.retry.wait = wait_fixed(0)
+    try:
+        yield
+    finally:
+        for fn, wait_strategy in saved:
+            fn.retry.wait = wait_strategy
+
+
+class TestNonStreamingFallbackSpendLatch:
+    """A failed non-streaming fallback is issued once, not once per retry.
+
+    The fallback lives inside the tenacity-decorated ``get_chat_response``:
+    a transient failure of the fallback itself re-enters the whole method,
+    where the stream creation fails deterministically again. The
+    spent-fallback latch stores the fallback's error, so re-entry re-raises
+    it instead of issuing a second fallback, while the transient error keeps
+    driving the retry attempts and the provider failover classification.
+    """
+
+    async def test_mistral_failed_fallback_is_not_reissued_on_retry(self) -> None:
+        stream_async = AsyncMock(side_effect=_make_mistral_sdk_error(400))
+        complete_async = AsyncMock(side_effect=_make_mistral_sdk_error(429))
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface()
+
+        with (
+            _zeroed_retry_waits(),
+            patch(
+                "chibi.services.providers.mistralai_native.prepare_system_prompt",
+                new=AsyncMock(return_value="sp"),
+            ),
+        ):
+            with pytest.raises(SDKError) as exc_info:
+                await MistralAI.get_chat_response(
+                    provider,
+                    messages=[],
+                    user=User(id=1),
+                    caller_storage_id=1,
+                    caller_thread_id=0,
+                    interface=interface,
+                )
+
+        assert exc_info.value.raw_response.status_code == 429
+        assert stream_async.await_count == 4
+        assert complete_async.await_count == 1
+
+    async def test_openai_failed_fallback_is_not_reissued_on_retry(self) -> None:
+        calls = {"stream": 0, "complete": 0}
+
+        async def create(**kwargs: Any) -> Any:
+            if kwargs.get("stream"):
+                calls["stream"] += 1
+                raise _make_bad_request_error()
+            calls["complete"] += 1
+            raise _make_rate_limit_error()
+
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        provider = OpenAI(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        with (
+            _zeroed_retry_waits(),
+            patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client),
+            patch(
+                "chibi.services.providers.provider.prepare_system_prompt",
+                new=AsyncMock(return_value="sp"),
+            ),
+        ):
+            with pytest.raises(ServiceRateLimitError):
+                await OpenAIFriendlyProvider.get_chat_response(
+                    provider,
+                    messages=[],
+                    user=User(id=1),
+                    caller_storage_id=1,
+                    caller_thread_id=0,
+                    interface=interface,
+                )
+
+        assert calls == {"stream": 4, "complete": 1}
+
+    @pytest.mark.parametrize("status_code", [429, 500])
+    async def test_plain_streaming_retryable_statuses_still_retry_without_fallback(self, status_code: int) -> None:
+        stream_async = AsyncMock(side_effect=_make_mistral_sdk_error(status_code))
+        complete_async = AsyncMock()
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=stream_async, complete_async=complete_async)
+        )
+        interface = _make_interface()
+
+        with (
+            _zeroed_retry_waits(),
+            patch(
+                "chibi.services.providers.mistralai_native.prepare_system_prompt",
+                new=AsyncMock(return_value="sp"),
+            ),
+        ):
+            with pytest.raises(SDKError) as exc_info:
+                await MistralAI.get_chat_response(
+                    provider,
+                    messages=[],
+                    user=User(id=1),
+                    caller_storage_id=1,
+                    caller_thread_id=0,
+                    interface=interface,
+                )
+
+        assert exc_info.value.raw_response.status_code == status_code
+        assert stream_async.await_count == 4
+        assert complete_async.await_count == 0
+        assert non_streaming_fallback_spent_error(interface) is None
 
 
 class TestLatch:
@@ -947,6 +1083,17 @@ class TestLatch:
         assert delta_latched(None) is False
         async with AckSentinelStreamSession(None) as deltas:
             await deltas.emit("chunk")
+
+    async def test_non_streaming_fallback_latch_roundtrip(self) -> None:
+        interface = _make_interface()
+        assert non_streaming_fallback_spent_error(interface) is None
+        error = ValueError("fallback failed")
+        mark_non_streaming_fallback_spent(interface, error)
+        assert non_streaming_fallback_spent_error(interface) is error
+
+    async def test_non_streaming_fallback_latch_none_interface_is_safe(self) -> None:
+        assert non_streaming_fallback_spent_error(None) is None
+        mark_non_streaming_fallback_spent(None, ValueError("fallback failed"))
 
 
 class TestAnthropicFamilyStreamFallback:
