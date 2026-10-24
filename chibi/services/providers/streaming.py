@@ -53,36 +53,54 @@ def delta_latched(interface: UserInterface | None) -> bool:
     return getattr(interface, "delta_emitted", False) is True
 
 
-def non_streaming_fallback_spent_error(interface: UserInterface | None) -> BaseException | None:
-    """Return the error raised by this request's already-spent non-streaming fallback.
+def non_streaming_fallback_spent_error(interface: UserInterface | None, provider_name: str) -> BaseException | None:
+    """Return the error raised by this provider's already-spent non-streaming fallback.
+
+    The failover walk reuses one request interface for every provider
+    attempt, so the stored entry carries the name of the provider that spent
+    its fallback: only that provider's retry re-entry may consume it, while
+    every other provider attempt still gets its own fresh fallback.
 
     Args:
         interface: The active user interface, if any.
+        provider_name: Name of the provider asking for the spent entry.
 
     Returns:
-        The exception the single non-streaming fallback attempt raised, or
-        None while the fallback has not failed yet.
+        The exception the provider's single non-streaming fallback attempt
+        raised, or None while that provider's fallback has not failed yet.
     """
-    return getattr(interface, "non_streaming_fallback_error", None)
+    if interface is None:
+        return None
+    spent = getattr(interface, "non_streaming_fallback_error", None)
+    if spent is None:
+        return None
+    spent_provider, error = spent
+    return error if spent_provider == provider_name else None
 
 
-def mark_non_streaming_fallback_spent(interface: UserInterface | None, error: BaseException) -> None:
-    """Store the error raised by the request's single non-streaming fallback attempt.
+def mark_non_streaming_fallback_spent(
+    interface: UserInterface | None, provider_name: str, error: BaseException
+) -> None:
+    """Store the error raised by the provider's single non-streaming fallback attempt.
 
     A stream rejected with 400/404 falls back to one non-streaming call. When
     that call fails with a transient error, the retry decorator around
     ``get_chat_response`` re-enters the whole method, the stream creation fails
     deterministically again, and the stored error is re-raised on re-entry: the
     fallback is never issued twice, while the transient error keeps driving the
-    retries and the provider failover classification.
+    retries and the provider failover classification. The entry is keyed to the
+    provider that spent its fallback, because the failover walk shares one
+    interface across provider attempts: a foreign provider must neither
+    inherit the suppression nor re-raise another provider's error.
 
     Args:
         interface: The active user interface, if any.
+        provider_name: Name of the provider spending its fallback.
         error: The exception raised by the fallback attempt.
     """
     if interface is None:
         return
-    interface.non_streaming_fallback_error = error
+    interface.non_streaming_fallback_error = (provider_name, error)
 
 
 class AckSentinelStreamGate:

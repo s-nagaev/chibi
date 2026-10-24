@@ -282,9 +282,10 @@ class MistralAI(RestApiFriendlyProvider):
                 were already emitted (the retry latch forbids a transparent
                 re-request at that point), when the rejection is neither a
                 400 nor a 404, or when the single non-streaming fallback
-                attempt of this request has already failed (its error is
+                attempt of this provider has already failed (its error is
                 re-raised on retry re-entry instead of issuing a second
-                fallback).
+                fallback; the latch is scoped to this provider, so other
+                providers of the same failover walk keep their own).
         """
         content_parts: list[str] = []
         tool_call_slots: dict[int, dict[str, str]] = {}
@@ -309,7 +310,7 @@ class MistralAI(RestApiFriendlyProvider):
             status_code = stream_error.raw_response.status_code
             if delta_latched(interface) or status_code not in (400, 404):
                 raise
-            spent_error = non_streaming_fallback_spent_error(interface)
+            spent_error = non_streaming_fallback_spent_error(interface, self.name)
             if spent_error is not None:
                 raise spent_error
             logger.warning(
@@ -323,7 +324,7 @@ class MistralAI(RestApiFriendlyProvider):
                     )
                 )
             except Exception as fallback_error:
-                mark_non_streaming_fallback_spent(interface, fallback_error)
+                mark_non_streaming_fallback_spent(interface, self.name, fallback_error)
                 raise
         async with AckSentinelStreamSession(interface) as deltas, stream:
             async for event in stream:

@@ -12,7 +12,7 @@ import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import httpx
 import httpx2
@@ -58,7 +58,14 @@ from tenacity import wait_fixed
 from chibi.config import gpt_settings
 from chibi.exceptions import ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
+from chibi.services.failover import (
+    CooldownStore,
+    FailoverEngine,
+    FailoverModelRegistry,
+    reset_failover_policy_cache,
+)
 from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.deepinfra import DeepInfra
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.minimax import Minimax
 from chibi.services.providers.mistralai_native import MistralAI, _is_retryable_mistral_error
@@ -75,6 +82,7 @@ from chibi.services.providers.streaming import (
     mark_non_streaming_fallback_spent,
     non_streaming_fallback_spent_error,
 )
+from chibi.utils.app import SingletonMeta
 
 TEST_TOKEN = "test-streaming-token"
 
@@ -1058,7 +1066,96 @@ class TestNonStreamingFallbackSpendLatch:
         assert exc_info.value.raw_response.status_code == status_code
         assert stream_async.await_count == 4
         assert complete_async.await_count == 0
-        assert non_streaming_fallback_spent_error(interface) is None
+        assert non_streaming_fallback_spent_error(interface, "MistralAI") is None
+
+
+class TestTwoProviderFailoverWalk:
+    """The spent-fallback latch never leaks across providers of one failover walk.
+
+    The failover engine reuses ONE request interface for every provider
+    attempt of the walk (the call site builds one closure capturing one
+    interface). A latch keyed to the interface alone let the primary
+    provider's spent fallback suppress the next provider's own fallback,
+    re-raise the primary's stale error as the fallback provider's failure,
+    and put that innocent provider on a 20-minute cooldown — an answer that
+    was available was lost. The latch is keyed to the provider name, so the
+    walk below must end with the second provider's fallback answer.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_failover_state(self) -> Any:
+        reset_failover_policy_cache()
+        for cls in (CooldownStore, FailoverModelRegistry):
+            SingletonMeta._instances.pop(cls, None)
+        yield
+        reset_failover_policy_cache()
+        for cls in (CooldownStore, FailoverModelRegistry):
+            SingletonMeta._instances.pop(cls, None)
+
+    async def test_second_provider_keeps_its_fallback_and_stays_off_cooldown(self, monkeypatch: Any) -> None:
+        interface = _make_interface()
+        mistral_stream = AsyncMock(side_effect=_make_mistral_sdk_error(400))
+        mistral_complete = AsyncMock(side_effect=_make_mistral_sdk_error(429))
+        mistral = MistralAI(token=TEST_TOKEN)
+        mistral.__dict__["_client"] = SimpleNamespace(
+            chat=SimpleNamespace(stream_async=mistral_stream, complete_async=mistral_complete)
+        )
+
+        deepinfra_calls = {"stream": 0, "complete": 0}
+
+        async def create(**kwargs: Any) -> Any:
+            if kwargs.get("stream"):
+                deepinfra_calls["stream"] += 1
+                raise _make_bad_request_error()
+            deepinfra_calls["complete"] += 1
+            return _make_non_streaming_completion("deepinfra fallback answer")
+
+        deepinfra_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        deepinfra = DeepInfra(token=TEST_TOKEN)
+
+        user = Mock()
+        user.providers = Mock()
+        user.providers.chat_ready = {"deepinfra": DeepInfra}
+        user.providers.get_instance = lambda provider_class: deepinfra
+
+        engine = FailoverEngine(user=user)
+        monkeypatch.setattr(engine.model_registry, "models_for", AsyncMock(return_value={"shared-model"}))
+        mark_spy = AsyncMock()
+        monkeypatch.setattr(CooldownStore, "mark", mark_spy)
+
+        async def call(provider: Any, model: str | None) -> Any:
+            return await provider.get_chat_response(
+                messages=[],
+                user=User(id=1),
+                caller_storage_id=1,
+                caller_thread_id=0,
+                model=model,
+                interface=interface,
+            )
+
+        with (
+            _zeroed_retry_waits(),
+            patch.object(DeepInfra, "client", new_callable=PropertyMock, return_value=deepinfra_client),
+            patch(
+                "chibi.services.providers.mistralai_native.prepare_system_prompt",
+                new=AsyncMock(return_value="sp"),
+            ),
+            patch(
+                "chibi.services.providers.provider.prepare_system_prompt",
+                new=AsyncMock(return_value="sp"),
+            ),
+        ):
+            result = await engine.run(role="master", primary_provider=mistral, model="shared-model", call=call)
+
+        assert result.response is not None
+        assert result.response.answer == "deepinfra fallback answer"
+        assert result.serving_provider == "Deepinfra"
+        assert deepinfra_calls == {"stream": 1, "complete": 1}
+        assert mistral_stream.await_count == 4
+        assert mistral_complete.await_count == 1
+        marked_providers = [attempt_call.args[0] for attempt_call in mark_spy.await_args_list]
+        assert marked_providers == ["MistralAI"]
+        assert await engine.cooldown.is_blocked("Deepinfra") is False
 
 
 class TestLatch:
@@ -1086,14 +1183,15 @@ class TestLatch:
 
     async def test_non_streaming_fallback_latch_roundtrip(self) -> None:
         interface = _make_interface()
-        assert non_streaming_fallback_spent_error(interface) is None
+        assert non_streaming_fallback_spent_error(interface, "MistralAI") is None
         error = ValueError("fallback failed")
-        mark_non_streaming_fallback_spent(interface, error)
-        assert non_streaming_fallback_spent_error(interface) is error
+        mark_non_streaming_fallback_spent(interface, "MistralAI", error)
+        assert non_streaming_fallback_spent_error(interface, "MistralAI") is error
+        assert non_streaming_fallback_spent_error(interface, "Deepinfra") is None
 
     async def test_non_streaming_fallback_latch_none_interface_is_safe(self) -> None:
-        assert non_streaming_fallback_spent_error(None) is None
-        mark_non_streaming_fallback_spent(None, ValueError("fallback failed"))
+        assert non_streaming_fallback_spent_error(None, "MistralAI") is None
+        mark_non_streaming_fallback_spent(None, "MistralAI", ValueError("fallback failed"))
 
 
 class TestAnthropicFamilyStreamFallback:

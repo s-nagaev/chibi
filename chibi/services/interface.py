@@ -28,7 +28,7 @@ class UserInterface(ABC):
     captures_llm_thoughts: bool = False
     delta_emitted: bool = False
     streaming_enabled: bool = False
-    non_streaming_fallback_error: BaseException | None = None
+    non_streaming_fallback_error: tuple[str, BaseException] | None = None
 
     @property
     def chat_id(self) -> str | int:

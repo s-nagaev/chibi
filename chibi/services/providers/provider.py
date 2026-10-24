@@ -889,9 +889,11 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 transparent re-request at that point).
             NotFoundError: When the API reports an unknown model after live
                 deltas were already emitted.
-            Exception: The error stored by this request's already-spent
+            Exception: The error stored by this provider's already-spent
                 non-streaming fallback attempt, re-raised on retry re-entry
-                instead of issuing a second fallback.
+                instead of issuing a second fallback. The latch is scoped to
+                this provider, so other providers of the same failover walk
+                keep their own fallback.
         """
         stream_kwargs: dict[str, Any] = {**completion_kwargs, "stream": True}
         if self.stream_include_usage:
@@ -912,7 +914,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 raise
             if isinstance(stream_error, BadRequestError) and stream_error.code == "context_length_exceeded":
                 raise
-            spent_error = non_streaming_fallback_spent_error(interface)
+            spent_error = non_streaming_fallback_spent_error(interface, self.name)
             if spent_error is not None:
                 raise spent_error
             logger.warning(
@@ -922,7 +924,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             try:
                 return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
             except Exception as fallback_error:
-                mark_non_streaming_fallback_spent(interface, fallback_error)
+                mark_non_streaming_fallback_spent(interface, self.name, fallback_error)
                 raise
         accumulator = _OpenAIChatStreamAccumulator()
         async with AckSentinelStreamSession(interface) as deltas:
