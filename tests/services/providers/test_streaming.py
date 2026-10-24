@@ -11,7 +11,7 @@ swallowing raw SDK errors) actually fail the suite. Pure-logic unit tests
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Callable, cast
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import httpx
@@ -83,6 +83,7 @@ from chibi.services.providers.streaming import (
     non_streaming_fallback_spent_error,
 )
 from chibi.utils.app import SingletonMeta
+from tests.conftest import retrying_policy
 
 TEST_TOKEN = "test-streaming-token"
 
@@ -866,6 +867,7 @@ class TestMistralStreaming:
         assert [call.args[0] for call in interface.send_delta.await_args_list] == ["I will call a tool."]
         assert fake_stream.closed is True
         message = response.choices[0].message
+        assert message is not None
         assert message.content == "I will call a tool."
         tool_calls = cast(Any, message.tool_calls)
         assert [tc.function.name for tc in tool_calls] == ["get"]
@@ -950,15 +952,16 @@ class TestMistralStreaming:
 @contextmanager
 def _zeroed_retry_waits() -> Any:
     """Silence the 30/40/80 s tenacity waits without touching the attempt counts."""
-    decorated = [MistralAI.get_chat_response, OpenAIFriendlyProvider.get_chat_response]
-    saved = [(fn, fn.retry.wait) for fn in decorated]
-    for fn, _ in saved:
-        fn.retry.wait = wait_fixed(0)
+    decorated: list[Callable[..., Any]] = [MistralAI.get_chat_response, OpenAIFriendlyProvider.get_chat_response]
+    policies = [retrying_policy(fn) for fn in decorated]
+    saved = [(policy, policy.wait) for policy in policies]
+    for policy, _ in saved:
+        policy.wait = wait_fixed(0)
     try:
         yield
     finally:
-        for fn, wait_strategy in saved:
-            fn.retry.wait = wait_strategy
+        for policy, wait_strategy in saved:
+            policy.wait = wait_strategy
 
 
 class TestNonStreamingFallbackSpendLatch:
@@ -1518,7 +1521,9 @@ class TestAckSentinelNativeAdapters:
         interface.send_delta.assert_not_awaited()
         assert interface.delta_emitted is False
         assert fake_stream.closed is True
-        assert response.choices[0].message.content == "<chibi>ACK</chibi>"
+        message = response.choices[0].message
+        assert message is not None
+        assert message.content == "<chibi>ACK</chibi>"
 
     async def test_mistral_marker_inside_streamed_text_is_stripped(self) -> None:
         events = [

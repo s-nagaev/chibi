@@ -38,6 +38,7 @@ from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.mistralai_native import MistralAI, _is_retryable_mistral_error
 from chibi.storage.database import _db_provider
 from chibi.utils.app import SingletonMeta
+from tests.conftest import retrying_policy
 
 
 def _mistral_sdk_error(status_code: int) -> Exception:
@@ -130,7 +131,7 @@ class TestMistralRateLimitFailover:
         monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "auto", raising=False)
         # No real sleeps: the tenacity policy waits 30-180s between attempts.
         sleep_mock = AsyncMock()
-        monkeypatch.setattr(MistralAI.get_chat_response.retry, "sleep", sleep_mock)
+        monkeypatch.setattr(retrying_policy(MistralAI.get_chat_response), "sleep", sleep_mock)
 
         mistral = MistralAI(token="stub-token")
         rate_limit_error = _mistral_sdk_error(429)
@@ -189,7 +190,7 @@ class TestMistralAuthFailover:
     async def test_auth_error_fails_over_on_the_first_attempt_and_marks_cooldown(self, monkeypatch, status_code):
         monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "auto", raising=False)
         sleep_mock = AsyncMock()
-        monkeypatch.setattr(MistralAI.get_chat_response.retry, "sleep", sleep_mock)
+        monkeypatch.setattr(retrying_policy(MistralAI.get_chat_response), "sleep", sleep_mock)
 
         mistral = MistralAI(token="stub-token")
         auth_error = _mistral_sdk_error(status_code)
@@ -255,7 +256,7 @@ class TestMistralAuthFailover:
         # propagates honestly, but Mistral is still put on cooldown.
         monkeypatch.setattr(gpt_settings, "failover_chain_master_raw", "auto", raising=False)
         sleep_mock = AsyncMock()
-        monkeypatch.setattr(MistralAI.get_chat_response.retry, "sleep", sleep_mock)
+        monkeypatch.setattr(retrying_policy(MistralAI.get_chat_response), "sleep", sleep_mock)
 
         mistral = MistralAI(token="stub-token")
         auth_error = _mistral_sdk_error(401)
