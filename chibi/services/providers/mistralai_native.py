@@ -2,25 +2,26 @@ import base64
 import json
 import random
 from asyncio import sleep
-from typing import Union, cast
+from typing import Any, Union, cast
 from uuid import uuid4
 
 import httpx
+import httpx2
 from loguru import logger
-from mistralai import (
-    ChatCompletionResponse,
-    JSONSchemaTypedDict,
-    Mistral,
-    ResponseFormatTypedDict,
-    TextChunk,
-)
-from mistralai.models import (
+from mistralai.client import Mistral
+from mistralai.client.errors import SDKError
+from mistralai.client.models import (
     AssistantMessage,
+    BaseModelCard,
     ChatCompletionChoice,
+    ChatCompletionResponse,
     DocumentURLChunk,
+    FTModelCard,
     FunctionCall,
-    SDKError,
+    JSONSchemaTypedDict,
+    ResponseFormatTypedDict,
     SystemMessage,
+    TextChunk,
     Tool,
     ToolCall,
     ToolMessage,
@@ -32,12 +33,34 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
-from chibi.models import Message, User
+from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
+from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
-from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
+    delta_latched,
+    delta_streaming_allowed,
+    mark_non_streaming_fallback_spent,
+    non_streaming_fallback_spent_error,
+)
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    append_repair_nudge,
+    ensure_function_parameters,
+    evaluate_turn_end,
+    fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
+    honored_terminal_name,
+    log_forced_choice_outcome,
+    log_turn_misuse,
+    offered_tool_definitions,
+    partition_terminal_calls,
+    plan_terminal_turn,
+    resolve_turn_end_misuse,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -55,15 +78,20 @@ MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMe
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
     """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
 
-    The mistral SDK (1.x) does not expose distinct rate-limit / server-error classes:
-    any failed HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
-    the raw ``httpx.Response``, so the status code is inspected instead.
+    The Mistral SDK (3.3.0) exposes no per-status exception classes: any failed
+    HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
+    the raw ``httpx2.Response``, so the status code is classified in
+    ``chibi.services.mistral_errors`` instead. The client's own transport
+    failures are plain ``httpx2`` exceptions (the SDK's HTTP library), which the
+    project ``httpx`` classes above do not cover. HTTP 401/403 classify to the
+    ``auth`` trigger and are deliberately NOT retried (owner decision): they
+    fail over unconditionally on the first response.
     """
-    if isinstance(exception, (ConnectionError, httpx.TransportError)):
+    if isinstance(exception, (ConnectionError, httpx.TransportError, httpx2.TransportError)):
         return True
     if isinstance(exception, SDKError):
-        status_code = exception.raw_response.status_code
-        return status_code == 429 or status_code >= 500
+        kind = classify_mistral_exception(exception)
+        return kind in ("rate_limit", "server_error")
     return False
 
 
@@ -105,6 +133,51 @@ class MistralAI(RestApiFriendlyProvider):
 
         self._client = Mistral(api_key=self.token)
         return self._client
+
+    def _chat_request_kwargs(
+        self,
+        model: str,
+        messages: list[MistralMessageParam],
+        interface: UserInterface | None,
+        max_tokens: int | None,
+    ) -> dict[str, Any]:
+        """Build the request kwargs shared by every Mistral chat call.
+
+        The streaming helper's non-streaming fallback re-issues the same
+        request without the stream, so the streaming and non-streaming calls
+        must be built by one builder: a divergence here would make the
+        fallback answer a different request than the rejected stream.
+
+        Args:
+            model: The Mistral model identifier.
+            messages: The conversation messages.
+            interface: The active user interface, if any.
+            max_tokens: Optional per-call output-token cap; overrides the
+                instance-level value when provided, exact old behavior when None.
+
+        Returns:
+            Keyword arguments for ``chat.complete_async`` and ``chat.stream_async``.
+        """
+        offered = offered_tool_definitions(definitions=self.tools_list, interface=interface)
+        forced_choice = forced_choice_applicable(interface=interface)
+        if forced_choice:
+            # Forced choice (optimisation only; the turn-end validator is the
+            # guarantee): "any" demands a tool call without naming one, for the
+            # same reason as the other adapters — the turn may end via either
+            # terminal tool and may need work calls first. Gated on the single
+            # switch AND interface presence (D1). The parameters field is
+            # mandatory Mistral-SDK-side even when the schema is empty (recon C4),
+            # so the forced path guarantees it on every offered tool.
+            offered = ensure_function_parameters(definitions=offered)
+        return {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
+            "temperature": self.temperature,
+            "tools": cast(list[Tool], offered),
+            "tool_choice": "any" if forced_choice else "auto",
+            "http_headers": {"Cache-Control": "max-age=86400"},
+        }
 
     def get_thoughts(self, assistant_message: AssistantMessage) -> str | None:
         if not assistant_message.content:
@@ -155,13 +228,9 @@ class MistralAI(RestApiFriendlyProvider):
                 )
             else:
                 response = await self.client.chat.complete_async(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                    temperature=self.temperature,
-                    tools=self.tools_list,  # type: ignore[arg-type]
-                    tool_choice="auto",
-                    http_headers={"Cache-Control": "max-age=86400"},
+                    **self._chat_request_kwargs(
+                        model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                    )
                 )
 
             if response.choices and len(response.choices) > 0:
@@ -188,7 +257,11 @@ class MistralAI(RestApiFriendlyProvider):
 
         Emits one live delta per non-empty content chunk via the interface
         until the earliest tool-call signal in the stream (the full
-        ``tool_calls`` typically arrive only on the final chunk). The chunks
+        ``tool_calls`` typically arrive only on the final chunk). Delta
+        content is normalized with ``mistral_content_to_text`` first, so a
+        reasoning-capable model's list-form chunks (``ThinkChunk`` et al.)
+        flatten to body text before the accumulator or the ACK gate sees
+        them, and reasoning text never enters the answer. The chunks
         are rebuilt into a ChatCompletionResponse equivalent to the
         non-streaming response (fragmented tool-call arguments, parallel
         tool calls and usage included). The stream is always closed
@@ -203,6 +276,16 @@ class MistralAI(RestApiFriendlyProvider):
 
         Returns:
             The aggregated final ChatCompletionResponse.
+
+        Raises:
+            SDKError: When the streaming request is rejected after live deltas
+                were already emitted (the retry latch forbids a transparent
+                re-request at that point), when the rejection is neither a
+                400 nor a 404, or when the single non-streaming fallback
+                attempt of this provider has already failed (its error is
+                re-raised on retry re-entry instead of issuing a second
+                fallback; the latch is scoped to this provider, so other
+                providers of the same failover walk keep their own).
         """
         content_parts: list[str] = []
         tool_call_slots: dict[int, dict[str, str]] = {}
@@ -212,15 +295,38 @@ class MistralAI(RestApiFriendlyProvider):
         completion_id = ""
         response_model = ""
         created = 0
-        async with await self.client.chat.stream_async(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-            temperature=self.temperature,
-            tools=cast(list[Tool], self.tools_list),
-            tool_choice="auto",
-            http_headers={"Cache-Control": "max-age=86400"},
-        ) as stream:
+        try:
+            stream = await self.client.chat.stream_async(
+                **self._chat_request_kwargs(model=model, messages=messages, interface=interface, max_tokens=max_tokens)
+            )
+        except SDKError as stream_error:
+            # Some deployments reject the streaming request (e.g. an
+            # unsupported streaming parameter) with a 400/404 before any
+            # chunk can arrive. Mirroring the OpenAI path, the fallback to a
+            # non-streaming request is handled here, inside the helper: the
+            # delta latch decides whether a transparent re-request is still
+            # allowed, and a failure after live deltas were emitted must
+            # surface instead of silently re-issuing the request.
+            status_code = stream_error.raw_response.status_code
+            if delta_latched(interface) or status_code not in (400, 404):
+                raise
+            spent_error = non_streaming_fallback_spent_error(interface, self.name)
+            if spent_error is not None:
+                raise spent_error
+            logger.warning(
+                f"{self.name}/{model} rejected the streaming request ({stream_error}). "
+                f"Falling back to a non-streaming request."
+            )
+            try:
+                return await self.client.chat.complete_async(
+                    **self._chat_request_kwargs(
+                        model=model, messages=messages, interface=interface, max_tokens=max_tokens
+                    )
+                )
+            except Exception as fallback_error:
+                mark_non_streaming_fallback_spent(interface, self.name, fallback_error)
+                raise
+        async with AckSentinelStreamSession(interface) as deltas, stream:
             async for event in stream:
                 chunk = event.data
                 completion_id = chunk.id or completion_id
@@ -234,10 +340,11 @@ class MistralAI(RestApiFriendlyProvider):
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
                 delta = choice.delta
-                if delta.content:
-                    content_parts.append(delta.content)
+                delta_text = mistral_content_to_text(delta.content)
+                if delta_text:
+                    content_parts.append(delta_text)
                     if not tool_call_signal:
-                        await emit_delta(interface=interface, text=delta.content)
+                        await deltas.emit(delta_text)
                 for tool_call_delta in delta.tool_calls or []:
                     tool_call_signal = True
                     index = tool_call_delta.index or 0
@@ -296,8 +403,10 @@ class MistralAI(RestApiFriendlyProvider):
         max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
+
+        history_size = len(messages)
         initial_messages = [msg.to_mistral() for msg in messages]
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
@@ -309,10 +418,14 @@ class MistralAI(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
         return (
             chat_response,
-            [Message.from_mistral(msg) for msg in new_messages if not isinstance(msg, SystemMessage)],
+            [msg for msg in new_messages if msg.role != "system"],
         )
 
     async def _get_chat_completion_response(
@@ -327,7 +440,29 @@ class MistralAI(RestApiFriendlyProvider):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
+        """Run one model round: prepare the prompt, call the model and dispatch its tool calls.
+
+        Args:
+            messages: The conversation messages in Mistral wire format.
+            model: The Mistral model identifier.
+            user: The requesting user.
+            caller_storage_id: Storage ID of the calling user.
+            caller_thread_id: ID of the calling thread.
+            system_prompt: The base system prompt.
+            interface: The active user interface, if any.
+            conversation_messages: The persisted conversation, if tool results must be folded back.
+            track_prompt_size: Whether to record prompt usage.
+            max_tokens: Optional per-call output-token cap.
+            repair_used: Whether the turn-end repair round-trip has already been spent.
+
+        Returns:
+            The chat response schema and the updated wire message list.
+
+        Raises:
+            NoResponseError: When the model returns a choice without a message.
+        """
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
             user_id=user.id,
@@ -356,14 +491,70 @@ class MistralAI(RestApiFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, user=user, model=model, provider=self.name)
 
         message_data = response.choices[0].message
+        if message_data is None:
+            raise NoResponseError(provider=self.name, model=model, detail="Response choice carries no message")
+        assistant_content = message_data.content or ""
 
         tool_calls = message_data.tool_calls
         if not tool_calls:
-            messages.append(
-                AssistantMessage(
-                    content=message_data.content or "",
-                )
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
+            # The validator judges the raw content, before the legacy
+            # "no data" fallback: an empty ending must cost a repair
+            # round-trip, never pass silently under a placeholder string.
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=assistant_content if isinstance(assistant_content, str) else "",
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
             )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: UserMessage(content=text),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
+            final_message = AssistantMessage(
+                content=message_data.content or "",
+            )
+            messages.append(final_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_mistral(final_message))
             return ChatResponseSchema(
                 answer=message_data.content or "no data",
                 provider=self.name,
@@ -391,6 +582,82 @@ class MistralAI(RestApiFriendlyProvider):
             )
             for tool_call in tool_calls
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                if isinstance(assistant_content, str):
+                    assistant_content = fold_terminal_calls_into_thoughts(
+                        thoughts=assistant_content, terminal_calls=terminal_calls
+                    )
+                tool_calls = [
+                    tool_call for tool_call in tool_calls if tool_call.function.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=thoughts)
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: UserMessage(content=text),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -403,7 +670,7 @@ class MistralAI(RestApiFriendlyProvider):
 
         for tool_call, result in zip(tool_calls, results):
             tool_call_message = AssistantMessage(
-                content=message_data.content or "",
+                content=assistant_content,
                 tool_calls=[
                     ToolCall(
                         id=tool_call.id,
@@ -437,6 +704,7 @@ class MistralAI(RestApiFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:
@@ -476,7 +744,7 @@ class MistralAI(RestApiFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
 
         message_data = response.choices[0].message
-        answer = message_data.content
+        answer = message_data.content if message_data else None
         if not answer:
             return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
 
@@ -611,14 +879,15 @@ class MistralAI(RestApiFriendlyProvider):
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return []
 
+        model_cards = [model for model in mistral_models if isinstance(model, (BaseModelCard, FTModelCard))]
         all_models = [
             ModelChangeSchema(
                 provider=self.name,
-                name=model.id,
-                display_name=model.id.replace("-", " ").title(),
+                name=model_card.id,
+                display_name=model_card.id.replace("-", " ").title(),
                 image_generation=False,
             )
-            for model in mistral_models
-            if not self._model_name_has_keywords_exclude(model_name=model.id)
+            for model_card in model_cards
+            if not self._model_name_has_keywords_exclude(model_name=model_card.id)
         ]
         return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)

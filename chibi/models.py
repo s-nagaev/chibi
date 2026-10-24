@@ -16,22 +16,25 @@ from anthropic.types import (
 )
 from google.genai.types import ContentDict, FunctionCallDict, PartDict
 from loguru import logger
-from mistralai.models import (
+from mistralai.client.models import (
     AssistantMessage as MistralAssistantMessage,
 )
-from mistralai.models import (
+from mistralai.client.models import (
     FunctionCall as MistralFunctionCall,
 )
-from mistralai.models import (
+from mistralai.client.models import (
     SystemMessage as MistralSystemMessage,
 )
-from mistralai.models import (
+from mistralai.client.models import (
+    TextChunk as MistralTextChunk,
+)
+from mistralai.client.models import (
     ToolCall as MistralToolCall,
 )
-from mistralai.models import (
+from mistralai.client.models import (
     ToolMessage as MistralToolMessage,
 )
-from mistralai.models import (
+from mistralai.client.models import (
     UserMessage as MistralUserMessage,
 )
 from openai.types.chat import (
@@ -59,6 +62,31 @@ CHAT_COMPLETION_CLASSES = {
     "tool": ChatCompletionToolMessageParam,
     "user": ChatCompletionUserMessageParam,
 }
+
+
+def mistral_content_to_text(content: Any) -> str:
+    """Flatten a Mistral message or delta content value into plain text.
+
+    The SDK types ``content`` as a string or as a list of content chunks, and
+    reasoning-capable models answer with the list form. Only top-level
+    ``TextChunk`` entries are body text: the ``TextChunk`` entries nested inside
+    a ``ThinkChunk`` are reasoning, and folding them into the answer would leak
+    private chain-of-thought to the user. Unset, empty and unexpected values
+    flatten to an empty string, so callers never inspect the raw shape.
+
+    Args:
+        content: The raw ``content`` value of a Mistral message or delta.
+
+    Returns:
+        The concatenated body text, empty when the value carries none.
+    """
+    if isinstance(content, str):
+        return content
+
+    if not isinstance(content, list):
+        return ""
+
+    return "".join(chunk.text for chunk in content if isinstance(chunk, MistralTextChunk))
 
 
 class FunctionSchema(BaseModel):
@@ -97,6 +125,9 @@ class ToolSchema(BaseModel):
         return base64.b64encode(value).decode("ascii")
 
 
+MessageVisibility = Literal["visible", "hidden"]
+
+
 class Message(BaseModel):
     id: int = Field(default_factory=time.time_ns)
     role: str
@@ -106,6 +137,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     tool_name: str | None = None
     source: str | None = None
+    visibility: MessageVisibility = "visible"
 
     @property
     def estimate_tokens(self) -> int:
@@ -116,7 +148,8 @@ class Message(BaseModel):
         if not wrapper_class:
             raise ValueError(f"Role {self.role} seems not supported yet")
 
-        open_ai_message = wrapper_class(**self.model_dump(exclude={"expire_at"}))
+        # visibility is platform metadata: it must never reach the API payload.
+        open_ai_message = wrapper_class(**self.model_dump(exclude={"expire_at", "visibility"}))
         return open_ai_message
 
     @classmethod

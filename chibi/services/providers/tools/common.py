@@ -148,6 +148,24 @@ class DelegateTool(ChibiTool):
 
         logger.log("SUBAGENT", f"[{model_name or caller_model}] Delegated task is done: {response.answer}")
 
+        # Loud-empty delegation contract (ruling D1). Terminal interception in
+        # the agent loops is by tool-name membership and never consults the
+        # offered list (terminal_calls.is_terminal_call), so an interface-less
+        # sub-agent that hallucinates ack_silently() still ends its turn with
+        # an empty answer. An empty delegation result must therefore never
+        # reach the parent as a success: {"response": ""} is indistinguishable
+        # from a swallowed report. Raising ToolException here turns the empty
+        # answer into an error tool result for the parent; both the foreground
+        # call and the background resumption path funnel through this function,
+        # so one rule covers both. No tool result is ever created for the
+        # terminal call itself — the loudness lives only at this boundary.
+        if not response.answer.strip():
+            raise ToolException(
+                "The delegated sub-agent returned an EMPTY report: its turn ended without any text "
+                "(it may have ended silently or produced no output). Treat this as a failed "
+                "delegation: re-run it with a refined instruction or handle the task yourself."
+            )
+
         return {"response": response.answer}
 
 
@@ -170,3 +188,80 @@ class GetCurrentDatetimeTool(ChibiTool):
         return {
             "datetime_now": now.strftime("%Y-%m-%d %H:%M:%S"),
         }
+
+
+class SayTool(ChibiTool):
+    """Terminal delivery tool: the only channel for user-facing communication.
+
+    Never dispatched as an ordinary tool: the agent loop must intercept a
+    ``say()`` call, persist ``text`` as the visible assistant message and end
+    the turn without producing a tool result (sub-task 4b). Until that branch
+    lands, the base-class dispatch path would treat this call like any other
+    tool, which is the acknowledged intermediate state of sub-task 4a.
+    """
+
+    register = True
+    run_in_background_by_default = False
+    allow_model_to_change_background_mode = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="say",
+            description=(
+                "Deliver a message to the user. This is the ONLY channel for user-facing "
+                "communication: text written outside this tool is never shown to the user. "
+                "Call say() whenever the user is owed an answer or anything worth reporting. "
+                "Calling say() ENDS your turn — it must be the last call of the turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The message the user will see.",
+                    },
+                },
+                "required": ["text"],
+            },
+        ),
+    )
+    name = "say"
+
+
+class AckSilentlyTool(ChibiTool):
+    """Terminal service acknowledgement: ends the turn with nothing delivered.
+
+    The user never sees this response; it is not a quiet version of ``say()``.
+    Never dispatched as an ordinary tool: the agent loop must intercept an
+    ``ack_silently()`` call, persist a hidden assistant message and end the
+    turn without producing a tool result (sub-task 4b). Until that branch
+    lands, the base-class dispatch path would treat this call like any other
+    tool, which is the acknowledged intermediate state of sub-task 4a.
+    """
+
+    register = True
+    run_in_background_by_default = False
+    allow_model_to_change_background_mode = False
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="ack_silently",
+            description=(
+                "Silently absorb a background event (a tool or scheduler result) and end the "
+                "turn with NOTHING delivered to the user. This is a service response: the user "
+                "NEVER sees it, and it is not a quiet version of say(). Admission rule: "
+                "ack_silently() is accepted only when an answer is no longer owed for this user "
+                "turn — the user already has the substance (a full answer was delivered) or more "
+                "background work is still running. It is REFUSED when the tool response you are "
+                "absorbing carries the only answer of the turn, or when nothing was ever "
+                "delivered: say() the answer instead. Calling ack_silently() ENDS your turn — it "
+                "must be the last call of the turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+    )
+    name = "ack_silently"

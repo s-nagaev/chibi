@@ -5,9 +5,11 @@ import json
 import pytest
 from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlockParam
 from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDict, PartDict
+from mistralai.client import UNSET
+from mistralai.client.models import TextChunk, ThinkChunk
 
 from chibi.config import application_settings
-from chibi.models import FunctionSchema, Message, ToolSchema, User
+from chibi.models import FunctionSchema, Message, ToolSchema, User, mistral_content_to_text
 
 
 class TestMessageGoogleConversion:
@@ -318,6 +320,43 @@ class TestMessageGoogleConversion:
         assert google_content["parts"][1]["function_call"]["name"] == "get_weather"
         assert google_content["parts"][2]["function_call"]
         assert google_content["parts"][2]["function_call"]["name"] == "get_time"
+
+
+class TestMistralContentToText:
+    """Test flattening of Mistral message and delta content into plain text."""
+
+    def test_plain_string_returned_verbatim(self) -> None:
+        """Test that a plain string content is returned exactly as-is."""
+        assert mistral_content_to_text("Hello, world") == "Hello, world"
+
+    def test_list_of_text_chunks_concatenated(self) -> None:
+        """Test that a list of text chunks flattens into the concatenated body text."""
+        content = [TextChunk(text="Hello, "), TextChunk(text="world")]
+
+        assert mistral_content_to_text(content) == "Hello, world"
+
+    def test_list_of_reasoning_chunks_is_dropped(self) -> None:
+        """Test that reasoning (ThinkChunk) content never leaks into the result."""
+        reasoning = ThinkChunk(thinking=[TextChunk(text="secret chain of thought")])
+
+        result = mistral_content_to_text([reasoning])
+
+        assert result == ""
+        assert "secret chain of thought" not in result
+
+    def test_mixed_list_keeps_only_text_chunks(self) -> None:
+        """Test that a mixed list keeps body text and drops the reasoning chunks."""
+        reasoning = ThinkChunk(thinking=[TextChunk(text="private reasoning")])
+        content = [reasoning, TextChunk(text="The answer"), TextChunk(text=" is 42")]
+
+        assert mistral_content_to_text(content) == "The answer is 42"
+        assert "private reasoning" not in mistral_content_to_text(content)
+
+    def test_unset_value_flattens_to_empty_string(self) -> None:
+        """Test that unset, None and unexpected values flatten to an empty string."""
+        assert mistral_content_to_text(UNSET) == ""
+        assert mistral_content_to_text(None) == ""
+        assert mistral_content_to_text(42) == ""
 
 
 class TestMessageAnthropicConversion:

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from openai.types import CompletionUsage
 from openai.types.completion_usage import CompletionTokensDetails, PromptTokensDetails
@@ -33,6 +33,11 @@ class ChatResponseSchema(BaseModel):
     provider: str
     model: str
     usage: UsageSchema | CompletionUsage | None
+    # Turn-level render metadata (task 5): "hidden" when the turn ended via
+    # ack_silently() and its content must not reach any renderer. This is a
+    # bot-side schema, NOT a provider payload serializer: visibility must
+    # never appear in any API payload (chibi/models.py) or on the IDE wire.
+    visibility: Literal["visible", "hidden"] = "visible"
 
 
 class ModelChangeSchema(BaseModel):

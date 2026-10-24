@@ -25,9 +25,16 @@ import pytest
 from loguru import logger
 
 from chibi.config.gpt import gpt_settings
+from chibi.exceptions import SilentTurnError
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.failover import CooldownStore, FailoverModelRegistry, reset_failover_policy_cache
+from chibi.services.failover import (
+    CooldownStore,
+    FailoverEngine,
+    FailoverModelRegistry,
+    classify_exception,
+    reset_failover_policy_cache,
+)
 from chibi.services.providers.tools.utils import get_sub_agent_response
 from chibi.services.user import get_llm_chat_completion_answer
 from chibi.storage.database import _db_provider
@@ -245,3 +252,35 @@ class TestSubagentWiring:
         assert result.answer == "subagent primary answer"
         assert log_lines == []
         mark_spy.assert_not_awaited()
+
+
+class TestSilentTurnRefusalIsNotAProviderFault:
+    """The turn-end validator's loud failure is turn bookkeeping, not an API fault.
+
+    A refusal propagates honestly and never puts the innocent provider on a
+    cooldown: the provider answered fine, the conversation produced nothing
+    deliverable. Before the fix the error rode its ServiceResponseError base
+    class into the server_error classification and cooled the provider down
+    for 20 minutes.
+    """
+
+    def test_classify_exception_treats_silent_turn_as_not_a_fault(self) -> None:
+        assert classify_exception(SilentTurnError(provider="openai", model="gpt-5.6-luna")) is None
+
+    async def test_silent_turn_error_causes_no_cooldown_and_no_fallback(self, monkeypatch):
+        user = _stub_user()
+        provider = AsyncMock()
+        provider.name = "openai"
+        engine = FailoverEngine(user=user)
+
+        mark_spy = AsyncMock()
+        monkeypatch.setattr(CooldownStore, "mark", mark_spy)
+
+        async def _call(provider: "Provider", model: str | None) -> tuple[ChatResponseSchema, list[Message]]:
+            raise SilentTurnError(provider="openai", model="gpt-5.6-luna", detail="turn misuse")
+
+        with pytest.raises(SilentTurnError):
+            await engine.run(role="master", primary_provider=provider, model="gpt-5.6-luna", call=_call)
+
+        mark_spy.assert_not_awaited()
+        assert await engine.cooldown.is_blocked("openai") is False

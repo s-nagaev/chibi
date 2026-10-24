@@ -12,7 +12,7 @@ from google.genai.types import (
     GenerateContentResponse,
     Part,
 )
-from mistralai.models import UserMessage
+from mistralai.client.models import UserMessage
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 

@@ -40,6 +40,7 @@ from chibi.models import Message, User
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
+from chibi.utils.ack_sentinel import is_pure_ack
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
@@ -1061,6 +1062,11 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                 return None
             if any((message.tool_name, message.tool_calls, message.tool_call_id)):
                 return None
+            # Private CoT (ack_silently turns) is never archived: long-term
+            # memory is a render-time consumer, so hidden content must not be
+            # laundered into it. The row itself stays in the primary storage.
+            if message.visibility == "hidden":
+                return None
 
             if message.role == "user":
                 try:
@@ -1075,7 +1081,7 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
                     snippet = str(message.content)[:50]
             else:
                 snippet = message.content[:50]
-            if "<chibi>ACK</chibi>" in snippet and len(snippet) <= 20:
+            if is_pure_ack(snippet):
                 return None
             if not snippet:
                 return None

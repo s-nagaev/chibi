@@ -155,6 +155,7 @@ async def test_get_chat_response_passes_conversation_messages_to_prepare_system_
     response = _create_final_answer_response(answer="Hello")
     user = User(id=12345)
     conversation = [Message(role="user", content="Hi")]
+    conversation_before = list(conversation)
 
     tracker = _PrepareSystemPromptTracker()
 
@@ -180,7 +181,10 @@ async def test_get_chat_response_passes_conversation_messages_to_prepare_system_
     assert isinstance(chat_response, ChatResponseSchema)
     assert chat_response.answer == "Hello"
     assert len(tracker.calls) == 1
-    assert tracker.calls[0][0]["conversation_messages"] == conversation
+    # The loop mirrors the final assistant message into the conversation list
+    # (it is the persisted form of the turn), so compare against the
+    # pre-call snapshot of that list.
+    assert tracker.calls[0][0]["conversation_messages"] == conversation_before
     prompt = json.loads(tracker.calls[0][1])
     assert prompt["approximate_context_size"] == "n/a"
 
