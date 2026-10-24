@@ -32,7 +32,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
-from chibi.models import Message, User
+from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
@@ -222,7 +222,11 @@ class MistralAI(RestApiFriendlyProvider):
 
         Emits one live delta per non-empty content chunk via the interface
         until the earliest tool-call signal in the stream (the full
-        ``tool_calls`` typically arrive only on the final chunk). The chunks
+        ``tool_calls`` typically arrive only on the final chunk). Delta
+        content is normalized with ``mistral_content_to_text`` first, so a
+        reasoning-capable model's list-form chunks (``ThinkChunk`` et al.)
+        flatten to body text before the accumulator or the ACK gate sees
+        them, and reasoning text never enters the answer. The chunks
         are rebuilt into a ChatCompletionResponse equivalent to the
         non-streaming response (fragmented tool-call arguments, parallel
         tool calls and usage included). The stream is always closed
@@ -280,10 +284,11 @@ class MistralAI(RestApiFriendlyProvider):
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
                 delta = choice.delta
-                if delta.content:
-                    content_parts.append(delta.content)
+                delta_text = mistral_content_to_text(delta.content)
+                if delta_text:
+                    content_parts.append(delta_text)
                     if not tool_call_signal:
-                        await deltas.emit(delta.content)
+                        await deltas.emit(delta_text)
                 for tool_call_delta in delta.tool_calls or []:
                     tool_call_signal = True
                     index = tool_call_delta.index or 0

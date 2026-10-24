@@ -37,7 +37,7 @@ from google.genai.types import (
     GenerateContentResponseUsageMetadata,
     Part,
 )
-from mistralai.client.models import UsageInfo
+from mistralai.client.models import TextChunk, ThinkChunk, UsageInfo
 from openai import BadRequestError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
@@ -689,7 +689,7 @@ class TestMistralStreaming:
 
     def _chunk(
         self,
-        content: str | None = None,
+        content: str | list[Any] | None = None,
         tool_calls: list[Any] | None = None,
         usage: Any = None,
         finish_reason: str | None = None,
@@ -736,6 +736,57 @@ class TestMistralStreaming:
         assert interface.delta_emitted is True
         assert result.answer == "Hello"
         assert result.usage.total_tokens == 3
+
+    async def test_thinkchunk_delta_does_not_crash_and_stays_out_of_the_answer(self) -> None:
+        events = [
+            self._chunk(content=[ThinkChunk(thinking=[TextChunk(text="secret reasoning")])]),
+            self._chunk(content=[TextChunk(text="Hel")]),
+            self._chunk(content=[TextChunk(text="lo")]),
+            self._chunk(finish_reason="stop", usage=UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3)),
+        ]
+        fake_stream = _FakeMistralStream(events)
+
+        async def _stream_async(**kwargs: Any) -> Any:
+            return fake_stream
+
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(chat=SimpleNamespace(stream_async=_stream_async))
+        interface = _make_interface()
+
+        result, _ = await self._call_public_path(provider, provider.__dict__["_client"], interface)
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Hel", "lo"]
+        assert fake_stream.closed is True
+        assert result.answer == "Hello"
+        assert "secret reasoning" not in result.answer
+        for call in interface.send_delta.await_args_list:
+            assert "secret reasoning" not in call.args[0]
+
+    async def test_mixed_chunk_list_yields_ordered_text_concatenation(self) -> None:
+        events = [
+            self._chunk(
+                content=[
+                    ThinkChunk(thinking=[TextChunk(text="hmm")]),
+                    TextChunk(text="Hel"),
+                    TextChunk(text="lo"),
+                ]
+            ),
+            self._chunk(finish_reason="stop", usage=UsageInfo(prompt_tokens=1, completion_tokens=1, total_tokens=2)),
+        ]
+        fake_stream = _FakeMistralStream(events)
+
+        async def _stream_async(**kwargs: Any) -> Any:
+            return fake_stream
+
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(chat=SimpleNamespace(stream_async=_stream_async))
+        interface = _make_interface()
+
+        result, _ = await self._call_public_path(provider, provider.__dict__["_client"], interface)
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == ["Hello"]
+        assert result.answer == "Hello"
+        assert "hmm" not in result.answer
 
     async def test_rebuilds_fragmented_tool_calls(self) -> None:
         usage = UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3)
