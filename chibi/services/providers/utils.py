@@ -8,7 +8,7 @@ from anthropic.types import (
     Message as AnthropicMessage,
 )
 from google.genai.types import GenerateContentResponse
-from mistralai import ChatCompletionResponse
+from mistralai.client.models import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
 from openai.types.responses import Response

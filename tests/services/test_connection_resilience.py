@@ -32,7 +32,7 @@ from google.genai.types import (
     HttpOptions,
     Part,
 )
-from mistralai.models import SDKError
+from mistralai.client.errors import SDKError
 
 from chibi.exceptions import ServiceConnectionError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User

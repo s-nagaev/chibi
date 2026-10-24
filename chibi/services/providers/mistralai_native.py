@@ -7,20 +7,20 @@ from uuid import uuid4
 
 import httpx
 from loguru import logger
-from mistralai import (
-    ChatCompletionResponse,
-    JSONSchemaTypedDict,
-    Mistral,
-    ResponseFormatTypedDict,
-    TextChunk,
-)
-from mistralai.models import (
+from mistralai.client import Mistral
+from mistralai.client.errors import SDKError
+from mistralai.client.models import (
     AssistantMessage,
+    BaseModelCard,
     ChatCompletionChoice,
+    ChatCompletionResponse,
     DocumentURLChunk,
+    FTModelCard,
     FunctionCall,
-    SDKError,
+    JSONSchemaTypedDict,
+    ResponseFormatTypedDict,
     SystemMessage,
+    TextChunk,
     Tool,
     ToolCall,
     ToolMessage,
@@ -73,9 +73,11 @@ MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMe
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
     """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
 
-    The mistral SDK (1.x) does not expose distinct rate-limit / server-error classes:
-    any failed HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
-    the raw ``httpx.Response``, so the status code is inspected instead.
+    The Mistral SDK (3.3.0) still exposes no per-status exception classes: the errors
+    module exports only ``HTTPValidationError``, ``MistralError``, ``NoResponseError``,
+    ``ObservabilityError`` and ``ResponseValidationError`` (plus data helpers), and any
+    failed HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
+    the raw ``httpx2.Response``, so the status code is inspected instead.
     """
     if isinstance(exception, (ConnectionError, httpx.TransportError)):
         return True
@@ -379,6 +381,27 @@ class MistralAI(RestApiFriendlyProvider):
         max_tokens: int | None = None,
         repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[MistralMessageParam]]:
+        """Run one model round: prepare the prompt, call the model and dispatch its tool calls.
+
+        Args:
+            messages: The conversation messages in Mistral wire format.
+            model: The Mistral model identifier.
+            user: The requesting user.
+            caller_storage_id: Storage ID of the calling user.
+            caller_thread_id: ID of the calling thread.
+            system_prompt: The base system prompt.
+            interface: The active user interface, if any.
+            conversation_messages: The persisted conversation, if tool results must be folded back.
+            track_prompt_size: Whether to record prompt usage.
+            max_tokens: Optional per-call output-token cap.
+            repair_used: Whether the turn-end repair round-trip has already been spent.
+
+        Returns:
+            The chat response schema and the updated wire message list.
+
+        Raises:
+            NoResponseError: When the model returns a choice without a message.
+        """
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
             user_id=user.id,
@@ -407,6 +430,8 @@ class MistralAI(RestApiFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, user=user, model=model, provider=self.name)
 
         message_data = response.choices[0].message
+        if message_data is None:
+            raise NoResponseError(provider=self.name, model=model, detail="Response choice carries no message")
         assistant_content = message_data.content or ""
 
         tool_calls = message_data.tool_calls
@@ -658,7 +683,7 @@ class MistralAI(RestApiFriendlyProvider):
             MetricsService.send_usage_metrics(metric=usage, model=moderator_model, provider=self.name)
 
         message_data = response.choices[0].message
-        answer = message_data.content
+        answer = message_data.content if message_data else None
         if not answer:
             return ModeratorsAnswer(status="error", verdict="declined", reason="no response from moderator received")
 
@@ -793,14 +818,15 @@ class MistralAI(RestApiFriendlyProvider):
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return []
 
+        model_cards = [model for model in mistral_models if isinstance(model, (BaseModelCard, FTModelCard))]
         all_models = [
             ModelChangeSchema(
                 provider=self.name,
-                name=model.id,
-                display_name=model.id.replace("-", " ").title(),
+                name=model_card.id,
+                display_name=model_card.id.replace("-", " ").title(),
                 image_generation=False,
             )
-            for model in mistral_models
-            if not self._model_name_has_keywords_exclude(model_name=model.id)
+            for model_card in model_cards
+            if not self._model_name_has_keywords_exclude(model_name=model_card.id)
         ]
         return self.filter_and_return_list_of_models(models=all_models, image_generation=image_generation)

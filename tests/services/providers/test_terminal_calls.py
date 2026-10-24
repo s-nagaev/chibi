@@ -23,8 +23,8 @@ from anthropic.types import Message as AnthropicMessage
 from anthropic.types import TextBlock, ToolUseBlock, Usage
 from google.genai.types import Candidate, Content, GenerateContentResponse, Part
 from google.genai.types import FunctionCall as GeminiFunctionCall
-from mistralai.models import FunctionCall as MistralFunctionCall
-from mistralai.models import ToolCall as MistralToolCall
+from mistralai.client.models import FunctionCall as MistralFunctionCall
+from mistralai.client.models import ToolCall as MistralToolCall
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from openai.types.chat.chat_completion_message_tool_call import (

@@ -125,7 +125,7 @@ async def test_ocr_payload_uses_document_url_chunk():
     assert document is not None, "Document parameter should be present"
 
     # Verify DocumentURLChunk was used with correct base64 data URL
-    from mistralai.models import DocumentURLChunk
+    from mistralai.client.models import DocumentURLChunk
 
     assert isinstance(document, DocumentURLChunk), f"Expected DocumentURLChunk, got {type(document)}"
 

@@ -33,9 +33,7 @@ def _zero_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(retryer, "wait", wait_fixed(0))
 
 
-def _patch_chat_call(
-    monkeypatch: pytest.MonkeyPatch, error: BaseException
-) -> dict[str, Any]:
+def _patch_chat_call(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> dict[str, Any]:
     """Make the underlying chat completion call of a ``MoonshotAI`` fail with ``error``.
 
     Args:

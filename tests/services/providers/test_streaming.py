@@ -37,7 +37,7 @@ from google.genai.types import (
     GenerateContentResponseUsageMetadata,
     Part,
 )
-from mistralai.models import UsageInfo
+from mistralai.client.models import UsageInfo
 from openai import BadRequestError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
