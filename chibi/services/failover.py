@@ -34,6 +34,12 @@ Hard rules honoured here:
 - No ``context_overflow`` trigger (two-tier protection already exists) and
   no moderation fallback: those exceptions are deliberately NOT classified
   as failover triggers.
+- Auth handling: a raw Mistral ``SDKError`` with HTTP 401/403 IS a failover
+  trigger (kind ``auth``, owner decision — these codes also arrive when the
+  account is out of credit or cut off, which is exactly when another
+  provider can still serve the request). Chibi-side auth/config exceptions
+  from other providers (``NotAuthorizedError``, ``NoApiKeyProvidedError``)
+  remain non-triggering.
 - No revisiting already-tried (provider, model) pairs within one request.
 - Cooldown is the ONLY persistent state (Redis-backed, 20 min fixed TTL,
   not configurable in v1).
@@ -80,7 +86,9 @@ from chibi.exceptions import (
     ServiceConnectionError,
     ServiceRateLimitError,
     ServiceResponseError,
+    SilentTurnError,
 )
+from chibi.services.mistral_errors import MistralErrorKind, classify_mistral_exception
 from chibi.storage.database import _db_provider
 from chibi.storage.redis import RedisStorage
 from chibi.utils.app import SingletonMeta
@@ -91,7 +99,7 @@ if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
 
 Role = Literal["master", "subagent"]
-TriggerKind = Literal["rate_limit", "server_error", "timeout", "network"]
+TriggerKind = MistralErrorKind
 
 # Notification hooks (failover_notification task): invoked by the engine when
 # a fallback step is ABOUT to be attempted and when every step is exhausted.
@@ -108,8 +116,10 @@ ChatCall = Callable[["Provider", str | None], Awaitable[tuple["ChatResponseSchem
 # Failover trigger taxonomy. Mapping is checked top-down; order matters
 # because SDK exception hierarchies overlap (e.g. openai.APITimeoutError is
 # a subclass of APIConnectionError, httpx.TimeoutException is a subclass of
-# TransportError). Context-length and auth/config errors are intentionally
-# NOT failover triggers.
+# TransportError). Context-length errors and Chibi-side auth/config errors
+# (``NotAuthorizedError``, ``NoApiKeyProvidedError``) are intentionally NOT
+# failover triggers — but a raw Mistral SDKError 401/403 IS one (kind
+# ``auth``, owner decision; see the module docstring).
 _TIMEOUT_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.TimeoutException,
     OpenAIAPITimeoutError,
@@ -143,6 +153,11 @@ _NOT_FAILOVER_EXCEPTIONS: tuple[type[BaseException], ...] = (
     NoApiKeyProvidedError,
     NoProviderSelectedError,
     NoModelSelectedError,
+    # Turn-bookkeeping, not a provider fault: the loud failure of the
+    # turn-end validator says the conversation produced no deliverable
+    # outcome. Failover would re-ask an innocent provider (and cool it down
+    # for 20 minutes) for a problem that lives in the turn, not in the API.
+    SilentTurnError,
 )
 
 
@@ -222,15 +237,23 @@ def classify_exception(exception: BaseException) -> TriggerKind | None:
     Tenacity retry policies use ``reraise=True`` on every chat path, so the
     engine sees the final provider exception, not ``RetryError``. Both raw
     SDK exceptions and Chibi service exceptions (produced by the provider
-    error-conversion wrappers) are recognised.
+    error-conversion wrappers) are recognised. Mistral SDK errors carry no
+    per-status exception classes; they are classified from the HTTP status
+    code and the ``httpx2`` transport kind via
+    ``chibi.services.mistral_errors``.
 
     Args:
         exception: The exception raised by the provider call.
 
     Returns:
-        One of ``rate_limit`` / ``server_error`` / ``timeout`` / ``network``,
-        or None when the exception must NOT trigger failover (context
-        overflow, auth/config problems, or unrelated errors).
+        One of ``rate_limit`` / ``server_error`` / ``auth`` / ``timeout`` /
+        ``network``, or None when the exception must NOT trigger failover
+        (context overflow, Chibi-side auth/config problems, turn-
+        bookkeeping failures such as ``SilentTurnError``, or unrelated
+        errors). A raw Mistral SDKError 401/403 classifies to ``auth`` and
+        DOES trigger failover (owner decision); the Mistral adapter's
+        retry predicate never retries it, so the failover fires on the
+        first response.
     """
     if isinstance(exception, _NOT_FAILOVER_EXCEPTIONS):
         return None
@@ -242,6 +265,9 @@ def classify_exception(exception: BaseException) -> TriggerKind | None:
         return "network"
     if isinstance(exception, _SERVER_EXCEPTIONS):
         return "server_error"
+    mistral_kind = classify_mistral_exception(exception)
+    if mistral_kind is not None:
+        return mistral_kind
     return None
 
 

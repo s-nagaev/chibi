@@ -16,12 +16,14 @@ from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
+from anthropic import omit as anthropic_omit
 from anthropic.types import (
     CacheControlEphemeralParam,
     MessageParam,
     TextBlock,
     TextBlockParam,
     TextDelta,
+    ToolChoiceAnyParam,
     ToolChoiceToolParam,
     ToolParam,
     ToolResultBlockParam,
@@ -56,6 +58,7 @@ from openai.types.chat import (
     ChatCompletionMessageToolCall,
     ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
+    ChatCompletionUserMessageParam,
 )
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -85,7 +88,29 @@ from chibi.schemas.app import (
 )
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
-from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
+    delta_latched,
+    delta_streaming_allowed,
+    mark_non_streaming_fallback_spent,
+    non_streaming_fallback_spent_error,
+)
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    anthropic_forced_tool_choice,
+    append_repair_nudge,
+    evaluate_turn_end,
+    fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
+    honored_terminal_name,
+    log_forced_choice_outcome,
+    log_turn_misuse,
+    offered_tool_definitions,
+    offered_tools,
+    partition_terminal_calls,
+    plan_terminal_turn,
+    resolve_turn_end_misuse,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
@@ -787,9 +812,14 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             return self.__dict__["_mock_client"]
         return self.client
 
+    # SDK errors reaching this boundary are already converted into typed
+    # GptException subclasses (see ``__getattribute__``), so only the
+    # transport-level representatives are worth a retry; application-level
+    # outcomes (the silent-turn error among them) are final.
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
+        retry=retry_if_exception_type((ConnectionError, ServiceConnectionError, ServiceRateLimitError)),
         reraise=True,
     )
     async def get_chat_response(
@@ -806,8 +836,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
 
+        history_size = len(messages)
         initial_messages = [msg.to_openai() for msg in messages]
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             model=model,
             system_prompt=system_prompt,
@@ -819,11 +850,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
-        return (
-            chat_response,
-            [Message.from_openai(msg) for msg in new_messages],
-        )
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
+        return (chat_response, new_messages)
 
     async def _stream_chat_completion(
         self,
@@ -833,9 +865,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         """Request a streamed Chat Completions completion and aggregate it.
 
         Emits one live delta per non-empty body-text chunk via the interface
-        until the earliest tool-call signal in the stream; the accumulated
-        chunks are rebuilt into a ChatCompletion equivalent to the
-        non-streaming response (fragmented tool-call arguments, parallel
+        until the earliest tool-call signal in the stream; chunks that could
+        still complete into a pure ACK sentinel are buffered by the gate owned
+        by this streaming attempt's ``AckSentinelStreamSession``, so a
+        pure-ACK answer never emits a delta.
+        The accumulated chunks are rebuilt into a ChatCompletion equivalent to
+        the non-streaming response (fragmented tool-call arguments, parallel
         tool calls, ``reasoning_content`` split and the usage-only final
         chunk included). The stream is always closed explicitly, also on
         cancellation.
@@ -854,6 +889,11 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 transparent re-request at that point).
             NotFoundError: When the API reports an unknown model after live
                 deltas were already emitted.
+            Exception: The error stored by this provider's already-spent
+                non-streaming fallback attempt, re-raised on retry re-entry
+                instead of issuing a second fallback. The latch is scoped to
+                this provider, so other providers of the same failover walk
+                keep their own fallback.
         """
         stream_kwargs: dict[str, Any] = {**completion_kwargs, "stream": True}
         if self.stream_include_usage:
@@ -874,19 +914,27 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 raise
             if isinstance(stream_error, BadRequestError) and stream_error.code == "context_length_exceeded":
                 raise
+            spent_error = non_streaming_fallback_spent_error(interface, self.name)
+            if spent_error is not None:
+                raise spent_error
             logger.warning(
                 f"{self.name}/{completion_kwargs.get('model', 'unknown')} rejected the streaming request "
                 f"({stream_error}). Falling back to a non-streaming request."
             )
-            return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
+            try:
+                return cast(ChatCompletion, await self.client.chat.completions.create(**completion_kwargs))
+            except Exception as fallback_error:
+                mark_non_streaming_fallback_spent(interface, self.name, fallback_error)
+                raise
         accumulator = _OpenAIChatStreamAccumulator()
-        try:
-            async for chunk in stream:
-                text_delta = accumulator.process_chunk(chunk=chunk)
-                if text_delta and not accumulator.tool_call_signal:
-                    await emit_delta(interface=interface, text=text_delta)
-        finally:
-            await stream.close()
+        async with AckSentinelStreamSession(interface) as deltas:
+            try:
+                async for chunk in stream:
+                    text_delta = accumulator.process_chunk(chunk=chunk)
+                    if text_delta and not accumulator.tool_call_signal:
+                        await deltas.emit(text_delta)
+            finally:
+                await stream.close()
         return accumulator.build_response()
 
     async def _get_chat_completion_response(
@@ -901,6 +949,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[ChatCompletionMessageParam]]:
         dialog: list[ChatCompletionMessageParam]
         if not system_prompt:
@@ -916,6 +965,15 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_message = ChatCompletionSystemMessageParam(role="system", content=prepared_system_prompt)
             dialog = [system_message] + messages
 
+        # Forced choice (optimisation, never load-bearing — the turn-end
+        # validator is the guarantee): the "required" form rather than the
+        # named form {"type": "function", "function": {"name": ...}} because
+        # the turn may legitimately end via either terminal tool and may
+        # still need ordinary work calls first; "required" only demands that
+        # the turn not end with prose. Applied only when the single switch is
+        # on AND the request carries a user interface (exactly when the
+        # terminal tools are offered per ruling D1).
+        forced_tool_choice = forced_choice_applicable(interface=interface)
         completion_kwargs: dict[str, Any] = {
             "model": model,
             "messages": dialog,
@@ -924,8 +982,10 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             "presence_penalty": self.presence_penalty,
             "frequency_penalty": self.frequency_penalty,
             "timeout": self.timeout,
-            "tools": RegisteredChibiTools.get_tool_definitions(),
-            "tool_choice": "auto",
+            "tools": offered_tool_definitions(
+                definitions=RegisteredChibiTools.get_tool_definitions(), interface=interface
+            ),
+            "tool_choice": "required" if forced_tool_choice else "auto",
             "reasoning_effort": self.get_reasoning_effort_value(model_name=model),
         }
         response: ChatCompletion
@@ -961,10 +1021,63 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         tool_calls: list[ChatCompletionMessageToolCall] | None = data.message.tool_calls  # type: ignore
 
         if not tool_calls:
+            if forced_tool_choice:
+                # The backend answered a forced request with prose: the force
+                # was ignored. The validator still judges this ending.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             if hasattr(data.message, "reasoning_content") and data.message.reasoning_content:
                 await send_llm_thoughts(thoughts=data.message.reasoning_content, interface=interface)
                 logger.log("THINK", data.message.reasoning_content)
-            messages.append(ChatCompletionAssistantMessageParam(**data.message.model_dump()))  # type: ignore
+            final_message = ChatCompletionAssistantMessageParam(**data.message.model_dump())  # type: ignore
+            messages.append(final_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_openai(cast(ChatCompletionMessageParam, final_message)))
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer,
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: ChatCompletionUserMessageParam(role="user", content=text),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         # Tool calls handling
@@ -982,6 +1095,79 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             )
             for tool_call in tool_calls
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                answer = fold_terminal_calls_into_thoughts(thoughts=answer, terminal_calls=terminal_calls)
+                tool_calls = [
+                    tool_call for tool_call in tool_calls if tool_call.function.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_tool_choice:
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: ChatCompletionUserMessageParam(role="user", content=text),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -1037,6 +1223,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     def get_reasoning_effort_value(self, model_name: str) -> ReasoningEffort | OpenAIOmit | None:
@@ -1371,6 +1558,25 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 cache_control=CacheControlEphemeralParam(type="ephemeral"),
             )
         ]
+        # Forced choice for the agent loop (optimisation only). The guard in
+        # anthropic_forced_tool_choice drops the forced choice when legacy
+        # thinking.type="enabled" is present — that combination is a hard 400
+        # ("Thinking may not be enabled when tool_choice forces tool use",
+        # recon C5, VERIFIED live); adaptive thinking plus a forced choice is
+        # accepted. The repo sends no thinking parameter today (pinned by
+        # test). Documentary, UNVERIFIED live (the recon probe hit a 402
+        # balance error): MiniMax on the Anthropic-compatible endpoint
+        # (api.minimax.io/anthropic) is reported to ignore the forced choice
+        # and answer in plain text — Minimax shares this loop through
+        # AnthropicFriendlyProvider, so if that report is real, its forced
+        # requests fall through to the validator like any other prose ending.
+        # Never build behaviour on that report.
+        tool_choice = anthropic_forced_tool_choice(interface=interface)
+        # The Anthropic SDK's tool_choice default is `omit`: an explicit None
+        # would be serialized as null and rejected, so None maps to omit.
+        wire_tool_choice: ToolChoiceAnyParam | Omit = (
+            cast("ToolChoiceAnyParam", tool_choice) if tool_choice is not None else anthropic_omit
+        )
         for attempt in range(gpt_settings.retries):
             if delta_streaming_allowed(interface):
                 response_message: AnthropicMessage = await self._stream_generate_content(
@@ -1379,6 +1585,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     messages=messages,
                     interface=interface,
                     max_tokens=max_tokens,
+                    tool_choice=wire_tool_choice,
                 )
             else:
                 response_message = await self.client.messages.create(
@@ -1386,7 +1593,8 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
                     temperature=self.temperature,
                     timeout=self.timeout,
-                    tools=self.tools_list,
+                    tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
+                    tool_choice=wire_tool_choice,
                     system=system_blocks,
                     messages=messages,
                 )
@@ -1411,6 +1619,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         messages: list[MessageParam],
         interface: UserInterface | None,
         max_tokens: int | None = None,
+        tool_choice: ToolChoiceAnyParam | Omit = anthropic_omit,
     ) -> AnthropicMessage:
         """Request a streamed Anthropic completion and return the final message.
 
@@ -1426,19 +1635,27 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             interface: The active user interface, if any.
             max_tokens: Optional per-call output-token cap; overrides the
                 instance-level value when provided, exact old behavior when None.
+            tool_choice: Optional protocol-level forced tool choice (the
+                forced-choice optimisation; omit/None keeps the default
+                "auto" behaviour). Computed once by ``_generate_content``
+                through ``anthropic_forced_tool_choice``.
 
         Returns:
             The final aggregated Anthropic message.
         """
-        async with self.client.messages.stream(
-            model=model,
-            max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-            temperature=self.temperature,
-            timeout=self.timeout,
-            tools=self.tools_list,
-            system=system,
-            messages=messages,
-        ) as stream:
+        async with (
+            AckSentinelStreamSession(interface) as deltas,
+            self.client.messages.stream(
+                model=model,
+                max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                temperature=self.temperature,
+                timeout=self.timeout,
+                tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
+                tool_choice=tool_choice,
+                system=system,
+                messages=messages,
+            ) as stream,
+        ):
             tool_call_signal = False
             async for event in stream:
                 if event.type == "content_block_start":
@@ -1446,7 +1663,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                         tool_call_signal = True
                 elif event.type == "content_block_delta" and not tool_call_signal:
                     if isinstance(event.delta, TextDelta) and event.delta.text:
-                        await emit_delta(interface=interface, text=event.delta.text)
+                        await deltas.emit(event.delta.text)
             return await stream.get_final_message()
 
     @retry(
@@ -1470,12 +1687,14 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
+
+        history_size = len(messages)
         initial_messages = [msg.to_anthropic() for msg in messages]
 
         if len(initial_messages) >= 2:
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
@@ -1487,11 +1706,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
-        return (
-            chat_response,
-            [Message.from_anthropic(msg) for msg in new_messages],
-        )
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
+        return (chat_response, new_messages)
 
     async def _get_chat_completion_response(
         self,
@@ -1505,6 +1725,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[MessageParam]]:
         prepared_system_prompt = await prepare_system_prompt(
             base_system_prompt=system_prompt,
@@ -1534,17 +1755,72 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         tool_call_parts = [part for part in response_message.content if isinstance(part, ToolUseBlock)]
         if not tool_call_parts:
-            messages.append(
-                MessageParam(
-                    role="assistant",
-                    content=[content.model_dump() for content in response_message.content],  # type: ignore
-                )
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
+            assistant_message = MessageParam(
+                role="assistant",
+                content=[content.model_dump() for content in response_message.content],  # type: ignore
             )
+            messages.append(assistant_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_anthropic(assistant_message))
             answer = None
             for block in response_message.content:
                 if answer := getattr(block, "text", None):
                     break
 
+            # The validator judges the raw text, before the legacy "no data"
+            # fallback: an empty ending must cost a repair round-trip, never
+            # pass silently under a placeholder string.
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer or "",
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: MessageParam(
+                            role="user", content=[TextBlockParam(type="text", text=text)]
+                        ),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(
                 answer=answer or "no data",
                 provider=self.name,
@@ -1572,6 +1848,90 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             )
             for tool_call_part in tool_call_parts
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                folded_thoughts = fold_terminal_calls_into_thoughts(
+                    thoughts=thoughts_part.text if thoughts_part else "", terminal_calls=terminal_calls
+                )
+                if thoughts_part is not None:
+                    thoughts_part = TextBlock(type="text", text=folded_thoughts)
+                tool_call_parts = [
+                    tool_call_part
+                    for tool_call_part in tool_call_parts
+                    if tool_call_part.name not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(
+                    terminal_calls=terminal_calls,
+                    thoughts=thoughts_part.text if thoughts_part else "",
+                )
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: MessageParam(
+                                role="user", content=[TextBlockParam(type="text", text=text)]
+                            ),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -1616,6 +1976,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     async def moderate_command(self, cmd: str, model: str | None = None) -> ModeratorsAnswer:

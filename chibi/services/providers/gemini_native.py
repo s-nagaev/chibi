@@ -23,6 +23,7 @@ from google.genai.types import (
     ContentListUnion,
     ContentListUnionDict,
     FunctionCallDict,
+    FunctionCallingConfig,
     FunctionDeclaration,
     FunctionResponseDict,
     GenerateContentConfig,
@@ -36,8 +37,10 @@ from google.genai.types import (
     Part,
     PartDict,
     PrebuiltVoiceConfig,
+    Schema,
     SpeechConfig,
     Tool,
+    ToolConfig,
     VoiceConfig,
 )
 from loguru import logger
@@ -50,7 +53,24 @@ from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsA
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
-from chibi.services.providers.streaming import delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
+    delta_streaming_allowed,
+)
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    append_repair_nudge,
+    evaluate_turn_end,
+    fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
+    honored_terminal_name,
+    log_forced_choice_outcome,
+    log_turn_misuse,
+    offered_tools,
+    partition_terminal_calls,
+    plan_terminal_turn,
+    resolve_turn_end_misuse,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
@@ -61,6 +81,44 @@ from chibi.services.providers.utils import (
     send_llm_thoughts,
 )
 from chibi.services.usage_cache import UsageCacheStore
+
+
+def ensure_declaration_parameters(tools: list[Tool]) -> list[Tool]:
+    """Guarantee every function declaration carries an explicit parameters object.
+
+    Defensive, per recon C4: the "silent no-call when ``parameters`` is
+    omitted" observation did NOT reproduce on the live re-run (downgraded to
+    NOT REPRODUCED/UNVERIFIED), so this is verified-harmless defensiveness,
+    not a measured failure mode. Every forced declaration always sends
+    ``parameters={"type": "OBJECT", "properties": {}}``. The ``Tool`` objects
+    come fresh from the ``tools_list`` property on every access, so mutating
+    them here never touches shared state.
+
+    Args:
+        tools: Gemini Tool objects, each holding function declarations.
+
+    Returns:
+        The same list, with every declaration's parameters guaranteed set.
+    """
+    for tool in tools:
+        for declaration in tool.function_declarations or []:
+            if declaration.parameters is None:
+                declaration.parameters = Schema(type="OBJECT", properties={})
+    return tools
+
+
+def _gemini_tool_name(tool: Tool) -> str:
+    """Return the function name of a single-declaration Gemini tool.
+
+    Args:
+        tool: The Gemini Tool object (one declaration per tool, as built by
+            ``tools_list``).
+
+    Returns:
+        The declaration's function name.
+    """
+    declarations = tool.function_declarations or []
+    return str(declarations[0].name)
 
 
 class Gemini(RestApiFriendlyProvider):
@@ -345,7 +403,10 @@ class Gemini(RestApiFriendlyProvider):
             contents=contents,
             config=config,
         )
-        async with aclosing(cast(AsyncGenerator[GenerateContentResponse, None], stream)) as chunks:
+        async with (
+            AckSentinelStreamSession(interface) as deltas,
+            aclosing(cast(AsyncGenerator[GenerateContentResponse, None], stream)) as chunks,
+        ):
             async for chunk in chunks:
                 if chunk.usage_metadata:
                     usage_metadata = chunk.usage_metadata
@@ -361,7 +422,7 @@ class Gemini(RestApiFriendlyProvider):
                         continue
                     parts.append(part)
                     if part.text and not part.function_call and not tool_call_signal:
-                        await emit_delta(interface=interface, text=part.text)
+                        await deltas.emit(part.text)
         if thought_signature:
             for part in parts:
                 if part.function_call and not part.thought_signature:
@@ -398,6 +459,7 @@ class Gemini(RestApiFriendlyProvider):
         conversation_messages: list[Message] | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -414,13 +476,40 @@ class Gemini(RestApiFriendlyProvider):
         else:
             temperature = self.temperature
 
+        offered = (
+            offered_tools(
+                tools=self.tools_list,
+                interface=interface,
+                name_of=_gemini_tool_name,
+            )
+            if "gemini" in model_name
+            else None
+        )
+        tool_config: ToolConfig | None = None
+        if forced_choice_applicable(interface=interface) and offered is not None:
+            # Forced choice for the agent loop (optimisation only; the
+            # turn-end validator is the guarantee). Mode ANY without
+            # allowed_function_names is the Gemini analog of OpenAI's
+            # "required": the turn may legitimately end via either terminal
+            # tool and may still need ordinary work calls first, so the
+            # allowed set must not be narrowed to the terminal tools.
+            # recon C1 verified mode ANY live (with an allowed-names list;
+            # the unrestricted variant follows the same documented mode).
+            # Defensive (recon C4): every forced declaration always carries an
+            # explicit parameters object — verified harmless live, and the
+            # validator keeps treating a 200-OK-with-empty-parts as an
+            # R1-class failure regardless.
+            ensure_declaration_parameters(tools=offered)
+            tool_config = ToolConfig(function_calling_config=FunctionCallingConfig(mode="ANY"))
+
         generation_config = GenerateContentConfig(
             system_instruction=prepared_system_prompt if "gemini" in model_name else None,
             temperature=temperature,
             max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
-            tools=self.tools_list if "gemini" in model_name else None,
+            tools=offered,
+            tool_config=tool_config,
         )
 
         response: GenerateContentResponse = await self._generate_content(
@@ -444,16 +533,68 @@ class Gemini(RestApiFriendlyProvider):
         usage_message = get_usage_msg(usage=usage)
 
         if not response.function_calls:
-            messages.append(
-                ContentDict(
-                    role="model",
-                    parts=[
-                        PartDict(
-                            text=answer,
-                        )
-                    ],
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(
+                    model=model_name, provider_name=self.name, interface=interface, outcome="ignored"
                 )
+            final_message: ContentDict = ContentDict(
+                role="model",
+                parts=[
+                    PartDict(
+                        text=answer,
+                    )
+                ],
             )
+            messages.append(final_message)
+            if conversation_messages is not None:
+                conversation_messages.append(Message.from_google(final_message))
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer or "",
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=conversation_messages or [],
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model_name,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: append_repair_nudge(
+                        nudge_text=nudge_text,
+                        messages=messages,
+                        conversation_messages=conversation_messages,
+                        to_wire=lambda text: ContentDict(role="user", parts=[PartDict(text=text)]),
+                    ),
+                    reissue=lambda retried: self._get_chat_completion_response(
+                        messages=messages,
+                        model=model_name,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        conversation_messages=conversation_messages,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model_name,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model_name, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model_name, usage=usage), messages
 
         # Tool calls handling
@@ -463,13 +604,98 @@ class Gemini(RestApiFriendlyProvider):
             await send_llm_thoughts(thoughts=answer, interface=interface)
         logger.log("THINK", f"{model_name}: {answer or 'No thoughts...'}. {usage_message}")
 
+        function_calls = list(response.function_calls)
         calls = [
             ToolCallSchema(
                 tool_name=str(function_call.name),
                 args=copy(function_call.args),
             )
-            for function_call in response.function_calls
+            for function_call in function_calls
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model_name} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                answer = fold_terminal_calls_into_thoughts(thoughts=answer, terminal_calls=terminal_calls)
+                function_calls = [
+                    function_call
+                    for function_call in function_calls
+                    if str(function_call.name) not in TERMINAL_TOOL_NAMES
+                ]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
+                logger.log(
+                    "CALL", f"{model_name} called the terminal tool {terminal_calls[0].tool_name}; ending the turn."
+                )
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model_name, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=conversation_messages or [],
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model_name, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
+                if conversation_messages is not None and plan.message is not None:
+                    conversation_messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model_name,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: append_repair_nudge(
+                            nudge_text=nudge_text,
+                            messages=messages,
+                            conversation_messages=conversation_messages,
+                            to_wire=lambda text: ContentDict(role="user", parts=[PartDict(text=text)]),
+                        ),
+                        reissue=lambda retried: self._get_chat_completion_response(
+                            messages=messages,
+                            model=model_name,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            conversation_messages=conversation_messages,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
+                return (
+                    ChatResponseSchema(
+                        answer=plan.answer,
+                        provider=self.name,
+                        model=model_name,
+                        usage=usage,
+                        visibility=plan.visibility,
+                    ),
+                    messages,
+                )
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model_name,
@@ -487,7 +713,7 @@ class Gemini(RestApiFriendlyProvider):
                 f"{response.candidates}."
             )
 
-        for function_call, result in zip(response.function_calls, results):
+        for function_call, result in zip(function_calls, results):
             function_call_id = function_call.id or str(uuid4())
             tool_call_message: ContentDict = ContentDict(
                 role="model",
@@ -530,6 +756,7 @@ class Gemini(RestApiFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     @retry(
@@ -553,9 +780,11 @@ class Gemini(RestApiFriendlyProvider):
         max_tokens: int | None = None,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         model = model or self.default_model
+
+        history_size = len(messages)
         initial_messages = [msg.to_google() for msg in messages]
 
-        chat_response, updated_messages = await self._get_chat_completion_response(
+        chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
@@ -568,8 +797,12 @@ class Gemini(RestApiFriendlyProvider):
             max_tokens=max_tokens,
         )
 
-        new_messages = [msg for msg in updated_messages if msg not in initial_messages]
-        return chat_response, [Message.from_google(msg) for msg in new_messages]
+        # Every loop iteration mirrors the messages it wants persisted into
+        # the conversation list (including normalized terminal messages with
+        # their visibility), so the list's delta is the persisted form of the
+        # turn.
+        new_messages = messages[history_size:]
+        return chat_response, new_messages
 
     async def _generate_image_via_content_creation_model(
         self,

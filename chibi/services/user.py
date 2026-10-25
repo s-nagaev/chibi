@@ -28,6 +28,7 @@ from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
+from chibi.utils.ack_sentinel import is_pure_ack, strip_ack_sentinel
 
 if TYPE_CHECKING:
     from chibi.services.providers.provider import Provider
@@ -147,7 +148,15 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
     # input exactly as before: assistant tool_calls and their role="tool"
     # results are not useful summarization context and their pairing is
     # provider-protocol sensitive.
-    summarizable = [msg for msg in chat_history if not msg.tool_calls and not msg.tool_call_id]
+    # Hidden messages (private CoT from ack_silently turns) are excluded too
+    # (task 5 PM ruling): folding them into a summary would launder private
+    # reasoning into durable context. Note: the summary replaces the whole
+    # history below, so post-summarization those messages leave the
+    # conversation entirely (existing summarization behaviour, not a
+    # retention change; the storage rows are untouched.
+    summarizable = [
+        msg for msg in chat_history if not msg.tool_calls and not msg.tool_call_id and msg.visibility != "hidden"
+    ]
     budget = int(gpt_settings.max_history_tokens * EMERGENCY_SUMMARIZATION_INPUT_BUDGET)
     kept = _fit_messages_to_budget(summarizable, budget)
     chat_history_string = "\n".join(msg.content for msg in kept)
@@ -340,8 +349,8 @@ async def get_llm_chat_completion_answer(
             "desc": (
                 "Service trigger from the Chibi scheduler. This is NOT a user message and not a tool "
                 "response: the agent was woken up by a scheduled job in this thread. Handle the "
-                "trigger_text below using the thread context. Reply with <chibi>ACK</chibi> (and "
-                "nothing else) if there is nothing worth reporting to the user."
+                "trigger_text below using the thread context. If there is nothing worth reporting to "
+                "the user, end the turn with ack_silently(); otherwise deliver via say()."
             ),
             "job_id": scheduler_job_id,
             "trigger_text": scheduler_trigger_text,
@@ -437,6 +446,11 @@ async def get_llm_chat_completion_answer(
                 await asyncio.gather(*pending_notifications, return_exceptions=True)
         chat_response, new_messages = failover_result.response, failover_result.new_messages
         assert chat_response is not None  # Type narrowing for mypy: a returned walk always carries a response
+        if not is_pure_ack(chat_response.answer):
+            chat_response.answer = strip_ack_sentinel(chat_response.answer)
+            for message in new_messages:
+                if message.role == "assistant":
+                    message.content = strip_ack_sentinel(message.content)
         await db.add_message(user=user, message=new_message_to_llm, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
         for message in new_messages:
             await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)

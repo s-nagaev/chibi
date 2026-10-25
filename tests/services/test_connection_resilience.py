@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock
 
 import aiohttp
 import httpx
+import httpx2
 import pytest
 from anthropic import APIConnectionError
 from anthropic import InternalServerError as AnthropicInternalServerError
@@ -32,7 +33,7 @@ from google.genai.types import (
     HttpOptions,
     Part,
 )
-from mistralai.models import SDKError
+from mistralai.client.errors import SDKError
 
 from chibi.exceptions import ServiceConnectionError, ServiceRateLimitError, ServiceResponseError
 from chibi.models import Message, User
@@ -75,8 +76,8 @@ def _gemini_server_error() -> GeminiServerError:
 
 
 def _mistral_sdk_error(status_code: int) -> Exception:
-    request = httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions")
-    return SDKError(message="transient error", raw_response=httpx.Response(status_code, request=request))
+    request = httpx2.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+    return SDKError(message="transient error", raw_response=httpx2.Response(status_code, request=request))
 
 
 def _httpx_read_error() -> Exception:

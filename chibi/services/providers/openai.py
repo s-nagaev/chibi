@@ -23,7 +23,24 @@ from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchem
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
-from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
+from chibi.services.providers.streaming import (
+    AckSentinelStreamSession,
+    delta_latched,
+    delta_streaming_allowed,
+)
+from chibi.services.providers.terminal_calls import (
+    TERMINAL_TOOL_NAMES,
+    evaluate_turn_end,
+    fold_terminal_calls_into_thoughts,
+    forced_choice_applicable,
+    honored_terminal_name,
+    log_forced_choice_outcome,
+    log_turn_misuse,
+    offered_tool_definitions,
+    partition_terminal_calls,
+    plan_terminal_turn,
+    resolve_turn_end_misuse,
+)
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import get_usage_msg, prepare_system_prompt, send_llm_thoughts
@@ -98,8 +115,14 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         model = model or self.default_model
 
+        # ``messages`` is the conversation list, mutated in place by both the
+        # Responses path and the Chat Completions fallback below. Its delta
+        # over the call is the persisted form of the turn — this comparison
+        # used to compare the list with itself and persisted nothing.
+        history_size = len(messages)
+
         try:
-            response, updated_messages = await self._get_response_completion_response(
+            response, _ = await self._get_response_completion_response(
                 messages=messages,
                 model=model,
                 user=user,
@@ -124,7 +147,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 raise
 
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
-            response, updated_messages = await super().get_chat_response(
+            response, _ = await super().get_chat_response(
                 messages=messages,
                 user=user,
                 model=model,
@@ -136,7 +159,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 max_tokens=max_tokens,
             )
 
-        new_messages = [msg for msg in updated_messages if msg not in messages]
+        new_messages = messages[history_size:]
         return response, new_messages
 
     @classmethod
@@ -264,7 +287,10 @@ class OpenAI(OpenAIFriendlyProvider):
         reasoning summary deltas are never streamed. The final aggregated
         Response is obtained from the stream itself, so the downstream
         non-streaming processing stays unchanged. The stream is always
-        closed explicitly, also on cancellation.
+        closed explicitly, also on cancellation. A mid-stream 400/404
+        before any delta was emitted retries non-streaming outside the
+        session, so the aborted attempt's speculative held-back text is
+        discarded instead of flushed ahead of the regenerated answer.
 
         Args:
             request_kwargs: Non-streaming request parameters shared with the
@@ -284,21 +310,26 @@ class OpenAI(OpenAIFriendlyProvider):
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
         try:
-            async with self.get_client().responses.stream(**stream_kwargs) as stream:
-                async for event in stream:
-                    if isinstance(event, ResponseTextDeltaEvent):
-                        if not tool_call_signal and event.delta:
-                            await emit_delta(interface=interface, text=event.delta)
-                    elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
-                        tool_call_signal = True
-                return await stream.get_final_response()
+            async with AckSentinelStreamSession(interface) as deltas:
+                async with self.get_client().responses.stream(**stream_kwargs) as stream:
+                    async for event in stream:
+                        if isinstance(event, ResponseTextDeltaEvent):
+                            if not tool_call_signal and event.delta:
+                                await deltas.emit(event.delta)
+                        elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
+                            tool_call_signal = True
+                    return await stream.get_final_response()
         except (BadRequestError, NotFoundError) as stream_error:
             # Some gateways reject the streaming Responses request with a
             # 400/404. The fallback to a non-streaming request is handled
             # here — inside the helper — because the class-level
             # ``__getattribute__`` error-conversion wrapper turns raw SDK
             # errors into ServiceResponseError before they can reach any
-            # outer handler.
+            # outer handler. The handler sits outside the session on
+            # purpose: the propagating error exits it as an abort, so a
+            # never-released gate's speculative held-back text is
+            # discarded rather than flushed ahead of the regenerated
+            # answer.
             if delta_latched(interface):
                 raise
             logger.warning(
@@ -318,6 +349,7 @@ class OpenAI(OpenAIFriendlyProvider):
         interface: UserInterface | None = None,
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
+        repair_used: bool = False,
     ) -> tuple[ChatResponseSchema, list[Message]]:
         """Get a chat response using the OpenAI Responses API.
 
@@ -359,14 +391,25 @@ class OpenAI(OpenAIFriendlyProvider):
             )
 
         reasoning_effort = self.get_reasoning_effort_value(model_name=model)
-        tools = [self.adapt_tool_for_responses(t) for t in RegisteredChibiTools.get_tool_definitions()]
+        tools = [
+            self.adapt_tool_for_responses(t)
+            for t in offered_tool_definitions(
+                definitions=RegisteredChibiTools.get_tool_definitions(), interface=interface
+            )
+        ]
 
         request_kwargs: dict[str, Any] = {
             "model": model,
             "instructions": instructions,
             "input": input_items,
             "tools": tools,
-            "tool_choice": "auto",
+            # Forced choice (optimisation only; the turn-end validator is the
+            # guarantee): "required" rather than the named function form, for
+            # the same reason as the chat-completions loop — the turn may end
+            # via either terminal tool and may need work calls first. Gated on
+            # the single switch AND interface presence (D1: the terminal tools
+            # are offered exactly then).
+            "tool_choice": "required" if forced_choice_applicable(interface=interface) else "auto",
             "max_output_tokens": max_tokens if max_tokens is not None else self._get_max_tokens_value(model_name=model),
             "temperature": self._get_temperature_value(model_name=model),
             "timeout": self.timeout,
@@ -426,7 +469,50 @@ class OpenAI(OpenAIFriendlyProvider):
         tool_call_items = [item for item in response.output if isinstance(item, ResponseFunctionToolCall)]
 
         if not tool_call_items:
+            if forced_choice_applicable(interface=interface):
+                # A forced request answered with prose: the force was ignored.
+                log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
             messages.append(Message(role="assistant", content=answer))
+            verdict = evaluate_turn_end(
+                interface=interface,
+                answer=answer,
+                ended_by_terminal_call=False,
+                terminal_tool_name=None,
+                conversation=messages,
+            )
+            if verdict.outcome == "misuse":
+                return await resolve_turn_end_misuse(
+                    verdict=verdict,
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    repair_used=repair_used,
+                    append_nudge=lambda nudge_text: messages.append(Message(role="user", content=nudge_text)),
+                    reissue=lambda retried: self._get_response_completion_response(
+                        messages=messages,
+                        model=model,
+                        user=user,
+                        system_prompt=system_prompt,
+                        interface=interface,
+                        track_prompt_size=track_prompt_size,
+                        caller_storage_id=caller_storage_id,
+                        caller_thread_id=caller_thread_id,
+                        max_tokens=max_tokens,
+                        repair_used=retried,
+                    ),
+                )
+            if verdict.misuse is not None:
+                log_turn_misuse(
+                    model=model,
+                    provider_name=self.name,
+                    interface=interface,
+                    kind=verdict.misuse,
+                    action="degraded_visible",
+                )
+            elif repair_used:
+                log_turn_misuse(
+                    model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                )
             return ChatResponseSchema(answer=answer, provider=self.name, model=model, usage=usage), messages
 
         logger.log("CALL", f"{model} requested the call of {len(tool_call_items)} tools.")
@@ -443,6 +529,71 @@ class OpenAI(OpenAIFriendlyProvider):
             )
             for item in tool_call_items
         ]
+
+        # Terminal tools (say / ack_silently) end the turn: they are never
+        # dispatched and never receive a tool result — a result would send
+        # the turn back to the model and reproduce the infinite ack loop
+        # (design §3.2, recon C7). The branch sits between the parsed-calls
+        # comprehension and the call_functions invocation on purpose.
+        terminal_calls, work_calls = partition_terminal_calls(calls)
+        if terminal_calls:
+            if work_calls:
+                # A backend ignored the parallel-tool-use ban and emitted a
+                # terminal call alongside work calls: run the work calls,
+                # drop the terminal entries and let the model terminate
+                # cleanly on a later step (design §3.2, mixed-message case).
+                logger.warning(
+                    f"{model} emitted a terminal call ({terminal_calls[0].tool_name}) together with "
+                    f"{len(work_calls)} work call(s); folding the terminal text and continuing the turn."
+                )
+                answer = fold_terminal_calls_into_thoughts(thoughts=answer, terminal_calls=terminal_calls)
+                tool_call_items = [item for item in tool_call_items if item.name not in TERMINAL_TOOL_NAMES]
+                calls = work_calls
+            else:
+                plan = plan_terminal_turn(terminal_calls=terminal_calls, thoughts=answer)
+                logger.log("CALL", f"{model} called the terminal tool {terminal_calls[0].tool_name}; ending the turn.")
+                if forced_choice_applicable(interface=interface):
+                    log_forced_choice_outcome(
+                        model=model, provider_name=self.name, interface=interface, outcome="honoured"
+                    )
+                verdict = evaluate_turn_end(
+                    interface=interface,
+                    answer=plan.answer,
+                    ended_by_terminal_call=True,
+                    terminal_tool_name=honored_terminal_name(terminal_calls),
+                    conversation=messages,
+                )
+                if verdict.outcome != "misuse" and repair_used:
+                    log_turn_misuse(
+                        model=model, provider_name=self.name, interface=interface, kind=None, action="recovered"
+                    )
+                if plan.message is not None:
+                    messages.append(plan.message)
+                if verdict.outcome == "misuse":
+                    return await resolve_turn_end_misuse(
+                        verdict=verdict,
+                        model=model,
+                        provider_name=self.name,
+                        interface=interface,
+                        repair_used=repair_used,
+                        append_nudge=lambda nudge_text: messages.append(Message(role="user", content=nudge_text)),
+                        reissue=lambda retried: self._get_response_completion_response(
+                            messages=messages,
+                            model=model,
+                            user=user,
+                            system_prompt=system_prompt,
+                            interface=interface,
+                            track_prompt_size=track_prompt_size,
+                            caller_storage_id=caller_storage_id,
+                            caller_thread_id=caller_thread_id,
+                            max_tokens=max_tokens,
+                            repair_used=retried,
+                        ),
+                    )
+                return ChatResponseSchema(
+                    answer=plan.answer, provider=self.name, model=model, usage=usage, visibility=plan.visibility
+                ), messages
+
         results = await self.call_functions(
             calls=calls,
             caller_model=model,
@@ -489,6 +640,7 @@ class OpenAI(OpenAIFriendlyProvider):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
+            repair_used=repair_used,
         )
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:

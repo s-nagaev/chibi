@@ -88,7 +88,8 @@ async def test_scheduler_trigger_reaches_llm_chain_with_guardrail(local_db: Loca
     assert payload["trigger_text"] == "Check the reports"
     assert payload["job_id"] == "agent:1:health"
     assert "NOT a user message" in payload["desc"]
-    assert "ACK" in payload["desc"]
+    assert "ack_silently" in payload["desc"]
+    assert "<chibi>ACK</chibi>" not in payload["desc"]
 
     user = await local_db.get_or_create_user(user_id=1)
     history_contents = [message.content for message in user.thread_messages_map[42]]
@@ -217,8 +218,8 @@ async def test_scheduler_bot_requires_token() -> None:
         await _get_scheduler_bot()
 
 
-async def test_scheduler_trigger_persists_ack_answer_to_history(local_db: LocalStorage) -> None:
-    """Even a silent ACK answer is persisted to the thread history."""
+async def test_scheduler_trigger_persists_trigger_message_to_history(local_db: LocalStorage) -> None:
+    """The scheduler trigger message is persisted and carries the new silence contract."""
     provider_mock = _make_provider_mock("<chibi>ACK</chibi>")
     provider_patch, model_patch = _patch_active_llm(provider_mock)
     interface = SchedulerInterface(user_id=2, storage_id=2, chat_id=2, thread_id=0)
@@ -234,4 +235,5 @@ async def test_scheduler_trigger_persists_ack_answer_to_history(local_db: LocalS
 
     user = await local_db.get_or_create_user(user_id=2)
     history_contents = [message.content for message in user.messages]
-    assert any("<chibi>ACK</chibi>" in content for content in history_contents)
+    assert any("ack_silently" in content for content in history_contents)
+    assert not any("<chibi>ACK</chibi>" in content for content in history_contents)

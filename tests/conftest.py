@@ -1,7 +1,8 @@
-from typing import AsyncIterator, Generator, Iterable
+from typing import Any, AsyncIterator, Callable, Generator, Iterable
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from tenacity import AsyncRetrying
 
 
 class AsyncBytesIterator:
@@ -77,3 +78,25 @@ def minimax() -> Generator:
     _minimax = RestApiFriendlyMock("test_token")
     with patch("chibi.services.providers.minimax.Minimax", return_value=_minimax) as minimax:
         yield minimax
+
+
+def retrying_policy(func: Callable[..., Any]) -> AsyncRetrying:
+    """Return the tenacity policy object attached to a ``@retry``-decorated async callable.
+
+    Tenacity types its ``retry`` decorator as returning the undecorated
+    callable, while at runtime the wrapper carries the ``AsyncRetrying``
+    instance as its ``retry`` attribute (tenacity itself hides that assignment
+    behind a ``type: ignore``). The ``isinstance`` assertion surfaces that
+    runtime fact to the type checker and fails loudly if tenacity stops
+    attaching the policy.
+
+    Args:
+        func: Async callable decorated with ``tenacity.retry``, e.g. a
+            provider's class-level ``get_chat_response``.
+
+    Returns:
+        The ``AsyncRetrying`` instance the decorator attached to ``func``.
+    """
+    policy = getattr(func, "retry")
+    assert isinstance(policy, AsyncRetrying)
+    return policy
