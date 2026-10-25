@@ -883,6 +883,7 @@ class Gemini(RestApiFriendlyProvider):
         model = model or self.default_model
 
         history_size = len(messages)
+        conversation_mirror = list(messages)
         initial_messages = [msg.to_google() for msg in messages]
 
         # The volatile context note travels on the last converted user message,
@@ -900,7 +901,7 @@ class Gemini(RestApiFriendlyProvider):
             model=model,
             system_prompt=system_prompt,
             interface=interface,
-            conversation_messages=messages,
+            conversation_messages=conversation_mirror,
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
@@ -908,10 +909,10 @@ class Gemini(RestApiFriendlyProvider):
         )
 
         # Every loop iteration mirrors the messages it wants persisted into
-        # the conversation list (including normalized terminal messages with
-        # their visibility), so the list's delta is the persisted form of the
-        # turn.
-        new_messages = messages[history_size:]
+        # the call-owned mirror copy (including normalized terminal messages
+        # with their visibility), so the mirror's delta is the persisted
+        # form of the turn and the caller's list is never mutated.
+        new_messages = conversation_mirror[history_size:]
         return chat_response, new_messages
 
     async def _generate_image_via_content_creation_model(

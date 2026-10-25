@@ -857,6 +857,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         model = model or self.default_model
 
         history_size = len(messages)
+        conversation_mirror = list(messages)
         initial_messages = [msg.to_openai() for msg in messages]
         # The volatile context note travels on the last converted user message,
         # never on a Message object and never in the system payload. The
@@ -873,17 +874,17 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
             system_prompt=system_prompt,
             user=user,
             interface=interface,
-            conversation_messages=messages,
+            conversation_messages=conversation_mirror,
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
         # Every loop iteration mirrors the messages it wants persisted into
-        # the conversation list (including normalized terminal messages with
-        # their visibility), so the list's delta is the persisted form of the
-        # turn.
-        new_messages = messages[history_size:]
+        # the call-owned mirror copy (including normalized terminal messages
+        # with their visibility), so the mirror's delta is the persisted
+        # form of the turn and the caller's list is never mutated.
+        new_messages = conversation_mirror[history_size:]
         return (chat_response, new_messages)
 
     async def _stream_chat_completion(
@@ -1753,6 +1754,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         model = model or self.default_model
 
         history_size = len(messages)
+        conversation_mirror = list(messages)
         initial_messages = [msg.to_anthropic() for msg in messages]
 
         if len(initial_messages) >= 2:
@@ -1773,17 +1775,17 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             model=model,
             system_prompt=system_prompt,
             interface=interface,
-            conversation_messages=messages,
+            conversation_messages=conversation_mirror,
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
         )
         # Every loop iteration mirrors the messages it wants persisted into
-        # the conversation list (including normalized terminal messages with
-        # their visibility), so the list's delta is the persisted form of the
-        # turn.
-        new_messages = messages[history_size:]
+        # the call-owned mirror copy (including normalized terminal messages
+        # with their visibility), so the mirror's delta is the persisted
+        # form of the turn and the caller's list is never mutated.
+        new_messages = conversation_mirror[history_size:]
         return (chat_response, new_messages)
 
     async def _get_chat_completion_response(

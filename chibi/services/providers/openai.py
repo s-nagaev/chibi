@@ -123,8 +123,10 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         model = model or self.default_model
 
-        # ``messages`` is the conversation list, mutated in place by both the
-        # Responses path and the Chat Completions fallback below. Its delta
+        # ``messages`` is the conversation list, mutated in place by the
+        # Responses path below (the Chat Completions fallback mirrors its
+        # traffic into a call-owned copy and returns the turn's messages
+        # instead). The list's delta
         # over the call is the persisted form of the turn — this comparison
         # used to compare the list with itself and persisted nothing.
         history_size = len(messages)
@@ -160,7 +162,11 @@ class OpenAI(OpenAIFriendlyProvider):
                 raise
 
             logger.warning(f"Responses API failed for {model}: {e}. Falling back to Chat Completions.")
-            response, _ = await super().get_chat_response(
+            # The base implementation mirrors its traffic into a call-owned
+            # copy and returns the fallback turn's messages instead of
+            # mutating the caller's list; the Responses-path appends (if any)
+            # stay in the caller's list slice.
+            response, fallback_messages = await super().get_chat_response(
                 messages=messages,
                 user=user,
                 model=model,
@@ -171,6 +177,8 @@ class OpenAI(OpenAIFriendlyProvider):
                 caller_thread_id=caller_thread_id,
                 max_tokens=max_tokens,
             )
+            new_messages = messages[history_size:] + fallback_messages
+            return response, new_messages
 
         new_messages = messages[history_size:]
         return response, new_messages
@@ -412,7 +420,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 base_system_prompt=system_prompt,
                 user_id=user.id,
                 interface=interface,
-                conversation_messages=messages,
+                conversation_messages=list(messages),
                 thread_id=caller_thread_id,
             )
 
@@ -673,7 +681,7 @@ class OpenAI(OpenAIFriendlyProvider):
             model=model,
             storage_id=caller_storage_id,
             thread_id=caller_thread_id,
-            conversation_messages=messages,
+            conversation_messages=list(messages),
         )
         if not all(keep_mask):
             messages = [msg for msg, keep in zip(messages, keep_mask) if keep]
