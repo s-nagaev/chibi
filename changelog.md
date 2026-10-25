@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.20.1] - 2026-10-25
 
 ### Added
 - **Scheduler observability: APScheduler logs are now visible in Chibi's loguru sinks.** APScheduler 3.x emits everything through stdlib `logging` on the `apscheduler.*` logger family, and Chibi never bridged it — so every INFO/DEBUG record (`Scheduler started`, `Added job ... to job store`, `Next wakeup is due at ...`, `No jobs; waiting until a job is added`) was discarded outright, and even the surviving WARNING+ records (e.g. `Run time of job ... was missed by 2:00:00`) leaked to stderr as bare, unformatted lines with no timestamp, no level and no `scheduler` marker, making "did not fire" and "fired but delivery failed" indistinguishable in the logs. A dedicated stdlib→loguru bridge (`chibi.config.logging`) now installs a single intercepting handler on the `apscheduler` logger (idempotent, propagation disabled — no duplicate or double-formatted output, no `logging.lastResort` leak), scoped narrowly to the `apscheduler.*` family so all other loggers and every runner sink behave exactly as before. Bridged records render in the standard `datetime | LEVEL | message` shape with the stdlib logger name embedded in the message (`[apscheduler.scheduler] ...`), so a plain `grep -i scheduler` over the logs finally matches.
@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Scheduler wakeup guard against silent job starvation:** a transient job store failure (e.g. a Redis hiccup) inside APScheduler's `wakeup()` left the wakeup timer permanently disarmed — the scheduler stayed "running" but silently stopped executing jobs until an unrelated external `wakeup()` (a new job or a chat message) happened to re-arm it. This mirrored an upstream APScheduler bug ([agronholm/apscheduler#1132](https://github.com/agronholm/apscheduler/pull/1132), merged to the 3.x branch on 2026-08-31 but not yet released). Chibi now ships `GuardedAsyncIOScheduler`, a local guard that mirrors the upstream fix verbatim: an exception escaping `_process_jobs()` is logged through the standard `apscheduler.scheduler` logger and the wakeup timer is re-armed with `jobstore_retry_interval`. Both scheduler flavors (Telegram `ChibiScheduler` and stdio/IDE `StdioScheduler`) use it. The guard is marked `TODO(apscheduler-3.11.4): remove guard` and is a pure-deletion revert once APScheduler 3.11.4 ships. Regression tests simulate a `jobstore.update_job()` failure mid-wakeup and verify the scheduler keeps firing jobs.
+- **Local semantic memory no longer breaks after OS temp cleanup:** the `LOCAL` fastembed embedding model was cached in the system temp directory (`$TMPDIR/fastembed_cache`), which the OS wipes periodically — a wiped or interrupted download then made the ONNX model unloadable and killed Chroma archival and semantic search for the whole deployment. The model is now cached in a persistent per-user directory (`~/.cache/chibi/fastembed`), so a temp-directory cleanup can no longer destroy it; the location is overridable with the `FASTEMBED_CACHE_PATH` environment variable. Embedding vectors, model and dimension are unchanged, so existing collections need no re-embedding.
 
 ### Changed
 - **APScheduler upgraded 3.11.2 → 3.11.3** across all dependency artifacts: `poetry.lock`, and the exported `requirements.txt` (the production Docker image pin) and `requirements-dev.txt` (`pyproject.toml` already allowed `^3.11`); regenerating the requirements via the `deps` task (`poetry export`) keeps everything consistent. 3.11.3 fixes #1103 — sub-minute interval jobs stalling across a DST spring-forward gap with ZoneInfo timezones, relevant ahead of the 2026-10-26 CEST→CET transition (our `tzlocal` yields ZoneInfo). No API changes; PTB 22.x compatibility range (`>=3.10.4,<3.12.0`) unaffected.
@@ -40,12 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **The video generation polling lifecycle is now logged** in the MiniMax, ZhipuAI and Alibaba providers: submission acceptance (including the provider task id, so a finished generation can be recovered by querying the provider after a restart), each poll attempt with status and elapsed time (debug level), and every terminal outcome — success (with elapsed time, clip duration and size), timeout and failure/cancellation (error level). No behaviour, timing or payload changes; previously the entire submit → poll → download loop ran in complete log silence.
-
-### Changed
-- **The video generation polling lifecycle is now logged** in the MiniMax, ZhipuAI and Alibaba providers: submission acceptance (including the provider task id, so a finished generation can be recovered by querying the provider after a restart), each poll attempt with status and elapsed time (debug level), and every terminal outcome — success (with elapsed time, clip duration and size), timeout and failure/cancellation (error level). No behaviour, timing or payload changes; previously the entire submit → poll → download loop ran in complete log silence.
-
-### Fixed
-- **Local semantic memory no longer breaks after OS temp cleanup:** the `LOCAL` fastembed embedding model was cached in the system temp directory (`$TMPDIR/fastembed_cache`), which the OS wipes periodically — a wiped or interrupted download then made the ONNX model unloadable and killed Chroma archival and semantic search for the whole deployment. The model is now cached in a persistent per-user directory (`~/.cache/chibi/fastembed`), so a temp-directory cleanup can no longer destroy it; the location is overridable with the `FASTEMBED_CACHE_PATH` environment variable. Embedding vectors, model and dimension are unchanged, so existing collections need no re-embedding.
 
 ## [1.19.0] - 2026-10-09
 
@@ -801,7 +796,7 @@ applied.
 - Flake8 and Mypy setups.
 - GitHub Action for linters.
 
-[Unreleased]: https://github.com/s-nagaev/chibi/compare/v1.20.0...HEAD
+[1.20.1]: https://github.com/s-nagaev/chibi/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/s-nagaev/chibi/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/s-nagaev/chibi/compare/v1.18.0...v1.19.0
 [1.15.0]: https://github.com/s-nagaev/chibi/compare/v1.14.1...v1.15.0
