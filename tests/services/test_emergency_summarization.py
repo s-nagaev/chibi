@@ -189,12 +189,16 @@ async def test_emergency_summarization_passes_active_model_and_unboosted_max_tok
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
     db, provider = _make_summarization_mocks(list(messages))
 
-    await _run_emergency_summarization(db, max_history_tokens=100000)
+    # The comparison runs under the same patched max_tokens the summarizer
+    # call sees: outside a patch the ambient MAX_TOKENS would leak into
+    # _summarizer_max_tokens and the assertion would only pass by accident.
+    with patch("chibi.services.user.gpt_settings.max_tokens", 32000):
+        await _run_emergency_summarization(db, max_history_tokens=100000)
 
-    kwargs = provider.get_chat_response.await_args.kwargs
-    assert kwargs["model"] == "active-model"
-    assert kwargs["max_tokens"] == 32000 == _summarizer_max_tokens(provider, "active-model")
-    assert kwargs["system_prompt"].startswith("Summarize this conversation")
+        kwargs = provider.get_chat_response.await_args.kwargs
+        assert kwargs["model"] == "active-model"
+        assert kwargs["max_tokens"] == 32000 == _summarizer_max_tokens(provider, "active-model")
+        assert kwargs["system_prompt"].startswith("Summarize this conversation")
 
 
 @pytest.mark.asyncio

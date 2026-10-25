@@ -243,6 +243,7 @@ class TestSummarizerExcludesHidden:
             # singleton even when the db is passed via __wrapped__, so the
             # measurement seam is pinned to the same mock backend.
             patch("chibi.storage.database._db_provider.get_database", new=AsyncMock(return_value=db)),
+            patch("chibi.services.user.reset_chat_history.__wrapped__", new=AsyncMock()) as reset_mock,
             patch("chibi.services.user.gpt_settings.max_tokens", 32000),
             patch("chibi.services.user.gpt_settings.max_history_tokens", 100000),
         ):
@@ -256,7 +257,7 @@ class TestSummarizerExcludesHidden:
         # (existing summarization behaviour; storage rows are untouched,
         # reset + re-add of the summary pair through the merged
         # replace_thread_history, as before).
-        db.drop_messages.assert_awaited_once()
+        reset_mock.assert_awaited_once()
         assert db.add_message.await_count == 2
 
 
