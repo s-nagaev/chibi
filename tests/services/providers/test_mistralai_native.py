@@ -3,7 +3,7 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
 from mistralai.client.errors import SDKError
 from mistralai.client.models import UserMessage
@@ -354,8 +354,8 @@ async def test_ocr_short_description_formatting():
 
 def _make_mistral_sdk_error(status_code: int, message: str) -> SDKError:
     """Build a mistralai SDKError carrying the given HTTP status and body message."""
-    request = httpx.Request("POST", "https://api.mistral.ai/v1/chat/completions")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "https://api.mistral.ai/v1/chat/completions")
+    response = httpx2.Response(
         status_code,
         request=request,
         json={"object": "error", "message": message, "type": "invalid_request_error"},
