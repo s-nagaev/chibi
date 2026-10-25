@@ -47,9 +47,18 @@ from loguru import logger
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
-from chibi.exceptions import NoResponseError, NotAuthorizedError, ServiceRateLimitError, ServiceResponseError
+from chibi.constants import get_google_model_capabilities
+from chibi.exceptions import (
+    ContextLengthExceededError,
+    NoResponseError,
+    NotAuthorizedError,
+    ServiceRateLimitError,
+    ServiceResponseError,
+)
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
+from chibi.services import context_measurement
+from chibi.services.context_note import attach_context_note
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
@@ -75,12 +84,63 @@ from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.utils import (
+    collect_volatile_context_note,
     get_usage_from_google_response,
     get_usage_msg,
+    is_context_overflow_signal,
     prepare_system_prompt,
     send_llm_thoughts,
 )
 from chibi.services.usage_cache import UsageCacheStore
+from chibi.services.user import enforce_in_loop_budget
+
+
+def _fold_system_prompt_into_first_user_message(messages: list[ContentDict], prompt: str) -> bool:
+    """Fold the system prompt into the first user message of a Gemini payload.
+
+    Used for Google-family models that support neither a system instruction
+    nor tools (Gemma 1-3): the prompt content must still reach the model, so
+    it travels as a leading text part of the first real user turn, using the
+    same ``{"text": ...}`` part shape every user message already carries.
+
+    The mutation happens in place on the call-owned converted payload. The
+    folded message object is shared with the caller's ``initial_messages``
+    (the list passed to ``get_chat_response`` is a shallow copy), so the
+    persistence filter there (``msg not in initial_messages``) keeps excluding
+    it by equality and the folded prompt is never persisted as dialogue
+    history. A tenacity retry re-converts from the never-mutated ``Message``
+    list, so no attempt can inherit a previous attempt's fold.
+
+    Tool-result turns (user messages carrying a ``function_response`` part)
+    are skipped: a text part inside a function-response content is not a
+    shape the API accepts. If the payload contains no usable user message at
+    all, the prompt is dropped for the turn and a warning is logged.
+
+    Args:
+        messages: The converted Gemini payload (list of ContentDicts).
+        prompt: The prepared system prompt text to fold in.
+
+    Returns:
+        True when the prompt was folded into a user message, False when no
+        usable user message exists.
+    """
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        parts = message.get("parts")
+        if parts is None:
+            parts = []
+        if any(part.get("function_response") is not None for part in parts):
+            continue
+        parts.insert(0, PartDict(text=prompt))
+        message["parts"] = parts
+        return True
+    logger.warning(
+        "The model supports no system instruction, but the payload carries no "
+        "user message to fold the system prompt into. The prompt is dropped "
+        "for this request."
+    )
+    return False
 
 
 def ensure_declaration_parameters(tools: list[Tool]) -> list[Tool]:
@@ -298,6 +358,8 @@ class Gemini(RestApiFriendlyProvider):
             The final aggregated Gemini response.
 
         Raises:
+            ContextLengthExceededError: When the API reports a context-length
+                overflow (HTTP 400 with a context-length style message).
             NotAuthorizedError: When the API rejects the credentials.
             ServiceRateLimitError: When the API reports a per-day quota
                 exhaustion.
@@ -338,6 +400,13 @@ class Gemini(RestApiFriendlyProvider):
 
                 elif err.code == 403:
                     raise NotAuthorizedError(provider=self.name, model=model, detail=err.details)
+
+                elif err.code == 400 and is_context_overflow_signal(
+                    status_code=err.code, detail=err.details or err.message
+                ):
+                    raise ContextLengthExceededError(
+                        provider=self.name, model=model, detail=err.message or str(err.details)
+                    )
 
                 elif retry_server_errors and isinstance(err.code, int) and err.code >= 500:
                     # Transient server error (5xx): re-raise the raw SDK error so the tenacity
@@ -460,6 +529,7 @@ class Gemini(RestApiFriendlyProvider):
         track_prompt_size: bool = False,
         max_tokens: int | None = None,
         repair_used: bool = False,
+        system_prompt_folded: bool = False,
     ) -> tuple[ChatResponseSchema, list[ContentDict]]:
         model_name = model or self.default_model
 
@@ -476,13 +546,18 @@ class Gemini(RestApiFriendlyProvider):
         else:
             temperature = self.temperature
 
+        capabilities = get_google_model_capabilities(model_name)
+        if not capabilities.supports_system_prompt and prepared_system_prompt and not system_prompt_folded:
+            system_prompt_folded = _fold_system_prompt_into_first_user_message(
+                messages=messages, prompt=prepared_system_prompt
+            )
         offered = (
             offered_tools(
                 tools=self.tools_list,
                 interface=interface,
                 name_of=_gemini_tool_name,
             )
-            if "gemini" in model_name
+            if capabilities.supports_tools
             else None
         )
         tool_config: ToolConfig | None = None
@@ -503,7 +578,7 @@ class Gemini(RestApiFriendlyProvider):
             tool_config = ToolConfig(function_calling_config=FunctionCallingConfig(mode="ANY"))
 
         generation_config = GenerateContentConfig(
-            system_instruction=prepared_system_prompt if "gemini" in model_name else None,
+            system_instruction=prepared_system_prompt if capabilities.supports_system_prompt else None,
             temperature=temperature,
             max_output_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             presence_penalty=self.presence_penalty,
@@ -527,6 +602,14 @@ class Gemini(RestApiFriendlyProvider):
                 thread_id=interface.thread_id if interface else 0,
                 usage=usage,
                 provider=self.name,
+            )
+            await context_measurement.persist_measured_usage(
+                user_id=user.id,
+                thread_id=interface.thread_id if interface else 0,
+                usage=usage,
+                provider=self.name,
+                model=model_name,
+                message_count=len(conversation_messages) if conversation_messages is not None else None,
             )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model_name, provider=self.name, user=user)
@@ -745,6 +828,23 @@ class Gemini(RestApiFriendlyProvider):
                 conversation_messages.append(Message.from_google(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
+        if conversation_messages is not None:
+            # In-loop budget check: the request about to be re-sent has grown
+            # with the tool traffic above. The mask is computed over the
+            # Message mirror; the same mask filters BOTH lists and the
+            # filtered mirror is passed into the recursion, so the mirror
+            # stays in lockstep with the request list on every later check
+            # of the turn.
+            keep_mask = await enforce_in_loop_budget(
+                provider=self,
+                model=model_name,
+                storage_id=caller_storage_id,
+                thread_id=caller_thread_id,
+                conversation_messages=conversation_messages,
+            )
+            if not all(keep_mask):
+                messages = [item for index, item in enumerate(messages) if keep_mask[index]]
+                conversation_messages = [msg for msg, keep in zip(conversation_messages, keep_mask) if keep]
         return await self._get_chat_completion_response(
             messages=messages,
             model=model_name,
@@ -757,6 +857,7 @@ class Gemini(RestApiFriendlyProvider):
             caller_thread_id=caller_thread_id,
             max_tokens=max_tokens,
             repair_used=repair_used,
+            system_prompt_folded=system_prompt_folded,
         )
 
     @retry(
@@ -782,15 +883,25 @@ class Gemini(RestApiFriendlyProvider):
         model = model or self.default_model
 
         history_size = len(messages)
+        conversation_mirror = list(messages)
         initial_messages = [msg.to_google() for msg in messages]
 
+        # The volatile context note travels on the last converted user message,
+        # never on a Message object and never in the system payload. The
+        # converted ContentDicts are fresh, call-owned structures; a tenacity
+        # retry re-converts from the (never-mutated) Message list, so no
+        # attempt can inherit a previous attempt's note.
+        attach_context_note(
+            initial_messages,
+            collect_volatile_context_note(user_id=user.id, interface=interface, conversation_messages=messages),
+        )
         chat_response, _ = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
             model=model,
             system_prompt=system_prompt,
             interface=interface,
-            conversation_messages=messages,
+            conversation_messages=conversation_mirror,
             track_prompt_size=track_prompt_size,
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
@@ -798,10 +909,10 @@ class Gemini(RestApiFriendlyProvider):
         )
 
         # Every loop iteration mirrors the messages it wants persisted into
-        # the conversation list (including normalized terminal messages with
-        # their visibility), so the list's delta is the persisted form of the
-        # turn.
-        new_messages = messages[history_size:]
+        # the call-owned mirror copy (including normalized terminal messages
+        # with their visibility), so the mirror's delta is the persisted
+        # form of the turn and the caller's list is never mutated.
+        new_messages = conversation_mirror[history_size:]
         return chat_response, new_messages
 
     async def _generate_image_via_content_creation_model(

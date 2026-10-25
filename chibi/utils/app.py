@@ -23,7 +23,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
-from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.schemas.app import ModelChangeSchema
 from chibi.services.interface import UserInterface
 
 
@@ -181,39 +181,18 @@ def log_application_settings() -> None:
         )
 
 
-async def _try_reactive_context_recovery(
-    func: Callable[..., Any],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    storage_id: int,
-    thread_id: int,
-) -> Any:
-    """Summarize history and retry the wrapped function once after context overflow.
-
-    Args:
-        func: The wrapped function to retry.
-        args: Positional arguments for the function.
-        kwargs: Keyword arguments for the function.
-        storage_id: User/chat storage identifier to summarize.
-        thread_id: Thread identifier to summarize.
-
-    Returns:
-        The result of the retried function call.
-
-    Raises:
-        ContextLengthExceededError: If the retry also overflows.
-        Exception: Any exception raised by emergency_summarization or the retry.
-    """
-    from chibi.services.user import emergency_summarization  # Circular import avoidance
-
-    await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
-    return await func(*args, **kwargs)
-
-
 def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator handling openai module's exceptions.
 
     If the specific exception occurred, handles it and sends the corresponding message.
+
+    The decorator is a pure error presenter: it owns no recovery logic. In
+    particular, a ``ContextLengthExceededError`` is only reported (log, IDE
+    error state, chat message), the reactive recovery for overflow lives at
+    the single provider call site
+    (``chibi.services.user.get_llm_chat_completion_answer`` ->
+    ``_reactive_context_recovery``), so whatever reaches this decorator has
+    already exhausted the backstop.
 
     Args:
         func: async function that may rise openai exception.
@@ -281,24 +260,6 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             )
 
         except ContextLengthExceededError as e:
-            if gpt_settings.reactive_context_recovery:
-                try:
-                    result = await _try_reactive_context_recovery(
-                        func=func,
-                        args=args,
-                        kwargs=kwargs,
-                        storage_id=interface.storage_id,
-                        thread_id=interface.thread_id,
-                    )
-                    if isinstance(result, ChatResponseSchema):
-                        result = result.model_copy(
-                            update={"answer": result.answer + "\n\n_(Context was compressed to stay within limits.)_"}
-                        )
-                    return result
-                except ContextLengthExceededError:
-                    logger.warning(f"{error_msg_prefix}: context still too large after reactive summarization")
-                except Exception as recovery_error:
-                    logger.exception(f"{error_msg_prefix}: reactive context recovery failed: {recovery_error!r}")
             logger.error(f"{error_msg_prefix}: {e}")
             _set_ide_error(
                 interface,

@@ -91,21 +91,25 @@ class GPTSettings(BaseSettings):
         default=True,
         description=(
             "When True and a provider rejects a request because the context window is exceeded, "
-            "automatically summarize the conversation history and retry the turn exactly once. "
-            "This is the reactive safety net that complements the proactive MAX_HISTORY_TOKENS threshold."
+            "automatically summarize the conversation history and retry the turn exactly once at the "
+            "single provider call site (the reactive backstop behind the pre-call context-budget guard). "
+            "When False, an overflow error is presented as-is."
         ),
     )
     max_history_tokens: int = Field(
-        default=100000,
+        default=200000,
         description=(
             "Threshold (in tokens) of the *real* provider-reported prompt size at which the "
-            "conversation is auto-summarized. The value now reflects the entire outgoing request "
+            "conversation is auto-summarized. The value reflects the entire outgoing request "
             "(system prompt, activated skills, tool schemas, tool-call arguments, per-message "
-            "structural overhead, and conversation content) rather than the old history-only "
-            "estimate, which under-reported by ~4.8x. Re-based from 64000 to 100000 to protect the "
-            "smallest commonly-supported context window (128k): the threshold sits below it (~78%) "
-            "so summarization fires before a 128k model overflows, while leaving ~50% headroom on "
-            "a 200k window. Explicit setters should re-tune to the ~100k scale."
+            "structural overhead, and conversation content) rather than an estimate of the "
+            "conversation history alone. The default of 200000 aligns with the largest "
+            "commonly-supported context window, so large-window models keep their full usable "
+            "range instead of being throttled to ~50% by a threshold sized for the smallest "
+            "window. Smaller-window models (128k or less) are protected by the reactive "
+            "one-shot summarization retry and provider failover rather than by this proactive "
+            "threshold; deployments that only use small-window models should set an explicit "
+            "lower value."
         ),
     )
     context_size_warning_threshold: int = Field(alias="CONTEXT_SIZE_WARNING_THRESHOLD", default=50, ge=0, le=100)

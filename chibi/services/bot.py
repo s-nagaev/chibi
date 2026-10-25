@@ -13,8 +13,8 @@ from chibi.services.providers.tools import ToolResponseSchema
 from chibi.services.providers.utils import get_usage_msg
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
+from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
-    check_history_and_summarize,
     clone_thread_messages,
     delete_thread_from_map,
     describe_image,
@@ -149,11 +149,6 @@ async def handle_scheduler_trigger(trigger_text: str, job_id: str, interface: Us
         f"[{'%.2f' % completion_time}s]"
     )
     await interface.send_message(message=strip_ack_sentinel(chat_response.answer))
-    history_is_summarized = await check_history_and_summarize(
-        storage_id=interface.storage_id, thread_id=interface.thread_id
-    )
-    if history_is_summarized:
-        logger.bind(user_id=interface.user_id).info(f"{interface.user_data}: history successfully summarized.")
     return None
 
 
@@ -229,11 +224,6 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         f"the {interface.chat_data}. {logged_answer} {usage_message} [{'%.2f' % completion_time}s]"
     )
     await interface.send_message(message=strip_ack_sentinel(chat_response.answer))
-    history_is_summarized = await check_history_and_summarize(
-        storage_id=interface.storage_id, thread_id=interface.thread_id
-    )
-    if history_is_summarized:
-        logger.info(f"{interface.user_data}: history successfully summarized.")
     return None
 
 
@@ -241,6 +231,9 @@ async def handle_reset(interface: UserInterface) -> None:
     logger.info(f"{interface.user_data}: conversation history reset.")
 
     await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
+    # The cached prompt size reflects the pre-reset history and would
+    # misreport the context size on the next turn.
+    UsageCacheStore().invalidate(user_id=interface.storage_id, thread_id=interface.thread_id)
     task_manager.kill_all_user_tasks(user_id=interface.storage_id, thread_id=interface.thread_id)
     # Placed after the kill sequence on purpose: the flush reflects the
     # authoritative post-kill state, and retiring the counters here turns
@@ -387,6 +380,12 @@ async def handle_clone_thread(interface: UserInterface, args: list[str] | None =
     cloned_messages = await clone_thread_messages(
         storage_id=interface.storage_id, old_thread_id=interface.thread_id, new_thread_id=new_thread_id
     )
+    # The clone produces a thread whose conversation is a copy of the
+    # source's: any cached prompt size for the destination key must not
+    # survive (a fresh destination has no cache entry, but the helper is
+    # the single invalidation entry point for every history-forking path
+    # and is a no-op when nothing is cached).
+    UsageCacheStore().invalidate(user_id=interface.storage_id, thread_id=new_thread_id)
     message = f"✅ Thread cloned: {name} (ID: {new_thread_id}). {cloned_messages} messages copied."
 
     await interface.send_message(message=message)
@@ -421,5 +420,6 @@ async def handle_drop_thread(interface: UserInterface, args: list[str] | None = 
         return None
 
     await reset_chat_history(storage_id=interface.storage_id, thread_id=interface.thread_id)
+    UsageCacheStore().invalidate(user_id=interface.storage_id, thread_id=interface.thread_id)
     await delete_thread_from_map(storage_id=interface.storage_id, thread_id=interface.thread_id)
     return None

@@ -404,16 +404,17 @@ REACTIVE_CONTEXT_RECOVERY=true
 # Threshold (in tokens) of the real provider-reported prompt size at which the
 # conversation is auto-summarized. This value reflects the ENTIRE outgoing request
 # (system prompt + activated skills + tool schemas + tool-call arguments +
-# per-message structural overhead + conversation content), NOT the old
-# history-only estimate. The old default was 64000 and measured only conversation
-# content+role; the real figure is ~4.8x larger for an identical conversation, so
-# the default was re-based to 100000 to protect the smallest commonly-supported
-# context window (128k): the threshold sits below it (~78%) so summarization fires
-# before a 128k model overflows, while leaving ~50% headroom on a 200k window.
-# MIGRATION: if you previously set MAX_HISTORY_TOKENS explicitly, your old value
-# is now ~4.8x too small for the new (truthful) metric. Re-tune it upward by ~5x
-# (e.g. 64000 -> 100000) unless you intentionally want more aggressive summarization.
-MAX_HISTORY_TOKENS=100000
+# per-message structural overhead + conversation content), NOT an estimate of
+# the conversation history alone. The default of 200000 aligns with the largest
+# commonly-supported context window, so large-window models keep their full
+# usable range; smaller-window models (128k or less) are protected by the
+# reactive REACTIVE_CONTEXT_RECOVERY retry and provider failover instead of
+# this proactive threshold. If your deployment only uses small-window models,
+# set an explicit lower value that fits your smallest window.
+# MIGRATION: if you previously set MAX_HISTORY_TOKENS explicitly, re-tune it to
+# the ~200k scale (e.g. 100000 -> 200000) unless you intentionally keep a
+# conservative small-window value.
+MAX_HISTORY_TOKENS=200000
 
 
 # ============================================================================

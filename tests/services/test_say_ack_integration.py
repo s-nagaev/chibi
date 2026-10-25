@@ -126,6 +126,9 @@ def _stub_user(provider: Any) -> Mock:
     user.llm_skills = []
     user.info = "test user"
     user.thread_notes = {}
+    # The merged reset_chat_history runs `thread_id in user.thread_usage` on the
+    # stub, so the field must be a real dict (a Mock child is not iterable).
+    user.thread_usage = {}
     return user
 
 

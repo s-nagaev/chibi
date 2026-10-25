@@ -18,6 +18,8 @@ from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT, TOO
 from chibi.models import Message
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
+from chibi.services.context_measurement import estimate_messages_tokens
+from chibi.services.context_note import format_context_note
 from chibi.services.interface import UserInterface
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import _is_tool_response_message, get_chibi_user
@@ -29,6 +31,55 @@ T = TypeVar("T")
 P = ParamSpec("P")
 M = TypeVar("M", bound=Callable[..., Coroutine[Any, Any, Any]])
 AsyncFunc: TypeAlias = Callable[P, Coroutine[Any, Any, T]]
+
+
+CONTEXT_OVERFLOW_STATUS_CODES: tuple[int, ...] = (400, 413)
+
+# Markers restricted to token-count / context-length wordings. Generic
+# phrases such as "request too large" or a bare "input token count" are
+# deliberately absent: a non-overflow 400/413 whose body happens to contain
+# them must keep its original error type instead of being reclassified.
+CONTEXT_OVERFLOW_MARKERS: tuple[str, ...] = (
+    "context_length_exceeded",
+    "context length exceeded",
+    "context length is exceeded",
+    "maximum context length",
+    "prompt is too long",
+    "prompt too long",
+    "exceeds the maximum number of tokens",
+    "too many tokens",
+    "reached max total tokens",
+    "reduce the length of the messages",
+)
+
+
+def is_context_overflow_signal(status_code: int, detail: Any = None) -> bool:
+    """Decide whether a provider error payload describes a context-length overflow.
+
+    One shared mapping for every provider path: an overflow surfaces as an HTTP
+    400 (or 413) whose body carries a context-length style error code or
+    message, and providers word this differently. When the error cannot be
+    recognized, the caller keeps its previous behaviour (generic provider
+    error) instead of inventing a fragile heuristic.
+
+    Args:
+        status_code: HTTP status code carried by the error. Only 400 and 413
+            can carry an overflow; any other code (or an unusable value) fails
+            closed and the payload is never classified as an overflow.
+        detail: Error payload: the SDK message, the parsed response body or
+            any object whose string form contains the provider wording.
+            ``None`` never matches.
+
+    Returns:
+        True when the status code plus message markers identify a context
+        overflow.
+    """
+    if status_code not in CONTEXT_OVERFLOW_STATUS_CODES:
+        return False
+    if detail is None:
+        return False
+    text = str(detail).lower()
+    return any(marker in text for marker in CONTEXT_OVERFLOW_MARKERS)
 
 
 def decorate_async_methods(decorator: Callable[[M], M]) -> Callable[[Type[T]], Type[T]]:
@@ -79,9 +130,10 @@ def _scheduler_hint_applicable() -> bool:
 def _estimate_history_size(messages: list[Message]) -> int:
     """Estimate the total token size of a conversation history.
 
-    ``Message.estimate_tokens`` ignores ``tool_calls`` argument payloads, so
-    their serialized size is compensated locally (never persisted back to the
-    model).
+    A thin delegate to the single token-counting implementation
+    (:func:`chibi.services.context_measurement.estimate_messages_tokens`),
+    which includes ``tool_calls`` argument payloads that
+    ``Message.estimate_tokens`` ignores (never persisted back to the model).
 
     Args:
         messages: The conversation messages.
@@ -90,13 +142,7 @@ def _estimate_history_size(messages: list[Message]) -> int:
         Estimated token count of the whole history, including assistant
         ``tool_calls`` arguments.
     """
-    total = sum(msg.estimate_tokens for msg in messages)
-    total += sum(
-        len(json.dumps([tool_call.model_dump() for tool_call in msg.tool_calls])) // 4
-        for msg in messages
-        if msg.tool_calls
-    )
-    return total
+    return estimate_messages_tokens(messages)
 
 
 def _top_tool_result_offenders(messages: list[Message], limit: int = 3) -> list[tuple[str, int]]:
@@ -126,6 +172,90 @@ def _top_tool_result_offenders(messages: list[Message], limit: int = 3) -> list[
     return offenders[:limit]
 
 
+def collect_volatile_context_note(
+    user_id: int,
+    interface: UserInterface | None,
+    conversation_messages: list[Message] | None = None,
+) -> str:
+    """Build the volatile per-turn context note.
+
+    The note carries the keys that change on every turn: the approximate
+    context size, the context-size warning (when the configured threshold is
+    crossed) and the volume-based tool-results warning. It used to
+    travel as system-payload keys, which invalidated prompt caching for the
+    whole prefix on every turn; the provider entry points now append it to the
+    last converted user message instead (see
+    :func:`chibi.services.context_note.attach_context_note`).
+
+    The warnings are informational: they report how full the context is and
+    name the compaction tools. Compaction policy and timing live in the base
+    system prompt, not here; the volatile note stays a statement of state.
+
+    Args:
+        user_id: The user identifier used to key the real context-size cache.
+        interface: The user interface for the current request, or None.
+            Sub-agent and other interface-less requests never carry the note,
+            exactly as they never carried the volatile system keys.
+        conversation_messages: Retained history used only as a fallback
+            denominator for the volume-based tool-results warning when no
+            real provider-reported usage is cached.
+
+    Returns:
+        The delimited note text, or an empty string when there is nothing to
+        attach (no interface).
+    """
+    if interface is None:
+        return ""
+    thread_id = interface.thread_id
+    real_context_size = UsageCacheStore().get(user_id=user_id, thread_id=thread_id)
+    max_history_tokens = gpt_settings.max_history_tokens
+    # Denominator for the volume-based tool-results share: the real
+    # provider-reported context size when available, otherwise the local
+    # per-message estimate (including tool_calls arguments).
+    context_size_denominator = (
+        real_context_size
+        if real_context_size is not None
+        else _estimate_history_size(conversation_messages)
+        if conversation_messages
+        else 0
+    )
+    lines: list[str] = []
+    if real_context_size is not None:
+        context_percentage = round(real_context_size / max_history_tokens * 100) if max_history_tokens else 0
+        lines.append(
+            f"approximate_context_size: {real_context_size:,} tokens "
+            f"({context_percentage}% of {max_history_tokens:,} limit)"
+        )
+        if context_percentage > gpt_settings.context_size_warning_threshold:
+            lines.append(
+                "context_size_warning: "
+                f"the context size is more than {gpt_settings.context_size_warning_threshold}% of "
+                f"the maximum allowed ({max_history_tokens}) tokens. Compaction tools available in this "
+                f"conversation: 'summarize_history' (history compression) and 'clear_tool_call_history' "
+                f"(drops stale tool results)."
+            )
+    else:
+        lines.append("approximate_context_size: n/a")
+
+    if conversation_messages and context_size_denominator > 0:
+        tool_results_tokens = sum(
+            msg.estimate_tokens for msg in conversation_messages if _is_tool_response_message(msg)
+        )
+        offenders = _top_tool_result_offenders(conversation_messages)
+        tool_share = tool_results_tokens / context_size_denominator
+        if offenders and tool_share > TOOL_RESULTS_SHARE_WARN_THRESHOLD:
+            share_percentage = round(tool_share * 100)
+            top_offenders = "; ".join(f"{name}: ~{tokens} tokens" for name, tokens in offenders)
+            lines.append(
+                "tool_results_warning: "
+                f"Background tool results occupy ~{tool_results_tokens} tokens "
+                f"({share_percentage}% of the ~{context_size_denominator}-token context). "
+                f"Largest offenders (tool name: estimated tokens): {top_offenders}. "
+                f"Stale tool results can be dropped with 'clear_tool_call_history'."
+            )
+    return format_context_note(lines)
+
+
 async def prepare_system_prompt(
     base_system_prompt: str,
     user_id: int,
@@ -135,15 +265,20 @@ async def prepare_system_prompt(
 ) -> str:
     """Prepare the system prompt payload sent to the LLM.
 
+    The payload is stable across turns: the volatile keys (approximate context
+    size, context-size warning, tool-results warning) do NOT travel here
+    anymore. They are assembled per turn by
+    :func:`collect_volatile_context_note` and attached by the provider entry
+    points to the last converted user message, so the cached system prefix
+    stays cacheable.
+
     Args:
         base_system_prompt: The base system prompt text.
-        user_id: The user identifier used to fetch user metadata and to key
-            the real context-size cache.
+        user_id: The user identifier used to fetch user metadata.
         interface: The user interface for the current request, or None.
-        conversation_messages: Retained history used only as a fallback
-            denominator for the volume-based tool-results warning when no
-            real provider-reported usage is cached; the context-size display
-            itself still relies on the real value from ``UsageCacheStore``.
+        conversation_messages: Unused since the volatile keys moved out of the
+            system payload; kept for signature compatibility with the provider
+            call sites.
         thread_id: Session thread ID used when the interface is absent (e.g.
             sub-agent requests) so the effective working directory resolves to
             the same thread-scoped value as the parent request.
@@ -186,56 +321,9 @@ async def prepare_system_prompt(
 
         prompt["system"] = system_data
 
-    if interface:
-        if getattr(interface, "uses_uploaded_file_storage", True):
-            storage: FileStorage = get_file_storage(interface=interface)
-            prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
-
-        thread_id = interface.thread_id
-        real_context_size = UsageCacheStore().get(user_id=user_id, thread_id=thread_id)
-        max_history_tokens = gpt_settings.max_history_tokens
-        # Denominator for the volume-based tool-results share: the real
-        # provider-reported context size when available, otherwise the local
-        # per-message estimate (including tool_calls arguments).
-        context_size_denominator = (
-            real_context_size
-            if real_context_size is not None
-            else _estimate_history_size(conversation_messages)
-            if conversation_messages
-            else 0
-        )
-        if real_context_size is not None:
-            context_percentage = round(real_context_size / max_history_tokens * 100) if max_history_tokens else 0
-            prompt["approximate_context_size"] = (
-                f"{real_context_size:,} tokens ({context_percentage}% of {max_history_tokens:,} limit)"
-            )
-            if context_percentage > gpt_settings.context_size_warning_threshold:
-                prompt["context_size_warning"] = (
-                    f"MANDATORY: the context size is more than {gpt_settings.context_size_warning_threshold}% of "
-                    f"the maximum allowed ({max_history_tokens}) tokens. You MUST call 'summarize_history' "
-                    f"(history compression) BEFORE producing a substantive answer. Do not ignore this "
-                    f"instruction and do not answer first: compress the history by calling 'summarize_history' "
-                    f"with the most detailed summary possible, or call 'clear_tool_call_history' to drop stale "
-                    f"tool results. Only after the context is reduced, continue answering."
-                )
-        else:
-            prompt["approximate_context_size"] = "n/a"
-
-        if conversation_messages and context_size_denominator > 0:
-            tool_results_tokens = sum(
-                msg.estimate_tokens for msg in conversation_messages if _is_tool_response_message(msg)
-            )
-            offenders = _top_tool_result_offenders(conversation_messages)
-            tool_share = tool_results_tokens / context_size_denominator
-            if offenders and tool_share > TOOL_RESULTS_SHARE_WARN_THRESHOLD:
-                share_percentage = round(tool_share * 100)
-                top_offenders = "; ".join(f"{name}: ~{tokens} tokens" for name, tokens in offenders)
-                prompt["tool_results_warning"] = (
-                    f"Background tool results occupy ~{tool_results_tokens} tokens "
-                    f"({share_percentage}% of the ~{context_size_denominator}-token context). "
-                    f"Largest offenders (tool name: estimated tokens): {top_offenders}. "
-                    f"You should call 'clear_tool_call_history' to drop these stale tool results."
-                )
+    if interface and getattr(interface, "uses_uploaded_file_storage", True):
+        storage: FileStorage = get_file_storage(interface=interface)
+        prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
     llms_data: list[ModelChangeSchema] = await user.get_available_models()
     prompt["available_models_to_delegate"] = convert_list_of_models_to_str(models=llms_data)
@@ -357,36 +445,3 @@ def get_usage_msg(usage: UsageSchema | CompletionUsage | None) -> str:
 
 def suno_task_still_processing(task_data_response: SunoGetGenerationDetailsSchema) -> bool:
     return task_data_response.is_in_progress
-
-
-# def limit_recursion(
-#     max_depth: int = application_settings.max_consecutive_tool_calls,
-# ) -> Callable[[AsyncFunc[P], T]], AsyncFunc[P, T]]:
-#     def decorator(func: AsyncFunc[P, T]) -> AsyncFunc[P, T]:
-#         depth_var: ContextVar[int] = ContextVar(f"{func.__name__}_depth", default=0)
-#
-#         @wraps(func)
-#         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-#             current_depth = depth_var.get()
-#             depth_var.set(current_depth + 1)
-#             if depth_var.get() > max_depth + 1:
-#                 depth_var.set(current_depth)
-#                 class_name = ""
-#                 if args and hasattr(args[0], "__class__"):
-#                     class_name = f"{args[0].__class__.__name__}."
-#                 raise RecursionLimitExceeded(
-#                     provider=class_name,
-#                     model=cast(str, kwargs.get("model", "unknown")),
-#                     detail=f"Recursion depth exceeded: {max_depth} (function: {class_name}{func.__name__})",
-#                     exceeded_limit=max_depth,
-#                 )
-#
-#             try:
-#                 result = await func(*args, **kwargs)
-#                 return result
-#             finally:
-#                 depth_var.set(current_depth)
-#
-#         return async_wrapper
-#
-#     return decorator
