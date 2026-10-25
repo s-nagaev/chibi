@@ -236,7 +236,6 @@ async def test_once_self_job_end_to_end_over_stdio(
         patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
         patch("chibi.runners.ide_transport.recover_agent_jobs", new_callable=AsyncMock),
         patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(side_effect=fake_llm_answer)),
-        patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
         patch(f"{TOOL_MODULE}.application_settings", tool_settings),
         patch(f"{AGENT_TASK_MODULE}.application_settings", agent_task_settings),
         patch("chibi.config.logging.use_stderr_logging"),

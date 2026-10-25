@@ -19,6 +19,7 @@ from chibi.config import application_settings
 from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
 from chibi.services.terminal_interface import TerminalInterface
+from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import get_info, get_models_available, reset_chat_history, set_active_model
 from chibi.utils.encoding import reconfigure_stream_utf8
 
@@ -104,6 +105,7 @@ class TerminalRunner:
         """Reset chat history."""
         console.print("[yellow]Resetting chat history...[/yellow]")
         await reset_chat_history(storage_id=self.user_id, thread_id=0)
+        UsageCacheStore().invalidate(user_id=self.user_id, thread_id=0)
         console.print("[green]Chat history has been reset.[/green]")
 
     async def _handle_model_selection(self) -> None:
