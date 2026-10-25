@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from mistralai.models import SDKError, UserMessage
+from mistralai.client.errors import SDKError
+from mistralai.client.models import UserMessage
 
 from chibi.exceptions import ContextLengthExceededError
 from chibi.schemas.app import VisionResultSchema

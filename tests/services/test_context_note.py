@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from mistralai.models import UserMessage as MistralUserMessage
+from mistralai.client.models import UserMessage as MistralUserMessage
 
 from chibi.models import Message
 from chibi.services.context_note import (
