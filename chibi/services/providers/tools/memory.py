@@ -6,18 +6,16 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings, gpt_settings
 from chibi.memory.chroma import memory
-from chibi.models import Message
 from chibi.services.cwd_events import cwd_tracker
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
 from chibi.services.user import (
     activate_llm_skill,
-    build_compaction_seed,
     deactivate_llm_skill,
     drop_tool_call_history,
     get_chibi_user,
-    replace_thread_history,
+    reset_chat_history,
     set_info,
     set_thread_notes,
     set_thread_working_dir,
@@ -195,10 +193,6 @@ class ClearToolCallHistoryTool(ChibiTool):
                 "Clear the tool call history, replacing it with summary provided. "
                 "Use this tool fully independently and autonomously. "
                 "All tool call history excluding THIS one (call & result) will be dropped. "
-                "When to call: BEFORE writing a substantive answer, whenever the <context_note> block on the "
-                "latest user message reports high context usage or bulky stale tool results (or the tool "
-                "traffic is clearly large on your own). Compaction comes first; after the tool returns, "
-                "continue and deliver the full answer. "
             ),
             parameters={
                 "type": "object",
@@ -237,11 +231,7 @@ class SummarizeHistoryTool(ChibiTool):
             name="summarize_history",
             description=(
                 "Clear the whole chat history, replacing it with summary provided. Provide "
-                "EXHAUSTIVE summary. Use this tool fully independently and autonomously. "
-                "When to call: BEFORE writing a substantive answer, whenever the <context_note> block on the "
-                "latest user message reports high context usage or a context-size warning (or the dialogue is "
-                "clearly too long on your own). Compaction comes first; after the tool returns, continue and "
-                "deliver the full answer. The summary fully replaces the dialogue, so make it exhaustive. "
+                "EXHAUSTIVE summary. Use this tool fully independently and autonomously."
             ),
             parameters={
                 "type": "object",
@@ -264,25 +254,9 @@ class SummarizeHistoryTool(ChibiTool):
             raise ToolException("This function requires user_id to be automatically provided.")
         interface = cls.get_interface(kwargs=kwargs)
 
-        if not summary or not summary.strip():
-            # Same guard as the automatic compaction path: an empty summary
-            # must never replace the whole thread history, and the model
-            # calling this tool deserves the error rather than a silent wipe.
-            raise ToolException(
-                "The summary is empty. Refusing to replace the conversation history with nothing; "
-                "call this tool again with a non-empty summary of the conversation."
-            )
-
         logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summarizing chat...")
-        # The same 2-message seed the automatic compaction path writes, pushed
-        # through the single replacement helper so there is exactly one
-        # implementation of "write the seed". The turn's own messages are
-        # committed by the turn pipeline AFTER this tool returns, so the stored
-        # history becomes the seed followed by the current turn, the intended
-        # mid-turn commit behaviour, not the old wipe-then-commit bug (the
-        # summary itself IS persisted here, as the seed's assistant message).
-        seed: list[Message] = build_compaction_seed(summary=summary)
-        await replace_thread_history(storage_id=user_id, thread_id=interface.thread_id, seed=seed)
+        await reset_chat_history(storage_id=user_id, thread_id=interface.thread_id)
+        # await drop_history(storage_id=user_id, thread_id=interface.thread_id)
         if application_settings.log_prompt_data:
             logger.log("TOOL", f"[{kwargs.get('caller_model', 'unknown model')}] Summary: {summary}")
         return {"status": "ok"}

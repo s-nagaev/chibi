@@ -1,16 +1,11 @@
 """Tests for the with_chroma_archival decorator."""
 
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from chibi.memory.chroma import with_chroma_archival
 from chibi.models import Message, User
-from chibi.services.context_note import CONTEXT_NOTE_OPEN, format_context_note
-
-NOTE = format_context_note(["approximate_context_size: 42 tokens (0% of 200,000 limit)"])
-assert NOTE, "sanity: the test note must be non-empty"
 
 
 class MockDatabase:
@@ -180,85 +175,3 @@ class TestWithChromaArchival:
             # The inner add_message should be hit exactly once, not multiple times
             assert mock_inner.add_message_called is True
             mock_task_manager.run_task.assert_called_once()
-
-
-class CapturingDatabase(MockDatabase):
-    """MockDatabase variant that records the message each write received."""
-
-    def __init__(self):
-        super().__init__()
-        self.written_messages: list[Message] = []
-
-    async def add_message(self, user, message, ttl=None, thread_id=0):
-        await super().add_message(user, message, ttl=ttl, thread_id=thread_id)
-        self.written_messages.append(message)
-
-
-class CapturingMemory:
-    """Minimal memory stub recording the messages handed to archive."""
-
-    def __init__(self):
-        self.archived: list[Message] = []
-
-    async def archive(self, user_id, messages, thread_id=0):
-        self.archived.extend(messages)
-
-
-class TestStripOnWrite:
-    """The volatile context note must never reach stored history or the archive."""
-
-    @pytest.fixture
-    def noted_message(self) -> Message:
-        content = '{"user": "telegram", "prompt": "hi", "type": "user message"}'
-        return Message(role="user", content=content + "\n\n" + NOTE)
-
-    @pytest.mark.asyncio
-    async def test_note_is_stripped_from_the_write_and_the_archive(self, noted_message) -> None:
-        """Both the storage write and the archive receive the cleaned content."""
-        inner = CapturingDatabase()
-        memory = CapturingMemory()
-        wrapped = with_chroma_archival(cast(Any, memory))(cast(Any, inner))
-
-        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
-            mock_task_manager.run_task = MagicMock()
-            await wrapped.add_message(User(id=123), noted_message, thread_id=7)
-            # Run the scheduled archival coroutine synchronously.
-            archive_coro = mock_task_manager.run_task.call_args[0][0]
-            await archive_coro
-
-        assert CONTEXT_NOTE_OPEN not in inner.written_messages[0].content
-        assert CONTEXT_NOTE_OPEN not in memory.archived[0].content
-        assert inner.written_messages[0].content == memory.archived[0].content
-
-    @pytest.mark.asyncio
-    async def test_stripping_never_mutates_the_callers_message(self, noted_message) -> None:
-        """The wrapper writes a cleaned copy; the caller's Message keeps its content."""
-        original_content = noted_message.content
-        wrapped = with_chroma_archival(cast(Any, CapturingMemory()))(cast(Any, CapturingDatabase()))
-
-        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
-            mock_task_manager.run_task = MagicMock()
-            await wrapped.add_message(User(id=123), noted_message)
-            # Inspect-and-close: never await the scheduled archival coroutine.
-            archive_coro = mock_task_manager.run_task.call_args[0][0]
-            archive_coro.close()
-
-        assert noted_message.content == original_content
-
-    @pytest.mark.asyncio
-    async def test_clean_message_passes_through_byte_identical(self) -> None:
-        """A message without the note is written and archived byte for byte."""
-        clean = Message(role="user", content="plain text without any note")
-        inner = CapturingDatabase()
-        memory = CapturingMemory()
-        wrapped = with_chroma_archival(cast(Any, memory))(cast(Any, inner))
-
-        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
-            mock_task_manager.run_task = MagicMock()
-            await wrapped.add_message(User(id=123), clean)
-            archive_coro = mock_task_manager.run_task.call_args[0][0]
-            await archive_coro
-
-        assert inner.written_messages[0] is clean
-        assert memory.archived[0] is clean
-        assert inner.written_messages[0].content == "plain text without any note"

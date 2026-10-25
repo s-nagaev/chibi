@@ -20,22 +20,14 @@ from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoModelSelectedError, ServiceResponseError
 from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchema
-from chibi.services import context_measurement
-from chibi.services.context_note import attach_context_note
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.schemas import ToolCallSchema
-from chibi.services.providers.utils import (
-    collect_volatile_context_note,
-    get_usage_msg,
-    prepare_system_prompt,
-    send_llm_thoughts,
-)
+from chibi.services.providers.utils import get_usage_msg, prepare_system_prompt, send_llm_thoughts
 from chibi.services.usage_cache import UsageCacheStore
-from chibi.services.user import enforce_in_loop_budget
 
 RESPONSES_ONLY_MODELS = {"gpt-5.2", "gpt-5.3", "gpt-5.4", "codex"}
 
@@ -105,7 +97,6 @@ class OpenAI(OpenAIFriendlyProvider):
             NotFoundError: If model is responses-only and not found.
         """
         model = model or self.default_model
-        sent_messages = messages.copy()
 
         try:
             response, updated_messages = await self._get_response_completion_response(
@@ -120,11 +111,6 @@ class OpenAI(OpenAIFriendlyProvider):
                 max_tokens=max_tokens,
             )
         except (BadRequestError, NotFoundError) as e:
-            # Dead in practice: OpenAIFriendlyProvider.__getattribute__
-            # (chibi/services/providers/provider.py:747) converts raw SDK
-            # errors into Service* exceptions before they can reach this
-            # handler. Kept deliberately: removing it would change the
-            # error surface outside this change's scope.
             # Only fallback for 400/404 errors (unsupported model or parameter)
             for substr in RESPONSES_ONLY_MODELS:
                 if substr in model:
@@ -150,7 +136,7 @@ class OpenAI(OpenAIFriendlyProvider):
                 max_tokens=max_tokens,
             )
 
-        new_messages = [msg for msg in updated_messages if msg not in sent_messages]
+        new_messages = [msg for msg in updated_messages if msg not in messages]
         return response, new_messages
 
     @classmethod
@@ -362,19 +348,6 @@ class OpenAI(OpenAIFriendlyProvider):
         for msg in messages:
             input_items.extend(msg.to_responses_items())
 
-        # The volatile context note travels on the last converted user item,
-        # never on a Message object and never in the instructions. The
-        # input_items are rebuilt from the (never-mutated) Message list on
-        # every call of this method, including each in-loop recursion, so every
-        # request gets a fresh note and no attempt can inherit a stale one; the
-        # marker check in attach_context_note keeps the note single even if a
-        # payload arrives already carrying it (e.g. the Chat Completions
-        # fallback sharing history with this path).
-        attach_context_note(
-            input_items,
-            collect_volatile_context_note(user_id=user.id, interface=interface, conversation_messages=messages),
-        )
-
         instructions: str | Omit = omit
         if system_prompt:
             instructions = await prepare_system_prompt(
@@ -446,14 +419,6 @@ class OpenAI(OpenAIFriendlyProvider):
                 usage=usage,
                 provider=self.name,
             )
-            await context_measurement.persist_measured_usage(
-                user_id=user.id,
-                thread_id=interface.thread_id if interface else 0,
-                usage=usage,
-                provider=self.name,
-                model=model,
-                message_count=len(messages),
-            )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
@@ -514,19 +479,6 @@ class OpenAI(OpenAIFriendlyProvider):
             messages.append(tool_result_message)
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
-        # In-loop budget check: on this path the request list IS the Message
-        # mirror, so the mask is computed over the list actually sent and the
-        # filtered list itself is passed into the recursion, the alignment
-        # holds for every drop of the turn by construction.
-        keep_mask = await enforce_in_loop_budget(
-            provider=self,
-            model=model,
-            storage_id=caller_storage_id,
-            thread_id=caller_thread_id,
-            conversation_messages=messages,
-        )
-        if not all(keep_mask):
-            messages = [msg for msg, keep in zip(messages, keep_mask) if keep]
         return await self._get_response_completion_response(
             messages=messages,
             model=model,

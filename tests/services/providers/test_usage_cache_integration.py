@@ -69,19 +69,6 @@ def usage_cache_store() -> Iterator[UsageCacheStore]:
     store._data.clear()
 
 
-@pytest.fixture(autouse=True)
-def durable_persistence_mock(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
-    """Keep durable per-thread usage persistence off the real storage backend.
-
-    The provider store sites persist the measurement durably next to the
-    in-memory write; these tests only exercise the in-memory contract, so the
-    durable writer is replaced with a recording mock.
-    """
-    mock = AsyncMock()
-    monkeypatch.setattr("chibi.services.context_measurement.persist_measured_usage", mock)
-    yield mock
-
-
 @pytest.fixture
 def interface() -> UserInterface:
     """Return a minimal UserInterface stub."""
@@ -127,78 +114,6 @@ async def test_openai_friendly_provider_writes_cache_when_influx_not_configured(
         )
 
     assert usage_cache_store.get(user_id=user.id, thread_id=interface.thread_id) == 150
-
-
-@pytest.mark.asyncio
-async def test_tracked_call_persists_measured_usage_durably(
-    usage_cache_store: UsageCacheStore,
-    interface: UserInterface,
-    durable_persistence_mock: AsyncMock,
-) -> None:
-    """A tracked call also persists the measurement durably with model and message count."""
-    provider = MoonshotAI(token=TEST_TOKEN)
-    user = User(id=12345)
-    response = _create_final_answer_response(answer="Hello", prompt_tokens=150)
-    completions = SimpleNamespace(create=AsyncMock(return_value=response))
-    mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-
-    with (
-        _patch_provider_influx_not_configured(),
-        patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
-        patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="system")),
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-    ):
-        await provider.get_chat_response(
-            messages=[Message(role="user", content="Hi")],
-            user=user,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
-            model=TEST_MODEL,
-            system_prompt="base",
-            interface=interface,
-            track_prompt_size=True,
-        )
-
-    durable_persistence_mock.assert_awaited_once()
-    assert durable_persistence_mock.await_args is not None
-    kwargs = durable_persistence_mock.await_args.kwargs
-    assert kwargs["user_id"] == user.id
-    assert kwargs["thread_id"] == interface.thread_id
-    assert kwargs["model"] == TEST_MODEL
-    assert kwargs["message_count"] == 1
-    assert kwargs["usage"].prompt_tokens == 150
-
-
-@pytest.mark.asyncio
-async def test_untracked_call_does_not_persist_measured_usage(
-    usage_cache_store: UsageCacheStore,
-    interface: UserInterface,
-    durable_persistence_mock: AsyncMock,
-) -> None:
-    """A call that does not opt into tracking must not persist a measurement either."""
-    provider = MoonshotAI(token=TEST_TOKEN)
-    user = User(id=4242)
-    response = _create_final_answer_response(answer="Hello", prompt_tokens=77)
-    completions = SimpleNamespace(create=AsyncMock(return_value=response))
-    mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-
-    with (
-        _patch_provider_influx_not_configured(),
-        patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
-        patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="system")),
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-    ):
-        await provider.get_chat_response(
-            messages=[Message(role="user", content="Hi")],
-            user=user,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
-            model=TEST_MODEL,
-            system_prompt="base",
-            interface=interface,
-        )
-
-    durable_persistence_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -388,79 +303,3 @@ async def test_moderation_does_not_overwrite_chat_cache(
         await provider.moderate_command(cmd="hello")
 
     assert usage_cache_store.get(user_id=user.id, thread_id=interface.thread_id) == 150
-
-
-@pytest.mark.asyncio
-async def test_response_without_usage_does_not_overwrite_known_good_cache(
-    usage_cache_store: UsageCacheStore,
-    interface: UserInterface,
-) -> None:
-    """A response whose usage is absent must not zero out a known-good cached value.
-
-    When the provider returns no usage object, the extraction helper yields a
-    zero-filled ``UsageSchema``; the store must record that as the explicit
-    "unreported" state (or keep the prior value) instead of overwriting the
-    real prompt size with 0.
-    """
-    provider = MoonshotAI(token=TEST_TOKEN)
-    user = User(id=12345)
-
-    chat_response = _create_final_answer_response(answer="Hello", prompt_tokens=150)
-    completions = SimpleNamespace(create=AsyncMock(return_value=chat_response))
-    mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-
-    with (
-        _patch_provider_influx_not_configured(),
-        patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client),
-        patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="system")),
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-    ):
-        await provider.get_chat_response(
-            messages=[Message(role="user", content="Hi")],
-            user=user,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
-            model=TEST_MODEL,
-            system_prompt="base",
-            interface=interface,
-            track_prompt_size=True,
-        )
-
-    assert usage_cache_store.get(user_id=user.id, thread_id=interface.thread_id) == 150
-
-    no_usage_response = ChatCompletion(
-        id="test-id",
-        choices=[
-            Choice(
-                index=0,
-                message=ChatCompletionMessage(role="assistant", content="Answer without usage", tool_calls=None),
-                finish_reason="stop",
-            )
-        ],
-        created=1234567890,
-        model=TEST_MODEL,
-        object="chat.completion",
-        usage=None,
-    )
-    no_usage_completions = SimpleNamespace(create=AsyncMock(return_value=no_usage_response))
-    mock_client_no_usage = SimpleNamespace(chat=SimpleNamespace(completions=no_usage_completions))
-
-    with (
-        _patch_provider_influx_not_configured(),
-        patch.object(MoonshotAI, "client", new_callable=PropertyMock, return_value=mock_client_no_usage),
-        patch("chibi.services.providers.provider.prepare_system_prompt", new=AsyncMock(return_value="system")),
-        patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
-    ):
-        await provider.get_chat_response(
-            messages=[Message(role="user", content="Hi again")],
-            user=user,
-            caller_storage_id=interface.storage_id,
-            caller_thread_id=interface.thread_id,
-            model=TEST_MODEL,
-            system_prompt="base",
-            interface=interface,
-            track_prompt_size=True,
-        )
-
-    assert usage_cache_store.get(user_id=user.id, thread_id=interface.thread_id) == 150
-    assert usage_cache_store.is_unreported(user_id=user.id, thread_id=interface.thread_id) is False

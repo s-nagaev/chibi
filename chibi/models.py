@@ -470,15 +470,6 @@ class Message(BaseModel):
             return None
 
 
-class ThreadUsageRecord(BaseModel):
-    """Last provider-measured prompt size for one thread, with its provenance."""
-
-    prompt_tokens: int = Field(description="Raw provider-reported prompt tokens of the measured request.")
-    model: str = Field(description="Model name the measurement was taken on.")
-    message_count: int = Field(description="Number of conversation messages included in the measured prompt.")
-    measured_at: float = Field(default_factory=time.time, description="Unix timestamp of the measurement.")
-
-
 class ImageMeta(BaseModel):
     id: int = Field(default_factory=time.time_ns)
     expire_at: float
@@ -543,9 +534,6 @@ class User(BaseModel):
     thread_names: dict[int, str] = Field(default_factory=dict)
     thread_working_dirs: dict[int, str] = Field(default_factory=dict)
     thread_notes: dict[int, str] = Field(default_factory=dict)
-    thread_usage: dict[int, ThreadUsageRecord] = Field(
-        default_factory=dict, description="Thread ID to the last provider-measured prompt size recorded in it."
-    )
 
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
@@ -775,3 +763,17 @@ class User(BaseModel):
         if str(self.id) in gpt_settings.video_generations_whitelist:
             return False
         return len(self.videos) >= gpt_settings.video_generations_monthly_limit
+
+    def approximate_context_size(self, thread_id: int) -> int:
+        messages_to_count = []
+        if thread_id == 0:
+            messages_to_count.extend(self.messages)
+
+        thread_messages = self.thread_messages_map.get(thread_id)
+        if thread_messages:
+            messages_to_count.extend(thread_messages)
+
+        if not messages_to_count:
+            return 0
+
+        return sum(msg.estimate_tokens for msg in messages_to_count)

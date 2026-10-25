@@ -1,13 +1,10 @@
 """Unit tests for Anthropic provider OCR method."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-import httpx
 import pytest
-from anthropic import BadRequestError
 from anthropic.types import ToolUseBlock
 
-from chibi.exceptions import ContextLengthExceededError
 from chibi.schemas.app import VisionResultSchema
 from chibi.services.providers.anthropic import Anthropic
 
@@ -348,51 +345,3 @@ async def test_ocr_mock_called_correctly():
 
     # Verify the mock was called
     assert call_count == 1, "messages.create should be called exactly once"
-
-
-def _make_anthropic_bad_request_error(message: str) -> BadRequestError:
-    """Build an Anthropic BadRequestError carrying the given body message."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(
-        400,
-        request=request,
-        json={"type": "error", "error": {"type": "invalid_request_error", "message": message}},
-    )
-    return BadRequestError("Error code: 400", response=response, body=response.json())
-
-
-@pytest.mark.asyncio
-async def test_context_overflow_bad_request_raises_context_length_exceeded_error() -> None:
-    """An Anthropic 400 'prompt is too long' raises ContextLengthExceededError."""
-    provider = Anthropic(token=TEST_TOKEN)
-    mock_client = MagicMock()
-    mock_client.messages.create = AsyncMock(
-        side_effect=_make_anthropic_bad_request_error("prompt is too long: 250000 tokens > 200000 maximum")
-    )
-    provider.client = mock_client
-
-    with pytest.raises(ContextLengthExceededError):
-        await provider._generate_content(
-            model="claude-sonnet-5",
-            system_prompt="system",
-            messages=[{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
-        )
-
-    assert mock_client.messages.create.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_non_overflow_bad_request_still_escapes_unclassified() -> None:
-    """An Anthropic 400 unrelated to context length keeps escaping as the raw SDK error."""
-    provider = Anthropic(token=TEST_TOKEN)
-    bad_request = _make_anthropic_bad_request_error("max_tokens: Field required")
-    mock_client = MagicMock()
-    mock_client.messages.create = AsyncMock(side_effect=bad_request)
-    provider.client = mock_client
-
-    with pytest.raises(BadRequestError):
-        await provider._generate_content(
-            model="claude-sonnet-5",
-            system_prompt="system",
-            messages=[{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
-        )

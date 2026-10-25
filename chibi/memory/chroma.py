@@ -37,7 +37,6 @@ from chibi.memory.abstract import (
     MemorySearchResult,
 )
 from chibi.models import Message, User
-from chibi.services.context_note import note_is_present, strip_context_note
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
 from chibi.storage.abstract import Database
@@ -1057,19 +1056,6 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
         original_add_message = storage.add_message
 
         async def add_message(user: User, message: Message, ttl: int | None = None, thread_id: int = 0) -> None:
-            # Strip-on-write for the volatile context note: the note is
-            # attached to the converted provider payload per request and must
-            # never reach stored history or the archive. This boundary covers
-            # every storage backend and the archiver at once. The original
-            # Message object is never mutated: a cleaned copy is written and
-            # archived instead, so the caller's in-memory list keeps the
-            # attachment-free content it owns. Clean input passes through
-            # byte-for-byte unchanged.
-            content = message.content
-            if content and note_is_present(content):
-                cleaned = strip_context_note(content)
-                if cleaned != content:
-                    message = message.model_copy(update={"content": cleaned})
             await original_add_message(user=user, message=message, ttl=ttl, thread_id=thread_id)
             if message.role not in ("user", "assistant"):
                 return None

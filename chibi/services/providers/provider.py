@@ -14,7 +14,6 @@ from urllib.parse import urljoin
 import httpx
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
-from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 from anthropic.types import (
@@ -62,13 +61,7 @@ from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from openai.types.chat.chat_completion_message_tool_call import Function
 from openai.types.completion_usage import CompletionUsage
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    retry_if_not_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import IMAGE_SIZE_OPENAI_LITERAL
@@ -90,8 +83,6 @@ from chibi.schemas.app import (
     VideoResult,
     VisionResultSchema,
 )
-from chibi.services import context_measurement
-from chibi.services.context_note import attach_context_note
 from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import delta_latched, delta_streaming_allowed, emit_delta
@@ -99,21 +90,16 @@ from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.constants import MODERATOR_PROMPT
 from chibi.services.providers.tools.schemas import ToolCallSchema, ToolResponseSchema
 from chibi.services.providers.utils import (
-    collect_volatile_context_note,
     get_usage_from_anthropic_response,
     get_usage_from_openai_response,
     get_usage_msg,
-    is_context_overflow_signal,
     prepare_system_prompt,
     send_llm_thoughts,
 )
 from chibi.services.usage_cache import UsageCacheStore
-from chibi.services.user import enforce_in_loop_budget
 
 P = ParamSpec("P")
 R = TypeVar("R")
-
-CHAT_RETRY_PREDICATE = retry_if_exception_type(Exception) & retry_if_not_exception_type(ContextLengthExceededError)
 
 
 async def download_media(url: str, timeout: float = 120.0) -> bytes:
@@ -804,7 +790,6 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
     @retry(
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
-        retry=CHAT_RETRY_PREDICATE,
         reraise=True,
     )
     async def get_chat_response(
@@ -822,15 +807,6 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         model = model or self.default_model
 
         initial_messages = [msg.to_openai() for msg in messages]
-        # The volatile context note travels on the last converted user message,
-        # never on a Message object and never in the system payload. The
-        # converted dicts are fresh, call-owned structures; a tenacity retry
-        # re-converts from the (never-mutated) Message list, so no attempt can
-        # inherit a previous attempt's note.
-        attach_context_note(
-            initial_messages,
-            collect_volatile_context_note(user_id=user.id, interface=interface, conversation_messages=messages),
-        )
         chat_response, updated_messages = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             model=model,
@@ -978,14 +954,6 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 usage=usage,
                 provider=self.name,
             )
-            await context_measurement.persist_measured_usage(
-                user_id=user.id,
-                thread_id=interface.thread_id if interface else 0,
-                usage=usage,
-                provider=self.name,
-                model=model,
-                message_count=len(conversation_messages) if conversation_messages is not None else None,
-            )
         if application_settings.is_influx_configured:
             MetricsService.send_usage_metrics(metric=usage, model=model, provider=self.name, user=user)
         usage_message = get_usage_msg(usage=usage)
@@ -1058,23 +1026,6 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                 conversation_messages.append(Message.from_openai(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
-        if conversation_messages is not None:
-            # In-loop budget check: the request about to be re-sent has grown
-            # with the tool traffic above. The mask is computed over the
-            # Message mirror; the same mask filters BOTH lists and the
-            # filtered mirror is passed into the recursion, so the mirror
-            # stays in lockstep with the request list on every later check
-            # of the turn.
-            keep_mask = await enforce_in_loop_budget(
-                provider=self,
-                model=model,
-                storage_id=caller_storage_id,
-                thread_id=caller_thread_id,
-                conversation_messages=conversation_messages,
-            )
-            if not all(keep_mask):
-                messages = [item for index, item in enumerate(messages) if keep_mask[index]]
-                conversation_messages = [msg for msg, keep in zip(conversation_messages, keep_mask) if keep]
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,
@@ -1411,8 +1362,6 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             The final aggregated Anthropic message.
 
         Raises:
-            ContextLengthExceededError: When the API reports a context-length
-                overflow (HTTP 400/413 with a context-length style message).
             NoResponseError: When every attempt returns an empty response.
         """
         system_blocks = [
@@ -1423,30 +1372,24 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             )
         ]
         for attempt in range(gpt_settings.retries):
-            try:
-                if delta_streaming_allowed(interface):
-                    response_message: AnthropicMessage = await self._stream_generate_content(
-                        model=model,
-                        system=system_blocks,
-                        messages=messages,
-                        interface=interface,
-                        max_tokens=max_tokens,
-                    )
-                else:
-                    response_message = await self.client.messages.create(
-                        model=model,
-                        max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                        temperature=self.temperature,
-                        timeout=self.timeout,
-                        tools=self.tools_list,
-                        system=system_blocks,
-                        messages=messages,
-                    )
-            except AnthropicBadRequestError as err:
-                detail = str(err.body) if err.body is not None else str(err)
-                if is_context_overflow_signal(status_code=err.status_code, detail=detail):
-                    raise ContextLengthExceededError(provider=self.name, model=model, detail=detail) from err
-                raise
+            if delta_streaming_allowed(interface):
+                response_message: AnthropicMessage = await self._stream_generate_content(
+                    model=model,
+                    system=system_blocks,
+                    messages=messages,
+                    interface=interface,
+                    max_tokens=max_tokens,
+                )
+            else:
+                response_message = await self.client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                    temperature=self.temperature,
+                    timeout=self.timeout,
+                    tools=self.tools_list,
+                    system=system_blocks,
+                    messages=messages,
+                )
 
             if response_message.content and len(response_message.content) > 0:
                 return response_message
@@ -1532,15 +1475,6 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         if len(initial_messages) >= 2:
             initial_messages[-2]["content"][0]["cache_control"] = {"type": "ephemeral"}  # type: ignore
 
-        # The volatile context note travels on the last converted user message,
-        # never on a Message object and never in the system payload. The
-        # converted structures are fresh, call-owned objects; a tenacity retry
-        # re-converts from the (never-mutated) Message list, so no attempt can
-        # inherit a previous attempt's note.
-        attach_context_note(
-            initial_messages,
-            collect_volatile_context_note(user_id=user.id, interface=interface, conversation_messages=messages),
-        )
         chat_response, updated_messages = await self._get_chat_completion_response(
             messages=initial_messages.copy(),
             user=user,
@@ -1593,14 +1527,6 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 thread_id=interface.thread_id if interface else 0,
                 usage=usage,
                 provider=self.name,
-            )
-            await context_measurement.persist_measured_usage(
-                user_id=user.id,
-                thread_id=interface.thread_id if interface else 0,
-                usage=usage,
-                provider=self.name,
-                model=model,
-                message_count=len(conversation_messages) if conversation_messages is not None else None,
             )
 
         if application_settings.is_influx_configured:
@@ -1679,23 +1605,6 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                 conversation_messages.append(Message.from_anthropic(tool_result_message))
 
         logger.log("CALL", "All the function results have been obtained. Returning them to the LLM...")
-        if conversation_messages is not None:
-            # In-loop budget check: the request about to be re-sent has grown
-            # with the tool traffic above. The mask is computed over the
-            # Message mirror; the same mask filters BOTH lists and the
-            # filtered mirror is passed into the recursion, so the mirror
-            # stays in lockstep with the request list on every later check
-            # of the turn.
-            keep_mask = await enforce_in_loop_budget(
-                provider=self,
-                model=model,
-                storage_id=caller_storage_id,
-                thread_id=caller_thread_id,
-                conversation_messages=conversation_messages,
-            )
-            if not all(keep_mask):
-                messages = [item for index, item in enumerate(messages) if keep_mask[index]]
-                conversation_messages = [msg for msg, keep in zip(conversation_messages, keep_mask) if keep]
         return await self._get_chat_completion_response(
             messages=messages,
             model=model,
