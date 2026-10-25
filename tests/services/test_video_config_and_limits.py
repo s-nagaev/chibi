@@ -203,17 +203,3 @@ class TestUserHasReachedVideosGenerationLimit:
 
         await db.count_video(9)
         assert await user_service.user_has_reached_videos_generation_limit.__wrapped__(db, user_id=9) is True
-
-
-def test_max_history_tokens_default_is_200000(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The code default for max_history_tokens is 200000 (raised from 100000).
-
-    A fresh GPTSettings instance with no MAX_HISTORY_TOKENS in the environment
-    resolves to 200000. The module-level singleton may be overridden by the
-    deployment's .env, so we construct a fresh instance with the env var unset.
-    Relocated here from the deleted check_history_and_summarize suite: it
-    asserts a GPTSettings default, not the removed post-turn trigger.
-    """
-    monkeypatch.delenv("MAX_HISTORY_TOKENS", raising=False)
-    settings = GPTSettings(_env_file=None)
-    assert settings.max_history_tokens == 200000

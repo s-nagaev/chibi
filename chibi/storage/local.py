@@ -19,22 +19,9 @@ class LocalStorage(Database):
         return os.path.join(self.storage_path, f"{user_id}.pkl")
 
     async def save_user(self, user: User) -> None:
-        """Persist the whole user record atomically.
-
-        The pickle is written to a temp file first and moved into place with
-        ``os.replace``: a reader (or a process kill mid-write) can never see
-        a truncated file. There is no ``await`` between opening the temp
-        file and the replace, so two interleaved saves cannot collide on the
-        temp name under the single-threaded event loop.
-
-        Args:
-            user: The user to persist.
-        """
         filename = self._get_storage_filename(user.id)
-        tmp_filename = f"{filename}.tmp"
-        with open(tmp_filename, "wb") as f:
+        with open(filename, "wb") as f:
             pickle.dump(user.model_dump(), f)
-        os.replace(tmp_filename, filename)
 
     async def create_user(self, user_id: int) -> User:
         user = User(id=user_id)
