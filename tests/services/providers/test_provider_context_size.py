@@ -729,7 +729,11 @@ async def test_note_is_attached_to_last_converted_user_message(
     assert _count_notes_in_payload(request_messages) == 1
     assert request_messages[0]["content"] == "sp"
     # The caller's Message objects are untouched: no note anywhere in them.
-    assert [msg.content for msg in conversation] == snapshot
+    # The merged provider loop appends the normalized final assistant turn to
+    # the same list (provider.py appends Message.from_openai(final_message)),
+    # so the post-call list is the snapshot plus that one appended message.
+    assert [msg.content for msg in conversation] == [*snapshot, "Hello"]
+    assert [msg.role for msg in conversation[len(snapshot) :]] == ["assistant"]
     assert _count_notes_in_payload(conversation) == 0
 
 
