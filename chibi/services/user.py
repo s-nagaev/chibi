@@ -284,6 +284,7 @@ async def get_llm_chat_completion_answer(
     tool_message: Optional["ToolResponseSchema"] = None,
     scheduler_trigger_text: str | None = None,
     scheduler_job_id: str | None = None,
+    replied_to_message: str | None = None,
 ) -> ChatResponseSchema:
     """Produce an LLM answer for any incoming turn of the given thread.
 
@@ -307,6 +308,11 @@ async def get_llm_chat_completion_answer(
             (action type ``self``), if any.
         scheduler_job_id: Identifier of the scheduler job that fired; only
             meaningful together with ``scheduler_trigger_text``.
+        replied_to_message: Description of the message the user replied to
+            (author and quoted content), if the transport provides it. Only
+            attached to plain user-message turns: it is the context the user
+            answers to, so it is meaningless for tool responses, file
+            captions and scheduler triggers.
 
     Returns:
         The provider's answer for this turn.
@@ -374,6 +380,9 @@ async def get_llm_chat_completion_answer(
             "type": "user message",
             "transcribed_from_voice_message": bool(user_voice_message),
         }
+
+        if replied_to_message:
+            prompt["replied_to_message"] = replied_to_message
 
     if editor_ctx:
         selection = editor_ctx.get("selection")
