@@ -6,6 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 from loguru import logger
 from telegram import Chat as TelegramChat
 from telegram import File, Update
+from telegram import Message as TelegramMessage
 from telegram.constants import ChatAction, ChatType
 from telegram.ext import ContextTypes
 
@@ -22,6 +23,74 @@ class EditorContextProvider(Protocol):
     def editor_context(self) -> dict[str, Any] | None:
         """Return editor context supplied by an IDE client, if available."""
         ...
+
+
+_MAX_QUOTED_MESSAGE_LENGTH = 4096
+
+_MEDIA_PLACEHOLDERS: tuple[tuple[str, str], ...] = (
+    ("photo", "[photo]"),
+    ("voice", "[voice message]"),
+    ("audio", "[audio]"),
+    ("video_note", "[video message]"),
+    ("video", "[video]"),
+    ("document", "[document]"),
+    ("sticker", "[sticker]"),
+    ("animation", "[GIF]"),
+    ("location", "[location]"),
+    ("contact", "[contact]"),
+    ("poll", "[poll]"),
+)
+
+
+def _quoted_message_author(message: TelegramMessage) -> str:
+    """Describe the author of a quoted Telegram message.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        A short author label ("Bot (<name>)" for the assistant's own messages,
+        the user name otherwise, or "unknown author" when unavailable).
+    """
+    if not (from_user := getattr(message, "from_user", None)):
+        return "unknown author"
+    if from_user.is_bot:
+        return f"Bot ({from_user.name})"
+    return from_user.name
+
+
+def _quoted_message_text(message: TelegramMessage) -> str:
+    """Extract a textual representation of a quoted Telegram message.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        The message text or caption, or a media placeholder when the quoted
+        message carries no text at all.
+    """
+    if text := getattr(message, "text", None) or getattr(message, "caption", None):
+        return text[:_MAX_QUOTED_MESSAGE_LENGTH]
+
+    for attribute, placeholder in _MEDIA_PLACEHOLDERS:
+        if getattr(message, attribute, None):
+            return placeholder
+    return "[non-text message]"
+
+
+def _describe_quoted_message(message: TelegramMessage) -> str:
+    """Build the prompt fragment describing the message a user replied to.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        A single-line description of the quoted message: its author and
+        content.
+    """
+    author = _quoted_message_author(message)
+    text = _quoted_message_text(message).replace("\r", " ").replace("\n", " ")
+    return f"{author}: {text}"
 
 
 class UserInterface(ABC):
@@ -127,6 +196,21 @@ class UserInterface(ABC):
             The caption string, or None if no caption is present.
         """
         raise NotImplementedError
+
+    async def get_replied_to_prompt(self) -> str | None:
+        """Retrieve the content of the message the current message replies to.
+
+        Some transports (Telegram) deliver the whole quoted message together
+        with the update, which lets the agent understand a short follow-up
+        such as "tell me more about that one" without any extra API calls.
+        Interfaces without reply semantics return None, so the prompt shape
+        stays unchanged for them.
+
+        Returns:
+            A short human-readable description of the quoted message
+            (author and content), or None when the message is not a reply.
+        """
+        return None
 
     def set_caption(self, caption: str) -> None:
         """Store a caption for use during subsequent media sends.
@@ -701,6 +785,25 @@ class TelegramInterface(UserInterface):
             return message.caption
 
         return None
+
+    async def get_replied_to_prompt(self) -> str | None:
+        """Return the content of the Telegram message the user replied to.
+
+        The quoted message is delivered by Telegram inside the update itself,
+        so no extra API call is needed. Telegram omits it for messages that
+        were deleted or are too old to be quoted; in that case None is
+        returned and the prompt keeps its usual shape.
+
+        Returns:
+            A short description of the quoted message (author and content),
+            or None when the current message is not a reply.
+        """
+        message = self.update.effective_message
+        if not message:
+            return None
+        if not (replied := getattr(message, "reply_to_message", None)):
+            return None
+        return _describe_quoted_message(replied)
 
     def set_caption(self, caption: str) -> None:
         """Store a caption to associate with the next media message.

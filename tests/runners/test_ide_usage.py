@@ -402,6 +402,9 @@ class _FakeInterfaceForBot:
     storage_id = 1
     thread_id = 0
 
+    async def get_replied_to_prompt(self) -> str | None:
+        return None
+
     async def get_text_prompt(self) -> str | None:
         return "hello"
 

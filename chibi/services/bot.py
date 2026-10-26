@@ -163,6 +163,7 @@ async def handle_user_prompt(interface: UserInterface) -> None:
     text_prompt = await interface.get_text_prompt()
     voice_prompt = await interface.get_voice_prompt()
     caption_prompt = await interface.get_caption()
+    replied_to_prompt = await interface.get_replied_to_prompt()
 
     if text_prompt and text_prompt.startswith("/ask"):
         text_prompt = text_prompt.replace("/ask", "", 1).strip()
@@ -179,12 +180,17 @@ async def handle_user_prompt(interface: UserInterface) -> None:
         f"{': ' + prompt_to_log if application_settings.log_prompt_data else ''}"
     )
 
+    if replied_to_prompt and application_settings.log_prompt_data:
+        replied_to_log = replied_to_prompt.replace("\r", " ").replace("\n", " ")
+        logger.info(f"{interface.user_data} replied to a message: {replied_to_log}")
+
     async with indicator(coro_func=interface.send_action_typing):
         chat_response: ChatResponseSchema = await get_llm_chat_completion_answer(
             storage_id=interface.storage_id,
             user_text_message=text_prompt,
             user_voice_message=voice_prompt,
             user_caption=caption_prompt,
+            replied_to_message=replied_to_prompt,
             interface=interface,
         )
 
