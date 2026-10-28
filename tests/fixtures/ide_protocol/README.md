@@ -48,6 +48,19 @@ text, making reconciliation idempotent. A session without `capabilities.streamin
 `initialize` handshake is exactly the canonical `valid_session_*` scenario — no `delta`
 frames are ever emitted to a client that did not opt in.
 
+### `valid_thread_renamed_input.jsonl` / `valid_thread_renamed_output.jsonl`
+Thread rename push events (requires the `capabilities.thread_renames` opt-in):
+`initialize(thread_renames)` → `ready` (identical to the canonical one — the server never advertises
+`thread_renames` in `ready.capabilities`; the client opt-in is the only gate) → `request` →
+`status(running)` → `thread_renamed` → `result`.
+
+The `thread_renamed` frame is non-terminal and thread-scoped: it carries `thread_id` and the new
+`name`, and never a `request_id`. Emission is gated on the `thread_renames` opt-in; the frame is
+drained before the terminal write of the request it was scheduled during. A session without
+`capabilities.thread_renames` in the `initialize` handshake is exactly the canonical
+`valid_session_*` scenario — no `thread_renamed` frames are ever emitted to a client that did not
+opt in.
+
 ## Invalid / edge cases
 
 ### `invalid_cases.jsonl`
