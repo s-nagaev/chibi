@@ -473,7 +473,7 @@ Both are terminal: calling either one ends the turn.
 
 ## Procedure
 
-Use `say(text)` only when you clearly intend to deliver specific information to the user; 
+Use `say(text)` only when you clearly intend to deliver specific information to the user;
 in all other cases, use ack_silently().
 
 Important: it is prohibited to use ack_silently() instead of replying to the user.
@@ -484,8 +484,8 @@ User: thank you for the information.
 Agent (you): `ack_silently()`
 ```
 
-Tool `ack_silently()` can and should be effectively used to hide your interactions with subagents 
-and other background tasks, without annoying the user with service information. 
+Tool `ack_silently()` can and should be effectively used to hide your interactions with subagents
+and other background tasks, without annoying the user with service information.
 
 For example:
 ```
