@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.20.1] - 2026-10-25
 
+## [Unreleased]
+
+### Changed
+- **The say/ack_silently delivery contract is rebuilt around a short procedure, a worked example and a terminal-only fail-safe.** The previous request-state logic, whose mandatory-delivery clause was satisfiable at every intermediate step of a long delegated task and whose fail-safe preferred speaking on every doubt, is replaced: `say(text)` is used only to deliver specific information to the user, `ack_silently()` absorbs everything else (sub-agent interactions, background events, intermediate steps), and swallowing a reply to the user remains prohibited. A worked example shows a multi-agent search absorbed silently until one final report, making the intended rhythm imitable. The fail-safe now applies only after all planned work is finished: if work may still remain, the agent stays silent; if the answer exists and may be undelivered, it is sent. Any explicit user instruction about background-result handling overrides the defaults. The contract test now pins these properties through whitespace-normalized matching instead of exact line breaks.
+
 ### Added
 - **Hidden turns are now silent at every renderer.** A turn ended by `ack_silently()` persists its private reasoning as a `visibility="hidden"` message and delivers an empty answer; the render gates in the bot handlers used to test only the legacy `<chibi>ACK</chibi>` sentinel, so the empty answer fell through and was delivered to Telegram, the terminal REPL and scheduler chats. All three gates now key on the turn's visibility first, with the sentinel predicate kept as a fallback for historical marker bodies and backends that ignored forcing; the 👌 reaction on a user turn still fires. Long-term memory archival (Chroma) skips hidden messages, emergency summarization excludes them from its input (so private reasoning cannot be laundered into a durable summary), and the IDE result frame no longer attaches `thoughts` for a hidden turn. The private reasoning stays in storage and flows to the LLM, but never reaches a renderer.
 
