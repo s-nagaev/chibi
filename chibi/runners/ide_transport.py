@@ -45,6 +45,7 @@ COMMANDS = [
     "/reset",
     "/stop",
     "/new_thread_with_current_context",
+    "/rename_thread",
     "/model",
     "/imagine",
     "/info",
@@ -1281,6 +1282,38 @@ class IDEStdioRunner:
             f"{cloned_messages} messages copied."
         )
 
+    async def _handle_rename_thread(self, interface: IDEInterface, args: str, responses: list[str]) -> None:
+        """Rename the request's thread to the name given in the command arguments.
+
+        The hidden command lets the client push a user rename to the backend
+        (the TUI applies the title locally and fires this for persistence and
+        uniform semantics). The name is the raw command remainder trimmed;
+        it must be non-empty and single-line. Over-long names are truncated
+        to :data:`MAX_THREAD_NAME_LENGTH` (the chosen behaviour, matching the
+        ``rename_thread`` tool). The rename goes through
+        :meth:`IDEInterface.rename_thread`, so persistence and the
+        ``thread_renamed`` echo share the single fire site with every other
+        rename path; the drain-before-result ordering in ``_run_request``
+        keeps the echo ahead of this command's ``result`` frame.
+
+        Args:
+            interface: Request-local interface bound to the renamed thread.
+            args: Raw command arguments (the new thread name).
+            responses: Accumulated response lines for the result frame.
+        """
+        name = args.strip()
+        if not name or "\n" in name:
+            interface.error_code = "invalid_argument"
+            interface.error_message = "Please provide a non-empty single-line name: /rename_thread <name>"
+            return
+        name = name[:MAX_THREAD_NAME_LENGTH]
+        renamed = await interface.rename_thread(name)
+        if not renamed:
+            interface.error_code = "invalid_argument"
+            interface.error_message = "The name was rejected: it is empty or longer than 128 characters."
+            return
+        responses.append(f"✅ Thread renamed: {name} (ID: {interface.thread_id}).")
+
     async def _run_request(self, message: dict[str, Any]) -> None:
         """Route and complete one request."""
         request_id = message["request_id"]
@@ -1328,6 +1361,8 @@ class IDEStdioRunner:
                     await self._handle_new_thread_with_current_context(
                         interface=interface, args=args, responses=responses
                     )
+                elif command == "/rename_thread":
+                    await self._handle_rename_thread(interface=interface, args=args, responses=responses)
                 elif command == "/imagine":
                     if not args:
                         raise ValueError("Please provide a prompt: /imagine <description>")
