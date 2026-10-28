@@ -11,7 +11,7 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.config import application_settings
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
+from chibi.runners.ide_transport import COMMANDS, MAX_THREAD_NAME_LENGTH, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
 from chibi.services.thread_name_events import thread_name_tracker
 
 READY_FRAME: dict[str, Any] = {
@@ -138,6 +138,22 @@ def frame_of_type(output: list[dict[str, Any]], frame_type: str) -> dict[str, An
         if frame.get("type") == frame_type:
             return frame
     raise AssertionError(f"Missing {frame_type} frame: {output}")
+
+
+async def wait_for_errors(output: list[dict[str, Any]], request_ids: list[str]) -> None:
+    """Wait until every listed request has emitted its error frame.
+
+    Args:
+        output: Captured frame list.
+        request_ids: Request identifiers that must all have error frames.
+    """
+    pending = set(request_ids)
+    for _ in range(300):
+        answered = {frame["request_id"] for frame in output if frame.get("type") == "error" and frame.get("request_id")}
+        if pending <= answered:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Expected error frames for {sorted(pending)}: {output}")
 
 
 RUNNERS: list[IDEStdioRunner] = []
@@ -521,3 +537,115 @@ class TestInitialSync:
             await wait_for_results(output, ["r1"])
 
         assert thread_renamed_frames(output) == []
+
+
+class TestRenameCommand:
+    """The hidden /rename_thread user command."""
+
+    @pytest.mark.asyncio
+    async def test_command_happy_path_persists_and_echoes_before_result(self) -> None:
+        """The command persists the name, emits one echo and confirms after it."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+
+        with patched_save_thread_name() as save_mock:
+            await instance._handle_message(initialize({"thread_renames": True}))
+            await run_request(instance, "r1", 42, prompt="/rename_thread Refactor auth module")
+            await wait_for_results(output, ["r1"])
+            await instance.drain_thread_name_events()
+
+        save_mock.assert_awaited_once()
+        assert save_mock.await_args.kwargs["thread_id"] == 42
+        assert save_mock.await_args.kwargs["name"] == STORED_NAME
+        frames = thread_renamed_frames(output)
+        assert frames == [{"type": "thread_renamed", "thread_id": 42, "name": STORED_NAME}]
+        results = [frame for frame in output if frame.get("type") == "result" and frame.get("request_id") == "r1"]
+        assert len(results) == 1
+        assert output.index(frames[0]) < output.index(results[0])
+        assert "✅ Thread renamed: Refactor auth module" in results[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_missing_argument_is_an_error_without_mutation(self) -> None:
+        """/rename_thread without a name yields an invalid_request error result."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+
+        with patched_save_thread_name() as save_mock:
+            await instance._handle_message(initialize({"thread_renames": True}))
+            await run_request(instance, "r1", 42, prompt="/rename_thread")
+            await wait_for_errors(output, ["r1"])
+            await instance.drain_thread_name_events()
+
+        save_mock.assert_not_awaited()
+        assert thread_renamed_frames(output) == []
+        errors = [frame for frame in output if frame.get("type") == "error" and frame.get("request_id") == "r1"]
+        assert len(errors) == 1
+        assert errors[0]["code"] == "invalid_request"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_argument_is_an_error_without_mutation(self) -> None:
+        """A name that is empty after trimming yields an error and persists nothing."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+
+        with patched_save_thread_name() as save_mock:
+            await instance._handle_message(initialize({"thread_renames": True}))
+            await run_request(instance, "r1", 42, prompt="/rename_thread    ")
+            await wait_for_errors(output, ["r1"])
+            await instance.drain_thread_name_events()
+
+        save_mock.assert_not_awaited()
+        assert thread_renamed_frames(output) == []
+        errors = [frame for frame in output if frame.get("type") == "error" and frame.get("request_id") == "r1"]
+        assert len(errors) == 1
+        assert errors[0]["code"] == "invalid_request"
+
+    @pytest.mark.asyncio
+    async def test_newline_in_argument_is_an_error_without_mutation(self) -> None:
+        """A multi-line name yields an error and persists nothing."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+
+        with patched_save_thread_name() as save_mock:
+            await instance._handle_message(initialize({"thread_renames": True}))
+            await run_request(instance, "r1", 42, prompt="/rename_thread Bad\nName")
+            await wait_for_errors(output, ["r1"])
+            await instance.drain_thread_name_events()
+
+        save_mock.assert_not_awaited()
+        assert thread_renamed_frames(output) == []
+        errors = [frame for frame in output if frame.get("type") == "error" and frame.get("request_id") == "r1"]
+        assert len(errors) == 1
+        assert errors[0]["code"] == "invalid_request"
+
+    @pytest.mark.asyncio
+    async def test_overlong_name_is_truncated_to_128(self) -> None:
+        """An over-long name is truncated to 128 characters and persists the truncated form."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+        long_name = "z" * 200
+
+        with patched_save_thread_name() as save_mock:
+            await instance._handle_message(initialize({"thread_renames": True}))
+            await run_request(instance, "r1", 42, prompt=f"/rename_thread {long_name}")
+            await wait_for_results(output, ["r1"])
+            await instance.drain_thread_name_events()
+
+        assert save_mock.await_args.kwargs["thread_id"] == 42
+        assert save_mock.await_args.kwargs["name"] == "z" * MAX_THREAD_NAME_LENGTH
+        frames = thread_renamed_frames(output)
+        assert frames == [{"type": "thread_renamed", "thread_id": 42, "name": "z" * MAX_THREAD_NAME_LENGTH}]
+        results = [frame for frame in output if frame.get("type") == "result" and frame.get("request_id") == "r1"]
+        assert len(results) == 1
+        assert output.index(frames[0]) < output.index(results[0])
+
+    @pytest.mark.asyncio
+    async def test_command_is_listed_in_ready_capabilities(self) -> None:
+        """/rename_thread is registered so clients can feature-detect it."""
+        instance, output = runner()
+        RUNNERS.append(instance)
+
+        await instance._handle_message(initialize({"thread_renames": True}))
+
+        assert "/rename_thread" in COMMANDS
+        assert output[0]["capabilities"]["commands"] == COMMANDS
