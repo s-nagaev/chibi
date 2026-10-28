@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **The agent can rename the current thread over the IDE protocol.** The `rename_thread` tool used to be registered only for the Telegram client, so an agent working behind an IDE front end could not rename the thread it was working in; the tool is now offered to stdio clients (`chibi stdio --tui` and every other IDE front end) and remains deregistered in the terminal REPL. A successful rename is pushed to the connected client as a fire-and-forget `thread_renamed` frame (drained before the turn's `result`), and a thread that already has a stored name re-announces it once at the first request of a session, so the client's title converges after reconnecting. The name persists server-side.
+- **Users can rename a thread from their IDE client with the hidden `/rename_thread <name>` command.** The command validates the name (trimmed, non-empty, no newlines, truncated to 128 characters), applies it through the backend so it persists across sessions, and echoes it back as a `thread_renamed` frame before the confirmation result, so any other surface observing the session converges on the new title. The command is advertised in `ready.capabilities.commands`, letting clients feature-detect it.
+
 ## [1.20.1] - 2026-10-25
 
 ### Added
