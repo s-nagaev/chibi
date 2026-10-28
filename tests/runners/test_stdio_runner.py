@@ -1,6 +1,8 @@
 """Tests for the stdio runner CLI entrypoint and tool registration behavior."""
 
+import importlib
 from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +13,8 @@ import chibi.config  # noqa: F401
 from chibi.cli import main
 from chibi.config import application_settings
 from chibi.constants import IDE_STORAGE_ID
+from chibi.services.providers.tools import RegisteredChibiTools
+from chibi.services.providers.tools import topic as topic_module
 
 
 @pytest.fixture
@@ -93,30 +97,74 @@ class TestIDEStorageIdentity:
 
 
 class TestRenameThreadToolRegistration:
-    """Tests for conditional registration of the Telegram-only rename tool."""
+    """Tests for the runner-aware registration gate of the rename tool."""
 
-    def test_rename_thread_registered_when_telegram_runner_loaded(self) -> None:
-        """RenameThreadTool registers when the Telegram runner module is loaded."""
-        import chibi.runners.telegram  # noqa: F401
+    @pytest.fixture()
+    def restore_tool_registry(self) -> Iterator[None]:
+        """Snapshot the tool registry and the rename module around a reload."""
+        snapshot = dict(RegisteredChibiTools.tools_map)
+        yield
+        importlib.reload(topic_module)
+        RegisteredChibiTools.tools_map.clear()
+        RegisteredChibiTools.tools_map.update(snapshot)
+
+    @pytest.mark.usefixtures("restore_tool_registry")
+    @pytest.mark.parametrize("client", ["telegram", "tui", "vscode", "pycharm", "neovim"])
+    def test_rename_thread_registers_for_supported_clients(self, client: str) -> None:
+        """RenameThreadTool registers for the Telegram bot and every stdio client."""
+        with patch("chibi.config.application_settings", SimpleNamespace(client=client)):
+            reloaded = importlib.reload(topic_module)
+
+            assert reloaded.RenameThreadTool.register is True
+            assert RegisteredChibiTools.tools_map["rename_thread"] is reloaded.RenameThreadTool
+
+    @pytest.mark.usefixtures("restore_tool_registry")
+    def test_rename_thread_gate_excludes_terminal_client(self) -> None:
+        """The terminal REPL (client='terminal') never registers the rename tool."""
+        RegisteredChibiTools.tools_map.pop("rename_thread", None)
+
+        with patch("chibi.config.application_settings", SimpleNamespace(client="terminal")):
+            reloaded = importlib.reload(topic_module)
+
+            assert reloaded.RenameThreadTool.register is False
+            assert "rename_thread" not in RegisteredChibiTools.tools_map
+
+    @pytest.mark.asyncio
+    async def test_terminal_entrypoint_deregisters_rename_tool(self) -> None:
+        """End-to-end: the real terminal entrypoint must not expose the rename tool.
+
+        Regression guard: importing ``chibi.runners.terminal`` transitively
+        imports the tools module while ``application_settings.client`` still
+        holds the ``"telegram"`` default, so the tool registers at import
+        time — ``run_chibi`` must deregister it before the REPL starts.
+        """
+        import chibi.runners.terminal as terminal_module
         from chibi.services.providers.tools.topic import RenameThreadTool
 
-        assert RenameThreadTool.register is True
+        original_client = application_settings.client
+        snapshot = dict(RegisteredChibiTools.tools_map)
+        RegisteredChibiTools.register(RenameThreadTool)
+        assert "rename_thread" in RegisteredChibiTools.tools_map
 
-    def test_rename_thread_not_registered_without_telegram_runner(self) -> None:
-        """RenameThreadTool does not register when Telegram runner is not loaded.
+        class _StubRunner:
+            """Stand-in for TerminalRunner so run_chibi never starts the REPL."""
 
-        This is verified in a subprocess so that the current process's import
-        state does not influence the result.
-        """
-        import subprocess
-        import sys
+            def __init__(self, user_id: int) -> None:
+                self.user_id = user_id
 
-        code = (
-            "from chibi.services.providers.tools.topic import RenameThreadTool; "
-            "assert RenameThreadTool.register is False; "
-            "print('ok')"
-        )
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+            async def run(self) -> None:
+                return None
 
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "ok"
+        try:
+            with (
+                patch.object(terminal_module, "TerminalRunner", _StubRunner),
+                patch.object(terminal_module, "setup_logging"),
+            ):
+                await terminal_module.run_chibi(user_id=1)
+
+            assert application_settings.client == "terminal"
+            assert "rename_thread" not in RegisteredChibiTools.tools_map
+        finally:
+            application_settings.client = original_client
+            RegisteredChibiTools.tools_map.clear()
+            RegisteredChibiTools.tools_map.update(snapshot)
