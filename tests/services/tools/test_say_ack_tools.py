@@ -108,10 +108,20 @@ class TestMigratedPromptContract:
     def test_prompt_tells_the_two_tools_apart(self) -> None:
         prompt = get_llm_prompt(filesystem_access=True, allow_delegation=True)
         delivery_block = prompt.split("DELIVERY AND SILENCE")[1].split("# Guiding Principles")[0]
+        # Normalized text: immune to line-wrapping of the prompt source.
+        normalized = " ".join(delivery_block.split())
         assert "ONLY channel for user-facing communication" in delivery_block
         assert "NEVER sees" in delivery_block
-        assert "MUST say() it" in delivery_block
-        assert "NEVER ack_silently() in its place" in delivery_block
+        # Swallowing is forbidden: ack_silently() must never replace a reply to the user.
+        assert "it is prohibited to use ack_silently() instead of replying to the user" in normalized
+        # ack_silently()'s purpose: hiding subagent/background interactions from the user.
+        assert "hide your interactions with subagents" in normalized
+        # Fail-safe is narrowed to terminal states, never intermediate ones.
+        assert "The fail-safe covers terminal states only" in normalized
+        assert "NEVER applies to intermediate states" in normalized
+        # An explicit user instruction overrides the rule.
+        assert "Any explicit user instruction" in normalized
+        assert "overrides this rule" in normalized
 
     def test_scheduler_hint_points_at_ack_silently_not_the_sentinel(self) -> None:
         assert "ack_silently()" in SCHEDULER_HINT_PROMPT
