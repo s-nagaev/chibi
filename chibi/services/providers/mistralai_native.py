@@ -2,6 +2,7 @@ import base64
 import json
 import random
 from asyncio import sleep
+from io import BytesIO
 from typing import Any, Union, cast
 from uuid import uuid4
 
@@ -32,7 +33,12 @@ from openai.types.chat import ChatCompletionToolParam
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from chibi.config import application_settings, gpt_settings
-from chibi.exceptions import NoApiKeyProvidedError, NoResponseError
+from chibi.exceptions import (
+    NoApiKeyProvidedError,
+    NoResponseError,
+    NotAuthorizedError,
+    ServiceRateLimitError,
+)
 from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services.interface import UserInterface
@@ -74,6 +80,8 @@ from chibi.services.usage_cache import UsageCacheStore
 
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
 
+_TRANSCRIPTIONS_URL: str = "https://api.mistral.ai/v1/audio/transcriptions"
+
 
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
     """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
@@ -101,6 +109,7 @@ class MistralAI(RestApiFriendlyProvider):
     moderation_ready = True
     vision_ready = True
     ocr_ready = True
+    stt_ready = True
 
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
@@ -109,6 +118,7 @@ class MistralAI(RestApiFriendlyProvider):
     default_moderation_model = "mistral-small-latest"
     default_vision_model = "pixtral-12b-2409"
     default_ocr_model = "mistral-ocr-latest"
+    default_stt_model = "voxtral-mini-transcribe-3-0"
     frequency_penalty: float | None = 0.6
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = 0.3
@@ -122,6 +132,10 @@ class MistralAI(RestApiFriendlyProvider):
     def tools_list(self) -> list[ChatCompletionToolParam]:
         """Return tools in OpenAI-compatible format (which Mistral uses)."""
         return RegisteredChibiTools.get_tool_definitions()
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token}"}
 
     @property
     def client(self) -> Mistral:
@@ -865,6 +879,69 @@ class MistralAI(RestApiFriendlyProvider):
                 model=model,
                 detail=f"Could not extract text from PDF: {e}",
             )
+
+    async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
+        """Transcribe an audio recording with Mistral's Voxtral STT API.
+
+        The Mistral SDK (3.3.0) exposes no audio namespace, so the call goes
+        through raw ``httpx``: a multipart ``POST /v1/audio/transcriptions``
+        with the model name as a form field and the recording as the ``file``
+        field (the API requires exactly one of ``file|file_url|file_id``).
+
+        Args:
+            audio: The audio recording as a byte stream.
+            model: The transcription model to use; falls back to the
+                provider default when None.
+
+        Returns:
+            The transcribed text.
+
+        Raises:
+            NoApiKeyProvidedError: When no Mistral API key is configured.
+            NotAuthorizedError: When the API rejects the key (HTTP 401).
+            ServiceRateLimitError: When the API rate-limits the request (HTTP 429).
+            ServiceResponseError: On any other HTTP or transport failure.
+            ValueError: When the response carries no transcribed text.
+        """
+        model = model or self.default_stt_model
+        logger.info(f"[{self.name}] Transcribing audio with model {model}...")
+
+        if not self.token:
+            raise NoApiKeyProvidedError(provider=self.name)
+
+        try:
+            async with self.get_async_httpx_client() as client:
+                response = await client.post(
+                    _TRANSCRIPTIONS_URL,
+                    data={"model": model or ""},
+                    files={"file": ("voice.ogg", audio.getvalue())},
+                    headers=self._headers,
+                )
+        except Exception as e:
+            logger.error(f"An error occurred while calling the {self.name} API: {e}")
+            raise ServiceResponseError(provider=self.name, model=model or "", detail=str(e))
+
+        if response.status_code == 401:
+            raise NotAuthorizedError(provider=self.name, model=model or "")
+        if response.status_code == 429:
+            raise ServiceRateLimitError(provider=self.name, model=model or "")
+        if response.status_code != 200:
+            logger.error(
+                f"Unexpected response from {self.name} API. Status code: {response.status_code}. Data: {response.text}"
+            )
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model or "",
+                detail=f"status_code: {response.status_code}, body: {response.text[:200]}",
+            )
+
+        payload: dict[str, Any] = response.json()
+        text = payload.get("text")
+        if not isinstance(text, str) or not text:
+            raise ValueError("Could not transcribe audio message")
+
+        logger.info(f"[{self.name}] Transcribed text: {text}")
+        return text
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
