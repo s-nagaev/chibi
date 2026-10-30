@@ -354,7 +354,7 @@ def test_default_models_and_keyword_filter():
     assert MistralAI.default_model == "mistral-small-2603"
     assert MistralAI.default_moderation_model == "mistral-moderation-2603"
     assert MistralAI.default_ocr_model == "mistral-ocr-latest"
-    assert MistralAI.default_vision_model == "pixtral-12b-2409"
+    assert MistralAI.default_vision_model == "mistral-small-2603"
 
     assert "ministral" in MistralAI.model_name_keywords
     for excluded in ("embed", "moderation", "ocr", "transcribe", "tts", "voxtral"):

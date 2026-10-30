@@ -245,7 +245,7 @@ async def test_vision_default_model():
 
     await provider.vision(image=SAMPLE_IMAGE_BYTES, mime_type="image/png")
 
-    assert captured_model == "pixtral-12b-2409"
+    assert captured_model == "mistral-small-2603"
 
 
 @pytest.mark.asyncio
