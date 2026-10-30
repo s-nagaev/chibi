@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import random
 from asyncio import sleep
@@ -81,6 +82,7 @@ from chibi.services.usage_cache import UsageCacheStore
 MistralMessageParam = Union[SystemMessage, UserMessage, AssistantMessage, ToolMessage]
 
 _TRANSCRIPTIONS_URL: str = "https://api.mistral.ai/v1/audio/transcriptions"
+_TTS_URL: str = "https://api.mistral.ai/v1/audio/speech"
 
 
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
@@ -110,6 +112,7 @@ class MistralAI(RestApiFriendlyProvider):
     vision_ready = True
     ocr_ready = True
     stt_ready = True
+    tts_ready = True
 
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
@@ -119,6 +122,8 @@ class MistralAI(RestApiFriendlyProvider):
     default_vision_model = "pixtral-12b-2409"
     default_ocr_model = "mistral-ocr-latest"
     default_stt_model = "voxtral-mini-transcribe-3-0"
+    default_tts_model = "voxtral-mini-tts-3-0"
+    default_tts_voice = "gb_jane_neutral"
     frequency_penalty: float | None = 0.6
     max_tokens: int = gpt_settings.max_tokens
     presence_penalty: float | None = 0.3
@@ -942,6 +947,80 @@ class MistralAI(RestApiFriendlyProvider):
 
         logger.info(f"[{self.name}] Transcribed text: {text}")
         return text
+
+    async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
+        """Generate speech audio from text with Mistral's Voxtral TTS API.
+
+        The Mistral SDK (3.3.0) exposes no usable audio namespace for this
+        flow, so the call goes through raw ``httpx``: a JSON ``POST
+        /v1/audio/speech`` carrying ``model``, ``input``, ``voice_id`` and
+        ``response_format``. The response carries the rendered audio as a
+        base64 string in ``audio_data``, which is decoded to raw bytes.
+
+        Args:
+            text: The text to convert to speech.
+            voice: The voice preset slug to use; falls back to the
+                provider default when None.
+            model: The TTS model to use; falls back to the provider
+                default when None.
+
+        Returns:
+            The generated audio bytes in the requested format (mp3 by default).
+
+        Raises:
+            NoApiKeyProvidedError: When no Mistral API key is configured.
+            NotAuthorizedError: When the API rejects the key (HTTP 401).
+            ServiceRateLimitError: When the API rate-limits the request (HTTP 429).
+            ServiceResponseError: On any other HTTP or transport failure.
+            ValueError: When the response carries no decodable audio data.
+        """
+        model = model or self.default_tts_model
+        voice = voice or self.default_tts_voice
+        logger.info(f"[{self.name}] Generating speech with model {model} and voice {voice}...")
+
+        if not self.token:
+            raise NoApiKeyProvidedError(provider=self.name)
+
+        try:
+            async with self.get_async_httpx_client() as client:
+                response = await client.post(
+                    _TTS_URL,
+                    json={
+                        "model": model,
+                        "input": text,
+                        "voice_id": voice,
+                        "response_format": "mp3",
+                    },
+                    headers=self._headers,
+                )
+        except Exception as e:
+            logger.error(f"An error occurred while calling the {self.name} API: {e}")
+            raise ServiceResponseError(provider=self.name, model=model, detail=str(e))
+
+        if response.status_code == 401:
+            raise NotAuthorizedError(provider=self.name, model=model)
+        if response.status_code == 429:
+            raise ServiceRateLimitError(provider=self.name, model=model)
+        if response.status_code != 200:
+            logger.error(
+                f"Unexpected response from {self.name} API. Status code: {response.status_code}. Data: {response.text}"
+            )
+            raise ServiceResponseError(
+                provider=self.name,
+                model=model,
+                detail=f"status_code: {response.status_code}, body: {response.text[:200]}",
+            )
+
+        payload: dict[str, Any] = response.json()
+        audio_data = payload.get("audio_data")
+        if not isinstance(audio_data, str) or not audio_data:
+            raise ValueError("Could not generate speech audio")
+
+        try:
+            return base64.b64decode(audio_data)
+        except (binascii.Error, ValueError) as e:
+            logger.error(f"Malformed base64 audio data from the {self.name} API: {e}")
+            raise ValueError("Could not generate speech audio") from e
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
