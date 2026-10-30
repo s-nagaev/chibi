@@ -83,6 +83,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "mistral-small-latest": 262144,
     "mistral-medium-latest": 262144,
     "mistral-large-latest": 262144,
+    "mistral-small-2603": 262144,
+    "mistral-large-4": 1000000,
     "kimi-k3": 1048576,
     "kimi-k2.7-code": 262144,
     "kimi-k2.6": 262144,
