@@ -48,7 +48,7 @@ def _install_transport(provider: MistralAI, responder) -> list[httpx.Request]:
     def get_client() -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=transport)
 
-    provider.get_async_httpx_client = get_client
+    setattr(provider, "get_async_httpx_client", get_client)
     return requests
 
 
