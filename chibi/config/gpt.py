@@ -4,7 +4,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from chibi.constants import IMAGE_ASPECT_RATIO_LITERAL, get_llm_prompt
+from chibi.config import application_settings
+from chibi.constants import _RENAME_CLIENTS, IMAGE_ASPECT_RATIO_LITERAL, get_llm_prompt
 
 
 class GPTSettings(BaseSettings):
@@ -178,6 +179,7 @@ class GPTSettings(BaseSettings):
             filesystem_access=self.filesystem_access,
             allow_delegation=self.allow_delegation,
             role=self.llm_role,
+            thread_naming=application_settings.client in _RENAME_CLIENTS,
         )
 
     @property

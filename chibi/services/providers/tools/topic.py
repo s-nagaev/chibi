@@ -5,15 +5,11 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import application_settings
+from chibi.constants import _RENAME_CLIENTS
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.user import save_thread_name
-
-# Client frontends where the rename tool is exposed: the Telegram bot and every JSONL stdio
-# client (served by the same runner). The terminal REPL is intentionally excluded via the
-# explicit deregistration in TerminalRunner.run_chibi.
-_RENAME_CLIENTS = frozenset({"telegram", "tui", "vscode", "pycharm", "neovim"})
 
 # Names of the rename tools. Shared with the terminal runner so it can deregister them at
 # startup: the terminal entrypoint imports this module while the client setting still holds

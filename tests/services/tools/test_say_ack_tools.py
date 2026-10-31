@@ -13,7 +13,13 @@ import pytest
 # exactly what happens when this module is collected standalone
 # (`pytest tests/services/tools/test_say_ack_tools.py` with no earlier imports).
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
-from chibi.constants import DELEGATION_RULES, SCHEDULER_HINT_PROMPT, get_llm_prompt
+from chibi.config import application_settings, gpt_settings
+from chibi.constants import (
+    _RENAME_CLIENTS,
+    DELEGATION_RULES,
+    SCHEDULER_HINT_PROMPT,
+    get_llm_prompt,
+)
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.terminal_calls import TERMINAL_TOOL_NAMES
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -117,6 +123,25 @@ class TestMigratedPromptContract:
         assert "ack_silently()" in SCHEDULER_HINT_PROMPT
         assert "<chibi>ACK</chibi>" not in SCHEDULER_HINT_PROMPT
         assert "else ACK" not in SCHEDULER_HINT_PROMPT
+
+
+class TestThreadNamingPromptGating:
+    """The thread-naming block reaches the prompt only for clients exposing rename_thread."""
+
+    def test_thread_naming_fragment_gated_by_flag(self) -> None:
+        off = get_llm_prompt(filesystem_access=False, allow_delegation=False)
+        on = get_llm_prompt(filesystem_access=False, allow_delegation=False, thread_naming=True)
+        assert "# Thread Naming (rename_thread)" in on
+        assert "# Thread Naming (rename_thread)" not in off
+
+    def test_thread_naming_block_follows_the_delegation_placeholder(self) -> None:
+        on = get_llm_prompt(filesystem_access=True, allow_delegation=True, thread_naming=True)
+        assert on.index("# TASK DELEGATION") < on.index("# Thread Naming (rename_thread)")
+        assert on.index("# Thread Naming (rename_thread)") < on.index("DELIVERY AND SILENCE")
+
+    def test_assistant_prompt_wiring_follows_the_rename_clients(self) -> None:
+        expected = application_settings.client in _RENAME_CLIENTS
+        assert ("# Thread Naming (rename_thread)" in gpt_settings.assistant_prompt) == expected
 
 
 async def _fake_models_available(user_id: int, **kwargs: Any) -> list[ModelChangeSchema]:

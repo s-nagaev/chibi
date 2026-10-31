@@ -9,6 +9,11 @@ from chibi.config.telegram import telegram_settings
 
 GROUP_CHAT_TYPES = [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]
 PERSONAL_CHAT_TYPES = [constants.ChatType.SENDER, constants.ChatType.PRIVATE]
+# Client frontends where the rename tool is exposed: the Telegram bot and every JSONL stdio
+# client (served by the same runner). The terminal REPL is intentionally excluded via the
+# explicit deregistration in TerminalRunner.run_chibi.
+_RENAME_CLIENTS = frozenset({"telegram", "tui", "vscode", "pycharm", "neovim"})
+
 IMAGE_SIZE_OPENAI_LITERAL = Literal["1024x1024", "1536x1024", "1024x1536", "auto"]
 IMAGE_ASPECT_RATIO_LITERAL = Literal["1:1", "3:4", "4:3", "9:16", "16:9"]
 SETTING_SET = "<green>SET</green>"
@@ -347,6 +352,16 @@ If work may stall on background tasks, do NOT chain sleep-in-terminal calls: sch
 with `ack_silently()`. Self jobs: freeze the FULL context into trigger_text — nothing is remembered at fire time.
 """
 
+THREAD_NAMING_PROMPT = """
+# Thread Naming (rename_thread)
+
+The thread title is part of the product surface: it tells the user at a glance what this conversation is about.
+- Unless the user asked otherwise, keep the thread name in sync with the current intent of the dialog: when the
+subject clearly moves on, call `rename_thread` with a short, specific name.
+- Rename only on a real change of subject, not on every message, and keep names brief (a few words, no trailing
+punctuation), in the user's language.
+"""
+
 PERSISTENT_MEMORY_PROMPT = f"""
 # Persistent Memory
 
@@ -428,7 +443,20 @@ above.
 """
 
 
-def get_llm_prompt(filesystem_access: bool, allow_delegation: bool, role: str | None = None) -> str:
+def get_llm_prompt(
+    filesystem_access: bool, allow_delegation: bool, role: str | None = None, *, thread_naming: bool = False
+) -> str:
+    """Assemble the master agent system prompt.
+
+    Args:
+        filesystem_access: Whether filesystem tools are exposed to the agent.
+        allow_delegation: Whether the agent may spawn sub-agents via ``delegate_task``.
+        role: The operator-assigned role/persona text, or None.
+        thread_naming: Whether the client exposes the ``rename_thread`` tool.
+
+    Returns:
+        The assembled system prompt.
+    """
     role_prompt = get_role_prompt(role)
     base_prompt = f"""
 You are {telegram_settings.bot_name}, a powerful AI assistant integrated into a multi-tool environment.
@@ -458,6 +486,7 @@ Do **not**:
 - Hallucinate success or fabricate facts to satisfy a request.
 
 {DELEGATION_RULES if allow_delegation else ""}
+{THREAD_NAMING_PROMPT if thread_naming else ""}
 
 # DELIVERY AND SILENCE: say() / ack_silently()
 
