@@ -11,9 +11,9 @@ import pytest
 import chibi.config  # noqa: F401
 from chibi.runners.ide_transport import IDEStdioRunner
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.events.subagent_events import subagent_tracker
 from chibi.services.providers.tools.common import DelegateTool
 from chibi.services.providers.tools.exceptions import ToolException
-from chibi.services.subagent_events import subagent_tracker
 
 RUNNERS: list[IDEStdioRunner] = []
 

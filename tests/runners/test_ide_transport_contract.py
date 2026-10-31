@@ -432,7 +432,7 @@ async def test_commands_and_thread_scheduling() -> None:
 @pytest.mark.asyncio
 async def test_canonical_subagent_events_output() -> None:
     """Replay the canonical subagent lifecycle scenario and compare every frame."""
-    from chibi.services.subagent_events import subagent_tracker
+    from chibi.services.events.subagent_events import subagent_tracker
 
     async def subagent_prompt(interface: Any) -> None:
         """Emit one deterministic started/finished pair before answering."""

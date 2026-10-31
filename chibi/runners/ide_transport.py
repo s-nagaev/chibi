@@ -21,12 +21,12 @@ from chibi.exceptions import ConfigurationError, StorageError
 from chibi.models import Message
 from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
-from chibi.services.cwd_events import cwd_tracker
+from chibi.services.events.cwd_events import cwd_tracker
+from chibi.services.events.subagent_events import subagent_tracker
 from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
 from chibi.services.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
-from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     clone_thread_messages,
@@ -924,7 +924,7 @@ class IDEStdioRunner:
     def cwd_changed(self, thread_id: int) -> None:
         """Schedule one ``cwd_update`` frame for fire-and-forget delivery.
 
-        Sink callback invoked by :data:`chibi.services.cwd_events.cwd_tracker`
+        Sink callback invoked by :data:`chibi.services.events.cwd_events.cwd_tracker`
         when deep code (the ``set_working_dir`` tool) changes a thread's
         effective working directory. Emission must never block or serialize
         tool execution, so the task is simply left to contend for the stdout

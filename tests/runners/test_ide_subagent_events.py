@@ -11,7 +11,7 @@ import pytest
 import chibi.config  # noqa: F401
 from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
 from chibi.services.bot import handle_stop
-from chibi.services.subagent_events import subagent_tracker
+from chibi.services.events.subagent_events import subagent_tracker
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",
