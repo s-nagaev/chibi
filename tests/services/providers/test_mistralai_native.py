@@ -346,3 +346,16 @@ async def test_ocr_short_description_formatting():
     # Verify newlines are replaced with spaces in short_description
     assert "\n" not in result.short_description
     assert "Line one Line two" in result.short_description
+
+
+def test_default_models_and_keyword_filter():
+    """Defaults point at the current GA catalog IDs and the chat keyword
+    filter keeps non-chat models (embed, moderation, ocr, voxtral) excluded."""
+    assert MistralAI.default_model == "mistral-small-2603"
+    assert MistralAI.default_moderation_model == "mistral-moderation-2603"
+    assert MistralAI.default_ocr_model == "mistral-ocr-latest"
+    assert MistralAI.default_vision_model == "mistral-small-2603"
+
+    assert "ministral" in MistralAI.model_name_keywords
+    for excluded in ("embed", "moderation", "ocr", "transcribe", "tts", "voxtral"):
+        assert excluded in MistralAI.model_name_keywords_exclude
