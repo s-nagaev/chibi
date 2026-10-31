@@ -167,6 +167,14 @@ At least one provider API key is required.
 
 For the full list of environment variables (50+), see the [Configuration Reference](https://chibi.bot/configuration).
 
+### Generated Media
+
+When agent mode is on (`FILESYSTEM_ACCESS: "true"`), media-generation tools (image, video, music, TTS) can save their output to disk. On runners that cannot deliver media inline (e.g. the TUI), generated files are always saved to disk and returned as a path instead.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEDIA_OUTPUT_DIR` | `{working_dir}/media` | Directory where generated media files are saved. `~` and environment variables are expanded |
+
 ---
 
 ## Volumes and Persistence

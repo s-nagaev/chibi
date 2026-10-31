@@ -235,6 +235,10 @@ WORKING_DIR={HOME_DIR.absolute()}
 #  this directory is only for your own custom skill files)
 SKILLS_DIR={SKILLS_DIR.absolute()}
 
+# Directory where files saved by media-generation tools (images, videos, music, TTS)
+# are written. By default they land in the working_dir/media directory.
+#MEDIA_OUTPUT_DIR={HOME_DIR.absolute()}/media
+
 
 # ============================================================================
 # 6. MCP CONFIGURATION (Model Context Protocol)

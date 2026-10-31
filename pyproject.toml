@@ -130,7 +130,17 @@ disable_error_code = ["method-assign", "attr-defined"]
 
 
 [tool.vulture]
-ignore_names = ["expected_type", "restore_default_bridge",]
+ignore_names = [
+    "expected_type",
+    "restore_default_bridge",
+    "registry_snapshot",
+    "filesystem_access_disabled",
+    "tts_user",
+    "image_patches",
+    "video_patches",
+    "suno_provider",
+    "elevenlabs_provider",
+]
 min_confidence = 80
 sort_by_size = true
 paths = ["."]
