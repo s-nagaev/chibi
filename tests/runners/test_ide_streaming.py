@@ -10,7 +10,8 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.interfaces.interface import UserInterface
-from chibi.runners.ide_transport import DELTA_FLUSH_INTERVAL, IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import DELTA_FLUSH_INTERVAL, StdioRunner
 
 REQUEST_FIELDS: dict[str, Any] = {
     "workspace_root": "/tmp",
@@ -118,13 +119,13 @@ class BackgroundCapture:
         self.payloads.append((thread_id, content))
 
 
-def runner() -> tuple[IDEStdioRunner, OutputRecorder]:
+def runner() -> tuple[StdioRunner, OutputRecorder]:
     """Create a runner with captured protocol output.
 
     Returns:
         The runner and its captured-frame recorder.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write_line"] = recorder
     return instance, recorder
@@ -209,7 +210,7 @@ async def wait_for_frame(output: list[dict[str, Any]], request_id: str, frame_ty
     raise AssertionError(f"Missing {frame_type} for {request_id}: {output}")
 
 
-RUNNERS: list[IDEStdioRunner] = []
+RUNNERS: list[StdioRunner] = []
 
 
 @pytest.fixture(autouse=True, scope="function")
@@ -231,7 +232,7 @@ class TestCapabilityGate:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_streaming_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_streaming_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -250,7 +251,7 @@ class TestCapabilityGate:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_streaming_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_streaming_prompt):
             await instance._handle_message(initialize())
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -281,7 +282,7 @@ class TestWireOrdering:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_streaming_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_streaming_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -295,7 +296,7 @@ class TestWireOrdering:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_single_chunk_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_single_chunk_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -315,7 +316,7 @@ class TestCoalescing:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_cadence_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_cadence_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -342,7 +343,7 @@ class TestCoalescing:
             await interface.send_delta(big_chunk)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_big_chunk_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_big_chunk_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -364,7 +365,7 @@ class TestErrorAndCancellation:
         RUNNERS.append(instance)
 
         try:
-            with patch("chibi.runners.ide_transport.handle_user_prompt", fake_gated_prompt):
+            with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_gated_prompt):
                 await instance._handle_message(initialize({"streaming": True}))
                 await instance._handle_message(request("r1", 42))
                 await wait_for_frame(recorder.frames, "r1", "status")
@@ -406,7 +407,7 @@ class TestErrorAndCancellation:
             await original_write(message)
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_errored_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_errored_prompt),
             patch.object(instance, "_write", contended_write),
         ):
             await instance._handle_message(initialize({"streaming": True}))
@@ -428,7 +429,7 @@ class TestErrorAndCancellation:
         instance, recorder = runner()
         RUNNERS.append(instance)
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_gated_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_gated_prompt):
             await instance._handle_message(initialize({"streaming": True}))
             await instance._handle_message(request("r1", 42))
             await wait_for_frame(recorder.frames, "r1", "result")
@@ -442,13 +443,13 @@ class TestErrorAndCancellation:
 
 
 class TestInterfaceContract:
-    """IDEInterface delta forwarding and closed-interface behavior."""
+    """StdioInterface delta forwarding and closed-interface behavior."""
 
     @pytest.mark.asyncio
     async def test_interface_forwards_chunks_to_transport(self) -> None:
         """A streaming interface awaits the delta_emit callback inline."""
         capture = DeltaCapture()
-        interface = IDEInterface(42, "p", {}, lambda text: None, delta_emit=capture)
+        interface = StdioInterface(42, "p", {}, lambda text: None, delta_emit=capture)
 
         assert interface.streaming_enabled is True
         assert interface.delta_emitted is False
@@ -460,7 +461,7 @@ class TestInterfaceContract:
     @pytest.mark.asyncio
     async def test_interface_without_callback_is_not_streaming(self) -> None:
         """A non-streaming interface exposes the flag and drops chunks."""
-        interface = IDEInterface(42, "p", {}, lambda text: None)
+        interface = StdioInterface(42, "p", {}, lambda text: None)
 
         assert interface.streaming_enabled is False
         await interface.send_delta("ignored")
@@ -469,7 +470,7 @@ class TestInterfaceContract:
     async def test_closed_interface_drops_deltas_silently(self) -> None:
         """Chunks after mark_closed never reach the transport callback."""
         capture = DeltaCapture()
-        interface = IDEInterface(42, "p", {}, lambda text: None, delta_emit=capture)
+        interface = StdioInterface(42, "p", {}, lambda text: None, delta_emit=capture)
         interface.mark_closed()
 
         await interface.send_delta("late")
@@ -481,7 +482,7 @@ class TestInterfaceContract:
         """A closed interface drops deltas instead of emitting message frames."""
         capture = DeltaCapture()
         background = BackgroundCapture()
-        interface = IDEInterface(42, "p", {}, lambda text: None, background_emit=background, delta_emit=capture)
+        interface = StdioInterface(42, "p", {}, lambda text: None, background_emit=background, delta_emit=capture)
         interface.mark_closed()
 
         await interface.send_delta("late")

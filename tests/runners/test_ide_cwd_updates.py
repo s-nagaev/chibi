@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import COMMANDS, PROTOCOL_VERSION, StdioRunner
 from chibi.services.events.cwd_events import cwd_tracker
 
 READY_FRAME: dict[str, Any] = {
@@ -39,7 +40,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     The recorder replaces ``_write_line`` so both regular writes and
@@ -48,7 +49,7 @@ def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write_line"] = recorder
     return instance, recorder.frames
@@ -69,7 +70,7 @@ def initialize(capabilities: Any = None) -> dict[str, Any]:
     return message
 
 
-async def run_request(instance: IDEStdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
+async def run_request(instance: StdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
     """Send one protocol request through the runner.
 
     Args:
@@ -145,7 +146,7 @@ async def wait_for_results(output: list[dict[str, Any]], request_ids: list[str])
     raise AssertionError(f"Expected result frames for {sorted(pending)}: {output}")
 
 
-RUNNERS: list[IDEStdioRunner] = []
+RUNNERS: list[StdioRunner] = []
 
 
 @pytest.fixture(autouse=True)
@@ -178,7 +179,7 @@ def patched_cwd(*values: str) -> Any:
     mock = AsyncMock(return_value=values[0])
     if len(values) > 1:
         mock.side_effect = list(values)
-    return patch("chibi.runners.ide_transport._get_thread_cwd", new=mock)
+    return patch("chibi.interfaces.stdio_runner._get_thread_cwd", new=mock)
 
 
 class TestHandshake:
@@ -244,10 +245,10 @@ class TestFirstRequestEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "r1", "result")
@@ -260,10 +261,10 @@ class TestFirstRequestEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "r1", "result")
@@ -278,10 +279,10 @@ class TestFirstRequestEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
             await run_request(instance, "r2", 7)
@@ -298,10 +299,10 @@ class TestFirstRequestEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "r1", "result")
@@ -318,12 +319,15 @@ class TestRuntimeChange:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             cwd_tracker.cwd_changed(42)
             await asyncio.sleep(0)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(LAUNCH_CWD, CHANGED_CWD):
+        with (
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
+            patched_cwd(LAUNCH_CWD, CHANGED_CWD),
+        ):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "r1", "result")
@@ -340,12 +344,12 @@ class TestRuntimeChange:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             cwd_tracker.cwd_changed(42)
             await asyncio.sleep(0)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt), patched_cwd(CHANGED_CWD):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt), patched_cwd(CHANGED_CWD):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "r1", "result")
@@ -427,8 +431,8 @@ class TestCloneEmission:
 
         with (
             patched_cwd(CHANGED_CWD),
-            patch("chibi.runners.ide_transport._get_thread_messages", new=fake_thread_messages),
-            patch("chibi.runners.ide_transport.clone_thread_messages", new=fake_clone),
+            patch("chibi.interfaces.stdio_runner._get_thread_messages", new=fake_thread_messages),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", new=fake_clone),
         ):
             await instance._handle_message(initialize({"cwd_updates": True}))
             await run_request(instance, "r1", 42, prompt="/new_thread_with_current_context 7")

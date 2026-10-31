@@ -23,7 +23,8 @@ from apscheduler.schedulers.base import STATE_STOPPED
 
 import chibi.config  # noqa: F401
 from chibi.constants import IDE_STORAGE_ID
-from chibi.runners.ide_transport import PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import PROTOCOL_VERSION, StdioRunner
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services import task_manager as task_manager_module
 from chibi.services.jobs.agent_task import run_agent_job
@@ -45,7 +46,7 @@ STDIN_READ_TIMEOUT_SECONDS = 90.0
 class ScriptedStdin:
     """Blocking fake stdin consumed by the runner's real ``_read_line`` path.
 
-    ``IDEStdioRunner._read_line`` calls ``sys.stdin.readline`` inside
+    ``StdioRunner._read_line`` calls ``sys.stdin.readline`` inside
     ``asyncio.to_thread``, so ``readline`` must block the worker thread until
     the next JSONL line (or EOF) is supplied from the test coroutine.
     """
@@ -114,13 +115,13 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def make_runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def make_runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Build a stdio runner with captured protocol output.
 
     Returns:
         The runner under test and its mutable captured-frame list.
     """
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     recorder = OutputRecorder()
     runner.__dict__["_write"] = recorder
     return runner, recorder.frames
@@ -203,7 +204,7 @@ async def test_once_self_job_end_to_end_over_stdio(
 ) -> None:
     """A tool-created one-time self job fires and the answer lands as a message frame.
 
-    Drives a genuine ``IDEStdioRunner.run()`` session: the fake client's JSONL
+    Drives a genuine ``StdioRunner.run()`` session: the fake client's JSONL
     lines flow through the real stdin reader path, and the runner's own
     ``finally`` block performs the scheduler and task-manager shutdown.
     """
@@ -221,7 +222,7 @@ async def test_once_self_job_end_to_end_over_stdio(
         llm_calls.append(1)
         return ChatResponseSchema(answer=JOB_ANSWER, provider="OpenAI", model="m", usage=None)
 
-    async def fake_prompt(interface: IDEInterface) -> None:
+    async def fake_prompt(interface: StdioInterface) -> None:
         """Serve the foreground request without a real LLM.
 
         Args:
@@ -234,14 +235,14 @@ async def test_once_self_job_end_to_end_over_stdio(
     with (
         patch(f"{SCHEDULER_MODULE}.application_settings", stdio_scheduler_settings),
         patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
-        patch("chibi.runners.ide_transport.recover_agent_jobs", new_callable=AsyncMock),
+        patch("chibi.interfaces.stdio_runner.recover_agent_jobs", new_callable=AsyncMock),
         patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(side_effect=fake_llm_answer)),
         patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
         patch(f"{TOOL_MODULE}.application_settings", tool_settings),
         patch(f"{AGENT_TASK_MODULE}.application_settings", agent_task_settings),
         patch("chibi.config.logging.use_stderr_logging"),
         patch("sys.stdin", fake_stdin),
-        patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
     ):
         run_task = asyncio.create_task(runner.run())
 
@@ -268,7 +269,7 @@ async def test_once_self_job_end_to_end_over_stdio(
         if request_task is not None:
             await request_task
 
-        interface = IDEInterface(thread_id=THREAD_ID, prompt="schedule", context={}, emit=lambda text: None)
+        interface = StdioInterface(thread_id=THREAD_ID, prompt="schedule", context={}, emit=lambda text: None)
         run_at = datetime.now() + timedelta(seconds=1.5)
         result = await ScheduleTaskTool.function(
             title="stdio check",

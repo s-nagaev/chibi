@@ -18,7 +18,7 @@ from openai.types import CompletionUsage
 import chibi.config  # noqa: F401
 from chibi.config.gpt import gpt_settings
 from chibi.constants import get_model_context_window
-from chibi.runners.ide_transport import IDEStdioRunner, build_usage_payload
+from chibi.interfaces.stdio_runner import StdioRunner, build_usage_payload
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 
 # In-process harness reused from the contract tests' style: patch the
@@ -35,9 +35,9 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner_with(prompt_handler: Any) -> tuple[IDEStdioRunner, list[dict[str, Any]], list[Any]]:
+def runner_with(prompt_handler: Any) -> tuple[StdioRunner, list[dict[str, Any]], list[Any]]:
     """Create a runner whose prompt handling is replaced by prompt_handler."""
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write"] = recorder
 
@@ -45,12 +45,12 @@ def runner_with(prompt_handler: Any) -> tuple[IDEStdioRunner, list[dict[str, Any
         await interface.send_message("Done!")
 
     patches = [
-        patch("chibi.runners.ide_transport.handle_user_prompt", prompt_handler),
-        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
-        patch("chibi.runners.ide_transport.handle_image_generation", AsyncMock()),
-        patch("chibi.runners.ide_transport.get_models_available", AsyncMock(return_value=[])),
-        patch("chibi.runners.ide_transport.set_active_model", AsyncMock()),
-        patch("chibi.runners.ide_transport.get_info", AsyncMock(return_value="info")),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", prompt_handler),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", AsyncMock()),
+        patch("chibi.interfaces.stdio_runner.get_models_available", AsyncMock(return_value=[])),
+        patch("chibi.interfaces.stdio_runner.set_active_model", AsyncMock()),
+        patch("chibi.interfaces.stdio_runner.get_info", AsyncMock(return_value="info")),
     ]
     for item in patches:
         item.start()

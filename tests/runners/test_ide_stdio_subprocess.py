@@ -17,7 +17,7 @@ _BOOTSTRAP = textwrap.dedent(
     import asyncio
 
     from chibi.schemas.app import ModelChangeSchema
-    import chibi.runners.ide_transport as transport
+    import chibi.interfaces.stdio_runner as transport
 
     MODELS = [ModelChangeSchema(provider="fake", name="fake-model", display_name="Fake Model", image_generation=False)]
 

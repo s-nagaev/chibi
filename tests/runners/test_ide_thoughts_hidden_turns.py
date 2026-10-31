@@ -17,7 +17,8 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.config.gpt import gpt_settings
-from chibi.runners.ide_transport import IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.bot import handle_tool_response
 from chibi.services.providers.tools.schemas import ToolResponseSchema
@@ -57,17 +58,17 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
-    instance = IDEStdioRunner()
+def runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write"] = recorder
     return instance, recorder.frames
 
 
 def closed_interface_with_parent_thoughts(
-    instance: IDEStdioRunner,
+    instance: StdioRunner,
     parent_thoughts: str | None,
-) -> IDEInterface:
+) -> StdioInterface:
     """Build a closed interface whose result frame already carried reasoning."""
 
     async def emit_background(
@@ -75,7 +76,7 @@ def closed_interface_with_parent_thoughts(
     ) -> None:
         await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
-    interface = IDEInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
+    interface = StdioInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
     interface.response_thoughts = parent_thoughts
     interface.mark_closed()
     return interface
@@ -92,7 +93,7 @@ async def test_result_frame_omits_thoughts_on_a_hidden_turn(monkeypatch: pytest.
         await interface.send_llm_thoughts("private reasoning the user must not see")
         interface.response_visibility = "hidden"
 
-    with patch("chibi.runners.ide_transport.handle_user_prompt", prompt):
+    with patch("chibi.interfaces.stdio_runner.handle_user_prompt", prompt):
         await instance._handle_message(
             {"type": "initialize", "protocol_version": 1, "capabilities": {"thoughts": True}}
         )
@@ -113,7 +114,7 @@ async def test_result_frame_keeps_thoughts_on_a_visible_turn(monkeypatch: pytest
         await interface.send_llm_thoughts("visible turn reasoning")
         interface.response_visibility = "visible"
 
-    with patch("chibi.runners.ide_transport.handle_user_prompt", prompt):
+    with patch("chibi.interfaces.stdio_runner.handle_user_prompt", prompt):
         await instance._handle_message(
             {"type": "initialize", "protocol_version": 1, "capabilities": {"thoughts": True}}
         )

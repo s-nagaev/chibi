@@ -2,7 +2,7 @@
 
 Verifies the full path:
   VSCode sends protocol request with editor_context
-    → IDEStdioRunner._run_request() builds IDEInterface with editor_context
+    → StdioRunner._run_request() builds StdioInterface with editor_context
       → handle_user_prompt() → get_llm_chat_completion_answer()
         → isinstance(interface, EditorContextProvider) guard
           → editor_context section injected into prompt dict
@@ -26,20 +26,21 @@ _BOOTSTRAP = textwrap.dedent(r"""
     import sys
 
     from chibi.schemas.app import ModelChangeSchema
-    import chibi.runners.ide_transport as transport
+    import chibi.interfaces.stdio_interface as stdio_interface
+    import chibi.interfaces.stdio_runner as transport
 
     MODELS = [ModelChangeSchema(provider="fake", name="fake-model", display_name="Fake Model", image_generation=False)]
 
     # Use a list wrapper so the nested function can mutate it via nonlocal.
     _captured_list: list = [None]
 
-    _original_fget = transport.IDEInterface.editor_context.fget
+    _original_fget = stdio_interface.StdioInterface.editor_context.fget
 
     def _patched_fget(self):
         _captured_list[0] = _original_fget(self)
         return _captured_list[0]
 
-    transport.IDEInterface.editor_context = property(_patched_fget)
+    stdio_interface.StdioInterface.editor_context = property(_patched_fget)
 
     async def prompt(interface):
         interface.response_model = "fake-model"

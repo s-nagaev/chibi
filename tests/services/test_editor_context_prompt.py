@@ -9,7 +9,7 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.interfaces.interface import UserInterface
-from chibi.runners.ide_transport import IDEInterface
+from chibi.interfaces.stdio_interface import StdioInterface
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.user import get_llm_chat_completion_answer
 
@@ -62,7 +62,7 @@ async def test_ide_prompt_contains_sanitized_editor_context(fake_user: SimpleNam
     db = AsyncMock()
     db.get_or_create_user.return_value = fake_user
     db.get_conversation_messages.return_value = []
-    interface = IDEInterface(
+    interface = StdioInterface(
         7,
         "explain",
         {
@@ -94,7 +94,7 @@ async def test_empty_editor_context_omits_section(fake_user: SimpleNamespace) ->
     db = AsyncMock()
     db.get_or_create_user.return_value = fake_user
     db.get_conversation_messages.return_value = []
-    interface = IDEInterface(7, "hello", {}, lambda _: None)
+    interface = StdioInterface(7, "hello", {}, lambda _: None)
 
     await get_llm_chat_completion_answer.__wrapped__(db, 1, interface, user_text_message="hello")
 
@@ -110,7 +110,7 @@ async def test_selection_text_truncated_to_4kb(fake_user: SimpleNamespace) -> No
     db.get_or_create_user.return_value = fake_user
     db.get_conversation_messages.return_value = []
     long_text = "x" * 5000
-    interface = IDEInterface(
+    interface = StdioInterface(
         7,
         "refactor",
         {
@@ -140,7 +140,7 @@ async def test_workspace_root_basename_sanitized(fake_user: SimpleNamespace) -> 
     db = AsyncMock()
     db.get_or_create_user.return_value = fake_user
     db.get_conversation_messages.return_value = []
-    interface = IDEInterface(
+    interface = StdioInterface(
         7,
         "explain",
         {
