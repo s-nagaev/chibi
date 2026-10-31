@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import COMMANDS, PROTOCOL_VERSION, StdioRunner
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.bot import handle_tool_response
 from chibi.services.providers.tools.schemas import ToolResponseSchema
@@ -47,7 +48,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner(fail_on_types: set[str] | None = None) -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner(fail_on_types: set[str] | None = None) -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     Args:
@@ -56,7 +57,7 @@ def runner(fail_on_types: set[str] | None = None) -> tuple[IDEStdioRunner, list[
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder(fail_on_types=fail_on_types)
     instance.__dict__["_write"] = recorder
     return instance, recorder.frames
@@ -80,7 +81,7 @@ async def wait_for_frame(output: list[dict[str, Any]], frame_type: str) -> dict[
     raise AssertionError(f"Missing {frame_type} frame: {output}")
 
 
-async def wait_until_closed(interface: IDEInterface) -> None:
+async def wait_until_closed(interface: StdioInterface) -> None:
     """Wait until the request owning the interface is finished."""
     for _ in range(300):
         if interface._closed:
@@ -101,7 +102,7 @@ def deliver_later(content: str, model: str | None = None, provider: str | None =
         An async handler compatible with the patched ``handle_user_prompt``.
     """
 
-    async def fake_prompt(interface: IDEInterface) -> None:
+    async def fake_prompt(interface: StdioInterface) -> None:
         async def deliver() -> None:
             await wait_until_closed(interface)
             await interface.send_tool_answer(content, model=model, provider=provider)
@@ -129,7 +130,7 @@ def initialize(capabilities: Any = None) -> dict[str, Any]:
     return message
 
 
-async def run_request(instance: IDEStdioRunner, request_id: str, thread_id: int) -> None:
+async def run_request(instance: StdioRunner, request_id: str, thread_id: int) -> None:
     """Run one protocol request through the runner.
 
     Args:
@@ -205,7 +206,7 @@ class TestBackgroundMessageFrames:
         """A background answer after request completion becomes a message frame."""
         instance, output = runner()
         with patch(
-            "chibi.runners.ide_transport.handle_user_prompt", deliver_later("Background answer", "gpt-x", "prov")
+            "chibi.interfaces.stdio_runner.handle_user_prompt", deliver_later("Background answer", "gpt-x", "prov")
         ):
             await instance._handle_message(initialize({"background_messages": True}))
             await run_request(instance, "r1", 42)
@@ -224,7 +225,7 @@ class TestBackgroundMessageFrames:
     async def test_no_frame_without_capability(self) -> None:
         """Clients that did not declare the capability never see message frames."""
         instance, output = runner()
-        with patch("chibi.runners.ide_transport.handle_user_prompt", deliver_later("Background answer")):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", deliver_later("Background answer")):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -235,7 +236,7 @@ class TestBackgroundMessageFrames:
     async def test_optional_fields_omitted_when_unknown(self) -> None:
         """model and provider are dropped from the frame when not provided."""
         instance, output = runner()
-        with patch("chibi.runners.ide_transport.handle_user_prompt", deliver_later("Background answer")):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", deliver_later("Background answer")):
             await instance._handle_message(initialize({"background_messages": True}))
             await run_request(instance, "r1", 7)
             await wait_for_frame(output, "message")
@@ -252,7 +253,7 @@ class TestRequestScopedContractUnchanged:
         """The result frame still correlates the foreground answer by request_id."""
         instance, output = runner()
         with patch(
-            "chibi.runners.ide_transport.handle_user_prompt", deliver_later("Background answer", "gpt-x", "prov")
+            "chibi.interfaces.stdio_runner.handle_user_prompt", deliver_later("Background answer", "gpt-x", "prov")
         ):
             await instance._handle_message(initialize({"background_messages": True}))
             await run_request(instance, "r1", 42)
@@ -278,7 +279,7 @@ class TestEmissionFailureResilience:
         ) -> None:
             await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
-        interface = IDEInterface(3, "p", {}, responses.append, background_emit=emit_background)
+        interface = StdioInterface(3, "p", {}, responses.append, background_emit=emit_background)
         interface.mark_closed()
 
         await interface.send_tool_answer("Answer that will be dropped", model="m", provider="p")
@@ -289,7 +290,7 @@ class TestEmissionFailureResilience:
     async def test_background_task_survives_write_failure(self) -> None:
         """The background delivery task completes even when the write fails."""
         instance, output = runner(fail_on_types={"message"})
-        with patch("chibi.runners.ide_transport.handle_user_prompt", deliver_later("Doomed answer", "m", "p")):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", deliver_later("Doomed answer", "m", "p")):
             await instance._handle_message(initialize({"background_messages": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -314,7 +315,7 @@ class TestHandleToolResponsePlumbing:
             emitted.append((thread_id, content, model, provider))
             await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
-        interface = IDEInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
+        interface = StdioInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
         interface.mark_closed()
         chat_response = ChatResponseSchema(answer="Tool answer", provider="prov", model="m", usage=None)
 
@@ -332,7 +333,7 @@ class TestHandleToolResponsePlumbing:
     async def test_open_interface_appends_to_request_responses(self) -> None:
         """An open request still collects the tool answer in its response buffer."""
         responses: list[str] = []
-        interface = IDEInterface(11, "p", {}, responses.append)
+        interface = StdioInterface(11, "p", {}, responses.append)
         chat_response = ChatResponseSchema(answer="Tool answer", provider="prov", model="m", usage=None)
 
         with patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=chat_response)):
@@ -348,9 +349,9 @@ class TestContinuationThoughts:
 
     @staticmethod
     def _closed_interface_with_parent_thoughts(
-        instance: IDEStdioRunner,
+        instance: StdioRunner,
         parent_thoughts: str | None,
-    ) -> IDEInterface:
+    ) -> StdioInterface:
         """Build a closed interface whose result frame already carried reasoning.
 
         Args:
@@ -366,7 +367,7 @@ class TestContinuationThoughts:
         ) -> None:
             await instance._emit_background_message(thread_id, content, model, provider, thoughts)
 
-        interface = IDEInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
+        interface = StdioInterface(11, "p", {}, lambda _: None, background_emit=emit_background)
         interface.response_thoughts = parent_thoughts
         interface.mark_closed()
         return interface

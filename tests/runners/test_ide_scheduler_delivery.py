@@ -12,14 +12,14 @@ import pytest
 import chibi.config  # noqa: F401
 import chibi.services.jobs.agent_task as agent_task_module
 from chibi.constants import IDE_STORAGE_ID
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEStdioRunner
-from chibi.schemas.scheduler import AgentJobPayload
-from chibi.services.jobs.agent_task import _notify_failure, run_agent_job
-from chibi.services.scheduler_interface import (
+from chibi.interfaces.scheduler_interface import (
     StdioSchedulerInterface,
     clear_stdio_delivery_emitter,
     get_stdio_delivery_emitter,
 )
+from chibi.interfaces.stdio_runner import COMMANDS, PROTOCOL_VERSION, StdioRunner
+from chibi.schemas.scheduler import AgentJobPayload
+from chibi.services.jobs.agent_task import _notify_failure, run_agent_job
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",
@@ -52,7 +52,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner(recorder_delay: float = 0.0) -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner(recorder_delay: float = 0.0) -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     Args:
@@ -61,7 +61,7 @@ def runner(recorder_delay: float = 0.0) -> tuple[IDEStdioRunner, list[dict[str, 
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder(delay=recorder_delay)
     instance.__dict__["_write"] = recorder
     return instance, recorder.frames
@@ -82,7 +82,7 @@ def initialize(capabilities: dict[str, Any] | None = None) -> dict[str, Any]:
     return message
 
 
-async def run_request(instance: IDEStdioRunner, request_id: str, thread_id: int) -> None:
+async def run_request(instance: StdioRunner, request_id: str, thread_id: int) -> None:
     """Run one protocol request through the runner.
 
     Args:
@@ -253,7 +253,7 @@ class TestSchedulerMessageFrames:
         async def fake_prompt(interface: Any) -> None:
             await interface.send_message("Foreground answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"background_messages": True}))
             await run_request(instance, "r1", 42)
             # The request runs as a background task: wait for it to finish so

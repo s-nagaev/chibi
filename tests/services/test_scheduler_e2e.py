@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fakeredis import FakeStrictRedis
 
+from chibi.interfaces.scheduler_interface import SchedulerInterface
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.jobs.agent_task import run_agent_job
 from chibi.services.providers.tools.scheduler import ScheduleTaskTool
 from chibi.services.scheduler import ChibiScheduler
-from chibi.services.scheduler_interface import SchedulerInterface
 from chibi.utils.app import SingletonMeta
 
 pytestmark = pytest.mark.asyncio

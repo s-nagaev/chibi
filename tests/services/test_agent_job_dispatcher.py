@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import chibi.services.jobs.agent_task as agent_task_module
+from chibi.interfaces.scheduler_interface import SchedulerInterface
 from chibi.schemas.app import ModeratorsAnswer
 from chibi.services.jobs.agent_task import recover_agent_jobs, run_agent_job
 from chibi.services.scheduler import ChibiScheduler
-from chibi.services.scheduler_interface import SchedulerInterface
 from chibi.storage.local import LocalStorage
 from chibi.utils.app import SingletonMeta
 

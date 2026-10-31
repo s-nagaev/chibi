@@ -7,15 +7,15 @@ import pytest
 
 import chibi.services.jobs.agent_task as agent_task_module
 from chibi.constants import IDE_STORAGE_ID
-from chibi.schemas.scheduler import AgentJobPayload
-from chibi.services.jobs.agent_task import _build_interface, _notify_failure
-from chibi.services.scheduler_interface import (
+from chibi.interfaces.scheduler_interface import (
     SchedulerInterface,
     StdioSchedulerInterface,
     clear_stdio_delivery_emitter,
     get_stdio_delivery_emitter,
     set_stdio_delivery_emitter,
 )
+from chibi.schemas.scheduler import AgentJobPayload
+from chibi.services.jobs.agent_task import _build_interface, _notify_failure
 
 pytestmark = pytest.mark.asyncio
 
@@ -151,7 +151,7 @@ class TestStdioNotifyFailure:
                 SimpleNamespace(client="vscode", scheduler_failure_notify=True),
             ),
             patch(
-                "chibi.services.scheduler_interface._get_scheduler_bot",
+                "chibi.interfaces.scheduler_interface._get_scheduler_bot",
                 side_effect=AssertionError("Telegram bot must not be touched in stdio delivery"),
             ),
         ):

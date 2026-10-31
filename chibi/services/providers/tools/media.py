@@ -8,8 +8,8 @@ from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings, telegram_settings
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ModelChangeSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.constants.suno import POLLING_ATTEMPTS_WAIT_BETWEEN
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool

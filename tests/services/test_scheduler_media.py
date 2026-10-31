@@ -8,11 +8,11 @@ import pytest
 from telegram import InputFile, InputMediaDocument, InputMediaPhoto
 from telegram.constants import ChatAction, FileSizeLimit
 
-import chibi.services.scheduler_interface as scheduler_interface_module
+import chibi.interfaces.scheduler_interface as scheduler_interface_module
 from chibi.config import gpt_settings
 from chibi.config.gpt import GPTSettings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
-from chibi.services.scheduler_interface import SchedulerInterface
+from chibi.interfaces.scheduler_interface import SchedulerInterface
 
 pytestmark = pytest.mark.asyncio
 
@@ -160,7 +160,7 @@ class TestSendImagesFromUrls:
 
     async def test_urls_sent_as_media_group(self, interface, scheduler_bot) -> None:
         """URLs are downloaded and each becomes an InputMediaPhoto in the media group."""
-        with patch("chibi.services.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
+        with patch("chibi.interfaces.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
             await interface.send_images(images=["http://example.com/1.png", "http://example.com/2.png"])
 
         scheduler_bot.send_media_group.assert_awaited_once()
@@ -178,7 +178,7 @@ class TestSendImagesFromUrls:
         scheduler_bot.send_media_group.side_effect = RuntimeError("upload failed")
         urls = ["http://example.com/1.png", "http://example.com/2.png"]
 
-        with patch("chibi.services.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
+        with patch("chibi.interfaces.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
             await interface.send_images(images=urls)
 
         scheduler_bot.send_message.assert_awaited()
@@ -263,7 +263,7 @@ class TestSendImagesFromLocalPaths:
         local_file = self._local_file(tmp_path, "picture.png", 1024)
         scheduler_bot.send_media_group.side_effect = [RuntimeError("upload failed"), None]
 
-        with patch("chibi.services.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
+        with patch("chibi.interfaces.scheduler_interface.download_image", new=AsyncMock(return_value=b"img")):
             await interface.send_images(images=["http://example.com/1.png", str(local_file)])
 
         scheduler_bot.send_message.assert_awaited()

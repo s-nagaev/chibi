@@ -12,9 +12,9 @@ from anthropic.types import Message as AnthropicMessage
 from chibi.config import application_settings
 from chibi.config.app import ClientType
 from chibi.constants import SCHEDULER_HINT_PROMPT
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import UsageSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.utils import (
     _is_tool_response_message,
     get_usage_from_anthropic_response,

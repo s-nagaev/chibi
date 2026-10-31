@@ -35,8 +35,8 @@ from openai.types.responses import ResponseFunctionToolCall
 
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
 from chibi.exceptions import SilentTurnError
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
-from chibi.services.interface import UserInterface
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.mistralai_native import MistralAI
 from chibi.services.providers.moonshotai import MoonshotAI

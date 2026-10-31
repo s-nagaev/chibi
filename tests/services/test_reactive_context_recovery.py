@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from chibi.exceptions import ContextLengthExceededError, ServiceResponseError
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
-from chibi.services.interface import UserInterface
 from chibi.utils.app import handle_gpt_exceptions
 
 

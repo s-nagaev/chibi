@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from chibi.exceptions import StorageError
+from chibi.interfaces.interface import TelegramInterface
 from chibi.models import TelegramFileMeta
-from chibi.services.interface import TelegramInterface
 from chibi.storage.files.telegram_storage import TelegramFileStorage
 from chibi.utils.text_files import is_text_file
 

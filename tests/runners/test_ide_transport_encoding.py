@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import IDEStdioRunner
+from chibi.interfaces.stdio_runner import StdioRunner
 
 NON_ASCII_CONTENT = "Привет, мир"
 
@@ -92,7 +92,7 @@ async def test_non_ascii_frame_is_written_as_utf8_on_cp1252_console(monkeypatch:
     """Non-ASCII content reaches stdout as UTF-8 bytes on a cp1252 console."""
     stdout = Cp1252Stdout()
     monkeypatch.setattr(sys, "stdout", stdout)
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     frame: dict[str, Any] = {"type": "result", "content": NON_ASCII_CONTENT}
 
     await runner._write(frame)
@@ -107,7 +107,7 @@ async def test_ascii_frame_is_written_as_utf8_bytes(monkeypatch: pytest.MonkeyPa
     """ASCII frames use the same binary path and stay byte-identical."""
     stdout = Cp1252Stdout()
     monkeypatch.setattr(sys, "stdout", stdout)
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     frame: dict[str, Any] = {"type": "status", "request_id": "abc", "state": "running"}
 
     await runner._write(frame)
@@ -121,7 +121,7 @@ async def test_consecutive_frames_are_newline_delimited(monkeypatch: pytest.Monk
     """Sequential writes produce one UTF-8 JSONL line per frame."""
     stdout = Cp1252Stdout()
     monkeypatch.setattr(sys, "stdout", stdout)
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     first: dict[str, Any] = {"type": "result", "content": NON_ASCII_CONTENT}
     second: dict[str, Any] = {"type": "result", "content": "ok"}
 
@@ -138,7 +138,7 @@ async def test_stream_without_buffer_falls_back_to_text_write(monkeypatch: pytes
     """Streams exposing no binary buffer still receive the frame as text."""
     stdout = TextOnlyStdout()
     monkeypatch.setattr(sys, "stdout", stdout)
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     frame: dict[str, Any] = {"type": "result", "content": NON_ASCII_CONTENT}
 
     await runner._write(frame)

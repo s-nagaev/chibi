@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 from chibi.config import application_settings
-from chibi.services.interface import TelegramInterface, UserInterface
+from chibi.interfaces.interface import TelegramInterface, UserInterface
 
 
 def get_file_storage(interface: UserInterface) -> FileStorage:

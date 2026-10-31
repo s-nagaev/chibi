@@ -8,6 +8,7 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.events.subagent_events import subagent_tracker
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import (
@@ -16,7 +17,6 @@ from chibi.services.providers.tools.utils import (
     get_sub_agent_response,
     resolve_session_context,
 )
-from chibi.services.subagent_events import subagent_tracker
 from chibi.utils.app import convert_list_of_models_to_str
 
 

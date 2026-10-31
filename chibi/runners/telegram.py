@@ -30,6 +30,7 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
+from chibi.interfaces.interface import TelegramInterface
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,
@@ -44,7 +45,6 @@ from chibi.services.bot import (
     handle_stop,
     handle_user_prompt,
 )
-from chibi.services.interface import TelegramInterface
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools.topic import RenameThreadTool

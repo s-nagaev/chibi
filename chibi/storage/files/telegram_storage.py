@@ -5,7 +5,7 @@ from typing import Any
 from telegram import File
 
 from chibi.exceptions import StorageError
-from chibi.services.interface import TelegramInterface
+from chibi.interfaces.interface import TelegramInterface
 from chibi.services.user import get_telegram_document, get_telegram_documents, save_telegram_document_metadata
 from chibi.storage.files.file_storage import FileStorage
 from chibi.utils.text_files import is_text_file

@@ -9,8 +9,8 @@ from openai.types.shared_params import FunctionDefinition
 from PIL import Image
 
 from chibi.config import gpt_settings
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ModelChangeSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import AdditionalOptions

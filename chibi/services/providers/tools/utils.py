@@ -14,6 +14,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.constants import get_sub_executor_prompt
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.failover import (
@@ -23,7 +24,6 @@ from chibi.services.failover import (
     failover_warning_message,
     run_with_failover,
 )
-from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database

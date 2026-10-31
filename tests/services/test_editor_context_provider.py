@@ -1,4 +1,4 @@
-"""Tests for the EditorContextProvider protocol and IDEInterface accessor."""
+"""Tests for the EditorContextProvider protocol and StdioInterface accessor."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import IDEInterface
-from chibi.services.interface import EditorContextProvider, TelegramInterface, UserInterface
+from chibi.interfaces.interface import EditorContextProvider, TelegramInterface, UserInterface
+from chibi.interfaces.stdio_interface import StdioInterface
 
 
 def test_ide_interface_is_editor_context_provider() -> None:
-    """IDEInterface instances satisfy the EditorContextProvider protocol."""
-    interface = IDEInterface(1, "hello", {"active_file": "foo.py"}, lambda _: None)
+    """StdioInterface instances satisfy the EditorContextProvider protocol."""
+    interface = StdioInterface(1, "hello", {"active_file": "foo.py"}, lambda _: None)
 
     assert isinstance(interface, EditorContextProvider)
 
@@ -40,7 +40,7 @@ def test_user_interface_abc_is_not_editor_context_provider() -> None:
 
 
 def test_ide_interface_editor_context_returns_supplied_dict() -> None:
-    """IDEInterface.editor_context returns the dict passed at construction."""
+    """StdioInterface.editor_context returns the dict passed at construction."""
     context = {
         "active_file": "foo.py",
         "selection": {"start_line": 1, "end_line": 2, "text": "bar"},
@@ -48,32 +48,32 @@ def test_ide_interface_editor_context_returns_supplied_dict() -> None:
         "workspace_root": "/tmp",
         "cursor_position": None,
     }
-    interface = IDEInterface(1, "explain", context, lambda _: None)
+    interface = StdioInterface(1, "explain", context, lambda _: None)
 
     assert interface.editor_context == context
 
 
 def test_ide_interface_context_emits_deprecation_warning() -> None:
-    """Accessing IDEInterface.context emits a DeprecationWarning and delegates."""
+    """Accessing StdioInterface.context emits a DeprecationWarning and delegates."""
     context = {"active_file": "foo.py"}
-    interface = IDEInterface(1, "hello", context, lambda _: None)
+    interface = StdioInterface(1, "hello", context, lambda _: None)
 
-    with pytest.warns(DeprecationWarning, match="IDEInterface.context is deprecated"):
+    with pytest.warns(DeprecationWarning, match="StdioInterface.context is deprecated"):
         result = interface.context
 
     assert result == context
 
 
 def test_ide_interface_context_warns_via_warnings_warn() -> None:
-    """IDEInterface.context calls warnings.warn with the expected arguments."""
+    """StdioInterface.context calls warnings.warn with the expected arguments."""
     context = {"active_file": "foo.py"}
-    interface = IDEInterface(1, "hello", context, lambda _: None)
+    interface = StdioInterface(1, "hello", context, lambda _: None)
 
-    with patch("chibi.runners.ide_transport.warnings.warn") as warn_mock:
+    with patch("chibi.interfaces.stdio_interface.warnings.warn") as warn_mock:
         result = interface.context
 
     warn_mock.assert_called_once_with(
-        "IDEInterface.context is deprecated; use IDEInterface.editor_context instead.",
+        "StdioInterface.context is deprecated; use StdioInterface.editor_context instead.",
         DeprecationWarning,
         stacklevel=2,
     )

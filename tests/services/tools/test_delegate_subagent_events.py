@@ -9,13 +9,13 @@ from unittest.mock import patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import IDEStdioRunner
+from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
+from chibi.services.events.subagent_events import subagent_tracker
 from chibi.services.providers.tools.common import DelegateTool
 from chibi.services.providers.tools.exceptions import ToolException
-from chibi.services.subagent_events import subagent_tracker
 
-RUNNERS: list[IDEStdioRunner] = []
+RUNNERS: list[StdioRunner] = []
 
 
 class OutputRecorder:
@@ -34,13 +34,13 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def counting_runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def counting_runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner wired as the tracker sink with captured output.
 
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write_line"] = recorder
     instance._subagent_events_enabled = True

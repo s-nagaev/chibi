@@ -9,12 +9,12 @@ import pytest
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
-import chibi.services.scheduler_interface as scheduler_interface_module
+import chibi.interfaces.scheduler_interface as scheduler_interface_module
 from chibi.exceptions import ConfigurationError
+from chibi.interfaces.scheduler_interface import SchedulerInterface, _get_scheduler_bot
 from chibi.models import User
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.bot import handle_scheduler_trigger
-from chibi.services.scheduler_interface import SchedulerInterface, _get_scheduler_bot
 from chibi.services.user import get_llm_chat_completion_answer
 from chibi.storage.local import LocalStorage
 
@@ -151,7 +151,7 @@ async def test_scheduler_interface_delivers_via_bot_to_chat_and_thread() -> None
     bot_mock = MagicMock()
     bot_mock.send_message = AsyncMock()
 
-    with patch("chibi.services.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
+    with patch("chibi.interfaces.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
         await interface.send_message("Hello")
 
     bot_mock.send_message.assert_awaited_once()
@@ -167,7 +167,7 @@ async def test_scheduler_interface_omits_thread_for_non_threaded_chat() -> None:
     bot_mock = MagicMock()
     bot_mock.send_message = AsyncMock()
 
-    with patch("chibi.services.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
+    with patch("chibi.interfaces.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
         await interface.send_message("Hello")
 
     kwargs = bot_mock.send_message.await_args.kwargs
@@ -181,7 +181,7 @@ async def test_scheduler_interface_falls_back_to_plain_text_on_bad_request() -> 
     bot_mock = MagicMock()
     bot_mock.send_message = AsyncMock(side_effect=[BadRequest("can't parse entities"), None])
 
-    with patch("chibi.services.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
+    with patch("chibi.interfaces.scheduler_interface._get_scheduler_bot", new=AsyncMock(return_value=bot_mock)):
         await interface.send_message("Hello")
 
     assert bot_mock.send_message.await_count == 2
@@ -194,8 +194,8 @@ async def test_scheduler_bot_is_initialized_once_and_reused() -> None:
     """The shared Bot is created and initialized exactly once."""
     settings_stub = SimpleNamespace(token="TEST_TOKEN", proxy=None)
     with (
-        patch("chibi.services.scheduler_interface.telegram_settings", settings_stub),
-        patch("chibi.services.scheduler_interface.Bot") as bot_cls,
+        patch("chibi.interfaces.scheduler_interface.telegram_settings", settings_stub),
+        patch("chibi.interfaces.scheduler_interface.Bot") as bot_cls,
     ):
         bot_instance = bot_cls.return_value
         bot_instance.initialize = AsyncMock()
@@ -212,7 +212,7 @@ async def test_scheduler_bot_requires_token() -> None:
     """A missing bot token raises ConfigurationError instead of a silent failure."""
     settings_stub = SimpleNamespace(token=None, proxy=None)
     with (
-        patch("chibi.services.scheduler_interface.telegram_settings", settings_stub),
+        patch("chibi.interfaces.scheduler_interface.telegram_settings", settings_stub),
         pytest.raises(ConfigurationError),
     ):
         await _get_scheduler_bot()

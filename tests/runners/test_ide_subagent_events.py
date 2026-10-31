@@ -9,9 +9,10 @@ from unittest.mock import patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import COMMANDS, PROTOCOL_VERSION, StdioRunner
 from chibi.services.bot import handle_stop
-from chibi.services.subagent_events import subagent_tracker
+from chibi.services.events.subagent_events import subagent_tracker
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",
@@ -20,7 +21,7 @@ READY_FRAME: dict[str, Any] = {
     "capabilities": {"commands": COMMANDS},
 }
 
-RUNNERS: list[IDEStdioRunner] = []
+RUNNERS: list[StdioRunner] = []
 SPAWNED_TASKS: list[asyncio.Task[None]] = []
 
 
@@ -47,7 +48,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner(fail_on_types: set[str] | None = None) -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner(fail_on_types: set[str] | None = None) -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     The recorder replaces ``_write_line`` so both regular writes and
@@ -59,7 +60,7 @@ def runner(fail_on_types: set[str] | None = None) -> tuple[IDEStdioRunner, list[
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder(fail_on_types=fail_on_types)
     instance.__dict__["_write_line"] = recorder
     RUNNERS.append(instance)
@@ -82,7 +83,7 @@ def initialize(capabilities: Any = None) -> dict[str, Any]:
     return message
 
 
-async def run_request(instance: IDEStdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
+async def run_request(instance: StdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
     """Send one protocol request through the runner.
 
     Args:
@@ -124,7 +125,7 @@ async def wait_for_frame(output: list[dict[str, Any]], frame_type: str) -> dict[
     raise AssertionError(f"Missing {frame_type} frame: {output}")
 
 
-async def wait_until_closed(interface: IDEInterface) -> None:
+async def wait_until_closed(interface: StdioInterface) -> None:
     """Wait until the request owning the interface is finished."""
     for _ in range(300):
         if interface._closed:
@@ -228,14 +229,14 @@ class TestAgentEventFrames:
         """A delegated subagent produces exactly one started and one finished frame."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             await subagent_tracker.drain()
             subagent_tracker.subagent_finished(42, "gpt-x")
             await subagent_tracker.drain()
             await interface.send_message("Delegated answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -265,14 +266,14 @@ class TestAgentEventFrames:
         """A foreground request keeps its whole lifecycle strictly pre-result."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             await subagent_tracker.drain()
             subagent_tracker.subagent_finished(42, "gpt-x")
             await subagent_tracker.drain()
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -289,7 +290,7 @@ class TestAgentEventFrames:
         """Two overlapping subagents report active 1, 2, 1, 0 with total growth."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             subagent_tracker.subagent_started(42, "gpt-y")
             await subagent_tracker.drain()
@@ -299,7 +300,7 @@ class TestAgentEventFrames:
             await subagent_tracker.drain()
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -317,14 +318,14 @@ class TestAgentEventFrames:
         """The final natural finish carries active 0 and no synthetic event follows."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             await subagent_tracker.drain()
             subagent_tracker.subagent_finished(42, "gpt-x")
             await subagent_tracker.drain()
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -339,14 +340,14 @@ class TestAgentEventFrames:
         """A second request on the same thread counts from zero again."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(interface.thread_id, "gpt-x")
             await subagent_tracker.drain()
             subagent_tracker.subagent_finished(interface.thread_id, "gpt-x")
             await subagent_tracker.drain()
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -374,7 +375,7 @@ class TestAgentEventFrames:
         """
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             await subagent_tracker.drain()
 
@@ -386,7 +387,7 @@ class TestAgentEventFrames:
             SPAWNED_TASKS.append(task)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -413,7 +414,7 @@ class TestAgentEventFrames:
         """
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             await subagent_tracker.drain()
 
@@ -430,7 +431,7 @@ class TestAgentEventFrames:
             SPAWNED_TASKS.append(task)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -465,7 +466,7 @@ class TestAgentEventFrames:
         assert instance._subagent_requests[7]["sealed"] is True
         assert instance._subagent_requests[7]["active"] == 1
 
-        interface = IDEInterface(7, "/stop", {}, responses.append)
+        interface = StdioInterface(7, "/stop", {}, responses.append)
         await handle_stop(interface=interface)
         await instance.drain_subagent_events()
 
@@ -562,12 +563,12 @@ class TestV1ClientCompatibility:
         """Lifecycle calls with no bound sink produce zero frames."""
         instance, output = runner()
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             subagent_tracker.subagent_finished(42, "gpt-x")
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -585,13 +586,13 @@ class TestEmissionFailureResilience:
         """A failing agent_event write raises nothing at the emission site."""
         instance, output = runner(fail_on_types={"agent_event"})
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             subagent_tracker.subagent_started(42, "gpt-x")
             subagent_tracker.subagent_finished(42, "gpt-x")
             await subagent_tracker.drain()
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"subagents": True}))
             await run_request(instance, "r1", 42)
             await wait_for_frame(output, "result")
@@ -620,7 +621,7 @@ class TestKillFlush:
                 # event; the flush is the authoritative reset for clients.
                 subagent_tracker.subagent_finished(7, "gpt-x")
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             task = asyncio.get_running_loop().create_task(hanging_subagent())
             SPAWNED_TASKS.append(task)
             subagent_tracker.subagent_started(7, "gpt-x")
@@ -628,7 +629,7 @@ class TestKillFlush:
             await gate.wait()
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patch("chibi.services.bot.reset_chat_history", new=AsyncMock(return_value=None)),
         ):
             await instance._handle_message(initialize({"subagents": True}))
@@ -668,7 +669,7 @@ class TestKillFlush:
         subagent_tracker.subagent_started(7, "gpt-x")
         await subagent_tracker.drain()
 
-        interface = IDEInterface(7, "/stop", {}, responses.append)
+        interface = StdioInterface(7, "/stop", {}, responses.append)
         await handle_stop(interface=interface)
         await instance.drain_subagent_events()
 
@@ -691,7 +692,7 @@ class TestKillFlush:
         await instance._handle_message(initialize({"subagents": True}))
         instance.begin_request(7, "r1")
 
-        interface = IDEInterface(7, "/stop", {}, responses.append)
+        interface = StdioInterface(7, "/stop", {}, responses.append)
         await handle_stop(interface=interface)
         await instance.drain_subagent_events()
 
