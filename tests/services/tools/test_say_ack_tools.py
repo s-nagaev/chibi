@@ -143,6 +143,10 @@ class TestThreadNamingPromptGating:
         expected = application_settings.client in _RENAME_CLIENTS
         assert ("# Thread Naming (rename_thread)" in gpt_settings.assistant_prompt) == expected
 
+    def test_assistant_prompt_omits_thread_naming_for_non_rename_clients(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(application_settings, "client", "terminal")
+        assert "# Thread Naming (rename_thread)" not in gpt_settings.assistant_prompt
+
 
 async def _fake_models_available(user_id: int, **kwargs: Any) -> list[ModelChangeSchema]:
     return [ModelChangeSchema(provider="prov", name="gpt-x", display_name="GPT-X", image_generation=False)]
