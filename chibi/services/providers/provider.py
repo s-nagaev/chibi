@@ -78,6 +78,7 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import (
     ChatResponseSchema,
@@ -86,7 +87,6 @@ from chibi.schemas.app import (
     VideoResult,
     VisionResultSchema,
 )
-from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,

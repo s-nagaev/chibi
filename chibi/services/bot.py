@@ -6,9 +6,9 @@ from telegram import (
 )
 
 from chibi.config import application_settings, gpt_settings
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VisionResultSchema
 from chibi.services.events.subagent_events import subagent_tracker
-from chibi.services.interface import UserInterface
 from chibi.services.providers import RegisteredProviders
 from chibi.services.providers.tools import ToolResponseSchema
 from chibi.services.providers.utils import get_usage_msg

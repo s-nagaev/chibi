@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from chibi.interfaces.interface import UserInterface
 from chibi.models import User
-from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.memory import THREAD_NOTES_MAX_LENGTH, UpdateNotesTool
 from chibi.services.providers.tools.tool import RegisteredChibiTools

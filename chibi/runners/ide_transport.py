@@ -18,15 +18,15 @@ from chibi.config import application_settings
 from chibi.config.gpt import gpt_settings
 from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
+from chibi.interfaces.interface import EditorContextProvider, UserInterface
+from chibi.interfaces.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.models import Message
 from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.events.cwd_events import cwd_tracker
 from chibi.services.events.subagent_events import subagent_tracker
-from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
-from chibi.services.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.services.task_manager import task_manager
 from chibi.services.user import (
     clone_thread_messages,
@@ -641,7 +641,7 @@ class IDEStdioRunner:
         """Deliver one scheduled-job message as an unsolicited message frame.
 
         Session-level delivery sink registered at handshake for
-        :class:`chibi.services.scheduler_interface.StdioSchedulerInterface`:
+        :class:`chibi.interfaces.scheduler_interface.StdioSchedulerInterface`:
         scheduler jobs fire outside any request context, so the emitter is
         session-level rather than request-scoped. The frame reuses the regular
         background-message machinery (same frame shape, same stdout write

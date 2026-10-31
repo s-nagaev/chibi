@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from types import TracebackType
 
-from chibi.services.interface import UserInterface
+from chibi.interfaces.interface import UserInterface
 from chibi.utils.ack_sentinel import ACK_SENTINEL
 
 logger = logging.getLogger(__name__)

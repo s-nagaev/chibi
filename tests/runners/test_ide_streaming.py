@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 
 import chibi.config  # noqa: F401
+from chibi.interfaces.interface import UserInterface
 from chibi.runners.ide_transport import DELTA_FLUSH_INTERVAL, IDEInterface, IDEStdioRunner
-from chibi.services.interface import UserInterface
 
 REQUEST_FIELDS: dict[str, Any] = {
     "workspace_root": "/tmp",

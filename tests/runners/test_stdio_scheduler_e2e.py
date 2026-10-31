@@ -180,7 +180,7 @@ def scheduler_gate_enabled():
 @pytest.fixture(autouse=True)
 def _clean_emitter():
     """Ensure the module-level emitter registry is clean around every test."""
-    from chibi.services.scheduler_interface import clear_stdio_delivery_emitter
+    from chibi.interfaces.scheduler_interface import clear_stdio_delivery_emitter
 
     clear_stdio_delivery_emitter()
     yield

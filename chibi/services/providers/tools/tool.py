@@ -6,7 +6,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from chibi.config import gpt_settings
-from chibi.services.interface import UserInterface
+from chibi.interfaces.interface import UserInterface
 from chibi.services.providers.tools.exceptions import LoopDetectedException, NoUserInterfaceProvidedException
 from chibi.services.providers.tools.schemas import ToolResponseSchema
 from chibi.services.providers.tools.utils import AdditionalOptions, CallTracker

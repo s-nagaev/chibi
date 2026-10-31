@@ -29,10 +29,14 @@ chibi/                    # Main package
 ├── constants.py          # Enums, constants, provider metadata
 ├── exceptions.py         # Custom exceptions
 ├── models.py             # Pydantic models (User, Message, etc.)
+├── interfaces/           # Interface protocols: interface.py (UserInterface,
+│   │                     # TelegramInterface, EditorContextProvider),
+│   │                     # terminal_interface.py, scheduler_interface.py
 ├── runners/              # Entry points: telegram.py, terminal.py
 ├── schemas/              # Provider API request/response schemas (Pydantic)
 ├── service.py            # Core service orchestration
 ├── services/             # Business logic
+│   ├── events/           # Event modules: cwd_events.py, subagent_events.py
 │   ├── providers/        # LLM provider adapters
 │   │   └── tools/        # ChibiTools exposed to LLMs
 │   └── ...

@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 import chibi.config  # noqa: F401
+from chibi.interfaces.interface import UserInterface
 from chibi.runners.ide_transport import IDEInterface
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
-from chibi.services.interface import UserInterface
 from chibi.services.user import get_llm_chat_completion_answer
 
 

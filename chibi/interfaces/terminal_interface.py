@@ -6,7 +6,7 @@ from typing import Any
 from rich.console import Console
 from rich.markdown import Markdown
 
-from chibi.services.interface import UserInterface
+from chibi.interfaces.interface import UserInterface
 
 # Module-level shared console for consistent output
 _console = Console()

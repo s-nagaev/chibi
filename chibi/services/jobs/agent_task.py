@@ -16,6 +16,8 @@ from loguru import logger
 from pydantic import ValidationError
 
 from chibi.config import application_settings, gpt_settings
+from chibi.interfaces.interface import UserInterface
+from chibi.interfaces.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
 from chibi.schemas.scheduler import (
     AgentJobPayload,
     CommandActionPayload,
@@ -23,11 +25,9 @@ from chibi.schemas.scheduler import (
     SelfActionPayload,
 )
 from chibi.services.bot import handle_scheduler_trigger
-from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.cmd import _decode_output
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler, StdioScheduler
-from chibi.services.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
 from chibi.services.user import get_moderation_provider
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database

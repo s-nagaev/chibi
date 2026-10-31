@@ -12,14 +12,14 @@ import pytest
 import chibi.config  # noqa: F401
 import chibi.services.jobs.agent_task as agent_task_module
 from chibi.constants import IDE_STORAGE_ID
-from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEStdioRunner
-from chibi.schemas.scheduler import AgentJobPayload
-from chibi.services.jobs.agent_task import _notify_failure, run_agent_job
-from chibi.services.scheduler_interface import (
+from chibi.interfaces.scheduler_interface import (
     StdioSchedulerInterface,
     clear_stdio_delivery_emitter,
     get_stdio_delivery_emitter,
 )
+from chibi.runners.ide_transport import COMMANDS, PROTOCOL_VERSION, IDEStdioRunner
+from chibi.schemas.scheduler import AgentJobPayload
+from chibi.services.jobs.agent_task import _notify_failure, run_agent_job
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",
