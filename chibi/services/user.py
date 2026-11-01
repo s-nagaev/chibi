@@ -815,6 +815,22 @@ async def drop_tool_call_history(db: Database, storage_id: int, thread_id: int) 
 
 
 @inject_database
+async def get_thread_name(db: Database, storage_id: int, thread_id: int) -> str | None:
+    """Return the stored display name of a thread, if any.
+
+    Args:
+        db: The database instance.
+        storage_id: The storage ID (user_id for private, chat_id for groups).
+        thread_id: The ID of the thread.
+
+    Returns:
+        The stored thread name, or None when the thread has no stored name.
+    """
+    user = await db.get_or_create_user(user_id=storage_id)
+    return user.thread_names.get(thread_id)
+
+
+@inject_database
 async def save_thread_name(db: Database, storage_id: int, thread_id: int, name: str) -> None:
     """Save the name of a specific thread for the user.
 

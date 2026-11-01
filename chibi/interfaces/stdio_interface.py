@@ -11,7 +11,10 @@ from openai.types import CompletionUsage
 from chibi.constants import IDE_STORAGE_ID
 from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.schemas.app import UsageSchema
+from chibi.services.thread_name_events import thread_name_tracker
 from chibi.services.user import save_thread_name
+
+MAX_THREAD_NAME_LENGTH = 128
 
 
 class StdioInterface(UserInterface, EditorContextProvider):
@@ -321,18 +324,28 @@ class StdioInterface(UserInterface, EditorContextProvider):
         raise NotImplementedError("IDE threads are allocated by the client")
 
     async def rename_thread(self, new_name: str) -> bool:
-        """Persist the thread name in backend storage.
+        """Persist the thread name in backend storage and push it to the client.
 
         IDE threads have no external topic to edit, so the name is registered
         in the user's thread-name map (the same place the clone command uses).
+        On success the rename is forwarded to the IDE client as a
+        ``thread_renamed`` frame through the thread-name tracker: this is the
+        single fire site for every rename path (tool, hidden command), so
+        callers never touch the transport. An invalid name is rejected before
+        anything is persisted or emitted.
 
         Args:
             new_name: The new display name for this request's thread.
 
         Returns:
-            True once the name is persisted.
+            True once the name is persisted, False when the name is empty
+            after trimming or longer than :data:`MAX_THREAD_NAME_LENGTH`.
         """
-        await save_thread_name(storage_id=self.storage_id, thread_id=self.thread_id, name=new_name)
+        name = new_name.strip()
+        if not name or len(name) > MAX_THREAD_NAME_LENGTH:
+            return False
+        await save_thread_name(storage_id=self.storage_id, thread_id=self.thread_id, name=name)
+        thread_name_tracker.thread_renamed(self.thread_id, name)
         return True
 
     async def delete_thread(self) -> bool:
