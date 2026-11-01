@@ -30,7 +30,7 @@ from telegram.ext import (
 
 from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import GROUP_CHAT_TYPES, UserAction, UserContext
-from chibi.interfaces.interface import TelegramInterface
+from chibi.interfaces.telegram_interface import TelegramInterface
 from chibi.schemas.app import ModelChangeSchema
 from chibi.services.bot import (
     handle_available_model_options,

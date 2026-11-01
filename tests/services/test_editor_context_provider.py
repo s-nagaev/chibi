@@ -6,8 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.interfaces.interface import EditorContextProvider, TelegramInterface, UserInterface
+from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.telegram_interface import TelegramInterface
 
 
 def test_ide_interface_is_editor_context_provider() -> None:

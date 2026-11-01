@@ -30,8 +30,9 @@ chibi/                    # Main package
 ├── exceptions.py         # Custom exceptions
 ├── models.py             # Pydantic models (User, Message, etc.)
 ├── interfaces/           # Interface protocols: interface.py (UserInterface,
-│   │                     # TelegramInterface, EditorContextProvider),
-│   │                     # terminal_interface.py, scheduler_interface.py,
+│   │                     # EditorContextProvider), telegram_interface.py
+│   │                     # (TelegramInterface), terminal_interface.py,
+│   │                     # scheduler_interface.py,
 │   │                     # stdio_interface.py (StdioInterface),
 │   │                     # stdio_runner.py (StdioRunner)
 ├── runners/              # Entry points: telegram.py, terminal.py

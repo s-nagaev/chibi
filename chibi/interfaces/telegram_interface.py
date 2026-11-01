@@ -1,0 +1,437 @@
+import random
+from io import BytesIO
+from typing import Any
+
+from loguru import logger
+from telegram import Chat as TelegramChat
+from telegram import File, Update
+from telegram.constants import ChatAction, ChatType
+from telegram.ext import ContextTypes
+
+from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, GROUP_CHAT_TYPES
+from chibi.utils.rich_message import RichMessageBuilder
+from chibi.utils.telegram import send_answer_message, send_images
+
+from .interface import UserInterface
+
+
+class TelegramInterface(UserInterface):
+    def __init__(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Initialize the Telegram interface from an incoming update.
+
+        Args:
+            update: The Telegram update object.
+            context: The PTB callback context.
+        """
+        self.update = update
+        self.context = context
+        self._caption: str | None = None
+        self._thinking_draft_id: int | None = None
+
+    @property
+    def _chat(self) -> TelegramChat:
+        """Internal helper to access the current Telegram chat.
+
+        Returns:
+            The Telegram chat object.
+        """
+        if chat := self.update.effective_chat:
+            return chat
+        raise ValueError("Telegram incoming update does not contain valid chat data.")
+
+    @property
+    def thread_id(self) -> int:
+        """Returns the message thread ID from the current Telegram message.
+
+        Returns:
+            The thread ID, or 0 for non-threaded chats and non-forum supergroups.
+        """
+        if message := self.update.effective_message:
+            if message.chat.type == ChatType.SUPERGROUP and not message.chat.is_forum:
+                return 0
+            return message.message_thread_id or 0
+
+        return 0
+
+    @property
+    def chat_id(self) -> str | int:
+        """Returns the unique identifier for the current Telegram chat.
+
+        Returns:
+            The chat identifier.
+        """
+        return self._chat.id
+
+    @property
+    def user_id(self) -> int:
+        """Returns the unique identifier for the current Telegram user.
+
+        Returns:
+            The user identifier.
+        """
+        if user := self.update.effective_user:
+            return user.id
+        raise ValueError("Telegram incoming update does not contain valid user data.")
+
+    @property
+    def storage_id(self) -> int:
+        """Returns the storage key for persisting conversation/context.
+
+        Private chats -> user_id (== chat_id). Group chats -> chat_id (shared among all participants).
+
+        Returns:
+            The storage identifier.
+        """
+        if self._chat.type in GROUP_CHAT_TYPES:
+            return int(self._chat.id)
+        return self.user_id
+
+    @property
+    def user_data(self) -> str:
+        """Returns a string representation of the current Telegram user.
+
+        Returns:
+            The user data string.
+        """
+        if user := self.update.effective_user:
+            return f"{user.name} ({user.id})"
+        raise ValueError("Telegram incoming update does not contain valid user data.")
+
+    @property
+    def chat_data(self) -> str:
+        """Returns a string representation of the current Telegram chat.
+
+        Returns:
+            The chat data string.
+        """
+        return f"{self._chat.type.upper()} chat #{self._chat.id}, thread #{self.thread_id}"
+
+    @property
+    def attached_document(self) -> dict[str, str] | None:
+        """Returns the attached document or photo data from the message if present.
+
+        Returns:
+            The document data dictionary or None.
+        """
+        message = self.update.effective_message
+        if not message:
+            return None
+        if document := message.document:
+            return document.to_dict()
+        if not message.photo:
+            return None
+        photo = message.photo[-1]
+        return photo.to_dict()
+
+    @property
+    def attached_document_caption(self) -> str | None:
+        """Returns the caption of the attached document or photo if present.
+
+        Returns:
+            The caption string or None.
+        """
+        message = self.update.effective_message
+        if not message:
+            return None
+        return message.caption
+
+    async def get_text_prompt(self) -> str | None:
+        """Retrieves the text or caption from the current Telegram message.
+
+        Returns:
+            The text prompt string or None.
+        """
+        if message := self.update.effective_message:
+            return message.text or message.caption
+        raise ValueError("Telegram incoming update does not contain valid message data.")
+
+    async def get_voice_prompt(self) -> BytesIO | None:
+        """Downloads and returns the voice message from the current Telegram message as a BytesIO object.
+
+        Returns:
+            The voice prompt BytesIO object or None.
+        """
+        if not self.update.effective_message:
+            return None
+        if voice := self.update.effective_message.voice:
+            file_id = voice.file_id
+            file: File = await self.context.bot.get_file(file_id)
+            voice_prompt = BytesIO()
+            await file.download_to_memory(out=voice_prompt)
+            voice_prompt.seek(0)
+            return voice_prompt
+        return None
+
+    async def send_action_typing(self) -> None:
+        """Sends a typing action to the Telegram chat."""
+        await self._chat.send_chat_action(action=ChatAction.TYPING, message_thread_id=self.thread_id)
+
+    async def send_action_uploading_photo(self) -> None:
+        """Sends an uploading photo action to the Telegram chat."""
+        await self._chat.send_chat_action(action=ChatAction.UPLOAD_PHOTO, message_thread_id=self.thread_id)
+
+    async def send_action_recording(self) -> None:
+        """Sends a recording voice action to the Telegram chat."""
+        await self._chat.send_chat_action(action=ChatAction.RECORD_VOICE, message_thread_id=self.thread_id)
+
+    async def send_reaction(self, reaction: str) -> None:
+        """Sends a reaction to the user's message in Telegram.
+
+        Args:
+            reaction: The reaction to send.
+        """
+        if message := self.update.effective_message:
+            await message.set_reaction(reaction=reaction, is_big=True)
+            return None
+        logger.warning("We tried to set the reaction on user message, but no user message found in TG update.")
+
+    async def delete_last_user_message(self) -> None:
+        """Deletes the last message sent by the user in Telegram."""
+        if message := self.update.effective_message:
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting last user message: {e}")
+                pass
+        return None
+
+    async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
+        """Sends a text message to the Telegram chat.
+
+        Args:
+            message: The text content to send.
+            reply: Whether to reply to the user's message.
+            **kwargs: Additional arguments for the message sending function.
+        """
+        await self._clear_thinking_draft()
+        await send_answer_message(message=message, update=self.update, context=self.context, reply=reply, **kwargs)
+
+    async def _clear_thinking_draft(self) -> None:
+        """Clear any active ``<tg-thinking>`` draft before the final message.
+
+        Works around a known Mac Telegram client bug where the
+        ``<tg-thinking>`` draft persists and overlaps the final message.
+        """
+        if self._thinking_draft_id is None:
+            return None
+        try:
+            payload = RichMessageBuilder.build_thinking_draft(
+                thoughts="\u200b",
+                chat_id=self.chat_id,
+                thread_id=self.thread_id if self.thread_id != 0 else None,
+            )
+            payload["draft_id"] = self._thinking_draft_id
+            await self.context.bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.warning(f"Failed to clear thinking draft: {e}")
+        finally:
+            self._thinking_draft_id = None
+        return None
+
+    async def send_audio(
+        self,
+        audio: bytes | str,
+        reply: bool = True,
+        title: str | None = None,
+        caption: str | None = None,
+        performer: str | None = None,
+        duration: int | None = None,
+        thumbnail: bytes | None = None,
+        filename: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Sends an audio file to the Telegram chat.
+
+        Args:
+            audio: The audio data or path to send.
+            reply: Whether to reply to the user's message.
+            title: The title of the audio.
+            caption: The caption for the audio.
+            performer: The performer of the audio.
+            duration: The duration of the audio in seconds.
+            thumbnail: The thumbnail data for the audio.
+            filename: The filename for the audio.
+            **kwargs: Additional arguments for the audio sending function.
+        """
+        await self.context.bot.send_audio(
+            chat_id=self.chat_id,
+            audio=audio,
+            title=title,
+            performer=performer,
+            caption=caption,
+            duration=duration,
+            thumbnail=thumbnail,
+            filename=filename,
+            parse_mode="HTML",
+            message_thread_id=self.thread_id,
+            read_timeout=AUDIO_UPLOAD_TIMEOUT,
+            write_timeout=AUDIO_UPLOAD_TIMEOUT,
+        )
+
+    async def send_video(
+        self,
+        video: bytes | str,
+        reply: bool = True,
+        title: str | None = None,
+        caption: str | None = None,
+        duration: int | None = None,
+        thumbnail: bytes | None = None,
+        filename: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Sends a video file to the Telegram chat.
+
+        Args:
+            video: The video data or path to send.
+            reply: Whether to reply to the user's message.
+            title: The title of the video.
+            caption: The caption for the video.
+            duration: The duration of the video in seconds.
+            thumbnail: The thumbnail data for the video.
+            filename: The filename for the video.
+            **kwargs: Additional arguments for the video sending function.
+        """
+        await self.context.bot.send_video(
+            chat_id=self.chat_id,
+            video=video,
+            caption=caption,
+            duration=duration,
+            thumbnail=thumbnail,
+            filename=filename,
+            message_thread_id=self.thread_id,
+            parse_mode="HTML",
+            read_timeout=FILE_UPLOAD_TIMEOUT,
+            write_timeout=FILE_UPLOAD_TIMEOUT,
+        )
+
+    async def send_images(self, images: list[BytesIO] | list[str], reply: bool = True, **kwargs: Any) -> None:
+        """Sends a list of images to the Telegram chat.
+
+        Args:
+            images: A list of image data or paths to send.
+            reply: Whether to reply to the user's message.
+            **kwargs: Additional arguments for the image sending function.
+        """
+        await send_images(images=images, update=self.update, context=self.context)
+
+    async def send_document(
+        self,
+        document: bytes | BytesIO,
+        filename: str | None = None,
+        caption: str | None = None,
+        thumbnail: bytes | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Sends a document file to the Telegram chat.
+
+        Args:
+            document: The document data to send.
+            filename: The filename for the document.
+            caption: The caption for the document.
+            thumbnail: The thumbnail data for the document.
+            **kwargs: Additional arguments for the document sending function.
+        """
+        await self.context.bot.send_document(
+            chat_id=self.chat_id,
+            document=document,
+            filename=filename,
+            caption=caption,
+            thumbnail=thumbnail,
+            message_thread_id=self.thread_id,
+        )
+
+    async def send_llm_thoughts(self, thoughts: str) -> None:
+        """Send LLM thoughts as native Telegram ``<tg-thinking>`` animation.
+
+        Args:
+            thoughts: The LLM reasoning text to display.
+        """
+        if not thoughts or thoughts == "No content":
+            return None
+
+        if self._thinking_draft_id is None:
+            self._thinking_draft_id = random.randint(1, 2**31 - 1)
+
+        payload = RichMessageBuilder.build_thinking_draft(
+            thoughts=thoughts,
+            chat_id=self.chat_id,
+            thread_id=self.thread_id if self.thread_id != 0 else None,
+        )
+
+        payload["draft_id"] = self._thinking_draft_id
+
+        try:
+            await self.context.bot.do_api_request("sendRichMessageDraft", api_kwargs=payload)
+        except Exception as e:
+            logger.warning(f"sendRichMessageDraft failed: {e}, falling back to plain text")
+            # await self.send_message(f"💡💭 {thoughts}", reply=False)
+        return None
+
+    async def get_caption(self) -> str | None:
+        """Retrieve the caption for the current message.
+
+        Returns the previously stored caption if set, otherwise falls back
+        to the caption from the Telegram message.
+
+        Returns:
+            The caption string, or None if no caption is present.
+        """
+        if self._caption:
+            return self._caption
+
+        if message := self.update.effective_message:
+            return message.caption
+
+        return None
+
+    def set_caption(self, caption: str) -> None:
+        """Store a caption to associate with the next media message.
+
+        Args:
+            caption: The caption text.
+        """
+        self._caption = caption
+        return None
+
+    async def create_thread(self, name: str) -> int:
+        """Create a new Telegram forum topic.
+
+        Args:
+            name: The name of the topic to create.
+
+        Returns:
+            The message thread ID of the created topic.
+        """
+        thread_name = name[:128] or "Untitled"
+        topic = await self.context.bot.create_forum_topic(
+            chat_id=self.chat_id,
+            name=thread_name,
+        )
+        return topic.message_thread_id
+
+    async def rename_thread(self, new_name: str) -> bool:
+        """Rename the current Telegram forum topic.
+
+        Args:
+            new_name: The new name for the topic.
+
+        Returns:
+            True if the topic was successfully renamed.
+        """
+        name = new_name[:128] if new_name else "Untitled"
+        return await self.context.bot.edit_forum_topic(
+            chat_id=self.chat_id,
+            message_thread_id=self.thread_id,
+            name=name,
+        )
+
+    async def delete_thread(self) -> bool:
+        """Delete the current Telegram forum topic.
+
+        Returns:
+            True if the topic was successfully deleted.
+        """
+        return await self.context.bot.delete_forum_topic(
+            chat_id=self.chat_id,
+            message_thread_id=self.thread_id,
+        )
