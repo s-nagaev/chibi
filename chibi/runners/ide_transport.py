@@ -28,10 +28,12 @@ from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, regist
 from chibi.services.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.services.subagent_events import subagent_tracker
 from chibi.services.task_manager import task_manager
+from chibi.services.thread_name_events import thread_name_tracker
 from chibi.services.user import (
     clone_thread_messages,
     get_info,
     get_models_available,
+    get_thread_name,
     save_thread_name,
     set_active_model,
 )
@@ -43,6 +45,7 @@ COMMANDS = [
     "/reset",
     "/stop",
     "/new_thread_with_current_context",
+    "/rename_thread",
     "/model",
     "/imagine",
     "/info",
@@ -54,6 +57,7 @@ MAX_THOUGHTS_BYTES = 256 * 1024
 THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
 DELTA_FLUSH_INTERVAL = 0.2
 DELTA_FLUSH_CHARS = 512
+MAX_THREAD_NAME_LENGTH = 128
 
 
 class _SubagentRequestState(TypedDict):
@@ -511,18 +515,28 @@ class IDEInterface(UserInterface, EditorContextProvider):
         raise NotImplementedError("IDE threads are allocated by the client")
 
     async def rename_thread(self, new_name: str) -> bool:
-        """Persist the thread name in backend storage.
+        """Persist the thread name in backend storage and push it to the client.
 
         IDE threads have no external topic to edit, so the name is registered
         in the user's thread-name map (the same place the clone command uses).
+        On success the rename is forwarded to the IDE client as a
+        ``thread_renamed`` frame through the thread-name tracker: this is the
+        single fire site for every rename path (tool, hidden command), so
+        callers never touch the transport. An invalid name is rejected before
+        anything is persisted or emitted.
 
         Args:
             new_name: The new display name for this request's thread.
 
         Returns:
-            True once the name is persisted.
+            True once the name is persisted, False when the name is empty
+            after trimming or longer than :data:`MAX_THREAD_NAME_LENGTH`.
         """
-        await save_thread_name(storage_id=self.storage_id, thread_id=self.thread_id, name=new_name)
+        name = new_name.strip()
+        if not name or len(name) > MAX_THREAD_NAME_LENGTH:
+            return False
+        await save_thread_name(storage_id=self.storage_id, thread_id=self.thread_id, name=name)
+        thread_name_tracker.thread_renamed(self.thread_id, name)
         return True
 
     async def delete_thread(self) -> bool:
@@ -546,10 +560,13 @@ class IDEStdioRunner:
         self._thoughts_enabled = False
         self._subagent_events_enabled = False
         self._cwd_updates_enabled = False
+        self._thread_renames_enabled = False
         self._streaming_enabled = False
         self._cwd_emitted_threads: set[int] = set()
+        self._thread_name_emitted_threads: set[int] = set()
         self._session_threads: set[int] = set()
         self._cwd_emissions: set[asyncio.Task[None]] = set()
+        self._thread_name_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
         self._delta_requests: dict[str, int] = {}
@@ -946,6 +963,82 @@ class IDEStdioRunner:
         if self._cwd_emissions:
             await asyncio.gather(*list(self._cwd_emissions), return_exceptions=True)
 
+    async def _emit_thread_renamed(self, thread_id: int, name: str) -> None:
+        """Write one ``thread_renamed`` frame to stdout.
+
+        The frame reports a thread's new display name. It is a non-terminal,
+        thread-scoped, pure frontend-state update: like ``status``/``cwd_update``
+        it never affects a request lifecycle and carries no request id. Emission
+        is gated on the ``thread_renames`` capability, so v1 clients that never
+        opted in see zero behavioral change. On a write failure the frame is
+        logged and dropped: the update is best effort and there is no request
+        id to correlate an error frame to.
+
+        Args:
+            thread_id: Thread whose display name is reported.
+            name: The validated new display name.
+        """
+        if not self._thread_renames_enabled:
+            return
+        try:
+            await self._write({"type": "thread_renamed", "thread_id": thread_id, "name": name})
+        except Exception:
+            logger.exception("Failed to deliver a thread_renamed for thread {}", thread_id)
+
+    async def _emit_stored_thread_name(self, thread_id: int) -> None:
+        """Emit the stored display name of one thread, if any.
+
+        First-request sync for the ``thread_renames`` capability: the client
+        learns the name chosen outside this session (or a previous one) before
+        anything runs. A thread with no stored name — every normal
+        TUI-created thread — is a silent no-op, so no frame is fabricated.
+        Names that fail validation are dropped silently, mirroring the
+        rename fire site.
+
+        Args:
+            thread_id: Thread whose stored display name is reported.
+        """
+        if not self._thread_renames_enabled:
+            return
+        try:
+            stored = await get_thread_name(storage_id=IDE_STORAGE_ID, thread_id=thread_id)
+        except Exception:
+            logger.exception("Failed to resolve the stored name for thread {}", thread_id)
+            return
+        if stored is None:
+            return
+        name = stored.strip()
+        if not name or len(name) > MAX_THREAD_NAME_LENGTH:
+            return
+        await self._emit_thread_renamed(thread_id, name)
+
+    def thread_renamed(self, thread_id: int, name: str) -> None:
+        """Schedule one ``thread_renamed`` frame for fire-and-forget delivery.
+
+        Sink callback invoked by
+        :data:`chibi.services.thread_name_events.thread_name_tracker` when
+        rename code (the ``rename_thread`` tool or the hidden command) changes
+        a thread's display name. Emission must never block or serialize the
+        rename itself, so the task is simply left to contend for the stdout
+        lock on its own.
+
+        Args:
+            thread_id: Thread whose display name changed.
+            name: The validated new display name.
+        """
+        try:
+            task = asyncio.get_running_loop().create_task(self._emit_thread_renamed(thread_id, name))
+        except RuntimeError:
+            logger.debug("No running loop for a thread_renamed on thread {}", thread_id)
+            return
+        self._thread_name_emissions.add(task)
+        task.add_done_callback(self._thread_name_emissions.discard)
+
+    async def drain_thread_name_events(self) -> None:
+        """Wait until every in-flight thread_renamed emission task has finished."""
+        if self._thread_name_emissions:
+            await asyncio.gather(*list(self._thread_name_emissions), return_exceptions=True)
+
     async def _emit_delta(self, request_id: str, thread_id: int, text: str) -> None:
         """Append one live response chunk to the request's delta buffer.
 
@@ -1189,6 +1282,38 @@ class IDEStdioRunner:
             f"{cloned_messages} messages copied."
         )
 
+    async def _handle_rename_thread(self, interface: IDEInterface, args: str, responses: list[str]) -> None:
+        """Rename the request's thread to the name given in the command arguments.
+
+        The hidden command lets the client push a user rename to the backend
+        (the TUI applies the title locally and fires this for persistence and
+        uniform semantics). The name is the raw command remainder trimmed;
+        it must be non-empty and single-line. Over-long names are truncated
+        to :data:`MAX_THREAD_NAME_LENGTH` (the chosen behaviour, matching the
+        ``rename_thread`` tool). The rename goes through
+        :meth:`IDEInterface.rename_thread`, so persistence and the
+        ``thread_renamed`` echo share the single fire site with every other
+        rename path; the drain-before-result ordering in ``_run_request``
+        keeps the echo ahead of this command's ``result`` frame.
+
+        Args:
+            interface: Request-local interface bound to the renamed thread.
+            args: Raw command arguments (the new thread name).
+            responses: Accumulated response lines for the result frame.
+        """
+        name = args.strip()
+        if not name or "\n" in name:
+            interface.error_code = "invalid_argument"
+            interface.error_message = "Please provide a non-empty single-line name: /rename_thread <name>"
+            return
+        name = name[:MAX_THREAD_NAME_LENGTH]
+        renamed = await interface.rename_thread(name)
+        if not renamed:
+            interface.error_code = "invalid_argument"
+            interface.error_message = "The name was rejected: it is empty or longer than 128 characters."
+            return
+        responses.append(f"✅ Thread renamed: {name} (ID: {interface.thread_id}).")
+
     async def _run_request(self, message: dict[str, Any]) -> None:
         """Route and complete one request."""
         request_id = message["request_id"]
@@ -1214,6 +1339,14 @@ class IDEStdioRunner:
             # status-line display and re-syncs after a Result-time change).
             self._cwd_emitted_threads.add(thread_id)
             await self._emit_cwd_update(thread_id)
+        if self._thread_renames_enabled and thread_id not in self._thread_name_emitted_threads:
+            # First request on this thread: sync the client with the thread's
+            # stored display name before anything runs. A no-op when no name
+            # is stored (normal TUI-created threads have none); a rename made
+            # in this or a previous session converges the client's title
+            # (backend wins, last-writer-wins on later renames).
+            self._thread_name_emitted_threads.add(thread_id)
+            await self._emit_stored_thread_name(thread_id)
         try:
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
@@ -1228,6 +1361,8 @@ class IDEStdioRunner:
                     await self._handle_new_thread_with_current_context(
                         interface=interface, args=args, responses=responses
                     )
+                elif command == "/rename_thread":
+                    await self._handle_rename_thread(interface=interface, args=args, responses=responses)
                 elif command == "/imagine":
                     if not args:
                         raise ValueError("Please provide a prompt: /imagine <description>")
@@ -1301,6 +1436,7 @@ class IDEStdioRunner:
             if current_task is None or current_task.cancelling() == 0:
                 await self.drain_subagent_events()
                 await self.drain_cwd_updates()
+                await self.drain_thread_name_events()
                 await self.drain_deltas()
             self._drop_deltas(request_id)
             self.seal_request(thread_id, request_id)
@@ -1394,6 +1530,10 @@ class IDEStdioRunner:
                 cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
                 if self._cwd_updates_enabled:
                     logger.debug("client declared the cwd_updates capability")
+                self._thread_renames_enabled = capabilities.get("thread_renames") is True
+                thread_name_tracker.set_sink(self if self._thread_renames_enabled else None)
+                if self._thread_renames_enabled:
+                    logger.debug("client declared the thread_renames capability")
                 self._streaming_enabled = capabilities.get("streaming") is True
                 if self._streaming_enabled:
                     logger.debug("client declared the streaming capability")
@@ -1526,6 +1666,7 @@ class IDEStdioRunner:
             self._stopping = True
             subagent_tracker.release(self)
             cwd_tracker.release(self)
+            thread_name_tracker.release(self)
             clear_stdio_delivery_emitter()
             await self._shutdown_scheduler()
             await task_manager.shutdown()
