@@ -14,6 +14,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.exceptions import NoProviderSelectedError
+from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, VideoResult, VisionResultSchema
 from chibi.services.failover import (
@@ -23,7 +24,6 @@ from chibi.services.failover import (
     failover_warning_message,
     run_with_failover,
 )
-from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.abstract import Database

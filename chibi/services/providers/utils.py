@@ -15,10 +15,10 @@ from openai.types.responses import Response
 
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT, TOOL_RESULTS_SHARE_WARN_THRESHOLD
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
-from chibi.services.interface import UserInterface
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import _is_tool_response_message, get_chibi_user
 from chibi.storage.files import get_file_storage

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.runners.ide_transport import PROTOCOL_VERSION, IDEStdioRunner
+from chibi.interfaces.stdio_runner import PROTOCOL_VERSION, StdioRunner
 from chibi.schemas.app import ModelChangeSchema
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "ide_protocol"
@@ -73,12 +73,12 @@ def patches(gate: asyncio.Event | None = None) -> list[Any]:
     global _gate
     _gate = gate
     return [
-        patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
-        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
-        patch("chibi.runners.ide_transport.handle_image_generation", fake_imagine),
-        patch("chibi.runners.ide_transport.get_models_available", fake_models),
-        patch("chibi.runners.ide_transport.set_active_model", fake_select),
-        patch("chibi.runners.ide_transport.get_info", fake_info),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", fake_imagine),
+        patch("chibi.interfaces.stdio_runner.get_models_available", fake_models),
+        patch("chibi.interfaces.stdio_runner.set_active_model", fake_select),
+        patch("chibi.interfaces.stdio_runner.get_info", fake_info),
     ]
 
 
@@ -103,7 +103,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     The recorder replaces ``_write_line`` so both regular writes and
@@ -112,7 +112,7 @@ def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write_line"] = recorder
     return instance, recorder.frames
@@ -187,12 +187,12 @@ async def test_canonical_session_output() -> None:
 async def test_canonical_streaming_session_output() -> None:
     """Replay the canonical streaming session and compare every frame."""
     active: list[Any] = [
-        patch("chibi.runners.ide_transport.handle_user_prompt", fake_streaming_session_prompt),
-        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
-        patch("chibi.runners.ide_transport.handle_image_generation", fake_imagine),
-        patch("chibi.runners.ide_transport.get_models_available", fake_models),
-        patch("chibi.runners.ide_transport.set_active_model", fake_select),
-        patch("chibi.runners.ide_transport.get_info", fake_info),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_streaming_session_prompt),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", fake_imagine),
+        patch("chibi.interfaces.stdio_runner.get_models_available", fake_models),
+        patch("chibi.interfaces.stdio_runner.set_active_model", fake_select),
+        patch("chibi.interfaces.stdio_runner.get_info", fake_info),
     ]
     for item in active:
         item.start()
@@ -244,7 +244,7 @@ async def test_canonical_cancel_and_shutdown_outputs() -> None:
 async def test_initialize_persists_and_logs_client_identity() -> None:
     """Persist standard client identity and emit the handshake observability event."""
     instance, output = runner()
-    with patch("chibi.runners.ide_transport.logger.info") as log_info:
+    with patch("chibi.interfaces.stdio_runner.logger.info") as log_info:
         await instance._handle_message(
             {
                 "type": "initialize",
@@ -273,7 +273,7 @@ async def test_initialize_handles_missing_or_malformed_client_identity(client: A
     if client is not None:
         message["client"] = client
 
-    with patch("chibi.runners.ide_transport.logger.info") as log_info:
+    with patch("chibi.interfaces.stdio_runner.logger.info") as log_info:
         await instance._handle_message(message)
 
     assert instance.client_name is None
@@ -432,7 +432,7 @@ async def test_commands_and_thread_scheduling() -> None:
 @pytest.mark.asyncio
 async def test_canonical_subagent_events_output() -> None:
     """Replay the canonical subagent lifecycle scenario and compare every frame."""
-    from chibi.services.subagent_events import subagent_tracker
+    from chibi.services.events.subagent_events import subagent_tracker
 
     async def subagent_prompt(interface: Any) -> None:
         """Emit one deterministic started/finished pair before answering."""
@@ -446,12 +446,12 @@ async def test_canonical_subagent_events_output() -> None:
 
     instance, output = runner()
     active: list[Any] = [
-        patch("chibi.runners.ide_transport.handle_user_prompt", subagent_prompt),
-        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
-        patch("chibi.runners.ide_transport.handle_image_generation", fake_imagine),
-        patch("chibi.runners.ide_transport.get_models_available", fake_models),
-        patch("chibi.runners.ide_transport.set_active_model", fake_select),
-        patch("chibi.runners.ide_transport.get_info", fake_info),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", subagent_prompt),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", fake_imagine),
+        patch("chibi.interfaces.stdio_runner.get_models_available", fake_models),
+        patch("chibi.interfaces.stdio_runner.set_active_model", fake_select),
+        patch("chibi.interfaces.stdio_runner.get_info", fake_info),
     ]
     for item in active:
         item.start()

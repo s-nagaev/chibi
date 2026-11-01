@@ -40,9 +40,9 @@ from chibi.exceptions import (
     NotAuthorizedError,
     ServiceRateLimitError,
 )
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User, mistral_content_to_text
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
-from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError

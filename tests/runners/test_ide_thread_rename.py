@@ -11,8 +11,9 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.config import application_settings
-from chibi.runners.ide_transport import COMMANDS, MAX_THREAD_NAME_LENGTH, PROTOCOL_VERSION, IDEInterface, IDEStdioRunner
-from chibi.services.thread_name_events import thread_name_tracker
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import COMMANDS, MAX_THREAD_NAME_LENGTH, PROTOCOL_VERSION, StdioRunner
+from chibi.services.events.thread_name_events import thread_name_tracker
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",
@@ -40,7 +41,7 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
+def runner() -> tuple[StdioRunner, list[dict[str, Any]]]:
     """Create a runner with captured protocol output.
 
     The recorder replaces ``_write_line`` so both regular writes and
@@ -49,7 +50,7 @@ def runner() -> tuple[IDEStdioRunner, list[dict[str, Any]]]:
     Returns:
         The runner and its mutable captured-frame list.
     """
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write_line"] = recorder
     return instance, recorder.frames
@@ -70,7 +71,7 @@ def initialize(capabilities: Any = None) -> dict[str, Any]:
     return message
 
 
-async def run_request(instance: IDEStdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
+async def run_request(instance: StdioRunner, request_id: str, thread_id: int, prompt: str = "hi") -> None:
     """Send one protocol request through the runner.
 
     Args:
@@ -156,7 +157,7 @@ async def wait_for_errors(output: list[dict[str, Any]], request_ids: list[str]) 
     raise AssertionError(f"Expected error frames for {sorted(pending)}: {output}")
 
 
-RUNNERS: list[IDEStdioRunner] = []
+RUNNERS: list[StdioRunner] = []
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +181,7 @@ def patched_save_thread_name() -> Any:
     Returns:
         The patch context manager.
     """
-    return patch("chibi.runners.ide_transport.save_thread_name", new=AsyncMock(return_value=None))
+    return patch("chibi.interfaces.stdio_interface.save_thread_name", new=AsyncMock(return_value=None))
 
 
 def patched_stored_name(value: str | None) -> Any:
@@ -192,7 +193,7 @@ def patched_stored_name(value: str | None) -> Any:
     Returns:
         The patch context manager.
     """
-    return patch("chibi.runners.ide_transport.get_thread_name", new=AsyncMock(return_value=value))
+    return patch("chibi.interfaces.stdio_runner.get_thread_name", new=AsyncMock(return_value=value))
 
 
 class TestHandshake:
@@ -258,7 +259,7 @@ class TestHandshake:
         application_settings.scheduler_tool_enabled = False
 
         try:
-            with patch("chibi.runners.ide_transport.task_manager") as task_manager_mock:
+            with patch("chibi.interfaces.stdio_runner.task_manager") as task_manager_mock:
                 task_manager_mock.shutdown = AsyncMock()
                 await instance.run()
         finally:
@@ -268,7 +269,7 @@ class TestHandshake:
 
 
 class TestRenameEmission:
-    """Rename frames fired through IDEInterface.rename_thread."""
+    """Rename frames fired through StdioInterface.rename_thread."""
 
     @pytest.mark.asyncio
     async def test_rename_thread_emits_frame_before_result(self) -> None:
@@ -276,13 +277,13 @@ class TestRenameEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             renamed = await interface.rename_thread(STORED_NAME)
             await interface.send_message("answer")
             assert renamed is True
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_save_thread_name() as save_mock,
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -303,13 +304,13 @@ class TestRenameEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             renamed = await interface.rename_thread(STORED_NAME)
             await interface.send_message("answer")
             assert renamed is True
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_save_thread_name() as save_mock,
         ):
             await instance._handle_message(initialize())
@@ -326,12 +327,12 @@ class TestRenameEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             thread_name_tracker.thread_renamed(42, "Direct fire")
             await asyncio.sleep(0)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize({"thread_renames": True}))
             await run_request(instance, "r1", 42)
             await wait_for_results(output, ["r1"])
@@ -345,12 +346,12 @@ class TestRenameEmission:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             thread_name_tracker.thread_renamed(42, "Ghost rename")
             await asyncio.sleep(0)
             await interface.send_message("answer")
 
-        with patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt):
+        with patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt):
             await instance._handle_message(initialize())
             await run_request(instance, "r1", 42)
             await wait_for_results(output, ["r1"])
@@ -369,13 +370,13 @@ class TestRenameValidation:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             renamed = await interface.rename_thread("   ")
             await interface.send_message("answer")
             assert renamed is False
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_save_thread_name() as save_mock,
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -392,13 +393,13 @@ class TestRenameValidation:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             renamed = await interface.rename_thread("x" * 129)
             await interface.send_message("answer")
             assert renamed is False
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_save_thread_name() as save_mock,
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -415,13 +416,13 @@ class TestRenameValidation:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             renamed = await interface.rename_thread(f"  {'y' * 128}  ")
             await interface.send_message("answer")
             assert renamed is True
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_save_thread_name() as save_mock,
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -442,11 +443,11 @@ class TestInitialSync:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_stored_name(STORED_NAME),
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -463,11 +464,11 @@ class TestInitialSync:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_stored_name(STORED_NAME),
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -483,11 +484,11 @@ class TestInitialSync:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_stored_name(STORED_NAME),
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -506,11 +507,11 @@ class TestInitialSync:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_stored_name(None),
         ):
             await instance._handle_message(initialize({"thread_renames": True}))
@@ -525,11 +526,11 @@ class TestInitialSync:
         instance, output = runner()
         RUNNERS.append(instance)
 
-        async def fake_prompt(interface: IDEInterface) -> None:
+        async def fake_prompt(interface: StdioInterface) -> None:
             await interface.send_message("answer")
 
         with (
-            patch("chibi.runners.ide_transport.handle_user_prompt", fake_prompt),
+            patch("chibi.interfaces.stdio_runner.handle_user_prompt", fake_prompt),
             patched_stored_name(STORED_NAME),
         ):
             await instance._handle_message(initialize())

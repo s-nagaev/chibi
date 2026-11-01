@@ -13,9 +13,9 @@ from openai.types.chat.chat_completion_message_tool_call import (
     Function,
 )
 
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.tools.schemas import ToolResponseSchema
 from chibi.services.providers.utils import prepare_system_prompt

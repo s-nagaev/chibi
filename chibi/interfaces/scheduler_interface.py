@@ -16,7 +16,7 @@ from telegram.request import HTTPXRequest
 from chibi.config import telegram_settings
 from chibi.constants import AUDIO_UPLOAD_TIMEOUT, FILE_UPLOAD_TIMEOUT, IMAGE_UPLOAD_TIMEOUT
 from chibi.exceptions import ConfigurationError
-from chibi.services.interface import UserInterface
+from chibi.interfaces.interface import UserInterface
 from chibi.services.providers.tools.utils import is_remote_url, read_local_file, resolve_local_file
 from chibi.utils.rich_message import RichMessageBuilder
 from chibi.utils.telegram import download_image, split_markdown_v2

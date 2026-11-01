@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import chibi.services.scheduler_interface as scheduler_interface_module
-from chibi.services.interface import UserInterface
-from chibi.services.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
+import chibi.interfaces.scheduler_interface as scheduler_interface_module
+from chibi.interfaces.interface import UserInterface
+from chibi.interfaces.scheduler_interface import SchedulerInterface, StdioSchedulerInterface
 
 pytestmark = pytest.mark.asyncio
 

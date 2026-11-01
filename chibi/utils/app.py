@@ -23,8 +23,8 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
-from chibi.services.interface import UserInterface
 
 
 @runtime_checkable

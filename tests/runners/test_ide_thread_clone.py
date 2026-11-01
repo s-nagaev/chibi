@@ -11,8 +11,9 @@ import pytest
 import chibi.config  # noqa: F401
 from chibi.constants import IDE_STORAGE_ID
 from chibi.exceptions import StorageError
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import COMMANDS, StdioRunner
 from chibi.models import Message
-from chibi.runners.ide_transport import COMMANDS, IDEInterface, IDEStdioRunner
 from chibi.storage.local import LocalStorage
 
 SOURCE_THREAD = 7
@@ -84,7 +85,7 @@ async def seed_thread_history(db: LocalStorage, thread_id: int, count: int) -> N
         await db.add_message(user=user, message=Message(role="user", content=f"message-{index}"), thread_id=thread_id)
 
 
-async def run_to_completion(runner: IDEStdioRunner, recorder: OutputRecorder, frame: dict[str, Any]) -> None:
+async def run_to_completion(runner: StdioRunner, recorder: OutputRecorder, frame: dict[str, Any]) -> None:
     """Dispatch initialize plus one request frame and wait for its terminal frame.
 
     Args:
@@ -128,7 +129,7 @@ class TestCloneCommandAdvertisement:
     async def test_capabilities_advertise_new_thread_with_current_context(self) -> None:
         """The clone command is advertised in capabilities.commands after handshake."""
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         with patch.object(runner, "_write", recorder):
             await runner._handle_message({"type": "initialize", "protocol_version": 1})
 
@@ -140,7 +141,7 @@ class TestCloneCommandAdvertisement:
     async def test_help_lists_new_thread_with_current_context(self) -> None:
         """/help output includes the clone command."""
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         with patch.object(runner, "_write", recorder):
             await run_to_completion(runner, recorder, request("help-clone", "/help"))
 
@@ -169,12 +170,12 @@ class TestCloneHappyPath:
             return []
 
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         clone_mock = AsyncMock(return_value=3)
         with (
             patch.object(runner, "_write", recorder),
-            patch("chibi.runners.ide_transport._get_thread_messages", new=fake_thread_messages),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner._get_thread_messages", new=fake_thread_messages),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(
                 runner, recorder, request("clone-ok", f"/new_thread_with_current_context {SOURCE_THREAD} My Clone")
@@ -204,12 +205,12 @@ class TestCloneHappyPath:
             return []
 
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         clone_mock = AsyncMock(return_value=2)
         with (
             patch.object(runner, "_write", recorder),
-            patch("chibi.runners.ide_transport._get_thread_messages", new=fake_thread_messages),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner._get_thread_messages", new=fake_thread_messages),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(
                 runner, recorder, request("clone-default", f"/new_thread_with_current_context {SOURCE_THREAD}")
@@ -235,12 +236,12 @@ class TestCloneErrorPaths:
     async def test_clone_invalid_source_id_is_rejected(self, raw_source: str) -> None:
         """Non-negative-integer validation rejects malformed source ids before any db access."""
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         clone_mock = AsyncMock()
         prompt = f"/new_thread_with_current_context {raw_source}".strip()
         with (
             patch.object(runner, "_write", recorder),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(runner, recorder, request("clone-bad-id", prompt))
 
@@ -256,12 +257,12 @@ class TestCloneErrorPaths:
         db = LocalStorage(storage_path=str(tmp_path))
         await seed_thread_history(db, DESTINATION_THREAD, 0)
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         clone_mock = AsyncMock()
         with (
             patch.object(runner, "_write", recorder),
             patch("chibi.storage.database._db_provider", local_db_provider(db)),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(
                 runner, recorder, request("clone-empty", f"/new_thread_with_current_context {SOURCE_THREAD}")
@@ -283,12 +284,12 @@ class TestCloneErrorPaths:
         await seed_thread_history(db, SOURCE_THREAD, 2)
         await seed_thread_history(db, DESTINATION_THREAD, 1)
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         clone_mock = AsyncMock()
         with (
             patch.object(runner, "_write", recorder),
             patch("chibi.storage.database._db_provider", local_db_provider(db)),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(
                 runner, recorder, request("clone-collide", f"/new_thread_with_current_context {SOURCE_THREAD} X")
@@ -306,12 +307,12 @@ class TestCloneErrorPaths:
         db = LocalStorage(storage_path=str(tmp_path))
         await seed_thread_history(db, SOURCE_THREAD, 2)
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         with (
             patch.object(runner, "_write", recorder),
             patch("chibi.storage.database._db_provider", local_db_provider(db)),
             patch(
-                "chibi.runners.ide_transport.clone_thread_messages",
+                "chibi.interfaces.stdio_runner.clone_thread_messages",
                 AsyncMock(side_effect=StorageError(detail="redis is unreachable")),
             ),
         ):
@@ -331,12 +332,12 @@ class TestCloneErrorPaths:
         db = LocalStorage(storage_path=str(tmp_path))
         await seed_thread_history(db, SOURCE_THREAD, 2)
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         with (
             patch.object(runner, "_write", recorder),
             patch("chibi.storage.database._db_provider", local_db_provider(db)),
             patch(
-                "chibi.runners.ide_transport.clone_thread_messages",
+                "chibi.interfaces.stdio_runner.clone_thread_messages",
                 AsyncMock(side_effect=RuntimeError("secret-db-boom-details")),
             ),
         ):
@@ -354,12 +355,12 @@ class TestCloneErrorPaths:
     async def test_clone_refused_while_source_thread_is_busy(self) -> None:
         """A source thread with an in-flight request is refused before touching storage."""
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         runner._thread_requests[SOURCE_THREAD] = 1
         clone_mock = AsyncMock()
         with (
             patch.object(runner, "_write", recorder),
-            patch("chibi.runners.ide_transport.clone_thread_messages", clone_mock),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", clone_mock),
         ):
             await run_to_completion(
                 runner, recorder, request("clone-busy", f"/new_thread_with_current_context {SOURCE_THREAD} X")
@@ -377,7 +378,7 @@ class TestCloneErrorPaths:
         db = LocalStorage(storage_path=str(tmp_path))
         await seed_thread_history(db, SOURCE_THREAD, 3)
         recorder = OutputRecorder()
-        runner = IDEStdioRunner()
+        runner = StdioRunner()
         release = asyncio.Event()
 
         async def blocking_clone(*args: Any, **kwargs: Any) -> int:
@@ -387,7 +388,7 @@ class TestCloneErrorPaths:
         with (
             patch.object(runner, "_write", recorder),
             patch("chibi.storage.database._db_provider", local_db_provider(db)),
-            patch("chibi.runners.ide_transport.clone_thread_messages", new=blocking_clone),
+            patch("chibi.interfaces.stdio_runner.clone_thread_messages", new=blocking_clone),
         ):
             await runner._handle_message({"type": "initialize", "protocol_version": 1})
             await runner._handle_message(
@@ -431,13 +432,13 @@ class TestCloneErrorPaths:
 
 
 class TestRenameThread:
-    """IDEInterface.rename_thread persists names via save_thread_name."""
+    """StdioInterface.rename_thread persists names via save_thread_name."""
 
     @pytest.mark.asyncio
     async def test_rename_thread_delegates_to_save_thread_name(self) -> None:
         """rename_thread calls save_thread_name for the request's thread and returns True."""
-        interface = IDEInterface(thread_id=DESTINATION_THREAD, prompt="p", context={}, emit=lambda _: None)
-        with patch("chibi.runners.ide_transport.save_thread_name", new=AsyncMock()) as save_mock:
+        interface = StdioInterface(thread_id=DESTINATION_THREAD, prompt="p", context={}, emit=lambda _: None)
+        with patch("chibi.interfaces.stdio_interface.save_thread_name", new=AsyncMock()) as save_mock:
             result = await interface.rename_thread("Renamed Thread")
 
         assert result is True
@@ -449,7 +450,7 @@ class TestRenameThread:
     async def test_rename_thread_persists_to_backend_storage(self, tmp_path: Path) -> None:
         """A rename through the IDE interface lands in the user's thread-name map."""
         db = LocalStorage(storage_path=str(tmp_path))
-        interface = IDEInterface(thread_id=DESTINATION_THREAD, prompt="p", context={}, emit=lambda _: None)
+        interface = StdioInterface(thread_id=DESTINATION_THREAD, prompt="p", context={}, emit=lambda _: None)
         with patch("chibi.storage.database._db_provider", local_db_provider(db)):
             result = await interface.rename_thread("Renamed Thread")
 

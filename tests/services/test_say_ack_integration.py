@@ -45,9 +45,9 @@ from openai.types.chat.chat_completion_message_tool_call import (
 
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
 from chibi.constants import DELEGATION_RULES, SCHEDULER_HINT_PROMPT, get_llm_prompt
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.common import DelegateTool

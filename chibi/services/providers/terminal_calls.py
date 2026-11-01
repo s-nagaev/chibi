@@ -30,9 +30,9 @@ from openai.types.chat import ChatCompletionToolParam
 
 from chibi.config import gpt_settings
 from chibi.exceptions import SilentTurnError
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, MessageVisibility
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.tools.common import AckSilentlyTool, SayTool
 from chibi.services.providers.tools.schemas import ToolCallSchema
 

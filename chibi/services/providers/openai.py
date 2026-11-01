@@ -18,9 +18,9 @@ from openai.types.responses import (
 
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import NoModelSelectedError, ServiceResponseError
+from chibi.interfaces.interface import UserInterface
 from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import ChatResponseSchema, UsageSchema, VisionResultSchema
-from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.streaming import (

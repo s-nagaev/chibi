@@ -9,7 +9,8 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.exceptions import ConfigurationError, NoApiKeyProvidedError, StorageError
-from chibi.runners.ide_transport import IDEInterface, IDEStdioRunner
+from chibi.interfaces.stdio_interface import StdioInterface
+from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.storage.local import LocalStorage
 from chibi.utils.app import handle_gpt_exceptions
 
@@ -53,7 +54,7 @@ def request(request_id: str, prompt: str = "hello") -> dict[str, Any]:
     }
 
 
-async def provider_configuration_failure(interface: IDEInterface) -> None:
+async def provider_configuration_failure(interface: StdioInterface) -> None:
     """Raise a provider configuration exception containing a secret-like detail.
 
     Args:
@@ -67,10 +68,10 @@ async def test_handled_provider_failure_is_sanitized_ide_error() -> None:
     """Handled provider exceptions become correlated IDE errors without raw details."""
     decorated_handler = handle_gpt_exceptions(provider_configuration_failure)
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     with (
         patch.object(runner, "_write", recorder),
-        patch("chibi.runners.ide_transport.handle_user_prompt", decorated_handler),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", decorated_handler),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
         await runner._handle_message(request("provider-failure"))
@@ -90,11 +91,11 @@ async def test_handled_provider_failure_is_sanitized_ide_error() -> None:
 async def test_model_storage_failure_is_actionable_transport_error() -> None:
     """A /model storage failure stays distinct from a handled provider error."""
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     with (
         patch.object(runner, "_write", recorder),
         patch(
-            "chibi.runners.ide_transport.get_models_available", new=AsyncMock(side_effect=OSError("disk unavailable"))
+            "chibi.interfaces.stdio_runner.get_models_available", new=AsyncMock(side_effect=OSError("disk unavailable"))
         ),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
@@ -133,10 +134,10 @@ async def test_invalid_model_selection_is_actionable_and_lists_available_models(
         ModelChangeSchema(provider="openai", name="gpt-example", display_name="GPT Example", image_generation=False),
     ]
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     with (
         patch.object(runner, "_write", recorder),
-        patch("chibi.runners.ide_transport.get_models_available", new=AsyncMock(return_value=models)),
+        patch("chibi.interfaces.stdio_runner.get_models_available", new=AsyncMock(return_value=models)),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
         await runner._handle_message(request(f"invalid-model-{selection}", f"/model {selection}"))
@@ -156,7 +157,7 @@ async def test_invalid_model_selection_is_actionable_and_lists_available_models(
 async def test_rate_limited_helper_emits_canonical_frame() -> None:
     """The transport-level rate-limit helper emits a frontend-shaped error frame."""
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     with patch.object(runner, "_write", recorder):
         await runner.emit_rate_limited("Slow down", 5, request_id="rate-limit-1")
 
@@ -173,11 +174,11 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
     selected_file_storage: str,
 ) -> None:
     """IDE prompts do not resolve Telegram-only uploaded-file storage."""
+    from chibi.interfaces.stdio_interface import StdioInterface
     from chibi.models import User
-    from chibi.runners.ide_transport import IDEInterface
     from chibi.services.providers.utils import prepare_system_prompt
 
-    interface = IDEInterface(1, "ping", {}, lambda _: None)
+    interface = StdioInterface(1, "ping", {}, lambda _: None)
     user = User(id=1, working_dir="/tmp", info="", llm_skills={})
     with (
         patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
@@ -195,14 +196,14 @@ async def test_ide_prompt_skips_uploaded_file_storage_for_all_storage_configurat
 async def test_storage_error_emits_tailored_message_and_typed_cause() -> None:
     """StorageError in _run_request emits a tailored message and cause field."""
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
 
-    async def raise_storage_error(interface: IDEInterface) -> None:
+    async def raise_storage_error(interface: StdioInterface) -> None:
         raise StorageError()
 
     with (
         patch.object(runner, "_write", recorder),
-        patch("chibi.runners.ide_transport.handle_user_prompt", raise_storage_error),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", raise_storage_error),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
         await runner._handle_message(request("storage-error"))
@@ -221,14 +222,14 @@ async def test_storage_error_emits_tailored_message_and_typed_cause() -> None:
 async def test_configuration_error_emits_tailored_message_and_typed_cause() -> None:
     """ConfigurationError in _run_request emits a tailored message and cause field."""
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
 
-    async def raise_config_error(interface: IDEInterface) -> None:
+    async def raise_config_error(interface: StdioInterface) -> None:
         raise ConfigurationError()
 
     with (
         patch.object(runner, "_write", recorder),
-        patch("chibi.runners.ide_transport.handle_user_prompt", raise_config_error),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", raise_config_error),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
         await runner._handle_message(request("config-error"))
@@ -247,14 +248,14 @@ async def test_configuration_error_emits_tailored_message_and_typed_cause() -> N
 async def test_generic_exception_emits_cause_with_exception_class_name() -> None:
     """Generic exceptions in _run_request emit cause with the exception class name."""
     recorder = OutputRecorder()
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
 
-    async def raise_runtime_error(interface: IDEInterface) -> None:
+    async def raise_runtime_error(interface: StdioInterface) -> None:
         raise RuntimeError("something went wrong")
 
     with (
         patch.object(runner, "_write", recorder),
-        patch("chibi.runners.ide_transport.handle_user_prompt", raise_runtime_error),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", raise_runtime_error),
     ):
         await runner._handle_message({"type": "initialize", "protocol_version": 1})
         await runner._handle_message(request("generic-error"))

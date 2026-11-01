@@ -11,7 +11,7 @@ from apscheduler.schedulers.base import STATE_STOPPED
 import chibi.config  # noqa: F401
 from chibi.config import application_settings
 from chibi.constants import IDE_STORAGE_ID
-from chibi.runners.ide_transport import IDEStdioRunner
+from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.services.scheduler import (
     RETENTION_CLEANUP_JOB_ID,
     STDIO_SCHEDULER_DB_FILENAME,
@@ -73,9 +73,9 @@ def scheduler_gate_disabled():
     application_settings.scheduler_tool_enabled = original
 
 
-def make_runner() -> IDEStdioRunner:
+def make_runner() -> StdioRunner:
     """Build a stdio runner whose event loop ends immediately (stdin EOF)."""
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     # ``_read_line`` is a regular method, so mypy would flag a direct Mock
     # assignment as method-assign; bypass the typed attribute access.
     object.__setattr__(runner, "_read_line", AsyncMock(return_value=""))
@@ -96,8 +96,8 @@ async def test_run_starts_stdio_scheduler_with_retention_and_recovery(sqlite_sch
     with (
         patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
         patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
-        patch("chibi.runners.ide_transport.recover_agent_jobs", side_effect=fake_recover) as recover_mock,
-        patch("chibi.runners.ide_transport.task_manager") as task_manager_mock,
+        patch("chibi.interfaces.stdio_runner.recover_agent_jobs", side_effect=fake_recover) as recover_mock,
+        patch("chibi.interfaces.stdio_runner.task_manager") as task_manager_mock,
     ):
         task_manager_mock.shutdown = AsyncMock()
         await runner.run()
@@ -128,8 +128,8 @@ async def test_shutdown_stops_scheduler_before_task_manager(sqlite_scheduler_set
     with (
         patch("chibi.services.scheduler.application_settings", sqlite_scheduler_settings),
         patch("chibi.services.jobs.archive.perform_retention_cleanup", new_callable=MagicMock),
-        patch("chibi.runners.ide_transport.recover_agent_jobs", new_callable=AsyncMock),
-        patch("chibi.runners.ide_transport.task_manager") as task_manager_mock,
+        patch("chibi.interfaces.stdio_runner.recover_agent_jobs", new_callable=AsyncMock),
+        patch("chibi.interfaces.stdio_runner.task_manager") as task_manager_mock,
     ):
         task_manager_mock.shutdown = AsyncMock(side_effect=record_state)
         await runner.run()
@@ -160,8 +160,8 @@ async def test_run_without_gate_does_not_start_scheduler(tmp_path) -> None:
     runner = make_runner()
 
     with (
-        patch("chibi.runners.ide_transport.recover_agent_jobs", new_callable=AsyncMock) as recover_mock,
-        patch("chibi.runners.ide_transport.task_manager") as task_manager_mock,
+        patch("chibi.interfaces.stdio_runner.recover_agent_jobs", new_callable=AsyncMock) as recover_mock,
+        patch("chibi.interfaces.stdio_runner.task_manager") as task_manager_mock,
     ):
         task_manager_mock.shutdown = AsyncMock()
         await runner.run()

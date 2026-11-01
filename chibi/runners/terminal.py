@@ -16,9 +16,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from chibi.config import application_settings
+from chibi.interfaces.terminal_interface import TerminalInterface
 from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
-from chibi.services.terminal_interface import TerminalInterface
 from chibi.services.user import get_info, get_models_available, reset_chat_history, set_active_model
 from chibi.utils.encoding import reconfigure_stream_utf8
 
