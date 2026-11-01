@@ -13,7 +13,7 @@ import chibi.config  # noqa: F401
 from chibi.config import application_settings
 from chibi.interfaces.stdio_interface import StdioInterface
 from chibi.interfaces.stdio_runner import COMMANDS, MAX_THREAD_NAME_LENGTH, PROTOCOL_VERSION, StdioRunner
-from chibi.services.thread_name_events import thread_name_tracker
+from chibi.services.events.thread_name_events import thread_name_tracker
 
 READY_FRAME: dict[str, Any] = {
     "type": "ready",

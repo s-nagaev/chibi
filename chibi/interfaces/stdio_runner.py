@@ -22,10 +22,10 @@ from chibi.schemas.app import UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.events.cwd_events import cwd_tracker
 from chibi.services.events.subagent_events import subagent_tracker
+from chibi.services.events.thread_name_events import thread_name_tracker
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
 from chibi.services.task_manager import task_manager
-from chibi.services.thread_name_events import thread_name_tracker
 from chibi.services.user import (
     clone_thread_messages,
     get_info,
@@ -675,7 +675,7 @@ class StdioRunner:
         """Schedule one ``thread_renamed`` frame for fire-and-forget delivery.
 
         Sink callback invoked by
-        :data:`chibi.services.thread_name_events.thread_name_tracker` when
+        :data:`chibi.services.events.thread_name_events.thread_name_tracker` when
         rename code (the ``rename_thread`` tool or the hidden command) changes
         a thread's display name. Emission must never block or serialize the
         rename itself, so the task is simply left to contend for the stdout

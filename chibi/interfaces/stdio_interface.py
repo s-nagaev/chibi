@@ -11,7 +11,7 @@ from openai.types import CompletionUsage
 from chibi.constants import IDE_STORAGE_ID
 from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.schemas.app import UsageSchema
-from chibi.services.thread_name_events import thread_name_tracker
+from chibi.services.events.thread_name_events import thread_name_tracker
 from chibi.services.user import save_thread_name
 
 MAX_THREAD_NAME_LENGTH = 128
