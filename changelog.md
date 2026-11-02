@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.20.1] - 2026-10-25
 
+
 ### Added
 - **Hidden turns are now silent at every renderer.** A turn ended by `ack_silently()` persists its private reasoning as a `visibility="hidden"` message and delivers an empty answer; the render gates in the bot handlers used to test only the legacy `<chibi>ACK</chibi>` sentinel, so the empty answer fell through and was delivered to Telegram, the terminal REPL and scheduler chats. All three gates now key on the turn's visibility first, with the sentinel predicate kept as a fallback for historical marker bodies and backends that ignored forcing; the 👌 reaction on a user turn still fires. Long-term memory archival (Chroma) skips hidden messages, emergency summarization excludes them from its input (so private reasoning cannot be laundered into a durable summary), and the IDE result frame no longer attaches `thoughts` for a hidden turn. The private reasoning stays in storage and flows to the LLM, but never reaches a renderer.
 
@@ -260,6 +261,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **IDE JSONL transport:** Added `chibi ide --stdio` for compatible local IDE clients using protocol v1.
 
+
 ## [1.12.0] - 2026-06-19
 
 ### Added
@@ -286,11 +288,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `send_llm_thoughts` now skips sending when thoughts content is "No content"
 - Thread ID captured before model selection to avoid stale references
 
+
 ## [1.11.0] - 2026-06-10
 
 ### Fixed
 -  The `/reset` and `/stop` commands now terminate not all user-related processes, but only those launched from the same thread where the command is applied.
 -  A bug where changing the model in a group chat would change it not for the group chat, but for the user's private chat.
+
 
 ## [1.10.0] - 2026-06-07
 
@@ -336,6 +340,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Active model matching now also checks `provider.name`, preventing ambiguous matches when models with identical names exist across different providers.
 
+
 ## [1.8.0] - 2026-05-04
 
 ### Added
@@ -344,6 +349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 thread-aware message sending (typing, photo upload, voice recording actions)
 - **Storage**: All backends (DynamoDB, Redis, Local) now support thread-scoped message storage and retrieval 
 via `thread_id` parameter
+
 
 ## [1.7.2] - 2026-03-10
 
@@ -355,6 +361,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Added
 - **PDF OCR support** for extracting text from PDF files via LLM providers
+
 
 ## [1.7.0] - 2026-03-09
 
@@ -383,11 +390,13 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Updated bot command descriptions
 - Command `/gpt_models` renamed to `/llm_models`
 
+
 ## [1.6.6] - 2026-02-21
 
 ### Added
 - **Gemini TTS:** New text-to-speech capability using Gemini API, outputs PCM 16-bit 44.1kHz mono WAV.
 - **Gemini STT:** New speech-to-text capability for transcribing voice messages.
+
 
 ## [1.6.5] - 2026-02-17
 
@@ -415,6 +424,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - **ZhipuAI Provider:** Renamed env variable containing API Key.
 - **Config Generator:** Added `ZHIPUAI_API_KEY` variable with short description.
 
+
 ## [1.6.2] - 2026-02-15
 
 ### Added
@@ -424,6 +434,8 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Changed
 - **Documentation:** Updated README with new providers and API key links.
+
+
 
 ## [1.6.1] - 2026-02-11
 ### Added
@@ -555,10 +567,12 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - **Linter and Test Configuration Fixes:** Addressed issues within linter configurations and made improvements to test setup for greater accuracy and coverage.
 - **New Comprehensive Test Suites:** Introduced new test files covering database interactions (`test_database.py`), file editor functionalities (`test_file_editor.py`), and model integrity (`test_models.py`).
 
+
 ## [1.2.1] - 2025-04-21
 
 ### Added
 - Optional heartbeat functionality. The bot can now periodically fetch a specified URL (e.g., a healthchecks.io endpoint or a custom monitoring system endpoint) to signal that it is operational.
+
 
 ## [1.2.0] - 2025-04-20
 
@@ -610,10 +624,12 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 ### Fixed
 - Addressed issues related to inconsistent or incorrect Markdown rendering in responses from Language Models, significantly reducing the occurrence of these problems.
 
+
 ## [0.10.0] - 2025-02-06
 
 ### Changed
 - Dependencies updated: `openai` module updated to `1.61.1`.
+
 
 ## [0.9.0] - 2025-02-06
 
@@ -624,6 +640,8 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Mistral AI models selection updated.
 - Anthropic available models list updated. 
 
+
+
 ## [0.8.2] - 2024-08-01
 
 ### Fixed
@@ -631,6 +649,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Changed
 - Project dependencies updated.
+
 
 ## [0.8.1] - 2024-07-11
 
@@ -654,6 +673,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Project structure significantly refactored.
 - README updated: environment variables description significantly improved.
 
+
 ## [0.6.2] - 2024-02-18
 
 ### Added
@@ -666,6 +686,7 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 DALL-E (to avoid excessive spending). The default value is 0, which means the feature is turned off, and no limits are 
 applied.
 - Optional `IMAGE_GENERATIONS_WHITELIST` setting for a list of user IDs exempt from image generation limits.
+
 
 ## [0.6.0] - 2023-11-28
 
@@ -683,6 +704,7 @@ applied.
 - Base Docker image updated to `python:3.11-alpine`
 - `REDIS_PASSWORD` environment variable is deprecated.
 
+
 ## [0.5.3] - 2023-06-20
 
 ### Changed
@@ -694,6 +716,7 @@ applied.
 ### Fixed
 
 - A bug when users whitelist couldn't work with the telegram user ID.  
+
 
 ## [0.5.1] - 2023-04-15
 
