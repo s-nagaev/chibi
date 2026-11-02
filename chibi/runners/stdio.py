@@ -26,9 +26,9 @@ def run_stdio() -> None:
     use_stderr_logging()
 
     import chibi.config  # noqa: F401
-    from chibi.runners.ide_transport import IDEStdioRunner
+    from chibi.interfaces.stdio_runner import StdioRunner
 
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     exit_code = asyncio.run(runner.run())
     if exit_code:
         raise SystemExit(exit_code)

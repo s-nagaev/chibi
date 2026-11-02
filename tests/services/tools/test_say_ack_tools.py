@@ -13,7 +13,13 @@ import pytest
 # exactly what happens when this module is collected standalone
 # (`pytest tests/services/tools/test_say_ack_tools.py` with no earlier imports).
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
-from chibi.constants import DELEGATION_RULES, SCHEDULER_HINT_PROMPT, get_llm_prompt
+from chibi.config import application_settings, gpt_settings
+from chibi.constants import (
+    _RENAME_CLIENTS,
+    DELEGATION_RULES,
+    SCHEDULER_HINT_PROMPT,
+    get_llm_prompt,
+)
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.providers.terminal_calls import TERMINAL_TOOL_NAMES
 from chibi.services.providers.tools import RegisteredChibiTools
@@ -108,15 +114,48 @@ class TestMigratedPromptContract:
     def test_prompt_tells_the_two_tools_apart(self) -> None:
         prompt = get_llm_prompt(filesystem_access=True, allow_delegation=True)
         delivery_block = prompt.split("DELIVERY AND SILENCE")[1].split("# Guiding Principles")[0]
+        # Normalized text: immune to line-wrapping of the prompt source.
+        normalized = " ".join(delivery_block.split())
         assert "ONLY channel for user-facing communication" in delivery_block
         assert "NEVER sees" in delivery_block
-        assert "MUST say() it" in delivery_block
-        assert "NEVER ack_silently() in its place" in delivery_block
+        # Swallowing is forbidden: ack_silently() must never replace a reply to the user.
+        assert "it is prohibited to use ack_silently() instead of replying to the user" in normalized
+        # ack_silently()'s purpose: hiding subagent/background interactions from the user.
+        assert "hide your interactions with subagents" in normalized
+        # Fail-safe is narrowed to terminal states, never intermediate ones.
+        assert "The fail-safe covers terminal states only" in normalized
+        assert "NEVER applies to intermediate states" in normalized
+        # An explicit user instruction overrides the rule.
+        assert "Any explicit user instruction" in normalized
+        assert "overrides this rule" in normalized
 
     def test_scheduler_hint_points_at_ack_silently_not_the_sentinel(self) -> None:
         assert "ack_silently()" in SCHEDULER_HINT_PROMPT
         assert "<chibi>ACK</chibi>" not in SCHEDULER_HINT_PROMPT
         assert "else ACK" not in SCHEDULER_HINT_PROMPT
+
+
+class TestThreadNamingPromptGating:
+    """The thread-naming block reaches the prompt only for clients exposing rename_thread."""
+
+    def test_thread_naming_fragment_gated_by_flag(self) -> None:
+        off = get_llm_prompt(filesystem_access=False, allow_delegation=False)
+        on = get_llm_prompt(filesystem_access=False, allow_delegation=False, thread_naming=True)
+        assert "# Thread Naming (rename_thread)" in on
+        assert "# Thread Naming (rename_thread)" not in off
+
+    def test_thread_naming_block_follows_the_delegation_placeholder(self) -> None:
+        on = get_llm_prompt(filesystem_access=True, allow_delegation=True, thread_naming=True)
+        assert on.index("# TASK DELEGATION") < on.index("# Thread Naming (rename_thread)")
+        assert on.index("# Thread Naming (rename_thread)") < on.index("DELIVERY AND SILENCE")
+
+    def test_assistant_prompt_wiring_follows_the_rename_clients(self) -> None:
+        expected = application_settings.client in _RENAME_CLIENTS
+        assert ("# Thread Naming (rename_thread)" in gpt_settings.assistant_prompt) == expected
+
+    def test_assistant_prompt_omits_thread_naming_for_non_rename_clients(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(application_settings, "client", "terminal")
+        assert "# Thread Naming (rename_thread)" not in gpt_settings.assistant_prompt
 
 
 async def _fake_models_available(user_id: int, **kwargs: Any) -> list[ModelChangeSchema]:

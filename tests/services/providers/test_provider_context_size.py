@@ -18,10 +18,10 @@ from openai.types.chat.chat_completion_message_tool_call import (
 from tenacity import AsyncRetrying, stop_after_attempt, wait_none
 
 from chibi.exceptions import ContextLengthExceededError, ServiceResponseError
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.context_measurement import SizeProvenance
-from chibi.services.interface import UserInterface
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.provider import CHAT_RETRY_PREDICATE, OpenAIFriendlyProvider
 from chibi.services.providers.tools.schemas import ToolResponseSchema

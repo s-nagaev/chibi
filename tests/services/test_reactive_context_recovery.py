@@ -16,9 +16,9 @@ import pytest
 from loguru import logger
 
 from chibi.exceptions import ContextLengthExceededError, ServiceResponseError
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.context_measurement import SizeProvenance
-from chibi.services.interface import UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.user import CompactionOutcome, CompactionResult, _reactive_context_recovery
 from chibi.utils.app import handle_gpt_exceptions

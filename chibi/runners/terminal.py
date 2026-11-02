@@ -16,9 +16,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 from chibi.config import application_settings
+from chibi.interfaces.terminal_interface import TerminalInterface
 from chibi.services.bot import handle_image_generation, handle_user_prompt
 from chibi.services.task_manager import task_manager
-from chibi.services.terminal_interface import TerminalInterface
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import get_info, get_models_available, reset_chat_history, set_active_model
 from chibi.utils.encoding import reconfigure_stream_utf8
@@ -313,13 +313,15 @@ async def run_chibi(user_id: int = 1) -> None:
     application_settings.client = "terminal"
     setup_logging()
 
-    # The scheduler agent tools register themselves at import time, when
+    # The agent-facing tools register themselves at import time, when
     # ``application_settings.client`` still holds its "telegram" default, so the terminal
-    # REPL must drop them explicitly: the terminal client is out of scope for the scheduler.
+    # REPL must drop them explicitly: the terminal client is out of scope for the scheduler
+    # and cannot rename threads (TerminalInterface.rename_thread is not implemented).
     from chibi.services.providers.tools import RegisteredChibiTools
     from chibi.services.providers.tools.scheduler import SCHEDULER_AGENT_TOOL_NAMES
+    from chibi.services.providers.tools.topic import RENAME_THREAD_TOOL_NAMES
 
-    RegisteredChibiTools.deregister_tools(list(SCHEDULER_AGENT_TOOL_NAMES))
+    RegisteredChibiTools.deregister_tools([*SCHEDULER_AGENT_TOOL_NAMES, *RENAME_THREAD_TOOL_NAMES])
 
     try:
         from chibi.utils.app import log_application_settings

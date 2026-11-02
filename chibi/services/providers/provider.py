@@ -86,6 +86,7 @@ from chibi.exceptions import (
     ServiceResponseError,
     SilentTurnError,
 )
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import (
     ChatResponseSchema,
@@ -96,7 +97,6 @@ from chibi.schemas.app import (
 )
 from chibi.services import context_measurement
 from chibi.services.context_note import attach_context_note
-from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,

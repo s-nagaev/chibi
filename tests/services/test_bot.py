@@ -12,7 +12,7 @@ import chibi.services.bot as bot_module
 from chibi.services.bot import handle_clone_thread
 
 if TYPE_CHECKING:
-    from chibi.services.interface import UserInterface
+    from chibi.interfaces.interface import UserInterface
 
 
 class _FakeThreadInterface:

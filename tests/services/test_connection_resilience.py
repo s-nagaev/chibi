@@ -36,9 +36,9 @@ from google.genai.types import (
 from mistralai.client.errors import SDKError
 
 from chibi.exceptions import ServiceConnectionError, ServiceRateLimitError, ServiceResponseError
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema
-from chibi.services.interface import UserInterface
 from chibi.services.providers.anthropic import Anthropic
 from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.mistralai_native import MistralAI, _is_retryable_mistral_error

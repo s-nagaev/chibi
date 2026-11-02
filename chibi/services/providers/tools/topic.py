@@ -1,24 +1,33 @@
-import sys
 from typing import Unpack
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
+from chibi.config import application_settings
+from chibi.constants import _RENAME_CLIENTS
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions
 from chibi.services.user import save_thread_name
 
+# Names of the rename tools. Shared with the terminal runner so it can deregister them at
+# startup: the terminal entrypoint imports this module while the client setting still holds
+# its "telegram" default, so the tool registers at import time and the runner must drop it
+# explicitly (see TerminalRunner.run_chibi).
+RENAME_THREAD_TOOL_NAMES: tuple[str, ...] = ("rename_thread",)
+
 
 class RenameThreadTool(ChibiTool):
-    # Thread renaming requires Telegram's forum-topic API; avoid exposing it to non-Telegram runners.
-    register = bool(sys.modules.get("chibi.runners.telegram"))
+    register = application_settings.client in _RENAME_CLIENTS
     definition = ChatCompletionToolParam(
         type="function",
         function=FunctionDefinition(
             name="rename_thread",
-            description="Rename the current topic/thread in telegram app or other UI.",
+            description=(
+                "Rename the current conversation thread: the new display name is persisted and "
+                "shown in the client's thread list (in Telegram forum chats, the forum topic is renamed)."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -55,7 +64,7 @@ class RenameThreadTool(ChibiTool):
 
         interface = cls.get_interface(kwargs=kwargs)
         if not interface:
-            raise ToolException("No interface found. This command can only be used inside a Telegram forum topic.")
+            raise ToolException("No interface found. This command requires an active conversation thread context.")
 
         caller_model = kwargs.get("caller_model", "unknown model")
 

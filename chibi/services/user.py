@@ -17,6 +17,7 @@ from loguru import logger
 from chibi.config import gpt_settings
 from chibi.constants import get_model_context_window
 from chibi.exceptions import ContextLengthExceededError, NoProviderSelectedError
+from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema, VideoResult, VisionResultSchema
 from chibi.services.context_counters import ContextDecisionCounters
@@ -28,7 +29,6 @@ from chibi.services.failover import (
     failover_warning_message,
     run_with_failover,
 )
-from chibi.services.interface import EditorContextProvider, UserInterface
 from chibi.services.lock_manager import LockManager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.abstract import Database
@@ -2211,6 +2211,22 @@ async def drop_tool_call_history(db: Database, storage_id: int, thread_id: int) 
         message.tool_call_id = None
         seed.append(message)
     await replace_thread_history.__wrapped__(db, storage_id=storage_id, thread_id=thread_id, seed=seed)
+
+
+@inject_database
+async def get_thread_name(db: Database, storage_id: int, thread_id: int) -> str | None:
+    """Return the stored display name of a thread, if any.
+
+    Args:
+        db: The database instance.
+        storage_id: The storage ID (user_id for private, chat_id for groups).
+        thread_id: The ID of the thread.
+
+    Returns:
+        The stored thread name, or None when the thread has no stored name.
+    """
+    user = await db.get_or_create_user(user_id=storage_id)
+    return user.thread_names.get(thread_id)
 
 
 @inject_database

@@ -22,9 +22,10 @@ from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from chibi.config.gpt import gpt_settings
+from chibi.constants import IDE_STORAGE_ID
 from chibi.exceptions import ContextLengthExceededError
+from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.models import Message, User
-from chibi.runners.ide_transport import IDE_STORAGE_ID, IDEStdioRunner
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.bot import handle_clone_thread
 from chibi.services.context_counters import ContextDecisionCounters
@@ -588,7 +589,7 @@ async def test_ide_thread_clone_invalidates_the_cached_prompt_size(
     await _seed_history(local_db, IDE_STORAGE_ID, 7, _dialogue(50, 2))
     store = UsageCacheStore()
     store._data[store._make_key(user_id=IDE_STORAGE_ID, thread_id=555)] = 4242
-    runner = IDEStdioRunner()
+    runner = StdioRunner()
     interface = SimpleNamespace(thread_id=555)
     responses: list[str] = []
 

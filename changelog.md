@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **The agent can rename the current thread over the IDE protocol.** The `rename_thread` tool used to be registered only for the Telegram client, so an agent working behind an IDE front end could not rename the thread it was working in; the tool is now offered to stdio clients (`chibi stdio --tui` and every other IDE front end) and remains deregistered in the terminal REPL. A successful rename is pushed to the connected client as a fire-and-forget `thread_renamed` frame (drained before the turn's `result`), and a thread that already has a stored name re-announces it once at the first request of a session, so the client's title converges after reconnecting. The name persists server-side.
+- **Users can rename a thread from their IDE client with the hidden `/rename_thread <name>` command.** The command validates the name (trimmed, non-empty, no newlines, truncated to 128 characters), applies it through the backend so it persists across sessions, and echoes it back as a `thread_renamed` frame before the confirmation result, so any other surface observing the session converges on the new title. The command is advertised in `ready.capabilities.commands`, letting clients feature-detect it.
+- **Agents keep the thread name in sync with the dialog's current intent.** On clients that expose `rename_thread` the assistant prompt now carries a thread-naming block asking the agent to rename the thread proactively whenever the subject of the conversation clearly moves on, so the title the user sees follows what the dialog is about; the block is absent from the prompt on clients without the tool.
+- **Voxtral speech-to-text on the MistralAI provider:** voice messages sent to a Mistral-backed thread are now transcribed through Mistral's Public Preview audio transcription API (`POST /v1/audio/transcriptions`), with `voxtral-mini-transcribe-3-0` as the default model. MistralAI is registered as an STT-capable provider when a Mistral key is configured, so it can be selected explicitly via the existing `stt_provider` setting or picked automatically as the first available STT provider.
+- **Voxtral text-to-speech on the MistralAI provider:** the bot can now speak its replies through Mistral's Public Preview audio speech API (`POST /v1/audio/speech`), which returns base64-encoded audio that is decoded and delivered like any other TTS output. Defaults: model `voxtral-mini-tts-3-0`, voice `gb_jane_neutral`, MP3 format. MistralAI is registered as a TTS-capable provider when a Mistral key is configured, selectable via the existing `tts_provider` setting.
+- **Context-management decisions are now observable in the logs and countable in-process.** Every decision point of the context pipeline (the pre-call budget guard, the in-loop budget guard, the compaction state machine, the lossy last-resort shrink and the reactive overflow recovery) logs one line per decision per turn stating the observed request size and its provenance (`provider_measured` when a durable provider-reported record anchors the figure, `estimated` when the local heuristic tokenizer counted the whole list), the resolved threshold it was compared against, and the drop list as tier counts with message id/role identity only; message content, credentials and provider payloads never reach the logs. A new in-process counter store (`chibi/services/context_counters.py`) counts each decision, so the questions "did compaction ever fire" and "why not" are answerable from counters: a high guard/in-loop no-op count (every request already fitted) next to zero `compaction_*` counts is a different diagnosis from a high `compaction_skipped` count (the machine ran but attempted no compaction), and a compaction that was rejected is distinguishable from one whose fallback succeeded or failed.
+
+### Changed
+- **Interfaces and events are now organized into dedicated packages:** the base user-interface contract, the terminal and scheduler interfaces, and the IDE stdio interface and runner were extracted into the `chibi/interfaces` package (the stdio types are now `StdioInterface` and `StdioRunner`), and the working-directory, subagent and thread name event services moved into `chibi/services/events`. No behaviour, configuration or protocol changes.
+- **Mistral defaults refreshed to the current model lineup:** the chat default is now `mistral-small-2603`, moderation defaults to `mistral-moderation-2603`, and the vision default moves from the retired Pixtral line to `mistral-small-2603`. The context-window map gained verified entries for `mistral-large-4` (1,000,000 tokens) and `mistral-small-2603` (262,144 tokens), so context-size warnings and auto-summarization trigger points for these models are computed from real limits instead of falling back to the global default.
+- **The say/ack_silently delivery contract is rebuilt around a short procedure, a worked example and a terminal-only fail-safe.** The previous request-state logic, whose mandatory-delivery clause was satisfiable at every intermediate step of a long delegated task and whose fail-safe preferred speaking on every doubt, is replaced: `say(text)` is used only to deliver specific information to the user, `ack_silently()` absorbs everything else (sub-agent interactions, background events, intermediate steps), and swallowing a reply to the user remains prohibited. A worked example shows a multi-agent search absorbed silently until one final report, making the intended rhythm imitable. The fail-safe now applies only after all planned work is finished: if work may still remain, the agent stays silent; if the answer exists and may be undelivered, it is sent. Any explicit user instruction about background-result handling overrides the defaults. The contract test now pins these properties through whitespace-normalized matching instead of exact line breaks.
+- **An oversized request is now prevented instead of failing.** Before each LLM call the thread is measured against its context threshold (default raised from 100k to 200k tokens, still overridable with `MAX_HISTORY_TOKENS`); when the request would not fit, the older turns are collapsed into a summary first, so the conversation continues from the compacted history instead of ending in a provider error. If the provider still reports an overflow, a reactive recovery pass trims the history and retries, and the compaction seed is written atomically so an interrupted run cannot leave the history half-replaced. The measured size is kept per thread on every storage backend, so the decision uses provider-reported numbers rather than a fresh guess.
+- **Context-size metadata moved out of the system payload into a per-turn note on the last user message.** The approximate context size and both context warnings used to travel as volatile keys inside the otherwise stable system prompt, invalidating provider prompt caching for the whole prefix on every turn and never reaching the model's view of the conversation history. They are now assembled per turn (`collect_volatile_context_note`) and appended as a delimited `<context_note>` block to the END of the last converted user message at all five provider entry points (generic Chat Completions, Anthropic, OpenAI Responses, Gemini native, Mistral native). Attachment never mutates `Message` objects (it works on the fresh, call-owned converted payloads), is idempotent across retries and the Responses-to-Chat-Completions fallback, and is stripped on write inside the existing `with_chroma_archival` wrapper, so the note never reaches stored dialogue history or the semantic archive on any storage backend. The base system prompt now carries a stable standing instruction for the two compaction tools (`summarize_history`, `clear_tool_call_history`, previously only mentioned inside the `filesystem_access`-gated prompt section), and both tool descriptions state when to compact and that compaction comes before the substantive answer.
+- **The volatile context-size warning no longer tells the model to compact before answering.** The `<context_note>` warning keeps reporting how full the context is and which compaction tools exist, but the "compact FIRST, answer SECOND" imperative now lives only in the stable places: the base system prompt and the two tool descriptions. With the pre-call budget guard deciding and performing compaction before the request goes out, a duplicated mid-turn directive invited a second, redundant compaction in the same turn. The volume-based tool-results warning is likewise a statement of fact now: it names `clear_tool_call_history` without telling the model to call it.
+- **Gemma models no longer silently lose the system prompt.** The Gemini-native provider gated the system instruction and the tools on a raw `"gemini"` substring, so any admitted Gemma model received neither. Capability is now encoded as data (a family/revision table of system-prompt and tool support in `chibi/constants.py`): Gemma 4 goes through the system channel with tools like the Gemini models, while Gemma 1-3 receive no tools (which matches what those models can actually do: their tools were never usable) and get the prompt content folded into the first user message instead of losing it. The folded prompt travels only in the request payload and is never persisted as dialogue history. A model matching no table row defaults to full capability, so supporting a future family (e.g. Gemma 5) means adding one row.
+
+### Fixed
+- **`summarize_history` now performs a real compaction.** Calling the tool replaces the stored thread history with the summary exchange instead of appending a summary on top of the untouched history, so the context actually shrinks when the model compacts, matching what the tool's description always claimed.
+
 ## [1.20.1] - 2026-10-25
 
 ### Added
@@ -13,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Optional per-adapter forced tool_choice for terminal-tool turns (default off):** a new single setting, `FORCE_TERMINAL_TOOL_CHOICE` (default `false`), makes every agent loop ask its provider at the protocol level to end the turn with a tool call instead of prose, when the request carries a user interface (and therefore offers the `say`/`ack_silently` terminal tools). The mapping covers all five adapter paths: `tool_choice="required"` for OpenAI Chat Completions and OpenAI Responses, `tool_choice={"type": "any"}` for Anthropic (with a guard that drops the forced choice if legacy `thinking.type="enabled"` is ever sent, since that combination is a hard 400; adaptive thinking is accepted), `tool_config.function_calling_config={mode: "ANY"}` for Gemini native (with an explicit `parameters` object on every forced declaration), and `tool_choice="any"` for Mistral native (with the SDK-mandatory `parameters` field guaranteed on every offered tool). This is an optimisation; the turn-end validator still judges every ending, so a backend that ignores the forced choice (documented but never verified live for MiniMax on the Anthropic-compatible endpoint) still produces a correct, validated turn. Outcomes are observable through greppable log lines (`FORCED_CHOICE model=<m> role=<master|delegated> outcome=<honoured|ignored> provider=<p>`) using the same mechanism as the `TURN_MISUSE` counters, with no new metrics service or storage. The default is deliberately off: forcing is the empirically identified trigger of the infinite-ack loop, so rollout is a decision for after the loop-trap regression suite exists.
 
-- **Context-management decisions are now observable in the logs and countable in-process.** Every decision point of the context pipeline (the pre-call budget guard, the in-loop budget guard, the compaction state machine, the lossy last-resort shrink and the reactive overflow recovery) logs one line per decision per turn stating the observed request size and its provenance (`provider_measured` when a durable provider-reported record anchors the figure, `estimated` when the local heuristic tokenizer counted the whole list), the resolved threshold it was compared against, and the drop list as tier counts with message id/role identity only; message content, credentials and provider payloads never reach the logs. A new in-process counter store (`chibi/services/context_counters.py`) counts each decision, so the questions "did compaction ever fire" and "why not" are answerable from counters: a high guard/in-loop no-op count (every request already fitted) next to zero `compaction_*` counts is a different diagnosis from a high `compaction_skipped` count (the machine ran but attempted no compaction), and a compaction that was rejected is distinguishable from one whose fallback succeeded or failed.
 - **Scheduler observability: APScheduler logs are now visible in Chibi's loguru sinks.** APScheduler 3.x emits everything through stdlib `logging` on the `apscheduler.*` logger family, and Chibi never bridged it — so every INFO/DEBUG record (`Scheduler started`, `Added job ... to job store`, `Next wakeup is due at ...`, `No jobs; waiting until a job is added`) was discarded outright, and even the surviving WARNING+ records (e.g. `Run time of job ... was missed by 2:00:00`) leaked to stderr as bare, unformatted lines with no timestamp, no level and no `scheduler` marker, making "did not fire" and "fired but delivery failed" indistinguishable in the logs. A dedicated stdlib→loguru bridge (`chibi.config.logging`) now installs a single intercepting handler on the `apscheduler` logger (idempotent, propagation disabled — no duplicate or double-formatted output, no `logging.lastResort` leak), scoped narrowly to the `apscheduler.*` family so all other loggers and every runner sink behave exactly as before. Bridged records render in the standard `datetime | LEVEL | message` shape with the stdlib logger name embedded in the message (`[apscheduler.scheduler] ...`), so a plain `grep -i scheduler` over the logs finally matches.
 - **New `SCHEDULER_DEBUG_LOGS` setting (default `false`):** the bridge floor is flag-gated — with the flag off the floor is INFO (start, scheduling, missed-run warnings; no per-wakeup chatter), with `SCHEDULER_DEBUG_LOGS=true` it drops to DEBUG so `Next wakeup is due at ...` and `Added job ...` become visible for diagnosing wakeup-arming issues. Toggling the env var only requires a process restart, not a rebuild. Documented in the generated configuration reference and the settings docstring.
 - **Explicit Chibi-level scheduler logging, independent of the stdlib bridge:** every successful scheduling call (`schedule_interval_job` / `schedule_cron_job` / `schedule_once_job`) now logs an INFO line carrying the job id, the owner (derived from the job-id namespace — `system` or the agent's user id), a trigger summary and the next run time, and a failed `add_job` logs a WARNING with the job id and error before re-raising. Additionally, a Chibi-level WARNING is logged whenever APScheduler dispatches a missed-run event (`EVENT_JOB_MISSED`), carrying the job id and the missed-by duration — the exact signature of the macOS-sleep digest failures, previously invisible.
@@ -23,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **The `<chibi>ACK</chibi>` sentinel is no longer mishandled:** the previous rule ("the message contains the marker and is at most 27 characters") silently swallowed ordinary answers that merely mentioned the marker, while a pure-ACK answer leaked the raw `<chibi>ACK</chibi>` text into the chat, and into the streamed deltas of every provider except the OpenAI-compatible one. The handling is now exact and centralized: only an answer that is precisely the sentinel (case-sensitive, whitespace-tolerant) counts as an ACK, it is kept in history for the prompt contract but never delivered, and any other answer containing the marker has it stripped before delivery and before persistence on every provider path. Live delta streaming is gated on all five adapter paths (OpenAI Chat Completions, OpenAI Responses, Gemini, Mistral, Anthropic/MiniMax): a pure-ACK answer emits zero deltas, so the marker can no longer appear transiently in the IDE/TUI delta channel.
 - **The contradictory "ACK grammar" block is gone from the system prompt:** an unapproved addendum under the ACK rule told the model that every assistant turn is either a bare silent ACK or plain visible text, that a user is never owed a substantive answer while background work continues, and that text and the ACK marker are mutually exclusive, so a model with a real answer plus a background result to absorb had no legal shape to emit, and the gate contradicted the approved rule's fail-safe (deliver when in doubt). The block is removed; the approved ACK rule itself is unchanged, and the scheduler wakeup hint remains untouched pending its own migration.
-- **`summarize_history` now performs a real compaction.** Calling the tool replaces the stored thread history with the summary exchange instead of appending a summary on top of the untouched history, so the context actually shrinks when the model compacts, matching what the tool's description always claimed.
 - **Scheduler wakeup guard against silent job starvation:** a transient job store failure (e.g. a Redis hiccup) inside APScheduler's `wakeup()` left the wakeup timer permanently disarmed — the scheduler stayed "running" but silently stopped executing jobs until an unrelated external `wakeup()` (a new job or a chat message) happened to re-arm it. This mirrored an upstream APScheduler bug ([agronholm/apscheduler#1132](https://github.com/agronholm/apscheduler/pull/1132), merged to the 3.x branch on 2026-08-31 but not yet released). Chibi now ships `GuardedAsyncIOScheduler`, a local guard that mirrors the upstream fix verbatim: an exception escaping `_process_jobs()` is logged through the standard `apscheduler.scheduler` logger and the wakeup timer is re-armed with `jobstore_retry_interval`. Both scheduler flavors (Telegram `ChibiScheduler` and stdio/IDE `StdioScheduler`) use it. The guard is marked `TODO(apscheduler-3.11.4): remove guard` and is a pure-deletion revert once APScheduler 3.11.4 ships. Regression tests simulate a `jobstore.update_job()` failure mid-wakeup and verify the scheduler keeps firing jobs.
 - **Local semantic memory no longer breaks after OS temp cleanup:** the `LOCAL` fastembed embedding model was cached in the system temp directory (`$TMPDIR/fastembed_cache`), which the OS wipes periodically — a wiped or interrupted download then made the ONNX model unloadable and killed Chroma archival and semantic search for the whole deployment. The model is now cached in a persistent per-user directory (`~/.cache/chibi/fastembed`), so a temp-directory cleanup can no longer destroy it; the location is overridable with the `FASTEMBED_CACHE_PATH` environment variable. Embedding vectors, model and dimension are unchanged, so existing collections need no re-embedding.
 
@@ -31,10 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Role-derived tool visibility and the loud-empty delegation contract (D1).** A request is offered the terminal tools `say` and `ack_silently` if and only if it carries a user interface. On every adapter path (OpenAI Chat Completions, OpenAI Responses, Anthropic, Gemini, Mistral) the offered tool list is now filtered at the request seam through a single helper, so delegated sub-agents at any depth and the emergency summarizer are offered neither terminal tool and are expected to end with a non-empty plain-text report; requests with a user interface keep both tools unchanged. The scheduler wakeup hint, which instructs the model to end a turn with `ack_silently()`, is no longer appended to interface-less requests. Because terminal-call interception remains name-based and offer-blind (a sub-agent that hallucinates `ack_silently()` despite never being offered it still ends its turn silently), a delegated sub-agent that returns an empty answer now produces a loud error tool result for the parent instead of a successful-looking `{"response": ""}`; a normal report, a genuinely empty report and a silent turn are therefore always distinguishable by the parent. The delegation prompt section was reworded to match: sub-agents have no user channel, their report arrives as the `delegate_task` result, and the parent delivers it to the user via `say()`.
 - **A `say()` or `ack_silently()` call now actually ends the turn.** The agent loop on every adapter path (OpenAI Chat Completions, OpenAI Responses, Anthropic, Gemini, Mistral) intercepts the terminal tools before dispatch: they are never executed as ordinary tools and never receive a tool result (a result would send the turn back to the model, reproducing an infinite say/ack loop). A `say(text)` call is normalized at ingest into a plain visible assistant message carrying the delivered text, and an `ack_silently()` call into a hidden assistant message carrying the model's private reasoning; a silent turn with nothing to persist omits the assistant turn entirely. Every message now carries a `visibility` field (`visible` by default, so existing stored messages read back unchanged) that is persisted across the Redis, DynamoDB and Local storage backends; rendering of hidden messages is handled separately.
 - **Silence toward the user is now stated with an `ack_silently()` tool call, and user-facing text is delivered through a `say(text)` tool call.** The system prompt no longer instructs the model to write the literal `<chibi>ACK</chibi>` marker to stay silent. Two new terminal tools carry the contract instead: `say(text)` is the only channel for user-facing communication, and `ack_silently()` is a service acknowledgement the user never sees, used when absorbing a background event with nothing to report; calling either one ends the turn. The ACK rule block, the scheduler wakeup hint and the scheduler trigger text were migrated to this contract, and the strict request-state decision logic (deliver whenever the user is still owed an answer) is preserved. The `<chibi>ACK</chibi>` handling remains in place as a legacy fallback for answers produced before the migration. Delivery behaviour is unchanged until the runtime loop handling of the new tools lands.
-- **An oversized request is now prevented instead of failing.** Before each LLM call the thread is measured against its context threshold (default raised from 100k to 200k tokens, still overridable with `MAX_HISTORY_TOKENS`); when the request would not fit, the older turns are collapsed into a summary first, so the conversation continues from the compacted history instead of ending in a provider error. If the provider still reports an overflow, a reactive recovery pass trims the history and retries, and the compaction seed is written atomically so an interrupted run cannot leave the history half-replaced. The measured size is kept per thread on every storage backend, so the decision uses provider-reported numbers rather than a fresh guess.
-- **Context-size metadata moved out of the system payload into a per-turn note on the last user message.** The approximate context size and both context warnings used to travel as volatile keys inside the otherwise stable system prompt, invalidating provider prompt caching for the whole prefix on every turn and never reaching the model's view of the conversation history. They are now assembled per turn (`collect_volatile_context_note`) and appended as a delimited `<context_note>` block to the END of the last converted user message at all five provider entry points (generic Chat Completions, Anthropic, OpenAI Responses, Gemini native, Mistral native). Attachment never mutates `Message` objects (it works on the fresh, call-owned converted payloads), is idempotent across retries and the Responses-to-Chat-Completions fallback, and is stripped on write inside the existing `with_chroma_archival` wrapper, so the note never reaches stored dialogue history or the semantic archive on any storage backend. The base system prompt now carries a stable standing instruction for the two compaction tools (`summarize_history`, `clear_tool_call_history`, previously only mentioned inside the `filesystem_access`-gated prompt section), and both tool descriptions state when to compact and that compaction comes before the substantive answer.
-- **The volatile context-size warning no longer tells the model to compact before answering.** The `<context_note>` warning keeps reporting how full the context is and which compaction tools exist, but the "compact FIRST, answer SECOND" imperative now lives only in the stable places: the base system prompt and the two tool descriptions. With the pre-call budget guard deciding and performing compaction before the request goes out, a duplicated mid-turn directive invited a second, redundant compaction in the same turn. The volume-based tool-results warning is likewise a statement of fact now: it names `clear_tool_call_history` without telling the model to call it.
-- **Gemma models no longer silently lose the system prompt.** The Gemini-native provider gated the system instruction and the tools on a raw `"gemini"` substring, so any admitted Gemma model received neither. Capability is now encoded as data (a family/revision table of system-prompt and tool support in `chibi/constants.py`): Gemma 4 goes through the system channel with tools like the Gemini models, while Gemma 1-3 receive no tools (which matches what those models can actually do: their tools were never usable) and get the prompt content folded into the first user message instead of losing it. The folded prompt travels only in the request payload and is never persisted as dialogue history. A model matching no table row defaults to full capability, so supporting a future family (e.g. Gemma 5) means adding one row.
 - **APScheduler upgraded 3.11.2 → 3.11.3** across all dependency artifacts: `poetry.lock`, and the exported `requirements.txt` (the production Docker image pin) and `requirements-dev.txt` (`pyproject.toml` already allowed `^3.11`); regenerating the requirements via the `deps` task (`poetry export`) keeps everything consistent. 3.11.3 fixes #1103 — sub-minute interval jobs stalling across a DST spring-forward gap with ZoneInfo timezones, relevant ahead of the 2026-10-26 CEST→CET transition (our `tzlocal` yields ZoneInfo). No API changes; PTB 22.x compatibility range (`>=3.10.4,<3.12.0`) unaffected.
 
 ## [1.20.0] - 2026-10-13
@@ -244,7 +260,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **IDE JSONL transport:** Added `chibi ide --stdio` for compatible local IDE clients using protocol v1.
 
-
 ## [1.12.0] - 2026-06-19
 
 ### Added
@@ -271,13 +286,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `send_llm_thoughts` now skips sending when thoughts content is "No content"
 - Thread ID captured before model selection to avoid stale references
 
-
 ## [1.11.0] - 2026-06-10
 
 ### Fixed
 -  The `/reset` and `/stop` commands now terminate not all user-related processes, but only those launched from the same thread where the command is applied.
 -  A bug where changing the model in a group chat would change it not for the group chat, but for the user's private chat.
-
 
 ## [1.10.0] - 2026-06-07
 
@@ -323,7 +336,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Active model matching now also checks `provider.name`, preventing ambiguous matches when models with identical names exist across different providers.
 
-
 ## [1.8.0] - 2026-05-04
 
 ### Added
@@ -332,7 +344,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 thread-aware message sending (typing, photo upload, voice recording actions)
 - **Storage**: All backends (DynamoDB, Redis, Local) now support thread-scoped message storage and retrieval 
 via `thread_id` parameter
-
 
 ## [1.7.2] - 2026-03-10
 
@@ -344,7 +355,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Added
 - **PDF OCR support** for extracting text from PDF files via LLM providers
-
 
 ## [1.7.0] - 2026-03-09
 
@@ -373,13 +383,11 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Updated bot command descriptions
 - Command `/gpt_models` renamed to `/llm_models`
 
-
 ## [1.6.6] - 2026-02-21
 
 ### Added
 - **Gemini TTS:** New text-to-speech capability using Gemini API, outputs PCM 16-bit 44.1kHz mono WAV.
 - **Gemini STT:** New speech-to-text capability for transcribing voice messages.
-
 
 ## [1.6.5] - 2026-02-17
 
@@ -407,7 +415,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - **ZhipuAI Provider:** Renamed env variable containing API Key.
 - **Config Generator:** Added `ZHIPUAI_API_KEY` variable with short description.
 
-
 ## [1.6.2] - 2026-02-15
 
 ### Added
@@ -417,8 +424,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Changed
 - **Documentation:** Updated README with new providers and API key links.
-
-
 
 ## [1.6.1] - 2026-02-11
 ### Added
@@ -550,12 +555,10 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - **Linter and Test Configuration Fixes:** Addressed issues within linter configurations and made improvements to test setup for greater accuracy and coverage.
 - **New Comprehensive Test Suites:** Introduced new test files covering database interactions (`test_database.py`), file editor functionalities (`test_file_editor.py`), and model integrity (`test_models.py`).
 
-
 ## [1.2.1] - 2025-04-21
 
 ### Added
 - Optional heartbeat functionality. The bot can now periodically fetch a specified URL (e.g., a healthchecks.io endpoint or a custom monitoring system endpoint) to signal that it is operational.
-
 
 ## [1.2.0] - 2025-04-20
 
@@ -607,12 +610,10 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 ### Fixed
 - Addressed issues related to inconsistent or incorrect Markdown rendering in responses from Language Models, significantly reducing the occurrence of these problems.
 
-
 ## [0.10.0] - 2025-02-06
 
 ### Changed
 - Dependencies updated: `openai` module updated to `1.61.1`.
-
 
 ## [0.9.0] - 2025-02-06
 
@@ -623,8 +624,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Mistral AI models selection updated.
 - Anthropic available models list updated. 
 
-
-
 ## [0.8.2] - 2024-08-01
 
 ### Fixed
@@ -632,7 +631,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 
 ### Changed
 - Project dependencies updated.
-
 
 ## [0.8.1] - 2024-07-11
 
@@ -656,7 +654,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 - Project structure significantly refactored.
 - README updated: environment variables description significantly improved.
 
-
 ## [0.6.2] - 2024-02-18
 
 ### Added
@@ -669,7 +666,6 @@ the `latest` tag. The `latest` tag is now correctly assigned only to the regular
 DALL-E (to avoid excessive spending). The default value is 0, which means the feature is turned off, and no limits are 
 applied.
 - Optional `IMAGE_GENERATIONS_WHITELIST` setting for a list of user IDs exempt from image generation limits.
-
 
 ## [0.6.0] - 2023-11-28
 
@@ -687,7 +683,6 @@ applied.
 - Base Docker image updated to `python:3.11-alpine`
 - `REDIS_PASSWORD` environment variable is deprecated.
 
-
 ## [0.5.3] - 2023-06-20
 
 ### Changed
@@ -699,7 +694,6 @@ applied.
 ### Fixed
 
 - A bug when users whitelist couldn't work with the telegram user ID.  
-
 
 ## [0.5.1] - 2023-04-15
 

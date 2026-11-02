@@ -10,8 +10,8 @@ from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from chibi.config import application_settings as real_application_settings
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
-from chibi.services.interface import UserInterface
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.openai import OpenAI
 from chibi.services.usage_cache import UsageCacheStore

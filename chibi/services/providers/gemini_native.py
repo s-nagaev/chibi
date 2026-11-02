@@ -55,11 +55,11 @@ from chibi.exceptions import (
     ServiceRateLimitError,
     ServiceResponseError,
 )
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer, VisionResultSchema
 from chibi.services import context_measurement
 from chibi.services.context_note import attach_context_note
-from chibi.services.interface import UserInterface
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.streaming import (

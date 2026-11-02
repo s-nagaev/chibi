@@ -1,7 +1,7 @@
 """Optional LLM thoughts in IDE result frames (v11_05).
 
 Covers:
-  provider reasoning → send_llm_thoughts capture seam → IDEInterface
+  provider reasoning → send_llm_thoughts capture seam → StdioInterface
     → result frame "thoughts" field (capability-gated, 256 KB capped)
 plus the feature-quiet no-reasoning path and result-frame-only delivery.
 """
@@ -16,7 +16,7 @@ import pytest
 
 import chibi.config  # noqa: F401
 from chibi.config.gpt import gpt_settings
-from chibi.runners.ide_transport import MAX_THOUGHTS_BYTES, THOUGHTS_TRUNCATION_MARKER, IDEStdioRunner, _cap_thoughts
+from chibi.interfaces.stdio_runner import MAX_THOUGHTS_BYTES, THOUGHTS_TRUNCATION_MARKER, StdioRunner, _cap_thoughts
 from chibi.services.providers.utils import send_llm_thoughts as deliver_thoughts
 
 
@@ -30,9 +30,9 @@ class OutputRecorder:
         self.frames.append(message)
 
 
-def runner_with(prompt_handler: Any) -> tuple[IDEStdioRunner, list[dict[str, Any]], list[Any]]:
+def runner_with(prompt_handler: Any) -> tuple[StdioRunner, list[dict[str, Any]], list[Any]]:
     """Create a runner whose prompt handling is replaced by prompt_handler."""
-    instance = IDEStdioRunner()
+    instance = StdioRunner()
     recorder = OutputRecorder()
     instance.__dict__["_write"] = recorder
 
@@ -40,12 +40,12 @@ def runner_with(prompt_handler: Any) -> tuple[IDEStdioRunner, list[dict[str, Any
         await interface.send_message("Done!")
 
     patches = [
-        patch("chibi.runners.ide_transport.handle_user_prompt", prompt_handler),
-        patch("chibi.runners.ide_transport.handle_reset", fake_reset),
-        patch("chibi.runners.ide_transport.handle_image_generation", AsyncMock()),
-        patch("chibi.runners.ide_transport.get_models_available", AsyncMock(return_value=[])),
-        patch("chibi.runners.ide_transport.set_active_model", AsyncMock()),
-        patch("chibi.runners.ide_transport.get_info", AsyncMock(return_value="info")),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", prompt_handler),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", AsyncMock()),
+        patch("chibi.interfaces.stdio_runner.get_models_available", AsyncMock(return_value=[])),
+        patch("chibi.interfaces.stdio_runner.set_active_model", AsyncMock()),
+        patch("chibi.interfaces.stdio_runner.get_info", AsyncMock(return_value="info")),
     ]
     for item in patches:
         item.start()
