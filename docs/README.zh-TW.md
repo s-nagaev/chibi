@@ -330,6 +330,10 @@ Chibi：*分析變更，建議改進，透過 MCP 更新文件*
 
 `REACTIVE_CONTEXT_RECOVERY`（預設：`true`）是補充主動 `MAX_HISTORY_TOKENS` 閾值的反應式安全網。當提供者因具型別的 `context_length_exceeded` 錯誤拒絕請求時，Chibi 會自動摘要對話歷史並**恰好重試一次**該輪。如果重試成功，使用者將收到正常回應（附帶一則簡短說明上下文已壓縮的註記）。如果重試再次溢位或因任何原因恢復失敗，則該輪回退到現有的道歉路徑——摘要+重試迴圈在每個原始輪次中最多只能執行一次。設為 `false` 可停用反應式恢復並保留舊行為（記錄日誌 + 道歉，不重試）。
 
+### `CONTEXT_FORCED_COMPACTION_ENABLED` — 回應後的自動壓縮
+
+`CONTEXT_FORCED_COMPACTION_ENABLED`（預設：`true`）啟用回應後的強制壓縮檢查：在每條已交付的回應之後，執行緒的上下文會在背景重新度量；一旦達到下一個請求會被上下文守衛裁剪的程度（模型的上下文視窗減去摘要器輸出保留額度；視窗無法解析時為 `MAX_HISTORY_TOKENS`），對話就會被無條件壓縮——儲存的歷史被一個種子（seed）取代，其摘要訊息以 `[SYSTEM] Context was forcibly compacted` 標記開頭，隨後是詳細摘要、「目前進行中的工作」章節與「背景任務」章節。該檢查是 fire-and-forget 的：它絕不會延遲、破壞或更改已交付的回應，也絕不會在子代理執行緒上執行。一次嘗試失敗後，執行緒會退避三個已交付的輪次或三十分鐘，以先到者為準。設為 `false` 可停用自動檢查；代理自身的壓縮工具（`summarize_history`、`clear_tool_call_history`）、裁剪守衛與 `REACTIVE_CONTEXT_RECOVERY` 保持不變。所有壓縮層的完整生命週期見 [docs/context-compaction.md](docs/context-compaction.md)。
+
 ### 工作目錄按執行緒隔離（`WORKING_DIR`）
 
 代理的工作目錄——用於終端機指令並作為目前工作目錄回報給模型——是**按執行緒隔離的**，與所選 LLM 模型按執行緒綁定的方式一致。
