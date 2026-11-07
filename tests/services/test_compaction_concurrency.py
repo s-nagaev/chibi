@@ -35,6 +35,7 @@ from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
     COMPACTION_SEED_SOURCE,
+    FORCED_COMPACTION_MARKER,
     CompactionOutcome,
     CompactionResult,
     emergency_summarization,
@@ -342,8 +343,8 @@ async def test_concurrent_compactions_are_single_flight(local_db: LocalStorage, 
         patch("chibi.models.User.get_active_llm_model", Mock(return_value=WINDOW_MODEL)),
     ):
         results = await asyncio.gather(
-            emergency_summarization(storage_id=UID_SINGLE_FLIGHT, thread_id=0),
-            emergency_summarization(storage_id=UID_SINGLE_FLIGHT, thread_id=0),
+            emergency_summarization(storage_id=UID_SINGLE_FLIGHT, thread_id=0, caller="reactive"),
+            emergency_summarization(storage_id=UID_SINGLE_FLIGHT, thread_id=0, caller="reactive"),
         )
 
     assert all(isinstance(result, CompactionResult) for result in results)
@@ -385,7 +386,7 @@ async def test_repeated_replacement_leaves_exactly_one_seed(local_db: LocalStora
         patch("chibi.models.User.get_active_llm_model", Mock(return_value=WINDOW_MODEL)),
     ):
         for _ in range(2):
-            result = await emergency_summarization(storage_id=UID_REPLACE + 1, thread_id=0)
+            result = await emergency_summarization(storage_id=UID_REPLACE + 1, thread_id=0, caller="reactive")
     assert isinstance(result, CompactionResult)
     stored_after = await _stored(local_db, UID_REPLACE + 1)
     assert len(stored_after) == 2
@@ -557,7 +558,11 @@ async def test_concurrent_turn_and_reset_keeps_the_seed(local_db: LocalStorage, 
     stored = await _stored(local_db, UID_RESET_RACE)
     assert len(stored) == 4
     assert stored[0].content == SEED_QUESTION and stored[0].source == COMPACTION_SEED_SOURCE
-    assert stored[1].content == SUMMARY_TEXT and stored[1].source == COMPACTION_SEED_SOURCE
+    # The reactive recovery runs through emergency_summarization, so the seed's
+    # summary carries the forced-compaction marker ahead of the summary text.
+    assert stored[1].source == COMPACTION_SEED_SOURCE
+    assert stored[1].content.startswith(FORCED_COMPACTION_MARKER.split("{date}")[0])
+    assert stored[1].content.endswith(SUMMARY_TEXT)
     assert stored[3].content == "recovered answer"
 
 

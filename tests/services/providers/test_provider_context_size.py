@@ -672,9 +672,17 @@ def _note() -> str:
 
 def _seed_context_store(user_id: int, thread_id: int) -> None:
     """Pin a deterministic real context size so the note text is predictable."""
+    from chibi.services.context_trim_store import ContextTrimStore
+    from chibi.utils.app import SingletonMeta
+
     store = UsageCacheStore()
     store._data.clear()
     store._data[store._make_key(user_id=user_id, thread_id=thread_id)] = 42
+    # A guard trim recorded by an earlier test at the same conversation key
+    # (the in-loop drop test below shares it) would append its warning line to
+    # the note; the exact-text note tests pin the volatile keys, not the trim
+    # disclosure, so the side-channel singleton is dropped with the cache.
+    SingletonMeta._instances.pop(ContextTrimStore, None)
 
 
 def _count_notes_in_payload(payload: Any) -> int:

@@ -25,6 +25,7 @@ from chibi.memory.chroma import with_chroma_archival
 from chibi.models import Message, User
 from chibi.schemas.app import ChatResponseSchema
 from chibi.services.bot import handle_scheduler_trigger, handle_tool_response, handle_user_prompt
+from chibi.services.context_measurement import SizeProvenance
 from chibi.services.user import clone_thread_messages, drop_tool_call_history, emergency_summarization
 from chibi.storage.local import LocalStorage
 from chibi.utils.ack_sentinel import ACK_SENTINEL
@@ -241,13 +242,19 @@ class TestSummarizerExcludesHidden:
         with (
             # The merged compaction machine measures through the inject_database
             # singleton even when the db is passed via __wrapped__, so the
-            # measurement seam is pinned to the same mock backend.
+            # measurement seam is pinned to the same mock backend. The measured
+            # figure is lifted above the seed's own count so the
+            # verify-before-wipe machine takes the success path and writes.
             patch("chibi.storage.database._db_provider.get_database", new=AsyncMock(return_value=db)),
             patch("chibi.services.user.reset_chat_history.__wrapped__", new=AsyncMock()) as reset_mock,
             patch("chibi.services.user.gpt_settings.max_tokens", 32000),
             patch("chibi.services.user.gpt_settings.max_history_tokens", 100000),
+            patch(
+                "chibi.services.user.measure_request_size_with_provenance",
+                new=AsyncMock(return_value=(50000, SizeProvenance.ESTIMATED)),
+            ),
         ):
-            await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0)
+            await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0, caller="reactive")
 
         sent_text = provider.get_chat_response.await_args.kwargs["messages"][0].content
         assert "thinking privately" not in sent_text

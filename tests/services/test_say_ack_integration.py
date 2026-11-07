@@ -48,6 +48,7 @@ from chibi.constants import DELEGATION_RULES, SCHEDULER_HINT_PROMPT, get_llm_pro
 from chibi.interfaces.interface import UserInterface
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema
+from chibi.services.context_measurement import SizeProvenance
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.providers.tools import RegisteredChibiTools
 from chibi.services.providers.tools.common import DelegateTool
@@ -402,7 +403,13 @@ class TestSummarizerExcludesHiddenMessages:
         user.get_active_llm_model = Mock(return_value="m")
 
         with patch.object(_db_provider, "get_database", AsyncMock(return_value=db)):
-            await emergency_summarization(storage_id=1, thread_id=9)
+            # The measured figure is lifted above the seed's own count so the
+            # verify-before-wipe machine takes the success path and writes.
+            with patch(
+                "chibi.services.user.measure_request_size_with_provenance",
+                AsyncMock(return_value=(50000, SizeProvenance.ESTIMATED)),
+            ):
+                await emergency_summarization(storage_id=1, thread_id=9, caller="reactive")
 
         input_kwargs = summarizer_provider.get_chat_response.await_args.kwargs
         summarizer_input = input_kwargs["messages"][0].content

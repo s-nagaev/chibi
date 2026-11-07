@@ -97,20 +97,36 @@ class GPTSettings(BaseSettings):
             "When False, an overflow error is presented as-is."
         ),
     )
+    context_forced_compaction_enabled: bool = Field(
+        alias="CONTEXT_FORCED_COMPACTION_ENABLED",
+        default=True,
+        description=(
+            "When True, every thread is re-measured after an answer has been delivered and, once "
+            "the measured context reaches the point where the NEXT request would be trimmed by the "
+            "pre-call context guard (the model window minus the summarizer output reservation; "
+            "max_history_tokens when the window does not resolve), the conversation is "
+            "unconditionally compacted by the active provider in the background. The check is "
+            "fire-and-forget: it never delays, breaks or alters the delivered answer. Independent "
+            "of reactive_context_recovery, which stays the backstop for a provider-rejected "
+            "oversized request."
+        ),
+    )
     max_history_tokens: int = Field(
         default=200000,
         description=(
-            "Threshold (in tokens) of the *real* provider-reported prompt size at which the "
-            "conversation is auto-summarized. The value reflects the entire outgoing request "
-            "(system prompt, activated skills, tool schemas, tool-call arguments, per-message "
-            "structural overhead, and conversation content) rather than an estimate of the "
-            "conversation history alone. The default of 200000 aligns with the largest "
-            "commonly-supported context window, so large-window models keep their full usable "
-            "range instead of being throttled to ~50% by a threshold sized for the smallest "
-            "window. Smaller-window models (128k or less) are protected by the reactive "
-            "one-shot summarization retry and provider failover rather than by this proactive "
-            "threshold; deployments that only use small-window models should set an explicit "
-            "lower value."
+            "Fallback context threshold (in tokens) of the *real* provider-reported "
+            "prompt size, used when the model's context window cannot be resolved: "
+            "the context guards and the post-answer forced compaction compare the "
+            "measured request against the model window minus the summarizer output "
+            "reservation and fall back to this value for models with an unknown "
+            "window. It is also the denominator of the approximate_context_size "
+            "percentage in the per-turn context note. The value reflects the entire "
+            "outgoing request (system prompt, activated skills, tool schemas, "
+            "tool-call arguments, per-message structural overhead, and conversation "
+            "content) rather than an estimate of the conversation history alone. The "
+            "default of 200000 aligns with the largest commonly-supported context "
+            "window; deployments that only use small-window models (128k or less) "
+            "should set an explicit lower value."
         ),
     )
     context_size_warning_threshold: int = Field(alias="CONTEXT_SIZE_WARNING_THRESHOLD", default=50, ge=0, le=100)

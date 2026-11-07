@@ -33,6 +33,7 @@ from chibi.memory.abstract import MemorySearchResult
 from chibi.memory.chroma import InternalChromaLongConversationMemory, with_chroma_archival
 from chibi.models import FunctionSchema, Message, ToolSchema, User
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
+from chibi.services.context_measurement import SizeProvenance
 from chibi.services.providers.tools.memory import (
     ClearToolCallHistoryTool,
     SearchInConversationHistoryTool,
@@ -41,6 +42,7 @@ from chibi.services.providers.tools.memory import (
 from chibi.services.providers.tools.schemas import ToolResponseSchema
 from chibi.services.user import (
     COMPACTION_SEED_SOURCE,
+    FORCED_COMPACTION_MARKER,
     CompactionResult,
     emergency_summarization,
     reset_chat_history,
@@ -536,20 +538,40 @@ async def test_automatic_compaction_replaces_the_thread_and_keeps_the_archive(
     before = await harness.entries(user_id=user_id, thread_id=thread_id)
     assert len(before) == ARCHIVED_DIALOGUE_COUNT, "seeding did not archive the dialogue"
 
-    with patch("chibi.models.User.get_active_llm_provider", Mock(return_value=summarizer_provider())):
-        result = await emergency_summarization.__wrapped__(injected_db, storage_id=user_id, thread_id=thread_id)
+    with (
+        patch("chibi.models.User.get_active_llm_provider", Mock(return_value=summarizer_provider())),
+        # The measured pre figure is lifted above the seed's own count (the
+        # tiny archived dialogue would otherwise measure smaller than the
+        # seed and be correctly rejected by verify-before-wipe); this test
+        # pins archival intactness, not the fit arithmetic.
+        patch(
+            "chibi.services.user.measure_request_size_with_provenance",
+            new=AsyncMock(return_value=(5000, SizeProvenance.ESTIMATED)),
+        ),
+    ):
+        result = await emergency_summarization.__wrapped__(
+            injected_db, storage_id=user_id, thread_id=thread_id, caller="reactive"
+        )
     await harness.tasks.drain()
 
     assert isinstance(result, CompactionResult)
     stored = await harness.stored(user_id=user_id, thread_id=thread_id)
-    assert [(message.role, message.content) for message in stored] == [
-        ("user", COMPACTION_QUESTION),
-        ("assistant", SUMMARY_TEXT),
-    ], "the state machine did not replace the thread history with the seed"
+    assert len(stored) == 2
+    assert stored[0].role == "user"
+    assert stored[0].content == COMPACTION_QUESTION
+    # The automatic state machine runs the emergency path, so the seed's summary
+    # carries the forced-compaction marker ahead of the summary text.
+    assert stored[1].role == "assistant"
+    assert stored[1].content.startswith(FORCED_COMPACTION_MARKER.split("{date}")[0])
+    assert stored[1].content.endswith(SUMMARY_TEXT)
     assert {message.source for message in stored} == {COMPACTION_SEED_SOURCE}
     after = await assert_entries_survived(harness, user_id=user_id, thread_id=thread_id, before=before)
-    added = sorted(after[entry_id][0] for entry_id in set(after) - set(before))
-    assert added == sorted([COMPACTION_QUESTION, SUMMARY_TEXT]), "the archive changed by more than the seed"
+    added_contents = [after[entry_id][0] for entry_id in set(after) - set(before)]
+    assert COMPACTION_QUESTION in added_contents, "the archive changed by more than the seed"
+    assert any(
+        content.startswith(FORCED_COMPACTION_MARKER.split("{date}")[0]) and content.endswith(SUMMARY_TEXT)
+        for content in added_contents
+    ), "the archive changed by more than the seed"
     results = await harness.search(user_id=user_id, thread_id=thread_id, query=SEARCH_QUERY)
     assert_old_memory_is_searchable(results, before)
 

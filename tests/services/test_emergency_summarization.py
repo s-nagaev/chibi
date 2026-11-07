@@ -12,6 +12,7 @@ from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.context_measurement import SizeProvenance, estimate_messages_tokens
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
+    COMPACTION_QUESTION,
     COMPACTION_SEED_SOURCE,
     EMERGENCY_SUMMARIZATION_INPUT_BUDGET,
     CompactionOutcome,
@@ -22,6 +23,7 @@ from chibi.services.user import (
     _is_tool_response_message,
     _summarizer_fit_budget,
     _summarizer_max_tokens,
+    build_compaction_seed,
     emergency_summarization,
     verify_compaction,
 )
@@ -95,7 +97,11 @@ def _make_summarization_mocks(
 
 
 async def _run_emergency_summarization(
-    db: MagicMock, patch_replace: bool = True, result_holder: dict[str, Any] | None = None, **patches: Any
+    db: MagicMock,
+    patch_replace: bool = True,
+    result_holder: dict[str, Any] | None = None,
+    caller: str = "reactive",
+    **patches: Any,
 ) -> AsyncMock:
     """Run emergency_summarization with the history replacement stubbed out.
 
@@ -105,12 +111,13 @@ async def _run_emergency_summarization(
     usage-cache invalidation, runs against the mocked database.
 
     The single measurement entry point is patched (it is an injected wrapper
-    that would otherwise touch real storage); by default it reports the
-    tokenizer count of the mocked history for the pre-compaction measure and
-    one token less for the post-compaction verify (so a completed compaction
-    is predicted to fit unless the test overrides a figure), and
-    tests exercise the real fit arithmetic against a consistent total unless
-    they override the figures.
+    that would otherwise touch real storage); it reports the tokenizer count
+    of the mocked history for the pre-compaction measure unless a test
+    overrides the figure. The post-compaction figure is NOT patched: since
+    the verify-before-wipe reordering the machine predicts it from the seed
+    itself (the tokenizer count of the built seed), so a test shapes the
+    outcome through the measured pre figure, the summary text, or the
+    verification budget, never through a mocked post figure.
 
     Args:
         db: The mocked database to inject.
@@ -119,9 +126,10 @@ async def _run_emergency_summarization(
         result_holder: Optional dict; when given, the ``CompactionResult``
             returned by ``emergency_summarization`` is stored under the key
             ``"result"`` so a test can branch on it.
+        caller: The caller fate passed to the machine (``"forced"`` or
+            ``"reactive"``; the reactive default keeps the legacy behaviour).
         **patches: Keyword arguments forwarded to ``patch`` over user-module gpt_settings attributes;
-            ``measured_total`` overrides the pre-compaction measured request size reported to the fit;
-            ``post_measured_total`` overrides the post-compaction size the verify phase reports.
+            ``measured_total`` overrides the pre-compaction measured request size reported to the fit.
 
     Returns:
         The AsyncMock standing in for the history replacement (the helper by
@@ -129,7 +137,6 @@ async def _run_emergency_summarization(
     """
     messages: list[Message] = db.get_conversation_messages.return_value
     measured_total = patches.pop("measured_total", estimate_messages_tokens(messages))
-    post_measured_total = patches.pop("post_measured_total", max(measured_total - 1, 0))
     if patch_replace:
         replace_mock = AsyncMock()
         with (
@@ -138,15 +145,10 @@ async def _run_emergency_summarization(
             patch("chibi.services.user.gpt_settings.max_history_tokens", patches.get("max_history_tokens", 100000)),
             patch(
                 "chibi.services.user.measure_request_size_with_provenance",
-                new=AsyncMock(
-                    side_effect=[
-                        (measured_total, SizeProvenance.ESTIMATED),
-                        (post_measured_total, SizeProvenance.ESTIMATED),
-                    ]
-                ),
+                new=AsyncMock(side_effect=[(measured_total, SizeProvenance.ESTIMATED)]),
             ),
         ):
-            result = await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0)
+            result = await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0, caller=caller)
         if result_holder is not None:
             result_holder["result"] = result
         return replace_mock
@@ -157,15 +159,10 @@ async def _run_emergency_summarization(
         patch("chibi.services.user.gpt_settings.max_history_tokens", patches.get("max_history_tokens", 100000)),
         patch(
             "chibi.services.user.measure_request_size_with_provenance",
-            new=AsyncMock(
-                side_effect=[
-                    (measured_total, SizeProvenance.ESTIMATED),
-                    (post_measured_total, SizeProvenance.ESTIMATED),
-                ]
-            ),
+            new=AsyncMock(side_effect=[(measured_total, SizeProvenance.ESTIMATED)]),
         ),
     ):
-        result = await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0)
+        result = await emergency_summarization.__wrapped__(db, storage_id=1, thread_id=0, caller=caller)
     if result_holder is not None:
         result_holder["result"] = result
     return reset_mock
@@ -207,7 +204,10 @@ async def test_emergency_summarization_marks_the_seed_messages() -> None:
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
     db, _provider = _make_summarization_mocks(list(messages))
 
-    await _run_emergency_summarization(db, patch_replace=False, max_history_tokens=100000)
+    # The measured pre figure must exceed the seed's own count, otherwise the
+    # verify-before-wipe machine correctly rejects the compaction (the seed
+    # would be BIGGER than the history) and writes nothing.
+    await _run_emergency_summarization(db, patch_replace=False, max_history_tokens=100000, measured_total=50000)
 
     written = [call.kwargs["message"] for call in db.add_message.await_args_list]
     assert len(written) == 2
@@ -225,7 +225,9 @@ async def test_emergency_summarization_invalidates_usage_cache() -> None:
     store = UsageCacheStore()
     store._data[store._make_key(user_id=1, thread_id=0)] = 99999
 
-    await _run_emergency_summarization(db, patch_replace=False, max_history_tokens=100000)
+    # A measured figure above the seed's own count keeps the compaction on
+    # the success path (the invalidation happens at the replacement).
+    await _run_emergency_summarization(db, patch_replace=False, max_history_tokens=100000, measured_total=50000)
 
     assert store.get(user_id=1, thread_id=0) is None
 
@@ -283,15 +285,19 @@ async def test_fit_uses_measured_scale_over_budget_when_counted_is_small() -> No
 async def test_fit_noop_when_measured_total_within_budget_despite_large_counted_history() -> None:
     """A measured size within the budget is a clean no-op even when the raw history is bulky."""
     messages = [
-        Message(role="user", content="u" * 2000),
-        Message(role="assistant", content="a" * 2000),
+        Message(role="user", content="u" * 200000),
+        Message(role="assistant", content="a" * 200000),
     ]
     db, provider = _make_summarization_mocks(deepcopy(messages))
 
-    replace_mock = await _run_emergency_summarization(db, max_history_tokens=1000, measured_total=100)
+    # max_history_tokens=40000: the fallback fit share (24000) is below the
+    # counted history (~100k) while the verification budget (the same 40000)
+    # still admits the predicted seed (post + the 32000 reservation), so the
+    # compaction completes and writes.
+    replace_mock = await _run_emergency_summarization(db, max_history_tokens=40000, measured_total=100)
 
     counted = estimate_messages_tokens(messages)
-    assert counted > int(1000 * EMERGENCY_SUMMARIZATION_INPUT_BUDGET)
+    assert counted > int(40000 * EMERGENCY_SUMMARIZATION_INPUT_BUDGET)
     # Whole history went to the summarizer: nothing was dropped.
     sent_text = provider.get_chat_response.await_args.kwargs["messages"][0].content
     assert "u" * 100 in sent_text
@@ -1024,23 +1030,24 @@ def test_verify_compaction_outcomes_distinguishable() -> None:
 async def test_predicted_fit_records_prediction_not_verification() -> None:
     """The state machine's post-compaction check is a PREDICTION and its log must say so.
 
-    After the replacement no provider figure exists for the compacted history (the durable
-    record is dropped by design), so the machine feeds the predicted post-size into the
-    advisory mode: the best it may record is PREDICTED_FITS. The log line says "predicted",
-    never claims verification, and anchors the reduction check on the pre-replacement
-    measured figure (50000) rather than the raw counted estimate of the same history (40001),
-    against which the identical post figure (45000) would read as did_not_reduce.
+    Since the verify-before-wipe reordering the post-compaction figure is the tokenizer
+    count of the built seed, taken BEFORE anything is written, so the machine feeds the
+    predicted post-size into the advisory mode: the best it may record is PREDICTED_FITS.
+    The log line says "predicted", never claims verification, and anchors the reduction
+    check on the pre-replacement measured figure (50000) rather than the raw counted
+    estimate of the same history (40001), against which the identical post figure would
+    read as did_not_reduce.
     """
     messages = [Message(role="user", content="u" * 160000)]
     db, _provider = _make_summarization_mocks(deepcopy(messages))
     records, cleanup = _capture_fit_logs()
     holder: dict[str, Any] = {}
+    predicted_post = estimate_messages_tokens(build_compaction_seed(summary="summary", forced=True))
     try:
         replace_mock = await _run_emergency_summarization(
             db,
             max_history_tokens=200000,
             measured_total=50000,
-            post_measured_total=45000,
             result_holder=holder,
         )
     finally:
@@ -1049,7 +1056,7 @@ async def test_predicted_fit_records_prediction_not_verification() -> None:
     assert replace_mock.await_count == 1
     assert estimate_messages_tokens(messages) == 40001
     assert any("Compaction predicted to fit" in record for record in records)
-    assert any("50000 -> 45000" in record for record in records)
+    assert any(f"50000 -> {predicted_post}" in record for record in records)
     assert not any("Compaction verified" in record for record in records)
     result = holder["result"]
     assert isinstance(result, CompactionResult)
@@ -1059,17 +1066,18 @@ async def test_predicted_fit_records_prediction_not_verification() -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_reduction_compaction_is_rejected_and_last_resort_runs() -> None:
-    """A compaction whose result is not smaller is rejected and the last-resort path runs.
+async def test_no_reduction_compaction_is_rejected_and_nothing_is_written() -> None:
+    """A compaction whose result is not smaller is rejected and the thread is not touched.
 
-    The predicted post-compaction measurement equals the pre-compaction one (a no-op
-    summarizer call), and the resulting request is over the budget (max_history_tokens
-    fallback stands in for the window), so the machine must log the did_not_reduce
-    rejection and shrink the seed through the replacement helper instead of treating
-    the compaction as a success. The equality is fed through the patched measurement
-    entry point: in the live flow the guard is defensive, not reachable (the pre side
-    is the oversized history, the post side the two-message seed). This test proves
-    the guard's behaviour, not its production reachability.
+    The predicted post-compaction figure (the seed's own count) is not smaller than the
+    measured pre-compaction one (here the measured figure is forced down to 1 token, the
+    shape of a no-op summarizer call against a tiny history), so the machine must log the
+    did_not_reduce rejection and NOT write anything: verify-before-wipe means the
+    replacement never runs on a rejected outcome. For the reactive caller the last-resort
+    path still runs and reports a fit (the seed itself fits the budget), but the shrink
+    changes nothing, so there is nothing to persist. This test proves the guard's
+    behaviour; in the live flow the pre side is the oversized history and the post side
+    the two-message seed, so the shape is defensive.
     """
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
     db, _provider = _make_summarization_mocks(deepcopy(messages))
@@ -1079,14 +1087,13 @@ async def test_no_reduction_compaction_is_rejected_and_last_resort_runs() -> Non
         replace_mock = await _run_emergency_summarization(
             db,
             max_history_tokens=100000,
-            measured_total=90000,
-            post_measured_total=90000,
+            measured_total=1,
             result_holder=holder,
         )
     finally:
         cleanup()
 
-    assert replace_mock.await_count == 2
+    replace_mock.assert_not_awaited()
     assert any("did_not_reduce" in record for record in records)
     assert any("post side predicted" in record for record in records)
     assert not any("Compaction verified" in record for record in records)
@@ -1095,8 +1102,6 @@ async def test_no_reduction_compaction_is_rejected_and_last_resort_runs() -> Non
     assert result.outcome is CompactionOutcome.DID_NOT_REDUCE
     assert result.fallback_ran is True
     assert result.fallback_fitted is True
-    shrunk_seed = replace_mock.await_args_list[1].kwargs["seed"]
-    assert len(shrunk_seed) == 2
 
 
 @pytest.mark.asyncio
@@ -1104,8 +1109,8 @@ async def test_no_reduction_compaction_rejected_even_when_result_fits() -> None:
     """DID_NOT_REDUCE is a rejection on its own: no success is recorded even though it fits.
 
     The fallback still runs (and reports that the request fits), but its no-op shrink
-    changes nothing, so the seed is not rewritten: exactly one replacement, one recorded
-    compaction outcome, and a result value that says fallback_ran without a second write.
+    changes nothing and the replacement never ran (verify-before-wipe: a rejected
+    outcome writes nothing), so the thread is left exactly as it was.
     """
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
     db, _provider = _make_summarization_mocks(deepcopy(messages))
@@ -1115,14 +1120,13 @@ async def test_no_reduction_compaction_rejected_even_when_result_fits() -> None:
         replace_mock = await _run_emergency_summarization(
             db,
             max_history_tokens=200000,
-            measured_total=90000,
-            post_measured_total=90000,
+            measured_total=1,
             result_holder=holder,
         )
     finally:
         cleanup()
 
-    assert replace_mock.await_count == 1
+    replace_mock.assert_not_awaited()
     assert any("did_not_reduce" in record for record in records)
     assert not any("Compaction verified" in record for record in records)
     result = holder["result"]
@@ -1135,21 +1139,31 @@ async def test_no_reduction_compaction_rejected_even_when_result_fits() -> None:
 async def test_reduced_but_over_budget_runs_last_resort_and_persists_shrunk_seed() -> None:
     """Reduced but still over the window: the shrunk seed is persisted with ids intact.
 
-    gpt-4o resolves a 128000 window; with the 32000 reservation the post-compaction request
-    (149999 mocked) is over budget, so the last-resort path runs and the second replacement
-    writes the shrunk seed, the same Message objects, ids and source marker unchanged.
+    The verification budget is tuned to sit just below the predicted seed request
+    (post + the 32000 reservation), so the outcome is REDUCED_BUT_OVER_BUDGET with a
+    tiny excess the seed's truncatable share can close: the summary (the last message)
+    is protected, only the question unit can shrink, so the excess must stay within a
+    truncation step. The last-resort path runs and the SINGLE replacement writes the
+    shrunk seed: under verify-before-wipe the wipe happens together with the shrunk
+    write, never before the fit is known.
     """
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
-    db, _provider = _make_summarization_mocks(deepcopy(messages), model="gpt-4o")
+    answer = "s" * 400000
+    db, _provider = _make_summarization_mocks(deepcopy(messages), answer=answer)
     holder: dict[str, Any] = {}
 
-    replace_mock = await _run_emergency_summarization(
-        db,
-        max_history_tokens=200000,
-        measured_total=150000,
-        post_measured_total=149999,
-        result_holder=holder,
-    )
+    # The predicted post-compaction request: the seed's own tokenizer count with the
+    # huge summary the fake summarizer returns.
+    predicted_post = estimate_messages_tokens(build_compaction_seed(summary=answer, forced=True))
+    # A window two tokens below post + reservation: over budget by exactly 2 tokens,
+    # closable by one truncation step of the seed question.
+    tuned_window = predicted_post + 32000 - 2
+    with patch("chibi.services.user.get_model_context_window", Mock(return_value=tuned_window)):
+        replace_mock = await _run_emergency_summarization(
+            db,
+            measured_total=predicted_post + 50000,
+            result_holder=holder,
+        )
 
     result = holder["result"]
     assert result.outcome is CompactionOutcome.REDUCED_BUT_OVER_BUDGET
@@ -1157,17 +1171,17 @@ async def test_reduced_but_over_budget_runs_last_resort_and_persists_shrunk_seed
     # itself was rejected, and the fallback ran and produced a fitting request.
     assert result.fallback_ran is True
     assert result.fallback_fitted is True
-    assert replace_mock.await_count == 2
-    original_seed = replace_mock.await_args_list[0].kwargs["seed"]
-    shrunk_seed = replace_mock.await_args_list[1].kwargs["seed"]
-    # The shrink mutates the seed messages in place, so both recorded calls reference the same
-    # objects: the proof of id preservation is that both calls carry the identical id list.
-    assert [message.id for message in shrunk_seed] == [message.id for message in original_seed]
+    # Exactly ONE replacement: the wiped-and-persisted state IS the shrunk seed.
+    assert replace_mock.await_count == 1
+    shrunk_seed = replace_mock.await_args.kwargs["seed"]
     assert all(message.source == COMPACTION_SEED_SOURCE for message in shrunk_seed)
     # The seed question was truncated (the unit overshoots the excess, so it is truncated, not
-    # dropped), and the last message, the summary, the current turn, survived untouched.
+    # dropped), and the last message, the summary (with its forced-compaction marker prefix),
+    # survived untouched.
+    assert len(shrunk_seed) == 2
     assert len(shrunk_seed[0].content) < len("What we were talking about?")
-    assert shrunk_seed[1].content == "summary"
+    assert shrunk_seed[1].content.endswith(answer)
+    assert "[SYSTEM] Context was forcibly compacted on" in shrunk_seed[1].content
 
 
 def test_fit_log_reports_tier_identity_and_never_content() -> None:
@@ -1215,7 +1229,6 @@ async def test_compaction_decision_log_carries_size_provenance_and_budget() -> N
             db,
             max_history_tokens=200000,
             measured_total=50000,
-            post_measured_total=45000,
             result_holder=holder,
         )
     finally:
@@ -1245,7 +1258,6 @@ async def test_counters_distinguish_compaction_success_from_fallback() -> None:
         db,
         max_history_tokens=200000,
         measured_total=50000,
-        post_measured_total=45000,
         result_holder=holder,
     )
 
@@ -1264,7 +1276,9 @@ async def test_counters_distinguish_fallback_success_from_failure() -> None:
     """A rejected compaction counts the rejection and whether the fallback fitted."""
     from chibi.services.context_counters import ContextDecisionCounters
 
-    # Rejected as did_not_reduce; the fallback shrink makes the request fit.
+    # Rejected as did_not_reduce (the seed is not smaller than the 1-token
+    # measured figure); the fallback shrink reports a fit (the seed itself
+    # fits the budget) and changes nothing, so nothing is written.
     ContextDecisionCounters().reset()
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
     db, _provider = _make_summarization_mocks(deepcopy(messages))
@@ -1272,8 +1286,7 @@ async def test_counters_distinguish_fallback_success_from_failure() -> None:
     await _run_emergency_summarization(
         db,
         max_history_tokens=100000,
-        measured_total=90000,
-        post_measured_total=90000,
+        measured_total=1,
         result_holder=holder,
     )
     assert holder["result"].fallback_fitted is True
@@ -1282,16 +1295,17 @@ async def test_counters_distinguish_fallback_success_from_failure() -> None:
     assert counters.get("compaction_fallback_succeeded") == 1
     assert "compaction_fallback_failed" not in counters
 
-    # Rejected again; this time even the fallback cannot make the request fit.
+    # Rejected again; this time even the fallback cannot make the request
+    # fit: the huge summary (the protected last message) alone keeps the
+    # predicted request over the budget, so the shrink cannot close the gap.
     ContextDecisionCounters().reset()
     messages = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
-    db, _provider = _make_summarization_mocks(deepcopy(messages))
+    db, _provider = _make_summarization_mocks(deepcopy(messages), answer="s" * 300000)
     holder = {}
     await _run_emergency_summarization(
         db,
         max_history_tokens=100000,
-        measured_total=90000,
-        post_measured_total=10000000,
+        measured_total=1,
         result_holder=holder,
     )
     assert holder["result"].fallback_fitted is False
@@ -1326,3 +1340,107 @@ async def test_skipped_compaction_is_countable() -> None:
     counters = ContextDecisionCounters().snapshot()
     assert counters.get("compaction_skipped") == 1
     assert "compaction_succeeded" not in counters
+
+
+@pytest.mark.parametrize("caller", ["forced", "reactive"])
+@pytest.mark.asyncio
+async def test_both_callers_share_the_success_core(caller: str) -> None:
+    """The forced and reactive fates run the same machine on the success path.
+
+    Same outcome, one summarizer call, one replacement: the only thing the
+    caller identity changes is the fate on a REJECTED outcome, never the
+    compaction core itself.
+    """
+    messages = [Message(role="user", content="u" * 160000)]
+    db, provider = _make_summarization_mocks(deepcopy(messages))
+    holder: dict[str, Any] = {}
+    replace_mock = await _run_emergency_summarization(
+        db,
+        max_history_tokens=200000,
+        measured_total=50000,
+        result_holder=holder,
+        caller=caller,
+    )
+
+    result = holder["result"]
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.PREDICTED_FITS
+    assert result.fallback_ran is False
+    assert replace_mock.await_count == 1
+    provider.get_chat_response.assert_awaited_once()
+    seed = replace_mock.await_args.kwargs["seed"]
+    assert all(message.source == COMPACTION_SEED_SOURCE for message in seed)
+    assert seed[0].content == COMPACTION_QUESTION
+    assert "[SYSTEM] Context was forcibly compacted on" in seed[1].content
+
+
+@pytest.mark.asyncio
+async def test_forced_fate_success_replaces_the_history_exactly_once() -> None:
+    """Forced fate, verified fit: the marked seed is written exactly once, after the check."""
+    messages = [Message(role="user", content="u" * 160000)]
+    db, _provider = _make_summarization_mocks(deepcopy(messages))
+    holder: dict[str, Any] = {}
+    replace_mock = await _run_emergency_summarization(
+        db,
+        max_history_tokens=200000,
+        measured_total=50000,
+        result_holder=holder,
+        caller="forced",
+    )
+
+    result = holder["result"]
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.PREDICTED_FITS
+    assert result.fallback_ran is False
+    assert result.fallback_fitted is None
+    assert replace_mock.await_count == 1
+    seed = replace_mock.await_args.kwargs["seed"]
+    assert len(seed) == 2
+    assert all(message.source == COMPACTION_SEED_SOURCE for message in seed)
+
+
+@pytest.mark.asyncio
+async def test_forced_fate_failure_shapes_leave_the_replacement_untouched() -> None:
+    """Forced fate: every rejected shape returns without any history mutation.
+
+    Empty summary (the machine aborts), DID_NOT_REDUCE and REDUCED_BUT_OVER_BUDGET
+    (rejected outcomes) all leave the thread untouched: no replacement, no
+    last-resort write; the failure is carried by the result value the thrash
+    guard records the back-off from.
+    """
+    # Empty summary: the machine aborts after the summarizer call, before the seed.
+    db, provider = _make_summarization_mocks([Message(role="user", content="hello")], answer="")
+    replace_mock = await _run_emergency_summarization(
+        db, max_history_tokens=100000, measured_total=50000, caller="forced"
+    )
+    provider.get_chat_response.assert_awaited_once()
+    replace_mock.assert_not_awaited()
+
+    # DID_NOT_REDUCE: the predicted seed is not smaller than the measured history.
+    db, _provider = _make_summarization_mocks([Message(role="user", content="hello")])
+    holder: dict[str, Any] = {}
+    replace_mock = await _run_emergency_summarization(
+        db, max_history_tokens=100000, measured_total=1, result_holder=holder, caller="forced"
+    )
+    replace_mock.assert_not_awaited()
+    assert holder["result"].outcome is CompactionOutcome.DID_NOT_REDUCE
+    assert holder["result"].fallback_ran is False
+    assert holder["result"].fallback_fitted is None
+
+    # REDUCED_BUT_OVER_BUDGET: the predicted seed request is over the budget,
+    # the forced fate must NOT fall through to the last-resort seed write.
+    answer = "s" * 400000
+    db, _provider = _make_summarization_mocks([Message(role="user", content="u" * 160000)], answer=answer)
+    predicted_post = estimate_messages_tokens(build_compaction_seed(summary=answer, forced=True))
+    holder = {}
+    with patch("chibi.services.user.get_model_context_window", Mock(return_value=predicted_post + 32000 - 2)):
+        replace_mock = await _run_emergency_summarization(
+            db,
+            measured_total=predicted_post + 50000,
+            result_holder=holder,
+            caller="forced",
+        )
+    replace_mock.assert_not_awaited()
+    assert holder["result"].outcome is CompactionOutcome.REDUCED_BUT_OVER_BUDGET
+    assert holder["result"].fallback_ran is False
+    assert holder["result"].fallback_fitted is None

@@ -39,11 +39,13 @@ from chibi.services.failover import CooldownStore, FailoverModelRegistry
 from chibi.services.providers.moonshotai import MoonshotAI
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
+    COMPACTION_QUESTION,
     COMPACTION_SEED_SOURCE,
     EMERGENCY_SUMMARIZATION_INPUT_BUDGET,
     CompactionOutcome,
     CompactionResult,
     _enforce_context_budget,
+    build_compaction_seed,
     emergency_summarization,
     get_llm_chat_completion_answer,
 )
@@ -386,7 +388,7 @@ async def test_summarizer_request_fits_the_model_window_end_to_end(local_db: Loc
     monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
     monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
 
-    result = await emergency_summarization(storage_id=UID, thread_id=0)
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller="reactive")
 
     assert isinstance(result, CompactionResult)
     assert result.outcome is CompactionOutcome.PREDICTED_FITS
@@ -423,7 +425,7 @@ async def test_fit_budget_uses_the_real_window_scale_not_the_fallback_share(
     monkeypatch.setattr(User, "get_active_llm_model", Mock(return_value=WINDOW_MODEL))
     monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
 
-    result = await emergency_summarization(storage_id=UID, thread_id=0)
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller="reactive")
 
     assert isinstance(result, CompactionResult)
     sent_text = provider.get_chat_response.await_args.kwargs["messages"][0].content
@@ -836,8 +838,22 @@ async def test_compaction_leaves_the_archive_searchable(
         patch("chibi.models.User.get_active_llm_provider", Mock(return_value=provider)),
         patch("chibi.models.User.get_active_llm_model", Mock(return_value=WINDOW_MODEL)),
         patch("chibi.services.user.gpt_settings.max_tokens", RESERVATION),
+        # The tiny three-message dialogue measures smaller than the post-compaction
+        # seed (the forced-compaction marker alone accounts for ~30 tokens), so the
+        # real measurement would reject the compaction as did_not_reduce. The
+        # measured pre figure is mocked above it: this test pins archival
+        # intactness and searchability, not the fit arithmetic.
+        patch(
+            "chibi.services.user.measure_request_size_with_provenance",
+            new=AsyncMock(
+                side_effect=[
+                    (5000, SizeProvenance.ESTIMATED),
+                    (43, SizeProvenance.ESTIMATED),
+                ]
+            ),
+        ),
     ):
-        result = await emergency_summarization(storage_id=CHROMA_UID, thread_id=CHROMA_THREAD)
+        result = await emergency_summarization(storage_id=CHROMA_UID, thread_id=CHROMA_THREAD, caller="reactive")
     await harness.tasks.drain()
 
     assert isinstance(result, CompactionResult)
@@ -852,6 +868,161 @@ async def test_compaction_leaves_the_archive_searchable(
         user_id=CHROMA_UID, thread_id=CHROMA_THREAD, query="QUESTION-ALPHA about bicycles"
     )
     contents = [entry.content for entry in results]
-    assert "QUESTION-ALPHA about bicycles" in contents
-    assert "ANSWER-BETA about bicycles" in contents
+    assert any("QUESTION-ALPHA about bicycles" in content for content in contents)
+    assert any("ANSWER-BETA about bicycles" in content for content in contents)
     assert all(str(entry.message_id) in {"1", "2", "3"} for entry in results)
+
+
+async def _stored_history(storage: LocalStorage, user_id: int, thread_id: int) -> list[Message]:
+    """Read the whole stored history of a thread back from real storage."""
+    user = await storage.get_or_create_user(user_id=user_id)
+    return await storage.get_conversation_messages(user=user, thread_id=thread_id)
+
+
+async def test_forced_fate_failure_shapes_leave_storage_untouched(local_db: LocalStorage, monkeypatch) -> None:
+    """Forced fate: empty summary, did_not_reduce and over-budget write NOTHING to storage.
+
+    The three failure shapes of the verify-before-wipe machine, on the real local
+    backend: the seeded history is read back byte-identical (roles and contents)
+    in every case, no seed message ever appears, and the failure is carried by
+    the result value (or the None skip) instead of a mutation.
+    """
+    oversized = _dialogue(turn_chars=6400, turns=60)
+
+    # Shape 1: empty summary. The machine aborts after the summarizer call.
+    await _seed_history(local_db, UID, 0, _dialogue(turn_chars=200, turns=4))
+    provider = _fake_chat_provider(answer="")
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    monkeypatch.setattr(User, "get_active_llm_model", Mock(return_value=WINDOW_MODEL))
+    monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
+    monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller="forced")
+    assert result is None
+    stored = await _stored_history(local_db, UID, 0)
+    assert [message.role for message in stored] == ["user", "assistant"] * 4
+    assert all(message.source is None for message in stored)
+
+    # Shape 2: DID_NOT_REDUCE. The predicted seed is not smaller than the tiny
+    # history it would replace, so the replacement never runs.
+    tiny = [Message(role="user", content="hello"), Message(role="assistant", content="hi")]
+    await _seed_history(local_db, UID + 1, 0, tiny)
+    provider = _fake_chat_provider(answer=SUMMARY_TEXT)
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    result = await emergency_summarization(storage_id=UID + 1, thread_id=0, caller="forced")
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.DID_NOT_REDUCE
+    assert result.fallback_ran is False
+    stored = await _stored_history(local_db, UID + 1, 0)
+    assert [(message.role, message.content) for message in stored] == [
+        (message.role, message.content) for message in tiny
+    ]
+
+    # Shape 3: REDUCED_BUT_OVER_BUDGET. The summary alone keeps the predicted
+    # seed request over the window; the forced fate must not fall through to
+    # the last-resort seed write.
+    await _seed_history(local_db, UID + 2, 0, oversized)
+    provider = _fake_chat_provider(answer="s" * 400000)
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    result = await emergency_summarization(storage_id=UID + 2, thread_id=0, caller="forced")
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.REDUCED_BUT_OVER_BUDGET
+    assert result.fallback_ran is False
+    assert result.fallback_fitted is None
+    stored = await _stored_history(local_db, UID + 2, 0)
+    assert len(stored) == len(oversized)
+    assert [message.content for message in stored] == [message.content for message in oversized]
+    assert all(message.source is None for message in stored)
+
+
+async def test_forced_fate_success_wipes_and_persists_exactly_once(local_db: LocalStorage, monkeypatch) -> None:
+    """Forced fate, verified fit: the stored history becomes exactly the marked seed pair."""
+    history = _dialogue(turn_chars=6400, turns=60)
+    await _seed_history(local_db, UID, 0, history)
+    provider = _fake_chat_provider(answer=SUMMARY_TEXT)
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    monkeypatch.setattr(User, "get_active_llm_model", Mock(return_value=WINDOW_MODEL))
+    monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
+    monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
+
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller="forced")
+
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.PREDICTED_FITS
+    assert result.fallback_ran is False
+    provider.get_chat_response.assert_awaited_once()
+    stored = await _stored_history(local_db, UID, 0)
+    assert len(stored) == 2
+    assert stored[0].role == "user" and stored[0].content == COMPACTION_QUESTION
+    assert stored[1].role == "assistant"
+    assert "[SYSTEM] Context was forcibly compacted on" in stored[1].content
+    assert stored[1].content.endswith(SUMMARY_TEXT)
+    assert {message.source for message in stored} == {COMPACTION_SEED_SOURCE}
+
+
+async def test_reactive_fate_over_budget_fallback_persists_a_sendable_shrunk_seed(
+    local_db: LocalStorage, monkeypatch
+) -> None:
+    """Reactive fate, over-budget prediction: the shrunk seed is persisted and stays sendable.
+
+    The summary is tuned so the predicted seed request sits exactly 2 tokens over the
+    gpt-4o window: the last-resort path closes the gap by truncating the seed question
+    (the summary, the last message, is protected), and the SINGLE replacement persists
+    the shrunk seed. Sendability: the stored seed plus the output reservation fits the
+    window, so the reactive retry re-assembled from storage can be sent.
+    """
+    history = _dialogue(turn_chars=6400, turns=60)
+    await _seed_history(local_db, UID, 0, history)
+    # Tune the summary so estimate(seed) == 96002 exactly: adding 4k characters adds
+    # exactly k tokens to the estimator's count, so the adjustment is exact.
+    base_answer = "s" * (4 * 96000)
+    base_post = estimate_messages_tokens(build_compaction_seed(summary=base_answer, forced=True))
+    answer = "s" * ((4 * 96000) + 4 * (96002 - base_post))
+    assert estimate_messages_tokens(build_compaction_seed(summary=answer, forced=True)) == 96002
+    provider = _fake_chat_provider(answer=answer)
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    monkeypatch.setattr(User, "get_active_llm_model", Mock(return_value=WINDOW_MODEL))
+    monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
+    monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
+
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller="reactive")
+
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.REDUCED_BUT_OVER_BUDGET
+    assert result.fallback_ran is True
+    assert result.fallback_fitted is True
+    stored = await _stored_history(local_db, UID, 0)
+    # The shrunk seed replaced the whole history: the original dialogue is gone.
+    assert len(stored) == 2
+    assert {message.source for message in stored} == {COMPACTION_SEED_SOURCE}
+    assert stored[1].content.endswith(answer)
+    assert "[SYSTEM] Context was forcibly compacted on" in stored[1].content
+    # The question was truncated, not dropped, and the original turn is gone.
+    assert stored[0].role == "user"
+    assert len(stored[0].content) < len(COMPACTION_QUESTION)
+    # Sendability: the persisted request plus the output reservation fits the window.
+    assert estimate_messages_tokens(stored) + RESERVATION <= WINDOW
+
+
+@pytest.mark.parametrize("caller", ["forced", "reactive"])
+async def test_compaction_end_state_is_identical_for_both_callers(local_db: LocalStorage, monkeypatch, caller) -> None:
+    """Both caller fates run the same core: identical outcome and identical stored seed."""
+    history = _dialogue(turn_chars=6400, turns=60)
+    await _seed_history(local_db, UID, 0, history)
+    provider = _fake_chat_provider(answer=SUMMARY_TEXT)
+    monkeypatch.setattr(User, "get_active_llm_provider", Mock(return_value=provider))
+    monkeypatch.setattr(User, "get_active_llm_model", Mock(return_value=WINDOW_MODEL))
+    monkeypatch.setattr(gpt_settings, "max_tokens", RESERVATION)
+    monkeypatch.setattr(gpt_settings, "max_history_tokens", 200000)
+
+    result = await emergency_summarization(storage_id=UID, thread_id=0, caller=caller)
+
+    assert isinstance(result, CompactionResult)
+    assert result.outcome is CompactionOutcome.PREDICTED_FITS
+    stored = await _stored_history(local_db, UID, 0)
+    assert [(message.role, message.source) for message in stored] == [
+        ("user", COMPACTION_SEED_SOURCE),
+        ("assistant", COMPACTION_SEED_SOURCE),
+    ]
+    assert stored[0].content == COMPACTION_QUESTION
+    assert "[SYSTEM] Context was forcibly compacted on" in stored[1].content
+    assert stored[1].content.endswith(SUMMARY_TEXT)

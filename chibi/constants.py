@@ -628,6 +628,15 @@ the answer because a compaction happened.
 when the dialogue itself is large. A summary must be exhaustive: it fully replaces the history.
 Never describe the compaction mechanics or the context note itself to the user.
 
+Forced compaction: the system itself may also compact this conversation after an answer has been delivered,
+when the context has grown past the safety threshold even though you did not compact. When that happens the
+stored history is replaced by a seed whose summary message starts with the line
+`[SYSTEM] Context was forcibly compacted on <date>; older turns were replaced by this summary`, followed by a
+detailed summary of the earlier conversation, a `## Current work in progress` section and a
+`## Background tasks` section. If you see that marker: treat the summary as the complete record of everything
+that happened before it, read its `## Current work in progress` and `## Background tasks` sections FIRST, and
+continue the interrupted work coherently; never ask the user to repeat what the summary already covers.
+
 # User Memory Rules (set_user_info + update_notes)
 You have two memory tools with strictly different scope. Never mix them.
 

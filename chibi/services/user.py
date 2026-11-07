@@ -10,7 +10,7 @@ from functools import partial
 from io import BytesIO
 from itertools import islice
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
@@ -22,6 +22,7 @@ from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema, VideoResult, VisionResultSchema
 from chibi.services.context_counters import ContextDecisionCounters
 from chibi.services.context_measurement import estimate_messages_tokens, measure_request_size_with_provenance
+from chibi.services.context_trim_store import ContextTrimStore
 from chibi.services.failover import (
     FailoverPair,
     FailoverTrigger,
@@ -30,7 +31,7 @@ from chibi.services.failover import (
     run_with_failover,
 )
 from chibi.services.lock_manager import LockManager
-from chibi.services.usage_cache import UsageCacheStore
+from chibi.services.usage_cache import CompactionStateStore, UsageCacheStore
 from chibi.storage.abstract import Database
 from chibi.storage.database import inject_database
 from chibi.utils.ack_sentinel import is_pure_ack, strip_ack_sentinel
@@ -106,6 +107,10 @@ async def replace_thread_history(db: Database, storage_id: int, thread_id: int, 
     # The cached prompt size reflects the pre-replacement history; without
     # this the next turn would read a stale context size.
     UsageCacheStore().invalidate(user_id=storage_id, thread_id=thread_id)
+    # Any recorded guard trims describe the PRE-replacement request; without
+    # this the next turn would disclose trims that never affected the new
+    # (seed) history.
+    ContextTrimStore().clear(storage_id=storage_id, thread_id=thread_id)
 
 
 # Fallback share of gpt_settings.max_history_tokens for the token budget of
@@ -128,7 +133,24 @@ COMPACTION_SEED_SOURCE = "compaction_seed"
 COMPACTION_QUESTION = "What we were talking about?"
 
 
-def build_compaction_seed(summary: str) -> list[Message]:
+# The forced-compaction marker line the seed's summary message starts with
+# when the compaction was initiated by the system (emergency_summarization,
+# both the proactive forced caller and the reactive recovery caller), as
+# opposed to the agent's own summarize_history tool call. It is the durable
+# in-history signal that older turns were replaced without the agent's
+# consent; the base prompt (chibi/constants.py, context-management section)
+# teaches the model to recognise it and continue from the seed's sections.
+# Agent-initiated (tool) compactions must NOT carry this marker: the agent
+# chose to compact, there is nothing forced to disclose.
+FORCED_COMPACTION_MARKER = (
+    "[SYSTEM] Context was forcibly compacted on {date}; older turns were replaced by this summary"
+)
+
+# Timestamp format of the {date} placeholder in FORCED_COMPACTION_MARKER.
+FORCED_COMPACTION_MARKER_DATE_FORMAT = "%Y-%m-%d %H:%M UTC"
+
+
+def build_compaction_seed(summary: str, forced: bool = False) -> list[Message]:
     """Build the 2-message compaction seed (question + summary).
 
     The single construction site for the seed literal: the automatic
@@ -138,10 +160,21 @@ def build_compaction_seed(summary: str) -> list[Message]:
 
     Args:
         summary: The summary text the seed's assistant message carries.
+        forced: When True (the emergency_summarization path only), the
+            summary message is prefixed with the
+            :data:`FORCED_COMPACTION_MARKER` line dated now, marking the
+            replacement as forced by the system. The ``summarize_history``
+            tool must not pass it: its compaction was the agent's own
+            decision, and the marker would falsely claim otherwise.
 
     Returns:
         The marked seed messages, in stored order.
     """
+    if forced:
+        marker = FORCED_COMPACTION_MARKER.format(
+            date=datetime.datetime.now(timezone.utc).strftime(FORCED_COMPACTION_MARKER_DATE_FORMAT)
+        )
+        summary = f"{marker}\n\n{summary}"
     return [
         Message(role="user", content=COMPACTION_QUESTION, source=COMPACTION_SEED_SOURCE),
         Message(role="assistant", content=summary, source=COMPACTION_SEED_SOURCE),
@@ -856,7 +889,10 @@ async def _enforce_context_budget(
       reservation), and the shrunk list is sent instead. The truncation is
       transient, the stored history is never touched, the next turn
       re-reads the full history, and the overflow corner case (the provider
-      rejecting the request) is not reached on this path.
+      rejecting the request) is not reached on this path. What the shrink
+      removed is recorded into the per-thread trim side-channel
+      (:class:`chibi.services.context_trim_store.ContextTrimStore`), which
+      the volatile context note discloses as a ``guard_trim_warning`` line.
     - The window does not resolve (unknown model): the guard does not guess
       a window out of thin air and does not block on a wrong assumption. It
       falls through and lets the reactive backstop
@@ -924,11 +960,31 @@ async def _enforce_context_budget(
         f"plus the {reservation}-token output reservation exceeds the {window}-token window of "
         f"{model or '<default>'}; the oversized request is not sent, the last-resort shrink runs first."
     )
+    # Write side of the guard-trim disclosure (plan Design decision 7): the
+    # shrink below is transient and silent, so what it removed is recorded
+    # into the per-thread side-channel store; collect_volatile_context_note
+    # reads the record and discloses it as a ``guard_trim_warning`` note line.
+    # Content lengths are snapshotted before the call because the truncation
+    # step shortens ``Message.content`` in place.
+    content_lengths_before = {id(msg): len(msg.content or "") for msg in messages}
     shrunk, fits = last_resort_fit(
         messages,
         budget=window - reservation,
         measured_total=measured_total,
         measured_request_counted_tokens=estimate_messages_tokens(messages),
+    )
+    kept_ids = {id(msg) for msg in shrunk}
+    dropped_messages = [msg for msg in messages if id(msg) not in kept_ids]
+    dropped_units = sum(1 for unit in _complete_units(messages) if all(id(msg) not in kept_ids for msg in unit))
+    truncated_messages = sum(
+        1 for msg in shrunk if len(msg.content or "") < content_lengths_before.get(id(msg), len(msg.content or ""))
+    )
+    ContextTrimStore().record(
+        storage_id=storage_id,
+        thread_id=thread_id,
+        dropped_units=dropped_units,
+        dropped_messages=len(dropped_messages),
+        truncated_messages=truncated_messages,
     )
     if not fits:
         counters.increment("context_guard_truncated_still_over")
@@ -983,6 +1039,12 @@ async def enforce_in_loop_budget(
     same mask it applies to the request list, the mirror it measures IS the
     list about to be sent: no drop can leave stale, already-dropped traffic
     in the measured list.
+
+    The shrink is drop-only and transient, and what it removed is recorded
+    into the per-thread trim side-channel
+    (:class:`chibi.services.context_trim_store.ContextTrimStore`), which the
+    volatile context note discloses as a ``guard_trim_warning`` line on the
+    next note assembly.
 
     The budget arithmetic is the pre-call guard's: the model window minus the
     single shared output reservation (:func:`_summarizer_max_tokens`). Where
@@ -1096,12 +1158,29 @@ async def enforce_in_loop_budget(
         )
     else:
         counters.increment("in_loop_guard_truncated")
+    # Write side of the guard-trim disclosure (plan Design decision 7): the
+    # in-loop shrink is drop-only and transient, so what it removed is
+    # recorded into the per-thread side-channel store; the next note
+    # assembly discloses it as a ``guard_trim_warning`` note line.
     kept_ids = {id(msg) for msg in shrunk}
+    dropped_messages = [msg for msg in conversation_messages if id(msg) not in kept_ids]
+    dropped_units = sum(
+        1 for unit in _complete_units(conversation_messages) if all(id(msg) not in kept_ids for msg in unit)
+    )
+    ContextTrimStore().record(
+        storage_id=storage_id,
+        thread_id=thread_id,
+        dropped_units=dropped_units,
+        dropped_messages=len(dropped_messages),
+        truncated_messages=0,
+    )
     return [id(msg) in kept_ids for msg in conversation_messages]
 
 
 @inject_database
-async def emergency_summarization(db: Database, storage_id: int, thread_id: int) -> CompactionResult | None:
+async def emergency_summarization(
+    db: Database, storage_id: int, thread_id: int, *, caller: Literal["forced", "reactive"]
+) -> CompactionResult | None:
     """Collapse the thread history into a single summary turn.
 
     The compaction state machine runs its phases in one ordered code path:
@@ -1122,25 +1201,33 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
        output than the request that just failed. Full collapse is the
        intended normal case: with a resolvable large-window model the whole
        history reaches the summarizer intact.
-    3. **replace**: the whole thread history is replaced with the marked
-       seed through the single replacement helper
-       (:func:`replace_thread_history`), which also invalidates the usage
-       cache.
-    4. **verify**: the compaction outcome is decided with the exact
-       predicate ``prompt_tokens + requested_max_tokens <= budget``
-       (:func:`verify_compaction`). On this path the post-compaction figure
-       is, by construction, a PREDICTION (the replacement drops the durable
-       provider record, and the provider has not seen the compacted history
-       yet), so the best outcome this check can record is
-       ``PREDICTED_FITS``, an advisory result that never claims
-       verification; the authoritative provider-side confirmation is the
-       same check the budget-choke-point recovery consumes with the retry's
-       reported usage. A compaction that did not reduce the size is rejected
-       as a failure. When the resulting request still does not fit, the
-       synchronous last-resort path (:func:`last_resort_fit`) drops the
-       oldest complete units and truncates the largest messages so the next
-       request can be sent; it is visibly distinct from a successful
-       compaction.
+    3. **verify (before any mutation)**: the compaction outcome is decided
+       with the exact predicate ``prompt_tokens + requested_max_tokens <=
+       budget`` (:func:`verify_compaction`) BEFORE anything is written.
+       The predicted post-compaction size is the tokenizer count of the
+       seed itself: exactly the figure the measurement entry point returns
+       after a replacement (the replacement drops the durable provider
+       record, so its post side is always the whole-list ESTIMATED count),
+       computed here before any mutation so a wrong prediction can never
+       cost the thread its history. The figure is a PREDICTION, so the best
+       outcome this check can record is ``PREDICTED_FITS``, an advisory
+       result that never claims verification; the authoritative
+       provider-side confirmation is the same check the budget-choke-point
+       recovery consumes with the retry's reported usage. A compaction that
+       did not reduce the size is rejected as a failure.
+    4. **replace**: only a verified outcome touches the thread. The whole
+       history is replaced with the marked seed through the single
+       replacement helper (:func:`replace_thread_history`), which also
+       invalidates the usage cache. On a rejected outcome the two callers
+       diverge (see ``caller``): the forced caller never mutates the thread
+       (verify-before-wipe: no replacement, no last-resort write, the
+       failure is logged and the thread stays intact), while the reactive
+       caller falls through to the synchronous last-resort path
+       (:func:`last_resort_fit`): the seed is shrunk in memory and the
+       shrunk seed is persisted (only when the shrink changed something) so
+       the reactive retry can be sent; the wipe happens together with that
+       write, never before the fit is known. The last-resort path is
+       visibly distinct from a successful compaction.
 
     The whole machine runs under the per-thread lock (the same key the
     provider-call path uses), so a compaction can never overlap itself or a
@@ -1151,12 +1238,24 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
         storage_id: The storage key of the conversation (user_id for private
             chats, chat_id for groups).
         thread_id: The message thread identifier (0 for the main thread).
+        caller: Which caller is running the machine, ``"forced"`` (the
+            post-delivery forced-compaction hook) or ``"reactive"`` (the
+            budget-choke-point overflow recovery). The fates on a rejected
+            compaction differ: the forced caller leaves the thread untouched
+            (no replacement, no last-resort write), the reactive caller
+            falls through to the lossy last-resort seed write so its single
+            retry stays sendable.
 
     Returns:
         A :class:`CompactionResult` describing how the attempt ended (the
         outcome plus whether the last-resort fallback ran and fitted), or
         ``None`` when no compaction was attempted (empty summarizer input or
-        an empty summary, the thread is left untouched in both cases).
+        an empty summary, the thread is left untouched in both cases). A
+        result carrying a rejected outcome (``DID_NOT_REDUCE`` or
+        ``REDUCED_BUT_OVER_BUDGET``) means the compaction was not applied:
+        for the forced caller the thread is untouched in that case too, for
+        the reactive caller it holds the shrunk seed when the shrink changed
+        something.
     """
     lock = await LockManager().get_lock(key=f"{storage_id}_{thread_id}")
     async with lock:
@@ -1238,7 +1337,19 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
             model=model,
             max_tokens=_summarizer_max_tokens(provider, model),
             system_prompt=(
-                "Summarize this conversation, keeping the most important and useful information using English."
+                "Summarize this conversation in English. Your summary fully replaces the compacted history, so it "
+                "must carry everything the conversation will still need, structured with exactly these sections:\n\n"
+                "## Summary\n"
+                "A detailed summary of the conversation: the topic, key decisions, facts, constraints and outcomes. "
+                "Do not compress away details a later turn may depend on.\n\n"
+                "## Current work in progress\n"
+                "What was being done at the end of the conversation: the active task, the relevant artifacts (file "
+                "paths, identifiers, commands), and the current state (what is already done, what remains). Write "
+                "'None' if nothing was in progress.\n\n"
+                "## Background tasks\n"
+                "Scheduled jobs, running sub-agents and any other background activity known from the conversation: "
+                "what runs, when it fires, and what still needs to be done with its results. Write 'None' if there "
+                "are none."
             ),
             caller_storage_id=storage_id,
             caller_thread_id=thread_id,
@@ -1256,27 +1367,38 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
             )
             return None
         # Phase 3: replace, the whole history becomes the marked seed through
-        # the single replacement helper (which also invalidates the usage
-        # cache). The seed is marked so a repeated compaction recognises it;
-        # the whole-thread swap means it can never append.
-        seed: list[Message] = build_compaction_seed(summary=response.answer)
-        await replace_thread_history.__wrapped__(db, storage_id=storage_id, thread_id=thread_id, seed=seed)
-        # Phase 4: verify, the outcome is decided with the exact predicate
+        # Phase 3: verify, BEFORE anything is written. The seed is built in
+        # memory only; the predicted post-compaction request size is the
+        # tokenizer count of the seed itself: exactly the figure the
+        # measurement entry point returns after a replacement (the
+        # replacement drops the durable provider record, so its post side is
+        # always the whole-list ESTIMATED count), computed here before any
+        # mutation so a wrong prediction can never cost the thread its
+        # history. Calling the entry point BEFORE the wipe would instead
+        # risk anchoring the prediction on the still-present durable record:
+        # a record whose message_count does not exceed the seed length is
+        # not stale by the accessor's contract and would lend the
+        # pre-compaction request's prompt_tokens to the seed figure. The
+        # seed is marked so a repeated compaction recognises it.
+        # forced=True: this is the emergency path (the proactive forced
+        # caller and the reactive recovery caller alike), so the seed carries
+        # the forced-compaction marker. The summarize_history tool builds its
+        # seed with the default forced=False and stays marker-free.
+        seed: list[Message] = build_compaction_seed(summary=response.answer, forced=True)
+        # The outcome is decided with the exact predicate
         # ``prompt_tokens + requested_max_tokens <= budget`` inside
         # verify_compaction. previous_tokens is measured_total, computed by
         # the same measurement entry point over the pre-replacement list;
         # it is provider-anchored (the durable ThreadUsageRecord base)
         # whenever a record valid for this model existed at measure time.
-        # post_tokens is a PREDICTION, and this path says so: after a
-        # whole-thread replacement the durable base is invalidated by design
-        # (reset_chat_history drops the record, user.thread_usage.pop) and
-        # the provider has not seen the compacted history yet, so no
-        # provider-reported figure exists here and none is fabricated, the
-        # post side is always the counted estimate, which UNDER-reports a
-        # real request: it omits the whole-request overhead the provider
-        # figure includes (system prompt, skills, tool schemas), so the
-        # reduction check is NOT conservative in direction, its bias is
-        # toward "reduced"/"fits". What carries the verdict is the
+        # post_tokens is a PREDICTION, and this path says so: the provider
+        # has not seen the compacted history yet, so no provider-reported
+        # figure exists here and none is fabricated, the post side is always
+        # the counted estimate, which UNDER-reports a real request: it omits
+        # the whole-request overhead the provider figure includes (system
+        # prompt, skills, tool schemas), so the reduction check is NOT
+        # conservative in direction, its bias is toward
+        # "reduced"/"fits". What carries the verdict is the
         # order-of-magnitude margin between the sides: the pre figure is the
         # oversized history that tripped the trigger, the post side a
         # two-message seed bounded by the summarizer's own output
@@ -1289,12 +1411,7 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
         # verify_compaction check in its PROVIDER_REPORTED mode, consumed at
         # the next measured turn (the budget-choke-point recovery calls it
         # with the retry's reported usage).
-        post_tokens, post_provenance = await measure_request_size_with_provenance(
-            user_id=storage_id,
-            thread_id=thread_id,
-            model=model or "",
-            messages=seed,
-        )
+        post_tokens = estimate_messages_tokens(seed)
         reservation = _summarizer_max_tokens(provider, model)
         verification_budget = _verification_budget(model)
         outcome = verify_compaction(
@@ -1304,50 +1421,73 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
             budget=verification_budget,
             post_provenance=TokenProvenance.PREDICTED,
         )
-        if outcome is CompactionOutcome.REDUCED_AND_FITS:
-            # Only reachable from a provider-reported post figure, which this
-            # path never has; kept for symmetry with the authoritative mode.
-            ContextDecisionCounters().increment("compaction_succeeded")
-            logger.info(
-                f"Compaction verified for user {storage_id} thread {thread_id}: "
-                f"{measured_total} -> {post_tokens} tokens (provider-reported), "
-                f"resulting request fits the {verification_budget}-token budget."
-            )
-            return CompactionResult(outcome=outcome)
-        if outcome is CompactionOutcome.PREDICTED_FITS:
-            # Advisory: the predicted post-compaction size fits, but this is
-            # a prediction, not a verification. No destructive fallback runs
-            # on a prediction; the provider's own usage at the next turn is
-            # the confirmation (the budget-choke-point recovery re-checks
-            # with the reported figure in the authoritative mode).
-            ContextDecisionCounters().increment("compaction_succeeded")
-            logger.info(
-                f"Compaction predicted to fit for user {storage_id} thread {thread_id}: "
-                f"{measured_total} -> {post_tokens} tokens (predicted post-compaction size, "
-                "not yet provider-verified; the authoritative check runs when the provider "
-                f"next reports usage) against the {verification_budget}-token budget."
-            )
+        if outcome in (CompactionOutcome.REDUCED_AND_FITS, CompactionOutcome.PREDICTED_FITS):
+            # Phase 4: replace, only on a verified outcome (verify-before-
+            # wipe): the whole history becomes the marked seed through the
+            # single replacement helper (which also invalidates the usage
+            # cache); the whole-thread swap means it can never append.
+            await replace_thread_history.__wrapped__(db, storage_id=storage_id, thread_id=thread_id, seed=seed)
+            if outcome is CompactionOutcome.REDUCED_AND_FITS:
+                # Only reachable from a provider-reported post figure, which this
+                # path never has; kept for symmetry with the authoritative mode.
+                ContextDecisionCounters().increment("compaction_succeeded")
+                logger.info(
+                    f"Compaction verified for user {storage_id} thread {thread_id}: "
+                    f"{measured_total} -> {post_tokens} tokens (provider-reported), "
+                    f"resulting request fits the {verification_budget}-token budget."
+                )
+            else:
+                # Advisory: the predicted post-compaction size fits, but this is
+                # a prediction, not a verification. No destructive fallback runs
+                # on a prediction; the provider's own usage at the next turn is
+                # the confirmation (the budget-choke-point recovery re-checks
+                # with the reported figure in the authoritative mode).
+                ContextDecisionCounters().increment("compaction_succeeded")
+                logger.info(
+                    f"Compaction predicted to fit for user {storage_id} thread {thread_id}: "
+                    f"{measured_total} -> {post_tokens} tokens (predicted post-compaction size, "
+                    "not yet provider-verified; the authoritative check runs when the provider "
+                    f"next reports usage) against the {verification_budget}-token budget."
+                )
             return CompactionResult(outcome=outcome)
         # Failure shapes: REDUCED_BUT_OVER_BUDGET or DID_NOT_REDUCE. Both are
-        # rejected as failures, a no-op summarizer call is never a success,
-        # and the lossy last-resort path runs so the next request can be sent.
+        # rejected as failures, a no-op summarizer call is never a success.
         ContextDecisionCounters().increment(
             "compaction_rejected_did_not_reduce"
             if outcome is CompactionOutcome.DID_NOT_REDUCE
             else "compaction_rejected_over_budget"
         )
         logger.warning(
-            f"Compaction rejected for user {storage_id} thread {thread_id}: outcome "
+            f"Compaction rejected for user {storage_id} thread {thread_id} (caller={caller}): outcome "
             f"{outcome.value} ({measured_total} -> {post_tokens} tokens, post side predicted) "
             f"against the {verification_budget}-token budget."
         )
+        if caller == "forced":
+            # Forced fate, verify-before-wipe: nothing has been written and
+            # nothing will be. No replacement, no last-resort write: the
+            # thread stays exactly as it was, the failure is logged and the
+            # already-delivered answer is unaffected. The forced caller's
+            # thrash guard records the back-off from this result's outcome.
+            logger.error(
+                f"Forced compaction left the thread untouched for user {storage_id} thread {thread_id}: "
+                f"the compacted request does not verifiably fit (outcome {outcome.value}, "
+                f"{measured_total} -> {post_tokens} tokens predicted); no seed was written."
+            )
+            return CompactionResult(outcome=outcome, fallback_ran=False, fallback_fitted=None)
+        # Reactive fate: the lossy last-resort path runs so the single retry
+        # can be sent (its sendability guarantee, wipe-then-write crash
+        # safety accepted at the replacement helper). The seed is shrunk in
+        # memory first; the wipe happens together with the persistence of
+        # the shrunk seed, never before the fit is known: the old
+        # wipe-then-verify ordering (replace first, judge the retry after)
+        # is gone.
         # The shrink mutates the seed messages in place (content only), so the
         # change is detected against a fingerprint taken before it ran, not by
         # list identity or equality.
         seed_fingerprint = [(msg.id, msg.content) for msg in seed]
         shrunk, fits = last_resort_fit(
             seed,
-            budget=_verification_budget(model) - reservation,
+            budget=verification_budget - reservation,
             measured_total=post_tokens,
             measured_request_counted_tokens=estimate_messages_tokens(seed),
         )
@@ -1366,6 +1506,7 @@ async def emergency_summarization(db: Database, storage_id: int, thread_id: int)
             ContextDecisionCounters().increment("compaction_fallback_succeeded")
         else:
             ContextDecisionCounters().increment("compaction_fallback_failed")
+
         return CompactionResult(outcome=outcome, fallback_ran=True, fallback_fitted=fits)
 
 
@@ -1471,7 +1612,7 @@ async def _reactive_context_recovery(
         f"(provenance={previous_provenance.value}), no figure reused from the failed request."
     )
 
-    compaction_result = await emergency_summarization(storage_id=storage_id, thread_id=thread_id)
+    compaction_result = await emergency_summarization(storage_id=storage_id, thread_id=thread_id, caller="reactive")
     if compaction_result is None:
         logger.info(
             f"Reactive recovery for user {storage_id} thread {thread_id}: no compaction was attempted "
@@ -1711,6 +1852,14 @@ async def get_llm_chat_completion_answer(
     the lock block has exited; every other provider error propagates to the
     presentation layer unchanged.
 
+    After a successful turn, once the lock block has exited and the answer
+    has been returned, the post-delivery forced-compaction check
+    (:func:`_maybe_run_forced_compaction`, scheduled fire-and-forget by
+    :func:`_schedule_forced_compaction`) re-measures the thread in the
+    background and unconditionally compacts it when the measured context has
+    reached the point where the NEXT request would be trimmed by the guard.
+    The check never delays, breaks or alters the delivered answer.
+
     Args:
         db: Database instance (injected).
         storage_id: The storage key of the conversation (user_id for private
@@ -1846,6 +1995,7 @@ async def get_llm_chat_completion_answer(
         # function returns/raises (warning lands before the answer/error).
         pending_notifications: list[asyncio.Task[None]] = []
         overflow_error: ContextLengthExceededError | None = None
+        delivered_answer: ChatResponseSchema | None = None
         try:
             failover_result = await run_with_failover(
                 role="master",
@@ -1888,26 +2038,287 @@ async def get_llm_chat_completion_answer(
             )
             for message in new_messages:
                 await db.add_message(user=user, message=message, ttl=gpt_settings.messages_ttl, thread_id=thread_id)
-            return chat_response
+            delivered_answer = chat_response
 
-    # The lock block above has exited before the recovery runs: the
-    # compaction machine re-enters the same per-thread lock (asyncio.Lock is
-    # not re-entrant). The recovery owns the single retry call and the
-    # turn's persistence; on failure it re-raises the original overflow
-    # error for the presentation layer (handle_gpt_exceptions stays a pure
-    # error presenter).
-    assert overflow_error is not None
-    return await _reactive_context_recovery.__wrapped__(
-        db,
+    if delivered_answer is None:
+        # The lock block above has exited before the recovery runs: the
+        # compaction machine re-enters the same per-thread lock (asyncio.Lock is
+        # not re-entrant). The recovery owns the single retry call and the
+        # turn's persistence; on failure it re-raises the original overflow
+        # error for the presentation layer (handle_gpt_exceptions stays a pure
+        # error presenter).
+        assert overflow_error is not None
+        return await _reactive_context_recovery.__wrapped__(
+            db,
+            storage_id=storage_id,
+            thread_id=thread_id,
+            user=user,
+            interface=interface,
+            provider=active_provider,
+            model=active_model,
+            new_message_to_llm=new_message_to_llm,
+            overflow_error=overflow_error,
+        )
+
+    # Post-delivery forced-compaction check (fire-and-forget): the answer is
+    # final and the per-thread lock has exited, so the check runs in the
+    # background; it never delays, breaks or alters the delivered answer.
+    # The compaction machine re-enters the same non-reentrant per-thread
+    # lock, which is why the check may never run inside the lock block.
+    _schedule_forced_compaction(
+        db=db,
         storage_id=storage_id,
         thread_id=thread_id,
         user=user,
-        interface=interface,
         provider=active_provider,
         model=active_model,
-        new_message_to_llm=new_message_to_llm,
-        overflow_error=overflow_error,
     )
+    return delivered_answer
+
+
+# Strong references to the in-flight fire-and-forget background tasks
+# (currently the post-delivery forced-compaction check), so the event loop
+# cannot garbage-collect a task mid-run: asyncio keeps only a weak reference
+# to scheduled tasks, and the done callbacks discard entries as the tasks
+# complete.
+_background_tasks: set["asyncio.Task[None]"] = set()
+
+
+def _log_failed_forced_compaction(task: "asyncio.Task[None]") -> None:
+    """Log (never raise) when the forced-compaction background task crashes.
+
+    The check itself is exception-contained, so this done-callback is the
+    second containment layer: it only catches an unexpected crash of the
+    wrapper around the coroutine. A cancelled task is not an error (a
+    process shutdown cancels pending background work).
+
+    Args:
+        task: The completed background task.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(f"Forced compaction background task crashed unexpectedly: {exc}")
+
+
+def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int:
+    """Token threshold at which the post-delivery forced compaction fires.
+
+    The threshold is the input space the NEXT request would have: the model
+    window minus the summarizer output reservation
+    (:func:`_summarizer_max_tokens`, the same reservation the pre-call guard
+    subtracts). When the model window does not resolve, the documented
+    fallback is ``max_history_tokens``. The predicate
+    ``measured_total >= threshold`` fires one token earlier than the guard's
+    ``measured + reservation > window`` and omits the next turn's prompt;
+    both biases point in the safe (early) direction and are intentional.
+
+    Args:
+        provider: The provider instance the turn used.
+        model: The model the turn used (None = provider default).
+
+    Returns:
+        The trigger threshold in tokens.
+    """
+    window = get_model_context_window(model)
+    if window is None:
+        return gpt_settings.max_history_tokens
+    return window - _summarizer_max_tokens(provider, model)
+
+
+def _is_solely_compaction_seed(history: list[Message]) -> bool:
+    """Tell whether the thread history consists SOLELY of compaction-seed messages.
+
+    The check is deliberate in both directions: a thread that merely CONTAINS
+    a seed (a compacted thread that regrew past the threshold) must stay
+    compactable, while a thread that IS only the seed (a compaction just
+    happened, or a seed was written without a reduction) has nothing new to
+    summarize and must not re-fire every turn.
+
+    Args:
+        history: The stored thread history, oldest first.
+
+    Returns:
+        True when the history is non-empty and every message carries the
+        compaction-seed source.
+    """
+    return bool(history) and all(message.source == COMPACTION_SEED_SOURCE for message in history)
+
+
+async def _maybe_run_forced_compaction(
+    db: Database,
+    storage_id: int,
+    thread_id: int,
+    user: "User",
+    provider: "Provider",
+    model: str | None,
+) -> None:
+    """Run the post-delivery forced-compaction check for one delivered turn.
+
+    Scheduled fire-and-forget from the shared answer flow
+    (:func:`get_llm_chat_completion_answer`) after the per-thread lock block
+    has exited and the answer has been returned: the check re-measures the
+    thread (the same measurement entry point the pre-call guard uses) and,
+    when the measured context has reached the point where the NEXT request
+    would be trimmed by the guard, calls the existing
+    :func:`emergency_summarization` unconditionally. The compaction machine
+    re-acquires the same non-reentrant per-thread lock, which is why this
+    check may never run inside that lock. Sub-agent threads are out of scope
+    by construction: they are one-shot, bypass the answer flow and have no
+    persisted history.
+
+    Trigger conditions, in order: the ``CONTEXT_FORCED_COMPACTION_ENABLED``
+    switch is on, no compaction for this thread is in flight (the per-thread
+    flag in :class:`CompactionStateStore`, set before the summarizer call and
+    cleared on completion or failure), the thread is not backing off after a
+    failed attempt (three turns or thirty minutes, whichever first), the
+    history is not solely a compaction seed, and the measured context
+    reached the threshold (the model window minus the summarizer output
+    reservation; ``max_history_tokens`` when the window does not resolve).
+    Compaction runs at most once per turn: the check itself runs exactly
+    once per delivered answer.
+
+    The whole body is exception-contained: any failure is logged and never
+    surfaced to the user, never affects the already-delivered answer and
+    never fails the turn.
+
+    Args:
+        db: Database instance (injected by the answer flow's decorator).
+        storage_id: The storage key of the conversation (user_id for private
+            chats, chat_id for groups).
+        thread_id: The message thread identifier (0 for the main thread).
+        user: The user record of the conversation.
+        provider: The active provider the delivered turn used.
+        model: The model the delivered turn used (None = provider default).
+    """
+    store = CompactionStateStore()
+    try:
+        if not gpt_settings.context_forced_compaction_enabled:
+            logger.debug(
+                f"Forced compaction is disabled by CONTEXT_FORCED_COMPACTION_ENABLED; the post-delivery "
+                f"check is skipped for user {storage_id} thread {thread_id}."
+            )
+            return
+        store.record_turn(user_id=storage_id, thread_id=thread_id)
+        if store.is_in_flight(user_id=storage_id, thread_id=thread_id):
+            logger.debug(
+                f"Forced compaction skipped for user {storage_id} thread {thread_id}: a compaction for this "
+                "thread is already in flight."
+            )
+            return
+        if store.is_backed_off(user_id=storage_id, thread_id=thread_id):
+            logger.debug(
+                f"Forced compaction skipped for user {storage_id} thread {thread_id}: the thread is backing off "
+                "after a failed attempt."
+            )
+            return
+        history = await db.get_conversation_messages(user=user, thread_id=thread_id)
+        if not history:
+            logger.debug(f"Forced compaction skipped for user {storage_id} thread {thread_id}: empty history.")
+            return
+        if _is_solely_compaction_seed(history):
+            logger.debug(
+                f"Forced compaction skipped for user {storage_id} thread {thread_id}: the history consists "
+                "solely of the compaction seed."
+            )
+            return
+        threshold = _forced_compaction_threshold(provider=provider, model=model)
+        measured_total, measured_provenance = await measure_request_size_with_provenance(
+            user_id=storage_id,
+            thread_id=thread_id,
+            model=model or "",
+            messages=history,
+        )
+        if measured_total < threshold:
+            logger.debug(
+                f"Forced compaction not needed for user {storage_id} thread {thread_id}: measured context "
+                f"{measured_total} tokens (provenance={measured_provenance.value}) is below the "
+                f"{threshold}-token trigger threshold."
+            )
+            return
+        logger.info(
+            f"Forced compaction triggered for user {storage_id} thread {thread_id}: measured context "
+            f"{measured_total} tokens (provenance={measured_provenance.value}) reached the "
+            f"{threshold}-token trigger threshold after the answer was delivered."
+        )
+        store.mark_in_flight(user_id=storage_id, thread_id=thread_id)
+        try:
+            result = await emergency_summarization(storage_id=storage_id, thread_id=thread_id, caller="forced")
+        except Exception:
+            store.record_failure(user_id=storage_id, thread_id=thread_id)
+            logger.exception(
+                f"Forced compaction failed for user {storage_id} thread {thread_id}; the thread history is "
+                "left untouched and the delivered answer is unaffected. Back-off recorded."
+            )
+            return
+        finally:
+            store.clear_in_flight(user_id=storage_id, thread_id=thread_id)
+        if result is None:
+            store.record_failure(user_id=storage_id, thread_id=thread_id)
+            logger.warning(
+                f"Forced compaction for user {storage_id} thread {thread_id} ended without an attempt (empty "
+                "summarizer input or empty summary); the thread history is left untouched. Back-off recorded."
+            )
+        elif result.outcome in (CompactionOutcome.DID_NOT_REDUCE, CompactionOutcome.REDUCED_BUT_OVER_BUDGET):
+            store.record_failure(user_id=storage_id, thread_id=thread_id)
+            logger.warning(
+                f"Forced compaction for user {storage_id} thread {thread_id} failed with outcome "
+                f"{result.outcome.value}; back-off recorded."
+            )
+        else:
+            logger.info(
+                f"Forced compaction completed for user {storage_id} thread {thread_id} with outcome "
+                f"{result.outcome.value}."
+            )
+    except Exception:
+        logger.exception(
+            f"Forced compaction check crashed for user {storage_id} thread {thread_id}; the delivered answer "
+            "is unaffected."
+        )
+
+
+def _schedule_forced_compaction(
+    db: Database,
+    storage_id: int,
+    thread_id: int,
+    user: "User",
+    provider: "Provider",
+    model: str | None,
+) -> None:
+    """Fire-and-forget the post-delivery forced-compaction check for a delivered turn.
+
+    Called by the shared answer flow after the per-thread lock block has
+    exited and the answer has been returned: the created task is never
+    awaited, so the compaction can never delay the answer, and the check's
+    own exception containment keeps a failure invisible to the user and the
+    turn result. The done callback is the second containment layer.
+
+    Args:
+        db: Database instance to pass through to the check.
+        storage_id: The storage key of the conversation (user_id for private
+            chats, chat_id for groups).
+        thread_id: The message thread identifier (0 for the main thread).
+        user: The user record of the conversation.
+        provider: The active provider the delivered turn used.
+        model: The model the delivered turn used (None = provider default).
+    """
+    task = asyncio.create_task(
+        _maybe_run_forced_compaction(
+            db=db,
+            storage_id=storage_id,
+            thread_id=thread_id,
+            user=user,
+            provider=provider,
+            model=model,
+        )
+    )
+    # The event loop keeps only a weak reference to scheduled tasks, so the
+    # task must be strongly referenced until it completes or the loop may
+    # garbage-collect it mid-run.
+    _background_tasks.add(task)
+    task.add_done_callback(_log_failed_forced_compaction)
+    task.add_done_callback(_background_tasks.discard)
 
 
 @inject_database

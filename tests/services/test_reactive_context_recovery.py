@@ -321,7 +321,7 @@ async def test_recovery_retries_once_with_reassembled_request_and_verifies_autho
                 overflow_error=ContextLengthExceededError(provider="openai", model="gpt-4"),
             )
 
-    mock_compaction.assert_awaited_once_with(storage_id=1, thread_id=0)
+    mock_compaction.assert_awaited_once_with(storage_id=1, thread_id=0, caller="reactive")
     provider.get_chat_response.assert_awaited_once()
     sent = provider.get_chat_response.await_args.kwargs["messages"]
     # The retry is re-assembled from storage (the compacted history) plus the
@@ -437,7 +437,7 @@ async def test_full_path_recovery_runs_outside_the_thread_lock(monkeypatch) -> N
 
     lock_state: dict[str, bool] = {}
 
-    async def fake_summarization(storage_id: int, thread_id: int) -> None:
+    async def fake_summarization(storage_id: int, thread_id: int, **kwargs: Any) -> None:
         lock = await LockManager().get_lock(key=f"{storage_id}_{thread_id}")
         lock_state["locked"] = lock.locked()
 

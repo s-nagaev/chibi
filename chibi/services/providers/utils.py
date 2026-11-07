@@ -21,6 +21,7 @@ from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.context_measurement import estimate_messages_tokens
 from chibi.services.context_note import format_context_note
+from chibi.services.context_trim_store import ContextTrimStore
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import _is_tool_response_message, get_chibi_user
 from chibi.storage.files import get_file_storage
@@ -181,7 +182,9 @@ def collect_volatile_context_note(
 
     The note carries the keys that change on every turn: the approximate
     context size, the context-size warning (when the configured threshold is
-    crossed) and the volume-based tool-results warning. It used to
+    crossed), the volume-based tool-results warning and the guard-trim
+    warning (when a context guard actually trimmed the outgoing request,
+    read from the per-thread side-channel store). It used to
     travel as system-payload keys, which invalidated prompt caching for the
     whole prefix on every turn; the provider entry points now append it to the
     last converted user message instead (see
@@ -252,6 +255,30 @@ def collect_volatile_context_note(
                 f"({share_percentage}% of the ~{context_size_denominator}-token context). "
                 f"Largest offenders (tool name: estimated tokens): {top_offenders}. "
                 f"Stale tool results can be dropped with 'clear_tool_call_history'."
+            )
+
+    # Read side of the guard-trim disclosure (plan Design decision 7): the
+    # collector computes nothing, it only consumes what a guard recorded for
+    # this conversation. The read-once consume keeps the line off requests
+    # that were not trimmed. The user_id argument is the storage key of the
+    # conversation (the User object is created from storage_id), so the key
+    # matches the one both guards write.
+    trim_stats = ContextTrimStore().consume(storage_id=user_id, thread_id=thread_id)
+    if trim_stats is not None:
+        clauses: list[str] = []
+        if trim_stats.dropped_units:
+            detail = f"{trim_stats.dropped_units} oldest unit(s) were hidden from this request"
+            if trim_stats.dropped_messages > trim_stats.dropped_units:
+                detail += f" ({trim_stats.dropped_messages} messages in total)"
+            clauses.append(detail)
+        if trim_stats.truncated_messages:
+            clauses.append(f"{trim_stats.truncated_messages} message(s) truncated")
+        if clauses:
+            lines.append(
+                "guard_trim_warning: "
+                + "; ".join(clauses)
+                + ". The hidden content is gone for this request; compaction tools "
+                "('summarize_history', 'clear_tool_call_history') can reduce future trims."
             )
     return format_context_note(lines)
 
