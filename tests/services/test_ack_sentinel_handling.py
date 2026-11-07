@@ -83,8 +83,7 @@ class TestUserPath:
             "chibi.services.bot.get_llm_chat_completion_answer",
             new=AsyncMock(return_value=_make_chat_response(ACK_SENTINEL)),
         ):
-            with patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)):
-                await handle_user_prompt(interface=interface)
+            await handle_user_prompt(interface=interface)
 
         interface.send_message.assert_not_awaited()
         interface.send_reaction.assert_awaited_once_with(reaction="👌")
@@ -96,8 +95,7 @@ class TestUserPath:
         with patch(
             "chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=_make_chat_response(answer))
         ):
-            with patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)):
-                await handle_user_prompt(interface=interface)
+            await handle_user_prompt(interface=interface)
 
         interface.send_message.assert_awaited_once_with(message=answer)
         interface.send_reaction.assert_not_awaited()
@@ -109,8 +107,7 @@ class TestUserPath:
         with patch(
             "chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=_make_chat_response(answer))
         ):
-            with patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)):
-                await handle_user_prompt(interface=interface)
+            await handle_user_prompt(interface=interface)
 
         interface.send_message.assert_awaited_once_with(message="Done. ")
         interface.send_reaction.assert_not_awaited()
@@ -122,8 +119,7 @@ class TestUserPath:
         with patch(
             "chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=_make_chat_response(answer))
         ):
-            with patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)):
-                await handle_user_prompt(interface=interface)
+            await handle_user_prompt(interface=interface)
 
         interface.send_message.assert_awaited_once_with(
             message="Here is the analysis you asked for.  Nothing else matters."

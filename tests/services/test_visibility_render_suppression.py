@@ -92,12 +92,9 @@ class TestUserPromptGate:
     async def test_hidden_turn_delivers_nothing_but_reacts(self) -> None:
         """A hidden turn sends no message; the 👌 receipt reaction still fires."""
         interface = _make_interface()
-        with (
-            patch(
-                "chibi.services.bot.get_llm_chat_completion_answer",
-                new=AsyncMock(return_value=_chat_response("", visibility="hidden")),
-            ),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
+        with patch(
+            "chibi.services.bot.get_llm_chat_completion_answer",
+            new=AsyncMock(return_value=_chat_response("", visibility="hidden")),
         ):
             await handle_user_prompt(interface=interface)
 
@@ -107,12 +104,9 @@ class TestUserPromptGate:
     async def test_visible_turn_is_still_delivered(self) -> None:
         """An ordinary visible user turn keeps being delivered (no regression)."""
         interface = _make_interface()
-        with (
-            patch(
-                "chibi.services.bot.get_llm_chat_completion_answer",
-                new=AsyncMock(return_value=_chat_response("Here is your answer")),
-            ),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
+        with patch(
+            "chibi.services.bot.get_llm_chat_completion_answer",
+            new=AsyncMock(return_value=_chat_response("Here is your answer")),
         ):
             await handle_user_prompt(interface=interface)
 
@@ -124,12 +118,9 @@ class TestSchedulerGate:
     async def test_hidden_turn_delivers_nothing(self) -> None:
         """A hidden scheduler wake delivers no message to the job context."""
         interface = _make_interface()
-        with (
-            patch(
-                "chibi.services.bot.get_llm_chat_completion_answer",
-                new=AsyncMock(return_value=_chat_response("", visibility="hidden")),
-            ),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
+        with patch(
+            "chibi.services.bot.get_llm_chat_completion_answer",
+            new=AsyncMock(return_value=_chat_response("", visibility="hidden")),
         ):
             await handle_scheduler_trigger(trigger_text="tick", job_id="agent:1:job", interface=interface)
 
@@ -138,12 +129,9 @@ class TestSchedulerGate:
     async def test_visible_turn_is_still_delivered(self) -> None:
         """A visible scheduler wake keeps being delivered (no regression)."""
         interface = _make_interface()
-        with (
-            patch(
-                "chibi.services.bot.get_llm_chat_completion_answer",
-                new=AsyncMock(return_value=_chat_response("Nightly digest: all good")),
-            ),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
+        with patch(
+            "chibi.services.bot.get_llm_chat_completion_answer",
+            new=AsyncMock(return_value=_chat_response("Nightly digest: all good")),
         ):
             await handle_scheduler_trigger(trigger_text="digest", job_id="agent:1:job", interface=interface)
 
@@ -237,6 +225,7 @@ class TestSummarizerExcludesHidden:
         ]
         user = MagicMock()
         user.id = 1
+        user.thread_usage = {}
         user.get_active_llm_model = MagicMock(return_value="active-model")
         provider = MagicMock()
         provider.get_chat_response = AsyncMock(
@@ -247,9 +236,14 @@ class TestSummarizerExcludesHidden:
         db.get_or_create_user = AsyncMock(return_value=user)
         db.get_conversation_messages = AsyncMock(return_value=messages)
         db.add_message = AsyncMock()
+        db.drop_messages = AsyncMock()
 
         with (
-            patch("chibi.services.user.reset_chat_history", new=AsyncMock()) as reset_mock,
+            # The merged compaction machine measures through the inject_database
+            # singleton even when the db is passed via __wrapped__, so the
+            # measurement seam is pinned to the same mock backend.
+            patch("chibi.storage.database._db_provider.get_database", new=AsyncMock(return_value=db)),
+            patch("chibi.services.user.reset_chat_history.__wrapped__", new=AsyncMock()) as reset_mock,
             patch("chibi.services.user.gpt_settings.max_tokens", 32000),
             patch("chibi.services.user.gpt_settings.max_history_tokens", 100000),
         ):
@@ -261,8 +255,10 @@ class TestSummarizerExcludesHidden:
         # Consequence of the PM ruling: the summary replaces the whole
         # history, so the hidden messages leave the conversation too
         # (existing summarization behaviour; storage rows are untouched,
-        # reset_chat_history + re-add of the summary pair, as before).
+        # reset + re-add of the summary pair through the merged
+        # replace_thread_history, as before).
         reset_mock.assert_awaited_once()
+        assert db.add_message.await_count == 2
 
 
 @pytest.fixture
@@ -315,12 +311,11 @@ class TestVisibilityPreservation:
         await local_db.add_message(user=user, message=Message(role="assistant", content="CoT", visibility="hidden"))
         await local_db.add_message(user=user, message=Message(role="assistant", content="Answer"))
 
-        async def reset_on_same_db(storage_id: int, thread_id: int) -> None:
-            u = await local_db.get_or_create_user(user_id=storage_id)
-            await local_db.drop_messages(user=u, thread_id=thread_id)
-
-        with patch("chibi.services.user.reset_chat_history", new=reset_on_same_db):
-            await drop_tool_call_history.__wrapped__(local_db, storage_id=9, thread_id=0)
+        # The merged drop_tool_call_history rewrites the thread through
+        # replace_thread_history.__wrapped__ with the db passed explicitly, so
+        # the wipe and the seed re-write land on this same local backend; no
+        # reset stub redirecting an injected singleton is needed anymore.
+        await drop_tool_call_history.__wrapped__(local_db, storage_id=9, thread_id=0)
 
         rewritten = await local_db.get_conversation_messages(user=user, thread_id=0)
         assert sorted(message.visibility for message in rewritten) == ["hidden", "visible"]
