@@ -3,6 +3,7 @@
 import re
 from copy import deepcopy
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 # re-enters the partially initialized chibi.config and fails on standalone collection.
 import chibi.services.providers.tools  # noqa: F401  (side effect: primes chibi.config)
 from chibi.constants import get_llm_prompt
+from chibi.interfaces.interface import UserInterface
 from chibi.models import Message
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.context_measurement import SizeProvenance
@@ -128,7 +130,7 @@ async def test_tool_built_seed_has_no_forced_marker(patched_db_provider: LocalSt
     await SummarizeHistoryTool.function(
         summary=SUMMARY_WITH_SECTIONS,
         user_id=storage_id,
-        interface=SimpleNamespace(thread_id=thread_id),
+        interface=cast("UserInterface", SimpleNamespace(thread_id=thread_id)),
     )
 
     user = await patched_db_provider.get_or_create_user(user_id=storage_id)

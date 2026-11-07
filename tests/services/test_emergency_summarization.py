@@ -2,7 +2,7 @@
 
 import json
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -100,7 +100,7 @@ async def _run_emergency_summarization(
     db: MagicMock,
     patch_replace: bool = True,
     result_holder: dict[str, Any] | None = None,
-    caller: str = "reactive",
+    caller: Literal["forced", "reactive"] = "reactive",
     **patches: Any,
 ) -> AsyncMock:
     """Run emergency_summarization with the history replacement stubbed out.
@@ -1173,6 +1173,7 @@ async def test_reduced_but_over_budget_runs_last_resort_and_persists_shrunk_seed
     assert result.fallback_fitted is True
     # Exactly ONE replacement: the wiped-and-persisted state IS the shrunk seed.
     assert replace_mock.await_count == 1
+    assert replace_mock.await_args is not None
     shrunk_seed = replace_mock.await_args.kwargs["seed"]
     assert all(message.source == COMPACTION_SEED_SOURCE for message in shrunk_seed)
     # The seed question was truncated (the unit overshoots the excess, so it is truncated, not
@@ -1344,7 +1345,7 @@ async def test_skipped_compaction_is_countable() -> None:
 
 @pytest.mark.parametrize("caller", ["forced", "reactive"])
 @pytest.mark.asyncio
-async def test_both_callers_share_the_success_core(caller: str) -> None:
+async def test_both_callers_share_the_success_core(caller: Any) -> None:
     """The forced and reactive fates run the same machine on the success path.
 
     Same outcome, one summarizer call, one replacement: the only thing the
@@ -1368,6 +1369,7 @@ async def test_both_callers_share_the_success_core(caller: str) -> None:
     assert result.fallback_ran is False
     assert replace_mock.await_count == 1
     provider.get_chat_response.assert_awaited_once()
+    assert replace_mock.await_args is not None
     seed = replace_mock.await_args.kwargs["seed"]
     assert all(message.source == COMPACTION_SEED_SOURCE for message in seed)
     assert seed[0].content == COMPACTION_QUESTION
@@ -1394,6 +1396,7 @@ async def test_forced_fate_success_replaces_the_history_exactly_once() -> None:
     assert result.fallback_ran is False
     assert result.fallback_fitted is None
     assert replace_mock.await_count == 1
+    assert replace_mock.await_args is not None
     seed = replace_mock.await_args.kwargs["seed"]
     assert len(seed) == 2
     assert all(message.source == COMPACTION_SEED_SOURCE for message in seed)
