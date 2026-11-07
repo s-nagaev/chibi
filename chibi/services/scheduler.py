@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,7 +14,7 @@ from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.redis import RedisJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler, run_in_event_loop
-from apscheduler.schedulers.base import STATE_STOPPED
+from apscheduler.schedulers.base import STATE_RUNNING, STATE_STOPPED
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
@@ -24,6 +25,7 @@ from chibi.schemas.scheduler import JobInfo
 from chibi.utils.app import SingletonMeta
 
 if TYPE_CHECKING:
+    from asyncio import TimerHandle
     from collections.abc import Callable, Coroutine
 
     from apscheduler.events import SchedulerEvent
@@ -170,28 +172,69 @@ def _next_run_time(job: Job) -> datetime | None:
 
 
 class GuardedAsyncIOScheduler(AsyncIOScheduler):
-    """``AsyncIOScheduler`` with a local wakeup-timer guard (upstream bug #1132).
+    """``AsyncIOScheduler`` with local guards against a silently disarmed timer.
 
-    Upstream bug (agronholm/apscheduler#1132, fixed on the 3.x branch on
-    2026-08-31 but unreleased as of 2026-10-16 — no 3.11.4 exists):
-    ``AsyncIOScheduler.wakeup()`` runs ``_stop_timer()`` → ``_process_jobs()`` →
-    ``_start_timer(wait_seconds)`` with no try/except. If ``_process_jobs()``
-    raises (e.g. a transient Redis error in ``jobstore.update_job()``), the
-    wakeup timer is never re-armed, the exception is lost in the event loop,
-    and the scheduler looks alive but silently stops running jobs until an
-    unrelated external ``wakeup()`` (add_job / user message) re-arms the timer.
+    Two independent failure modes of ``AsyncIOScheduler.wakeup()`` are guarded
+    here (the class is removable once both are fixed upstream and adopted):
 
-    This subclass mirrors the upstream fix semantics verbatim (same message,
-    same ``jobstore_retry_interval`` re-arm), so the future removal diff is a
-    pure deletion: replace every ``GuardedAsyncIOScheduler`` instantiation
-    with ``AsyncIOScheduler`` and delete this class plus the
-    ``run_in_event_loop`` import.
+    1. Upstream bug #1132 (agronholm/apscheduler#1132, fixed on the 3.x branch
+       on 2026-08-31 but unreleased as of 2026-11-04 — no 3.11.4 exists):
+       ``wakeup()`` runs ``_stop_timer()`` → ``_process_jobs()`` →
+       ``_start_timer(wait_seconds)`` with no try/except. If
+       ``_process_jobs()`` raises (e.g. a transient Redis error in
+       ``jobstore.update_job()``), the wakeup timer is never re-armed, the
+       exception is lost in the event loop, and the scheduler looks alive but
+       silently stops running jobs until an unrelated external ``wakeup()``
+       (add_job / user message) re-arms the timer. The exception branch
+       re-arms with ``jobstore_retry_interval``, mirroring the upstream fix
+       verbatim (same message, same re-arm), so the future removal diff is a
+       pure deletion.
+    2. Silent stall with ``wait_seconds=None`` while jobs exist:
+       ``_process_jobs()`` returns ``None`` when the job store reports no next
+       run time (e.g. ``RedisJobStore.get_next_run_time()`` returning None
+       while jobs exist in the hash) or when the scheduler is paused. With
+       live jobs present, arming no timer at all means the scheduler never
+       wakes up again — and nothing but the (dead) timer would ever call
+       ``wakeup()``. In that case the wakeup is re-armed from the nearest
+       job ``next_run_time`` (bounded to
+       ``[MIN_GUARD_REARM_DELAY_SECONDS, MAX_GUARD_REARM_DELAY_SECONDS]``, so
+       the recovery path itself never degrades into a hot loop on the event
+       loop), and a periodic watchdog (``WATCHDOG_INTERVAL_SECONDS``) self-checks
+       that the timer is armed and due jobs are actually processed, forcing a
+       ``wakeup()`` and logging a WARNING otherwise. The watchdog always
+       re-arms itself, so its own recovery path never depends on the code
+       path it protects.
 
-    TODO(apscheduler-3.11.4): remove guard — delete this class, the
+    TODO(apscheduler-3.11.4): remove guards — delete this class, the
     ``run_in_event_loop`` import and revert instantiations to plain
     ``AsyncIOScheduler`` once APScheduler 3.11.4 (containing the upstream
     fix) is released and adopted.
     """
+
+    WATCHDOG_INTERVAL_SECONDS = 120
+    MAX_GUARD_REARM_DELAY_SECONDS = 60
+    MIN_GUARD_REARM_DELAY_SECONDS = 1.0
+
+    _watchdog_handle: TimerHandle | None = None
+    _guard_warning_suppress_until: float = 0.0
+
+    def start(self, paused: bool = False) -> None:
+        """Start the scheduler and arm the stall watchdog.
+
+        Args:
+            paused: Whether to start the scheduler in the paused state.
+        """
+        super().start(paused)
+        self._ensure_watchdog()
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Shut down the scheduler and stop the stall watchdog.
+
+        Args:
+            wait: Whether to wait until all currently executing jobs have finished.
+        """
+        self._stop_watchdog()
+        super().shutdown(wait)
 
     @run_in_event_loop
     def wakeup(self) -> None:
@@ -199,7 +242,11 @@ class GuardedAsyncIOScheduler(AsyncIOScheduler):
 
         Mirrors the upstream fix from PR #1132: an exception escaping
         ``_process_jobs()`` is logged and the wakeup timer is re-armed with
-        ``jobstore_retry_interval`` instead of being left disarmed. The
+        ``jobstore_retry_interval`` instead of being left disarmed. On top of
+        that, a ``None`` result with live jobs present (the silent-stall
+        signature observed in production) is converted into a bounded re-arm
+        from the nearest job ``next_run_time``, and a ``None`` result without
+        jobs makes sure the periodic self-check watchdog is armed. The
         ``@run_in_event_loop`` decorator is kept (as upstream) so the body
         still runs on the scheduler's event loop; the try/except inside the
         decorated body is what prevents the exception from being lost in the
@@ -211,7 +258,110 @@ class GuardedAsyncIOScheduler(AsyncIOScheduler):
         except Exception:
             self._logger.exception("Error processing jobs")
             wait_seconds = self.jobstore_retry_interval
+        if wait_seconds is None and self.state == STATE_RUNNING:
+            try:
+                wait_seconds = self._guarded_wait_seconds()
+            except Exception:
+                self._logger.exception("Error computing the guarded re-arm delay")
+                wait_seconds = float(self.MAX_GUARD_REARM_DELAY_SECONDS)
+            if wait_seconds is None:
+                self._ensure_watchdog()
         self._start_timer(wait_seconds)
+
+    def _guarded_wait_seconds(self) -> float | None:
+        """Compute a bounded re-arm delay when ``_process_jobs()`` returned None.
+
+        A ``None`` result means upstream armed no timer at all. With jobs in
+        the store that is the silent-stall bug: the nearest job
+        ``next_run_time`` is used instead, bounded to
+        ``[MIN_GUARD_REARM_DELAY_SECONDS, MAX_GUARD_REARM_DELAY_SECONDS]`` —
+        the lower bound keeps the re-arm off the event loop's hot path when a
+        job is overdue, the upper one stops a bogus far-future value from a
+        transiently inconsistent job store postponing the check indefinitely.
+        Without jobs, ``None`` is the legitimate idle state and the caller
+        arms the self-check watchdog instead. The WARNING is logged on the
+        first occurrence and then at most once per re-arm interval, so a
+        persistent desync cannot flood the log.
+
+        Returns:
+            The delay in seconds until the next wakeup, or None when no jobs
+            exist (the scheduler may legitimately idle).
+        """
+        try:
+            jobs = self.get_jobs()
+        except Exception:
+            self._logger.exception("Error looking up jobs while re-arming the wakeup timer")
+            return float(self.MAX_GUARD_REARM_DELAY_SECONDS)
+        if not jobs:
+            return None
+        now = datetime.now(self.timezone)
+        next_run_times = [job.next_run_time for job in jobs if getattr(job, "next_run_time", None) is not None]
+        if next_run_times:
+            delay = (min(next_run_times) - now).total_seconds()
+            wait_seconds = min(
+                max(delay, self.MIN_GUARD_REARM_DELAY_SECONDS), float(self.MAX_GUARD_REARM_DELAY_SECONDS)
+            )
+        else:
+            wait_seconds = float(self.MAX_GUARD_REARM_DELAY_SECONDS)
+        now_monotonic = time.monotonic()
+        if now_monotonic >= self._guard_warning_suppress_until:
+            self._guard_warning_suppress_until = now_monotonic + wait_seconds
+            self._logger.warning(
+                "Wakeup processing returned no next wakeup while %d jobs exist;"
+                " re-arming the wakeup timer in %.3f seconds",
+                len(jobs),
+                wait_seconds,
+            )
+        return wait_seconds
+
+    def _ensure_watchdog(self) -> None:
+        """Arm the stall watchdog timer unless it is already armed."""
+        if self._watchdog_handle is not None and not self._watchdog_handle.cancelled():
+            return
+        if self.state == STATE_STOPPED or self._eventloop is None:
+            return
+        self._watchdog_handle = self._eventloop.call_later(self.WATCHDOG_INTERVAL_SECONDS, self._watchdog_tick)
+
+    def _stop_watchdog(self) -> None:
+        """Cancel the stall watchdog timer."""
+        if self._watchdog_handle is not None:
+            self._watchdog_handle.cancel()
+            self._watchdog_handle = None
+
+    def _watchdog_tick(self) -> None:
+        """Run one stall self-check, re-arming the watchdog unconditionally first.
+
+        With jobs present, a disarmed wakeup timer or a job whose
+        ``next_run_time`` is already in the past means the regular wakeup
+        cycle is not happening: a WARNING is logged and a ``wakeup()`` is
+        forced. The re-arm happens before any check, so an exception in the
+        check can never leave the watchdog itself disarmed.
+        """
+        self._watchdog_handle = None
+        self._ensure_watchdog()
+        if self.state != STATE_RUNNING:
+            return
+        try:
+            jobs = self.get_jobs()
+        except Exception:
+            self._logger.exception("Scheduler watchdog: error looking up jobs")
+            return
+        if not jobs:
+            return
+        timer_disarmed = self._timeout is None
+        now = datetime.now(self.timezone)
+        overdue = [
+            str(job.id) for job in jobs if getattr(job, "next_run_time", None) is not None and job.next_run_time <= now
+        ]
+        if not timer_disarmed and not overdue:
+            return
+        self._logger.warning(
+            "Scheduler watchdog: wakeup timer is %s while %d jobs exist (overdue: %s); forcing a wakeup",
+            "disarmed" if timer_disarmed else "armed but a job is overdue",
+            len(jobs),
+            ", ".join(overdue[:5]) or "none",
+        )
+        self.wakeup()
 
 
 class ChibiScheduler(metaclass=SingletonMeta):
