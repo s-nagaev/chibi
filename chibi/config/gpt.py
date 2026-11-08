@@ -103,9 +103,9 @@ class GPTSettings(BaseSettings):
         default=True,
         description=(
             "When True, every thread is re-measured after an answer has been delivered and, once "
-            "the measured context reaches the point where the NEXT request would be trimmed by the "
-            "pre-call context guard (the model window minus the summarizer output reservation; "
-            "max_history_tokens when the window does not resolve), the conversation is "
+            "the measured context reaches the forced compaction threshold "
+            "(min(max_history_tokens, the model's context window; max_history_tokens when the "
+            "window does not resolve), the conversation is "
             "unconditionally compacted by the active provider in the background. The check is "
             "fire-and-forget: it never delays, breaks or alters the delivered answer. Independent "
             "of reactive_context_recovery, which stays the backstop for a provider-rejected "
