@@ -62,6 +62,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **Mistral AI**
 - **Moonshot AI**
 - **OpenAI** (model GPT)
+- **StepFun** (model Step)
 - **Xiaomi** (model MiMo)
 - **xAI** (Grok)
 - **ZhipuAI** (model GLM)
@@ -97,7 +98,7 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), dan penjual kembali-agregator apa pun yang menyediakan akses ke model pembuatan gambar
 - **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); batas bulanan per pengguna dapat dikonfigurasi melalui variabel lingkungan `VIDEO_GENERATIONS_LIMIT`
 - **Musik:** Suno, ElevenLabs Music
-- **Suara (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
+- **Suara (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), StepFun (Step-Audio), Custom OpenAI-compatible (self-hosted)
 
 > Ketersediaan model yang tepat bergantung pada API key yang Anda konfigurasi dan fitur yang diaktifkan.
 
@@ -190,6 +191,7 @@ Setiap penyedia memerlukan kunci API sendiri. Berikut adalah tautan langsung:
 
 **Penyedia model pihak pertama:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)

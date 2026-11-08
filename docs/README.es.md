@@ -62,6 +62,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Mistral AI**
 - **Moonshot AI**
 - **OpenAI** (modelos GPT)
+- **StepFun** (modelos Step)
 - **Xiaomi** (modelos MiMo)
 - **xAI** (Grok)
 - **ZhipuAI** (modelos GLM)
@@ -97,7 +98,7 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **Imágenes:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), y cualquier revendedor-agregador que proporcione acceso a modelos de generación de imágenes
 - **Vídeo:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); el límite mensual por usuario se configura con la variable de entorno `VIDEO_GENERATIONS_LIMIT`
 - **Música:** Suno, ElevenLabs Music
-- **Voz (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
+- **Voz (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), StepFun (Step-Audio), Custom OpenAI-compatible (self-hosted)
 
 > La disponibilidad exacta de modelos depende de tus claves de proveedor configuradas y de las funciones habilitadas.
 
@@ -190,6 +191,7 @@ Cada proveedor requiere su propia clave API. Aquí están los enlaces directos:
 
 **Proveedores de modelos propios:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)
