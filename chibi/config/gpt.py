@@ -92,21 +92,41 @@ class GPTSettings(BaseSettings):
         default=True,
         description=(
             "When True and a provider rejects a request because the context window is exceeded, "
-            "automatically summarize the conversation history and retry the turn exactly once. "
-            "This is the reactive safety net that complements the proactive MAX_HISTORY_TOKENS threshold."
+            "automatically summarize the conversation history and retry the turn exactly once at the "
+            "single provider call site (the reactive backstop behind the pre-call context-budget guard). "
+            "When False, an overflow error is presented as-is."
+        ),
+    )
+    context_forced_compaction_enabled: bool = Field(
+        alias="CONTEXT_FORCED_COMPACTION_ENABLED",
+        default=True,
+        description=(
+            "When True, every thread is re-measured after an answer has been delivered and, once "
+            "the measured context reaches the point where the NEXT request would be trimmed by the "
+            "pre-call context guard (the model window minus the summarizer output reservation; "
+            "max_history_tokens when the window does not resolve), the conversation is "
+            "unconditionally compacted by the active provider in the background. The check is "
+            "fire-and-forget: it never delays, breaks or alters the delivered answer. Independent "
+            "of reactive_context_recovery, which stays the backstop for a provider-rejected "
+            "oversized request."
         ),
     )
     max_history_tokens: int = Field(
-        default=100000,
+        default=200000,
         description=(
-            "Threshold (in tokens) of the *real* provider-reported prompt size at which the "
-            "conversation is auto-summarized. The value now reflects the entire outgoing request "
-            "(system prompt, activated skills, tool schemas, tool-call arguments, per-message "
-            "structural overhead, and conversation content) rather than the old history-only "
-            "estimate, which under-reported by ~4.8x. Re-based from 64000 to 100000 to protect the "
-            "smallest commonly-supported context window (128k): the threshold sits below it (~78%) "
-            "so summarization fires before a 128k model overflows, while leaving ~50% headroom on "
-            "a 200k window. Explicit setters should re-tune to the ~100k scale."
+            "Fallback context threshold (in tokens) of the *real* provider-reported "
+            "prompt size, used when the model's context window cannot be resolved: "
+            "the context guards and the post-answer forced compaction compare the "
+            "measured request against the model window minus the summarizer output "
+            "reservation and fall back to this value for models with an unknown "
+            "window. It is also the denominator of the approximate_context_size "
+            "percentage in the per-turn context note. The value reflects the entire "
+            "outgoing request (system prompt, activated skills, tool schemas, "
+            "tool-call arguments, per-message structural overhead, and conversation "
+            "content) rather than an estimate of the conversation history alone. The "
+            "default of 200000 aligns with the largest commonly-supported context "
+            "window; deployments that only use small-window models (128k or less) "
+            "should set an explicit lower value."
         ),
     )
     context_size_warning_threshold: int = Field(alias="CONTEXT_SIZE_WARNING_THRESHOLD", default=50, ge=0, le=100)

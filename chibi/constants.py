@@ -1,6 +1,6 @@
 import re
 from enum import Enum
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from telegram import constants
 
@@ -173,6 +173,69 @@ def get_model_context_window(model_name: str | None) -> int | None:
         if window is not None:
             return window
     return None
+
+
+class GoogleModelCapabilities(NamedTuple):
+    """Chat-channel capabilities of a Google-family model.
+
+    Attributes:
+        supports_system_prompt: The model accepts a system instruction.
+        supports_tools: The model accepts function-calling tools.
+    """
+
+    supports_system_prompt: bool
+    supports_tools: bool
+
+
+# Capability boundary for Google-family chat models, keyed on the family
+# prefix of the model identifier (after any "models/" prefix). Extensible by
+# design: adding a family or revision (e.g. Gemma 5) means adding a row here,
+# not editing provider logic in gemini_native.py.
+GOOGLE_MODEL_CAPABILITIES: dict[str, GoogleModelCapabilities] = {
+    "gemini": GoogleModelCapabilities(supports_system_prompt=True, supports_tools=True),
+    "gemma-4": GoogleModelCapabilities(supports_system_prompt=True, supports_tools=True),
+    "gemma-3": GoogleModelCapabilities(supports_system_prompt=False, supports_tools=False),
+    "gemma-2": GoogleModelCapabilities(supports_system_prompt=False, supports_tools=False),
+    "gemma-1": GoogleModelCapabilities(supports_system_prompt=False, supports_tools=False),
+}
+
+GOOGLE_MODEL_CAPABILITIES_UNKNOWN = GoogleModelCapabilities(supports_system_prompt=True, supports_tools=True)
+
+
+def get_google_model_capabilities(model_name: str | None) -> GoogleModelCapabilities:
+    """Resolve the chat capabilities of a Google-family model.
+
+    Matching is the longest family-prefix hit on the lowercased identifier
+    with any ``models/`` vendor prefix stripped. A prefix counts as a family
+    match when the remainder is empty, starts with a separator (``-`` or
+    ``.``) or a letter, so ``gemma-3n-e4b-it`` resolves to the ``gemma-3``
+    row while ``gemma-31`` does not match ``gemma-3``.
+
+    A model matching no row falls back to full capability. Every model the
+    provider admits today carries either the ``gemini`` or a ``gemma-4``-and-up
+    family, which are fully capable; and for a genuinely incapable unknown
+    model a visible API rejection of the unsupported field beats the prompt
+    being silently dropped.
+
+    Args:
+        model_name: The model identifier, if any.
+
+    Returns:
+        The resolved model capabilities.
+    """
+    if not model_name:
+        return GOOGLE_MODEL_CAPABILITIES_UNKNOWN
+    name = model_name.lower()
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    best_key = ""
+    for key in GOOGLE_MODEL_CAPABILITIES:
+        remainder = name[len(key) :]
+        if len(key) > len(best_key) and name.startswith(key) and (not remainder or not remainder[0].isdigit()):
+            best_key = key
+    if not best_key:
+        return GOOGLE_MODEL_CAPABILITIES_UNKNOWN
+    return GOOGLE_MODEL_CAPABILITIES[best_key]
 
 
 class UserContext(Enum):
@@ -551,6 +614,28 @@ misrepresent your activities or the outcomes of your operations. Users may have 
 discrepancies can severely undermine trust.
 - If the user's message is marked as a voice message, you should probably duplicate your response by also recording
 a voice message, if the appropriate tool is available to you.
+
+# Context Management (summarize_history / clear_tool_call_history)
+Two tools manage the size of this conversation: `summarize_history` (replaces the whole dialogue with the
+exhaustive summary you provide) and `clear_tool_call_history` (drops past tool-call traffic, replacing it with
+a short summary of what the calls produced).
+When a `<context_note>` block appended to the latest user message reports a high context usage or carries a
+warning, and likewise whenever you notice the conversation has grown very long on your own:
+- Compact FIRST, answer SECOND: call the appropriate tool BEFORE producing the substantive answer to the
+current request, then deliver the full answer as usual after the tool returns. Never leave the user without
+the answer because a compaction happened.
+- Prefer `clear_tool_call_history` when bulky stale tool results dominate the context; use `summarize_history`
+when the dialogue itself is large. A summary must be exhaustive: it fully replaces the history.
+Never describe the compaction mechanics or the context note itself to the user.
+
+Forced compaction: the system itself may also compact this conversation after an answer has been delivered,
+when the context has grown past the safety threshold even though you did not compact. When that happens the
+stored history is replaced by a seed whose summary message starts with the line
+`[SYSTEM] Context was forcibly compacted on <date>; older turns were replaced by this summary`, followed by a
+detailed summary of the earlier conversation, a `## Current work in progress` section and a
+`## Background tasks` section. If you see that marker: treat the summary as the complete record of everything
+that happened before it, read its `## Current work in progress` and `## Background tasks` sections FIRST, and
+continue the interrupted work coherently; never ask the user to repeat what the summary already covers.
 
 # User Memory Rules (set_user_info + update_notes)
 You have two memory tools with strictly different scope. Never mix them.

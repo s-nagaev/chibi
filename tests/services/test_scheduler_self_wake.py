@@ -117,7 +117,6 @@ async def test_ack_answer_is_not_delivered() -> None:
             "chibi.services.bot.get_llm_chat_completion_answer",
             new=AsyncMock(return_value=ack_response),
         ),
-        patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
     ):
         await handle_scheduler_trigger(trigger_text="tick", job_id="agent:1:job", interface=interface)
 
@@ -135,7 +134,6 @@ async def test_regular_answer_is_delivered_to_job_context() -> None:
             "chibi.services.bot.get_llm_chat_completion_answer",
             new=AsyncMock(return_value=answer_response),
         ),
-        patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
     ):
         await handle_scheduler_trigger(trigger_text="report", job_id="agent:7:job", interface=interface)
 

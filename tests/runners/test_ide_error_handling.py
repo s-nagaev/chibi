@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import chibi.config  # noqa: F401
-from chibi.exceptions import ConfigurationError, NoApiKeyProvidedError, StorageError
+from chibi.exceptions import ConfigurationError, ContextLengthExceededError, NoApiKeyProvidedError, StorageError
 from chibi.interfaces.stdio_interface import StdioInterface
 from chibi.interfaces.stdio_runner import StdioRunner
 from chibi.storage.local import LocalStorage
@@ -268,3 +268,37 @@ async def test_generic_exception_emits_cause_with_exception_class_name() -> None
     assert error["code"] == "request_failed"
     assert error["cause"] == "RuntimeError"
     assert "something went wrong" not in error["message"]
+
+
+@pytest.mark.asyncio
+async def test_context_overflow_emits_typed_ide_error_without_recovery() -> None:
+    """ContextLengthExceededError emits a typed IDE error and performs no recovery."""
+    calls = 0
+
+    async def raise_overflow(interface: StdioInterface) -> None:
+        nonlocal calls
+        calls += 1
+        raise ContextLengthExceededError(provider="openai", model="gpt-4")
+
+    decorated_handler = handle_gpt_exceptions(raise_overflow)
+    recorder = OutputRecorder()
+    runner = StdioRunner()
+    with (
+        patch.object(runner, "_write", recorder),
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", decorated_handler),
+        patch("chibi.services.user.emergency_summarization", new=AsyncMock()) as mock_summarize,
+    ):
+        await runner._handle_message({"type": "initialize", "protocol_version": 1})
+        await runner._handle_message(request("context-overflow"))
+        for _ in range(100):
+            if any(frame.get("type") == "error" for frame in recorder.frames):
+                break
+            await asyncio.sleep(0.01)
+
+    error = next(frame for frame in recorder.frames if frame.get("type") == "error")
+    assert error["request_id"] == "context-overflow"
+    assert error["code"] == "context_length_exceeded"
+    assert "too large" in error["message"]
+    # Pure error presenter: the handler ran once, no recovery was attempted.
+    assert calls == 1
+    mock_summarize.assert_not_awaited()
