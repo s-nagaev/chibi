@@ -4,7 +4,7 @@ The trigger lives at the shared answer flow
 (``chibi.services.user.get_llm_chat_completion_answer`` -> ``_schedule_forced_compaction``
 -> ``_maybe_run_forced_compaction``) and fires after the answer has been
 delivered: it re-measures the thread and, once the measured context reaches
-the point where the NEXT request would be trimmed by the pre-call guard,
+the forced-compaction threshold ``min(max_history_tokens, window)``,
 unconditionally runs ``emergency_summarization``. These tests pin the trigger
 conditions, the throttle state (in-flight flag, back-off) and the
 exception-containment contract; the compaction machine itself is mocked.

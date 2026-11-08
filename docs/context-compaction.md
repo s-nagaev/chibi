@@ -81,7 +81,7 @@ The whole forced post-answer layer is governed by one switch, `CONTEXT_FORCED_CO
 | Context passes ~50% of the budget | Compaction advisory appears in the `<context_note>` | The agent, via the note |
 | Bulky tool results pass ~25% of the context | Tool-results warning with the top offenders | The agent, via the note |
 | Agent decides to compact | `summarize_history` or `clear_tool_call_history` runs before the answer | Nobody visible; the history shrinks |
-| Context reaches window minus summarizer reservation after an answer | Forced post-answer compaction replaces history with a seed (marker + summary + current work + background tasks) | The agent, via the seed marker; the user never does |
+| Context reaches min(MAX_HISTORY_TOKENS, model context window) after an answer | Forced post-answer compaction replaces history with a seed (marker + summary + current work + background tasks) | The agent, via the seed marker; the user never does |
 | Outgoing request would not fit | Trim guard hides oldest units for this request only | The agent, via `guard_trim_warning` on the following request (in-loop trims: one request late) |
 | Provider rejects a request as oversized | Reactive recovery: compact, retry once, last-resort shrink if needed | The user gets a normal answer with a short "context compressed" note |
 | A forced compaction attempt fails | History untouched; thread backs off 3 turns / 30 minutes | Nobody visible; failure is logged |

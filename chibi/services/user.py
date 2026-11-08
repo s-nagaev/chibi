@@ -1856,8 +1856,9 @@ async def get_llm_chat_completion_answer(
     has been returned, the post-delivery forced-compaction check
     (:func:`_maybe_run_forced_compaction`, scheduled fire-and-forget by
     :func:`_schedule_forced_compaction`) re-measures the thread in the
-    background and unconditionally compacts it when the measured context has
-    reached the point where the NEXT request would be trimmed by the guard.
+    background and unconditionally compacts it when the measured context
+    has reached the forced-compaction threshold
+    ``min(max_history_tokens, window)``.
     The check never delays, breaks or alters the delivered answer.
 
     Args:
@@ -2159,8 +2160,8 @@ async def _maybe_run_forced_compaction(
     (:func:`get_llm_chat_completion_answer`) after the per-thread lock block
     has exited and the answer has been returned: the check re-measures the
     thread (the same measurement entry point the pre-call guard uses) and,
-    when the measured context has reached the point where the NEXT request
-    would be trimmed by the guard, calls the existing
+    when the measured context has reached the threshold
+    ``min(max_history_tokens, window)``, calls the existing
     :func:`emergency_summarization` unconditionally. The compaction machine
     re-acquires the same non-reentrant per-thread lock, which is why this
     check may never run inside that lock. Sub-agent threads are out of scope
@@ -2173,8 +2174,8 @@ async def _maybe_run_forced_compaction(
     cleared on completion or failure), the thread is not backing off after a
     failed attempt (three turns or thirty minutes, whichever first), the
     history is not solely a compaction seed, and the measured context
-    reached the threshold (the model window minus the summarizer output
-    reservation; ``max_history_tokens`` when the window does not resolve).
+    reached the threshold (``min(max_history_tokens, window)``;
+    ``max_history_tokens`` when the window does not resolve).
     Compaction runs at most once per turn: the check itself runs exactly
     once per delivered answer.
 
