@@ -61,6 +61,7 @@ First-party model providers:
 - **Mistral AI**
 - **Moonshot AI** (Kimi)
 - **OpenAI** (GPT models)
+- **StepFun** (Step models)
 - **Xiaomi** (MiMo models)
 - **xAI** (Grok)
 - **ZhipuAI** (GLM models)
@@ -97,7 +98,7 @@ Model resellers and inference aggregators:
 - **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), and any reseller-aggregator providing access to image generation models
 - **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); the per-user monthly limit is configured via the `VIDEO_GENERATIONS_LIMIT` environment variable
 - **Music:** Suno, ElevenLabs Music
-- **Voice (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
+- **Voice (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), StepFun (Step-Audio), Custom OpenAI-compatible (self-hosted)
 
 > Exact model availability depends on your configured provider keys and enabled features.
 
@@ -201,6 +202,7 @@ Each provider requires its own API key. Here are the direct links:
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 

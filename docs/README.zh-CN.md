@@ -63,6 +63,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **Mistral AI**
 - **Moonshot AI**（Kimi）
 - **OpenAI**（GPT 系列模型）
+- **StepFun**（Step 系列模型）
 - **Xiaomi**（MiMo 系列模型）
 - **xAI**（Grok）
 - **ZhipuAI**（GLM 系列模型）
@@ -99,7 +100,7 @@ Chibi 在单一对话中支持多个提供商。添加一个或多个密钥—�
 - **图像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image、Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image、CogView）、MiniMax（Image-01），以及任何提供图像生成模型的转售聚合商
 - **视频**：Alibaba（Wan）、ZhipuAI（CogVideoX）、MiniMax（Hailuo）；每用户每月限额可通过环境变量 `VIDEO_GENERATIONS_LIMIT` 配置
 - **音乐**：Suno、ElevenLabs Music
-- **语音（TTS/STT）**：ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper、Kokoro）、Xiaomi（MiMo TTS）、自定义 OpenAI 兼容端点（自托管）
+- **语音（TTS/STT）**：ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper、Kokoro）、Xiaomi（MiMo TTS）、StepFun（Step-Audio）、自定义 OpenAI 兼容端点（自托管）
 
 > 具体模型可用性取决于您配置的提供商密钥和启用的功能。
 
@@ -200,6 +201,7 @@ docker-compose up -d
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **智谱AI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 

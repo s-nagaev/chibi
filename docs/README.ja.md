@@ -63,6 +63,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **Mistral AI**
 - **Moonshot AI**（Kimi）
 - **OpenAI**（GPT 系）
+- **StepFun**（Step 系）
 - **Xiaomi**（MiMoモデル）
 - **xAI**（Grok）
 - **ZhipuAI**（GLMモデル）
@@ -99,7 +100,7 @@ Chibi は、単一の会話の中で複数プロバイダーを扱えます。�
 - **画像:** Google（Imagen, Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image, Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image, CogView）、MiniMax（Image-01）、および画像生成モデルへのアクセスを提供するあらゆるリセラー／アグリゲーター
 - **動画:** Alibaba（Wan）、ZhipuAI（CogVideoX）、MiniMax（Hailuo）。ユーザーごとの月間上限は環境変数 `VIDEO_GENERATIONS_LIMIT` で設定できます
 - **音楽:** Suno、ElevenLabs Music
-- **音声（TTS/STT）:** ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper, Kokoro）、Xiaomi（MiMo TTS）、カスタムOpenAI互換エンドポイント（セルフホスト）
+- **音声（TTS/STT）:** ElevenLabs、OpenAI（GPT-4o Transcribe / TTS）、Gemini（Transcribe）、Together AI（Whisper, Kokoro）、Xiaomi（MiMo TTS）、StepFun（Step-Audio）、カスタムOpenAI互換エンドポイント（セルフホスト）
 
 > 利用可能なモデルは、設定したプロバイダーキーと有効化した機能により異なります。
 
@@ -200,6 +201,7 @@ docker-compose up -d
 - **Mistral AI**: [console.mistral.ai](https://console.mistral.ai/)
 - **Moonshot** (Kimi): [platform.moonshot.cn](https://platform.moonshot.cn/)
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **xAI** (Grok): [console.x.ai](https://console.x.ai/)
 - **ZhipuAI** (GLM, CogView): [z.ai/manage-apikey/apikey-list](https://z.ai/manage-apikey/apikey-list)
 

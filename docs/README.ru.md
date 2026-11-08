@@ -62,6 +62,7 @@ Chibi поддерживает множество провайдеров в ра
 - **Mistral AI**
 - **Moonshot AI**
 - **OpenAI** (модели GPT)
+- **StepFun** (модели Step)
 - **Xiaomi** (модели MiMo)
 - **xAI** (Grok)
 - **ZhipuAI** (модели GLM)
@@ -97,7 +98,7 @@ Chibi поддерживает множество провайдеров в ра
 - **Изображения:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), и любой реселлер-агрегатор, предоставляющий доступ к моделям генерации изображений
 - **Видео:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); месячный лимит на пользователя настраивается переменной окружения `VIDEO_GENERATIONS_LIMIT`
 - **Музыка:** Suno, ElevenLabs Music
-- **Голос (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
+- **Голос (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), StepFun (Step-Audio), Custom OpenAI-compatible (self-hosted)
 
 > Доступность конкретных моделей зависит от настроенных ключей провайдеров и включённых возможностей.
 
@@ -190,6 +191,7 @@ docker-compose up -d
 
 **Поставщики собственных моделей:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen, Voice): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)

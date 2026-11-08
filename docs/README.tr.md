@@ -62,6 +62,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 - **Mistral AI**
 - **Moonshot AI**
 - **OpenAI** (GPT modelleri)
+- **StepFun** (Step modelleri)
 - **Xiaomi** (MiMo modelleri)
 - **xAI** (Grok)
 - **ZhipuAI** (GLM modelleri)
@@ -97,7 +98,7 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 - **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), ve görüntü oluşturma modellerine erişim sağlayan herhangi bir satıcı-toplayıcı
 - **Video:** Alibaba (Wan), ZhipuAI (CogVideoX), MiniMax (Hailuo); kullanıcı başına aylık sınır `VIDEO_GENERATIONS_LIMIT` ortam değişkeni ile yapılandırılır
 - **Müzik:** Suno, ElevenLabs Music
-- **Ses (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), Custom OpenAI-compatible (self-hosted)
+- **Ses (TTS/STT):** ElevenLabs, OpenAI (GPT-4o Transcribe / TTS), Gemini (Transcribe), Together AI (Whisper, Kokoro), Xiaomi (MiMo TTS), StepFun (Step-Audio), Custom OpenAI-compatible (self-hosted)
 
 > Model erişilebilirliği, yapılandırdığınız sağlayıcı anahtarlarına ve etkinleştirdiğiniz özelliklere bağlıdır.
 
@@ -190,6 +191,7 @@ Her sağlayıcı kendi API anahtarını gerektirir. İşte doğrudan bağlantıl
 
 **Birinci taraf model sağlayıcıları:**
 - **OpenAI** (GPT, DALL·E): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **StepFun** (Step): [platform.stepfun.ai/interface-key](https://platform.stepfun.ai/interface-key)
 - **Anthropic** (Claude): [console.anthropic.com](https://console.anthropic.com/)
 - **Google** (Gemini, Nano Banana, Imagen): [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
 - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com/)

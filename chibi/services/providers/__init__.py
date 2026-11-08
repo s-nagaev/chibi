@@ -28,6 +28,7 @@ from chibi.services.providers.parasail import Parasail
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.sambanova import SambaNova
 from chibi.services.providers.siliconflow import SiliconFlow
+from chibi.services.providers.stepfun import StepFun
 from chibi.services.providers.suno import Suno
 from chibi.services.providers.together import Together
 from chibi.services.providers.tools.video import sync_video_tool_registration
