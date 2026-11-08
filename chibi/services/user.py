@@ -2105,14 +2105,13 @@ def _log_failed_forced_compaction(task: "asyncio.Task[None]") -> None:
 def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int:
     """Token threshold at which the post-delivery forced compaction fires.
 
-    The threshold is the input space the NEXT request would have: the model
-    window minus the summarizer output reservation
-    (:func:`_summarizer_max_tokens`, the same reservation the pre-call guard
-    subtracts). When the model window does not resolve, the documented
-    fallback is ``max_history_tokens``. The predicate
-    ``measured_total >= threshold`` fires one token earlier than the guard's
-    ``measured + reservation > window`` and omits the next turn's prompt;
-    both biases point in the safe (early) direction and are intentional.
+    The threshold is the configured ``max_history_tokens`` budget, capped by
+    the model's context window. When the model window does not resolve, the
+    threshold is simply ``max_history_tokens``. The predicate
+    ``measured_total >= threshold`` fires one token earlier than the
+    pre-call guard's ``measured + reservation > window`` and omits the next
+    turn's prompt; both biases point in the safe (early) direction and are
+    intentional.
 
     Args:
         provider: The provider instance the turn used.
@@ -2124,7 +2123,7 @@ def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int
     window = get_model_context_window(model)
     if window is None:
         return gpt_settings.max_history_tokens
-    return window - _summarizer_max_tokens(provider, model)
+    return min(gpt_settings.max_history_tokens, window)
 
 
 def _is_solely_compaction_seed(history: list[Message]) -> bool:

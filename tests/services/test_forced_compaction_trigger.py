@@ -40,7 +40,9 @@ UID = 931
 THREAD = 0
 WINDOW = 128000
 RESERVATION = 32000
-THRESHOLD = WINDOW - RESERVATION
+# The threshold is min(max_history_tokens, WINDOW); the default
+# max_history_tokens (200000) exceeds WINDOW, so the cap is WINDOW.
+THRESHOLD = WINDOW
 FALLBACK_THRESHOLD = 5000
 
 

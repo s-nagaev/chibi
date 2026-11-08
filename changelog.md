@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.1] - 2026-11-09
+
+### Fixed
+- **MistralAI defaults refreshed:** the chat default model is now `mistral-large-latest`, and the moderation default moved from the retired `mistral-moderation-2603` snapshot to `mistral-small-2603`.
+- **Forced context compaction now triggers at the configured `max_history_tokens` budget** (capped by the model window) instead of being deferred until near the raw context window on large-window models.
+
 ## [1.21.0] - 2026-11-08
 
 ### Added

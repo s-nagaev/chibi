@@ -401,8 +401,8 @@ async def test_non_overflow_sdk_error_still_escapes_unclassified() -> None:
 def test_default_models_and_keyword_filter():
     """Defaults point at the current GA catalog IDs and the chat keyword
     filter keeps non-chat models (embed, moderation, ocr, voxtral) excluded."""
-    assert MistralAI.default_model == "mistral-small-2603"
-    assert MistralAI.default_moderation_model == "mistral-moderation-2603"
+    assert MistralAI.default_model == "mistral-large-latest"
+    assert MistralAI.default_moderation_model == "mistral-small-2603"
     assert MistralAI.default_ocr_model == "mistral-ocr-latest"
     assert MistralAI.default_vision_model == "mistral-small-2603"
 

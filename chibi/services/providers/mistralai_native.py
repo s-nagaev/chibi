@@ -123,8 +123,8 @@ class MistralAI(RestApiFriendlyProvider):
     name = "MistralAI"
     model_name_keywords = ["mistral", "mixtral", "ministral"]
     model_name_keywords_exclude = ["embed", "moderation", "ocr", "transcribe", "tts", "voxtral"]
-    default_model = "mistral-small-2603"
-    default_moderation_model = "mistral-moderation-2603"
+    default_model = "mistral-large-latest"
+    default_moderation_model = "mistral-small-2603"
     default_vision_model = "mistral-small-2603"
     default_ocr_model = "mistral-ocr-latest"
     default_stt_model = "voxtral-mini-transcribe-3-0"
