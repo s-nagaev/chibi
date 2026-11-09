@@ -1,10 +1,12 @@
 """Unit tests for OcrPdfTool."""
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.ocr_pdf import OcrPdfTool
 
 # Sample PDF bytes for testing
@@ -76,29 +78,43 @@ class TestOcrPdfTool:
         with pytest.raises(ValueError, match="Exactly one of"):
             await OcrPdfTool.function(**mock_kwargs)
 
-    @patch("chibi.services.providers.tools.ocr_pdf.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_without_permission_raises_error(self, mock_gpt_settings, mock_kwargs):
         """Test that absolute_path without filesystem_access raises PermissionError."""
         mock_gpt_settings.filesystem_access = False
 
-        with pytest.raises(PermissionError, match="Filesystem access is not enabled"):
+        with pytest.raises(PermissionError, match="Filesystem access is disabled"):
             await OcrPdfTool.function(
                 absolute_path="/some/path.pdf",
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.ocr_pdf.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_file_not_found(self, mock_gpt_settings, mock_kwargs):
-        """Test that non-existent absolute_path raises FileNotFoundError."""
+        """Test that non-existent absolute_path raises ToolException."""
         mock_gpt_settings.filesystem_access = True
 
-        with pytest.raises(FileNotFoundError, match="File not found"):
+        with pytest.raises(ToolException, match="File not found"):
             await OcrPdfTool.function(
                 absolute_path="/non/existent/path.pdf",
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.ocr_pdf.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
+    async def test_absolute_path_fifo_rejected(self, mock_gpt_settings, mock_kwargs):
+        """Test that a FIFO is rejected instead of blocking on a synchronous read."""
+        mock_gpt_settings.filesystem_access = True
+
+        fifo_path = TEST_DIR / "test_pipe.pdf"
+        os.mkfifo(fifo_path)
+
+        with pytest.raises(ToolException, match="File not found"):
+            await OcrPdfTool.function(
+                absolute_path=str(fifo_path),
+                **mock_kwargs,
+            )
+
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_not_pdf_raises(self, mock_gpt_settings, mock_kwargs):
         """Test that non-PDF file raises ValueError."""
         mock_gpt_settings.filesystem_access = True
@@ -113,7 +129,7 @@ class TestOcrPdfTool:
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.ocr_pdf.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_success(self, mock_gpt_settings, mock_kwargs):
         """Test successful OCR of local PDF file."""
         mock_gpt_settings.filesystem_access = True
@@ -141,6 +157,28 @@ class TestOcrPdfTool:
             call_kwargs = mock_ocr.call_args.kwargs
             assert call_kwargs["user_id"] == 12345
             assert call_kwargs["pdf"] == SAMPLE_PDF_BYTES
+
+    @patch("chibi.services.providers.tools.ocr_pdf.read_local_file", new_callable=AsyncMock)
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
+    async def test_absolute_path_reads_off_the_event_loop(
+        self, mock_gpt_settings, mock_read_local_file, mock_kwargs
+    ):
+        """Test that local PDF reads go through the async read_local_file helper."""
+        mock_gpt_settings.filesystem_access = True
+        mock_read_local_file.return_value = SAMPLE_PDF_BYTES
+
+        test_file = TEST_DIR / "test_document.pdf"
+        test_file.write_bytes(SAMPLE_PDF_BYTES)
+
+        with patch("chibi.services.providers.tools.ocr_pdf.ocr_pdf", new=AsyncMock()) as mock_ocr:
+            mock_ocr.return_value = Mock(model_dump=lambda: {})
+
+            await OcrPdfTool.function(
+                absolute_path=str(test_file),
+                **mock_kwargs,
+            )
+
+        mock_read_local_file.assert_awaited_once()
 
     @patch("chibi.services.providers.tools.ocr_pdf.get_file_storage")
     async def test_file_id_success(self, mock_get_storage, mock_kwargs):
@@ -216,7 +254,7 @@ class TestOcrPdfTool:
                     **mock_kwargs,
                 )
 
-    @patch("chibi.services.providers.tools.ocr_pdf.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_model_override_passed_to_service(self, mock_gpt_settings, mock_kwargs):
         """Test that model parameter is passed to the service function."""
         mock_gpt_settings.filesystem_access = True

@@ -3,15 +3,13 @@ Vision tools for file info and image analysis.
 """
 
 import mimetypes
-from pathlib import Path
 from typing import Any, Unpack
 
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
-from chibi.config import gpt_settings
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, read_local_file, resolve_local_file
 from chibi.services.user import describe_image
 from chibi.storage.files import get_file_storage
 
@@ -112,7 +110,7 @@ class AnalyzeImageTool(ChibiTool):
         Raises:
             ValueError: If both or neither of file_id and absolute_path are provided.
             PermissionError: If filesystem_access is required but not enabled.
-            FileNotFoundError: If the file does not exist.
+            ToolException: If the path does not point to an existing regular file.
         """
         # XOR validation: exactly one of file_id or absolute_path must be provided
         if (file_id is None) == (absolute_path is None):
@@ -122,18 +120,12 @@ class AnalyzeImageTool(ChibiTool):
         user_id = interface.user_id
 
         if absolute_path:
-            if not gpt_settings.filesystem_access:
-                raise PermissionError(
-                    "Filesystem access is not enabled. Cannot analyze local files without filesystem_access permission."
-                )
-
             # Read local file
-            path = Path(absolute_path).expanduser().resolve()
-            if not path.exists():
-                raise FileNotFoundError(f"File not found: {path}")
-
-            with open(path, "rb") as f:
-                image_bytes = f.read()
+            # resolve_local_file gates on filesystem_access, rejects devices,
+            # FIFOs and directories, and read_local_file performs the read off
+            # the event-loop thread.
+            path = resolve_local_file(absolute_path)
+            image_bytes = await read_local_file(path)
 
             # Determine mime type
             mime_type, _ = mimetypes.guess_type(str(path))
