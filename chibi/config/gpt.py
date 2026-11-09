@@ -103,9 +103,9 @@ class GPTSettings(BaseSettings):
         default=True,
         description=(
             "When True, every thread is re-measured after an answer has been delivered and, once "
-            "the measured context reaches the point where the NEXT request would be trimmed by the "
-            "pre-call context guard (the model window minus the summarizer output reservation; "
-            "max_history_tokens when the window does not resolve), the conversation is "
+            "the measured context reaches the forced compaction threshold "
+            "(min(max_history_tokens, the model's context window; max_history_tokens when the "
+            "window does not resolve), the conversation is "
             "unconditionally compacted by the active provider in the background. The check is "
             "fire-and-forget: it never delays, breaks or alters the delivered answer. Independent "
             "of reactive_context_recovery, which stays the backstop for a provider-rejected "
@@ -116,11 +116,13 @@ class GPTSettings(BaseSettings):
         default=200000,
         description=(
             "Fallback context threshold (in tokens) of the *real* provider-reported "
-            "prompt size, used when the model's context window cannot be resolved: "
-            "the context guards and the post-answer forced compaction compare the "
-            "measured request against the model window minus the summarizer output "
-            "reservation and fall back to this value for models with an unknown "
-            "window. It is also the denominator of the approximate_context_size "
+            "prompt size. The context guards compare the measured request "
+            "against the model window minus the summarizer output reservation "
+            "and fall back to this value when the window cannot be resolved; "
+            "the post-answer forced compaction fires at "
+            "min(max_history_tokens, window), so reaching this value triggers "
+            "it unconditionally, capped by the model's context window where "
+            "it is known. It is also the denominator of the approximate_context_size "
             "percentage in the per-turn context note. The value reflects the entire "
             "outgoing request (system prompt, activated skills, tool schemas, "
             "tool-call arguments, per-message structural overhead, and conversation "

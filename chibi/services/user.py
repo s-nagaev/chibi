@@ -1856,8 +1856,9 @@ async def get_llm_chat_completion_answer(
     has been returned, the post-delivery forced-compaction check
     (:func:`_maybe_run_forced_compaction`, scheduled fire-and-forget by
     :func:`_schedule_forced_compaction`) re-measures the thread in the
-    background and unconditionally compacts it when the measured context has
-    reached the point where the NEXT request would be trimmed by the guard.
+    background and unconditionally compacts it when the measured context
+    has reached the forced-compaction threshold
+    ``min(max_history_tokens, window)``.
     The check never delays, breaks or alters the delivered answer.
 
     Args:
@@ -2105,14 +2106,16 @@ def _log_failed_forced_compaction(task: "asyncio.Task[None]") -> None:
 def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int:
     """Token threshold at which the post-delivery forced compaction fires.
 
-    The threshold is the input space the NEXT request would have: the model
-    window minus the summarizer output reservation
-    (:func:`_summarizer_max_tokens`, the same reservation the pre-call guard
-    subtracts). When the model window does not resolve, the documented
-    fallback is ``max_history_tokens``. The predicate
-    ``measured_total >= threshold`` fires one token earlier than the guard's
-    ``measured + reservation > window`` and omits the next turn's prompt;
-    both biases point in the safe (early) direction and are intentional.
+    The threshold is ``min(max_history_tokens, the model's context window)``.
+    Forced compaction is a post-delivery backstop: it runs after an answer
+    has been delivered, while the pre-call guard remains the per-send
+    protection that keeps each request inside the physical window. For
+    models whose window is at or below the configured budget the threshold
+    equals the window, so compaction fires later than the pre-call guard
+    would have trimmed, by roughly the summarizer output reservation; the
+    remaining early bias is that the predicate ignores the next turn's
+    prompt. When the model window does not resolve, the threshold falls
+    back to ``max_history_tokens``.
 
     Args:
         provider: The provider instance the turn used.
@@ -2124,7 +2127,7 @@ def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int
     window = get_model_context_window(model)
     if window is None:
         return gpt_settings.max_history_tokens
-    return window - _summarizer_max_tokens(provider, model)
+    return min(gpt_settings.max_history_tokens, window)
 
 
 def _is_solely_compaction_seed(history: list[Message]) -> bool:
@@ -2160,8 +2163,8 @@ async def _maybe_run_forced_compaction(
     (:func:`get_llm_chat_completion_answer`) after the per-thread lock block
     has exited and the answer has been returned: the check re-measures the
     thread (the same measurement entry point the pre-call guard uses) and,
-    when the measured context has reached the point where the NEXT request
-    would be trimmed by the guard, calls the existing
+    when the measured context has reached the threshold
+    ``min(max_history_tokens, window)``, calls the existing
     :func:`emergency_summarization` unconditionally. The compaction machine
     re-acquires the same non-reentrant per-thread lock, which is why this
     check may never run inside that lock. Sub-agent threads are out of scope
@@ -2174,8 +2177,8 @@ async def _maybe_run_forced_compaction(
     cleared on completion or failure), the thread is not backing off after a
     failed attempt (three turns or thirty minutes, whichever first), the
     history is not solely a compaction seed, and the measured context
-    reached the threshold (the model window minus the summarizer output
-    reservation; ``max_history_tokens`` when the window does not resolve).
+    reached the threshold (``min(max_history_tokens, window)``;
+    ``max_history_tokens`` when the window does not resolve).
     Compaction runs at most once per turn: the check itself runs exactly
     once per delivered answer.
 

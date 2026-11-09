@@ -40,7 +40,7 @@ Warnings can be ignored: a model absorbed in a long task may keep working past e
 
 To prevent that, Chibi re-checks every thread after an answer has been delivered. The check is fire-and-forget: it runs in the background, never delays the answer, never changes what the user receives, and any failure inside it is logged and swallowed. It runs at most once per delivered answer.
 
-The trigger threshold is deliberately conservative: compaction fires only once the measured context has reached the point where the *next* request would be trimmed — the model's context window minus the space reserved for the summarizer's own output. (For models whose window is unknown, the configured `MAX_HISTORY_TOKENS` threshold is used instead.) In other words, forced compaction steps in exactly at the doorstep of content loss, not earlier — the agent's own tools remain the preferred mechanism, and this layer only catches what they missed.
+The trigger threshold is deliberately conservative: compaction fires once the measured context reaches `min(MAX_HISTORY_TOKENS, model context window)` — the configured history limit, capped by the model's context window where it is known. Reaching `MAX_HISTORY_TOKENS` triggers compaction unconditionally; the window cap only keeps the trigger inside models with a smaller physical context. In other words, forced compaction steps in when the configured limit is reached, not earlier — the agent's own tools remain the preferred mechanism, and this layer only catches what they missed.
 
 When the trigger fires, the system compacts the conversation unconditionally in the background, replacing the stored history with a **seed**: the new, much smaller conversation state. The seed's summary message starts with a visible marker line — `[SYSTEM] Context was forcibly compacted on <date>; older turns were replaced by this summary` — so the agent can always tell that it is reading a compaction result rather than the original dialogue. After the marker the seed contains:
 
@@ -81,7 +81,7 @@ The whole forced post-answer layer is governed by one switch, `CONTEXT_FORCED_CO
 | Context passes ~50% of the budget | Compaction advisory appears in the `<context_note>` | The agent, via the note |
 | Bulky tool results pass ~25% of the context | Tool-results warning with the top offenders | The agent, via the note |
 | Agent decides to compact | `summarize_history` or `clear_tool_call_history` runs before the answer | Nobody visible; the history shrinks |
-| Context reaches window minus summarizer reservation after an answer | Forced post-answer compaction replaces history with a seed (marker + summary + current work + background tasks) | The agent, via the seed marker; the user never does |
+| Context reaches min(MAX_HISTORY_TOKENS, model context window) after an answer | Forced post-answer compaction replaces history with a seed (marker + summary + current work + background tasks) | The agent, via the seed marker; the user never does |
 | Outgoing request would not fit | Trim guard hides oldest units for this request only | The agent, via `guard_trim_warning` on the following request (in-loop trims: one request late) |
 | Provider rejects a request as oversized | Reactive recovery: compact, retry once, last-resort shrink if needed | The user gets a normal answer with a short "context compressed" note |
 | A forced compaction attempt fails | History untouched; thread backs off 3 turns / 30 minutes | Nobody visible; failure is logged |
