@@ -2,15 +2,13 @@
 OCR PDF tool for extracting text from PDF documents.
 """
 
-from pathlib import Path
 from typing import Any, Unpack
 
 from openai.types.chat import ChatCompletionToolParam
 from openai.types.shared_params import FunctionDefinition
 
-from chibi.config import gpt_settings
 from chibi.services.providers.tools.tool import ChibiTool
-from chibi.services.providers.tools.utils import AdditionalOptions
+from chibi.services.providers.tools.utils import AdditionalOptions, read_local_file, resolve_local_file
 from chibi.services.user import ocr_pdf
 from chibi.storage.files import get_file_storage
 
@@ -66,7 +64,7 @@ class OcrPdfTool(ChibiTool):
         Raises:
             ValueError: If both or neither of file_id and absolute_path are provided.
             PermissionError: If filesystem_access is required but not enabled.
-            FileNotFoundError: If the file does not exist.
+            ToolException: If the path does not point to an existing regular file.
         """
         # XOR validation: exactly one of file_id or absolute_path must be provided
         if (file_id is None) == (absolute_path is None):
@@ -76,21 +74,16 @@ class OcrPdfTool(ChibiTool):
         user_id = interface.user_id
 
         if absolute_path:
-            if not gpt_settings.filesystem_access:
-                raise PermissionError(
-                    "Filesystem access is not enabled. Cannot read local files without filesystem_access permission."
-                )
-
             # Read local file
-            path = Path(absolute_path).expanduser().resolve()
-            if not path.exists():
-                raise FileNotFoundError(f"File not found: {path}")
+            # resolve_local_file gates on filesystem_access, rejects devices,
+            # FIFOs and directories, and read_local_file performs the read off
+            # the event-loop thread.
+            path = resolve_local_file(absolute_path)
 
             if path.suffix.lower() != ".pdf":
                 raise ValueError(f"File is not a PDF: {path}")
 
-            with open(path, "rb") as f:
-                pdf_bytes = f.read()
+            pdf_bytes = await read_local_file(path)
         else:
             # Get file from storage
             assert file_id is not None  # Type narrowing for mypy

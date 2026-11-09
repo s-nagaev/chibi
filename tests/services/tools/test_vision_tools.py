@@ -2,12 +2,14 @@
 Tests for vision tools: GetFileInfoTool and AnalyzeImageTool.
 """
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from chibi.services.providers.tools import AnalyzeImageTool, GetFileInfoTool
+from chibi.services.providers.tools.exceptions import ToolException
 
 TEST_DIR = Path(__file__).parent / "test_vision_files"
 
@@ -104,31 +106,69 @@ class TestAnalyzeImageTool:
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.vision.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_without_permission_raises_error(self, mock_gpt_settings, mock_kwargs):
         """Test that absolute_path without filesystem_access raises PermissionError."""
         mock_gpt_settings.filesystem_access = False
 
-        with pytest.raises(PermissionError, match="Filesystem access is not enabled"):
+        with pytest.raises(PermissionError, match="Filesystem access is disabled"):
             await AnalyzeImageTool.function(
                 absolute_path="/some/path",
                 prompt="Describe this",
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.vision.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_file_not_found(self, mock_gpt_settings, mock_kwargs):
-        """Test that non-existent absolute_path raises FileNotFoundError."""
+        """Test that non-existent absolute_path raises ToolException."""
         mock_gpt_settings.filesystem_access = True
 
-        with pytest.raises(FileNotFoundError, match="File not found"):
+        with pytest.raises(ToolException, match="File not found"):
             await AnalyzeImageTool.function(
                 absolute_path="/non/existent/path.png",
                 prompt="Describe this",
                 **mock_kwargs,
             )
 
-    @patch("chibi.services.providers.tools.vision.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
+    async def test_absolute_path_fifo_rejected(self, mock_gpt_settings, mock_kwargs):
+        """Test that a FIFO is rejected instead of blocking on a synchronous read."""
+        mock_gpt_settings.filesystem_access = True
+
+        fifo_path = TEST_DIR / "test_pipe"
+        os.mkfifo(fifo_path)
+
+        with pytest.raises(ToolException, match="File not found"):
+            await AnalyzeImageTool.function(
+                absolute_path=str(fifo_path),
+                prompt="Describe this",
+                **mock_kwargs,
+            )
+
+    @patch("chibi.services.providers.tools.vision.read_local_file", new_callable=AsyncMock)
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
+    async def test_absolute_path_reads_off_the_event_loop(
+        self, mock_gpt_settings, mock_read_local_file, mock_kwargs
+    ):
+        """Test that local reads go through the async read_local_file helper."""
+        mock_gpt_settings.filesystem_access = True
+        mock_read_local_file.return_value = b"fake image data"
+
+        test_file = TEST_DIR / "test_async_read.png"
+        test_file.write_bytes(b"fake image data")
+
+        with patch("chibi.services.providers.tools.vision.describe_image", new=AsyncMock()) as mock_describe:
+            mock_describe.return_value = Mock(model_dump=lambda: {})
+
+            await AnalyzeImageTool.function(
+                absolute_path=str(test_file),
+                prompt="Describe this",
+                **mock_kwargs,
+            )
+
+        mock_read_local_file.assert_awaited_once()
+
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_absolute_path_success(self, mock_gpt_settings, mock_kwargs):
         """Test successful analysis of local file."""
         mock_gpt_settings.filesystem_access = True
@@ -191,7 +231,7 @@ class TestAnalyzeImageTool:
             assert call_kwargs["mime_type"] == "image/jpeg"
             assert call_kwargs["image"] == b"fake image bytes"
 
-    @patch("chibi.services.providers.tools.vision.gpt_settings")
+    @patch("chibi.services.providers.tools.utils.gpt_settings")
     async def test_mime_type_fallback(self, mock_gpt_settings, mock_kwargs):
         """Test that unknown file types fall back to application/octet-stream."""
         mock_gpt_settings.filesystem_access = True
