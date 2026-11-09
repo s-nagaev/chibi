@@ -2106,13 +2106,16 @@ def _log_failed_forced_compaction(task: "asyncio.Task[None]") -> None:
 def _forced_compaction_threshold(provider: "Provider", model: str | None) -> int:
     """Token threshold at which the post-delivery forced compaction fires.
 
-    The threshold is the configured ``max_history_tokens`` budget, capped by
-    the model's context window. When the model window does not resolve, the
-    threshold is simply ``max_history_tokens``. The predicate
-    ``measured_total >= threshold`` fires one token earlier than the
-    pre-call guard's ``measured + reservation > window`` and omits the next
-    turn's prompt; both biases point in the safe (early) direction and are
-    intentional.
+    The threshold is ``min(max_history_tokens, the model's context window)``.
+    Forced compaction is a post-delivery backstop: it runs after an answer
+    has been delivered, while the pre-call guard remains the per-send
+    protection that keeps each request inside the physical window. For
+    models whose window is at or below the configured budget the threshold
+    equals the window, so compaction fires later than the pre-call guard
+    would have trimmed, by roughly the summarizer output reservation; the
+    remaining early bias is that the predicate ignores the next turn's
+    prompt. When the model window does not resolve, the threshold falls
+    back to ``max_history_tokens``.
 
     Args:
         provider: The provider instance the turn used.
