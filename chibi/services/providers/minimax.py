@@ -58,7 +58,7 @@ class Minimax(AnthropicFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         if image_generation:
             image_models = [
                 ModelChangeSchema(provider=self.name, name="image-01", display_name="Image-01", image_generation=True)
@@ -71,6 +71,10 @@ class Minimax(AnthropicFriendlyProvider):
             return self.filter_and_return_list_of_models(models=video_models, video_generation=video_generation)
 
         models = await super().get_available_models(video_generation=video_generation)
+        if models is None:
+            # The fetch failed; propagating None lets callers skip this
+            # provider instead of caching a failure as a valid listing.
+            return None
         if not models:
             # Get models endpoint sometimes returns empty list, so we need a hacky fallback here
             supported_models = [

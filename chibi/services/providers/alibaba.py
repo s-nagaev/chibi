@@ -220,10 +220,12 @@ class Alibaba(OpenAIFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         models = await super().get_available_models(
             image_generation=image_generation, video_generation=video_generation
         )
+        if models is None:
+            return None
 
         if image_generation:
             wan_models = [

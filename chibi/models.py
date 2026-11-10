@@ -786,7 +786,11 @@ class User(BaseModel):
         ]
         results = await asyncio.gather(*tasks)
 
-        return list(itertools.chain.from_iterable(results))
+        # A provider that returned None failed to enumerate its models; skip
+        # it this round instead of caching the failure as an empty listing.
+        return list(
+            itertools.chain.from_iterable(result for result in results if result is not None)
+        )
 
     @property
     def has_reached_image_limits(self) -> bool:
