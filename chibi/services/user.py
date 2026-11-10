@@ -2522,6 +2522,9 @@ async def set_api_key(db: Database, user_id: int, api_key: str, provider_name: s
     user = await db.get_or_create_user(user_id=user_id)
     user.tokens[provider_name] = api_key
     await db.save_user(user)
+    # A newly added key can enable providers that previously had none, so
+    # the cached model listing must not outlive the change.
+    user.invalidate_models_cache()
     return None
 
 

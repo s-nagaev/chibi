@@ -501,8 +501,8 @@ class FailoverModelRegistry(metaclass=SingletonMeta):
     APIs can be slow or fail). The map is filled lazily from
     ``provider.get_available_models()`` and cached with a TTL. When the
     enumeration fails (the provider returns ``None``, or an empty list
-    despite declaring a default model), the previous good model map — if
-    any — is preserved and served stale, and the failed state is cached
+    despite declaring a default model), the previous good model map, if
+    any, is preserved and served stale, and the failed state is cached
     for a shorter TTL so the provider is not re-enumerated on every
     request. With no previous good map the provider is skipped (marker
     cached for the same shorter TTL) and the ladder continues.
