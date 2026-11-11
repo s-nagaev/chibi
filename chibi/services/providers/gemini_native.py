@@ -181,6 +181,47 @@ def _gemini_tool_name(tool: Tool) -> str:
     return str(declarations[0].name)
 
 
+_GEMINI_UNSUPPORTED_SCHEMA_KEYWORDS: frozenset[str] = frozenset(
+    {"$schema", "allOf", "not", "const", "examples", "discriminator"}
+)
+_stripped_keywords_logged: set[str] = set()
+
+
+def _normalize_schema_for_gemini(schema: Any) -> Any:
+    """Recursively normalize an OpenAI/MCP-style JSON Schema for google-genai ``Schema``.
+
+    google-genai's ``Schema`` model follows strict OpenAPI with ``extra='forbid'``:
+    it accepts ``anyOf`` but has no ``oneOf`` field, and JSON-Schema-only keywords
+    such as ``allOf`` or ``discriminator`` are rejected as extra fields. ``oneOf``
+    branches are semantically interchangeable with ``anyOf`` for tool-calling
+    purposes, so they are mapped to ``anyOf``. Keywords with no OpenAPI equivalent
+    are dropped; each keyword type is reported once at debug level. The recursion
+    walks every dict and list value, which covers ``properties``, ``items``,
+    ``anyOf``/``oneOf`` branches and ``$defs``/``definitions`` without special-casing.
+
+    Args:
+        schema: A JSON-Schema (sub)schema as decoded JSON data.
+
+    Returns:
+        A new normalized structure. The input is never mutated.
+    """
+    if isinstance(schema, dict):
+        normalized: dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "oneOf":
+                normalized["anyOf"] = _normalize_schema_for_gemini(value)
+            elif key in _GEMINI_UNSUPPORTED_SCHEMA_KEYWORDS:
+                if key not in _stripped_keywords_logged:
+                    _stripped_keywords_logged.add(key)
+                    logger.debug(f"Dropped JSON-Schema keyword '{key}': no google-genai Schema equivalent.")
+            else:
+                normalized[key] = _normalize_schema_for_gemini(value)
+        return normalized
+    if isinstance(schema, list):
+        return [_normalize_schema_for_gemini(item) for item in schema]
+    return schema
+
+
 class Gemini(RestApiFriendlyProvider):
     api_key = gpt_settings.gemini_key
     chat_ready = True
@@ -245,27 +286,34 @@ class Gemini(RestApiFriendlyProvider):
     def tools_list(self) -> list[Tool]:
         """Convert our tools format to Google's Tool format.
 
+        Every tool declaration is converted in isolation: a tool whose schema
+        cannot be normalized into a google-genai ``FunctionDeclaration`` is
+        skipped with a warning instead of aborting the whole tools list, so
+        one exotic MCP server cannot take the entire provider down.
+
         Returns:
             Tools list in Google's Tool format.
         """
         google_tools = []
         for tool in RegisteredChibiTools.get_tool_definitions():
+            tool_name = str(tool["function"]["name"])
             try:
                 google_tool = Tool(
                     function_declarations=[
                         FunctionDeclaration(
-                            name=str(tool["function"]["name"]),
+                            name=tool_name,
                             description=str(tool["function"]["description"]),
-                            parameters=tool["function"]["parameters"],
+                            parameters=_normalize_schema_for_gemini(tool["function"]["parameters"]),
                         )
                     ]
                 )
             except Exception as e:
-                logger.error(f"Failed to register tool {tool['function']['name']} due to exception: {e}")
-                import pprint
-
-                pprint.pprint(tool)
-                raise
+                logger.warning(
+                    f"Skipping tool {tool_name}: its schema is not convertible to a Gemini "
+                    f"FunctionDeclaration due to exception: {e}. The tool will not be offered "
+                    f"to Gemini models."
+                )
+                continue
             google_tools.append(google_tool)
         return google_tools
 

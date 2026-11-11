@@ -5,7 +5,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
@@ -13,15 +13,21 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent, Tool
+from openai.types.chat import ChatCompletionToolParam
+from openai.types.shared_params import FunctionDefinition
 
 import chibi.services.providers.tools.mcp_management as mcp_management_module
 from chibi.services.mcp.manager import MCPManager
+from chibi.services.providers.gemini_native import Gemini
 from chibi.services.providers.tools.mcp_management import (
     DeinitializeMCPServer,
     InitializeRestMCPServer,
+    _clean_schema,
     register_tools_from_mcp_session,
 )
 from chibi.services.providers.tools.tool import RegisteredChibiTools
+
+TEST_TOKEN = "test-token-for-mcp-rest-gemini"
 
 pytestmark = pytest.mark.asyncio
 
@@ -451,3 +457,58 @@ async def test_offline_register_tools_from_rest_session():
         assert result["message"].endswith(chibi_tool_name)
     finally:
         RegisteredChibiTools.deregister_tools([chibi_tool_name])
+
+
+async def test_melious_rest_oneof_schema_survives_gemini_conversion():
+    """The Melious REST MCP tool shape (parameters carrying oneOf) must survive the Gemini path.
+
+    The scrape_url tool of mcp_melious_rest declares either ``url`` or ``urls`` via a
+    top-level ``oneOf``. ``_clean_schema`` keeps ``oneOf`` intact, so the schema reaches
+    providers unchanged; the Gemini provider must normalize it (oneOf -> anyOf) instead of
+    crashing the whole ``tools_list`` conversion.
+    """
+    scrape_url_input_schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "format": "uri", "description": "URL to fetch."},
+            "urls": {
+                "type": "array",
+                "items": {"type": "string", "format": "uri"},
+                "maxItems": 10,
+                "description": "Multiple URLs to fetch in one request.",
+            },
+        },
+        "required": ["url"],
+        "oneOf": [
+            {"required": ["url"]},
+            {"required": ["urls"]},
+        ],
+    }
+
+    cleaned = _clean_schema(scrape_url_input_schema)
+    assert isinstance(cleaned, dict)
+    assert "oneOf" in cleaned
+
+    definition = ChatCompletionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name="mcp_melious_rest_rest_scrape_url",
+            description="MCP Server: melious. Extract content from URLs as clean markdown.",
+            parameters=cast(dict[str, object], cleaned),
+        ),
+    )
+
+    try:
+        with patch.object(RegisteredChibiTools, "get_tool_definitions", return_value=[definition]):
+            tools = Gemini(token=TEST_TOKEN).tools_list
+
+        assert len(tools) == 1
+        declarations = tools[0].function_declarations
+        assert declarations is not None
+        declaration = declarations[0]
+        assert declaration.name == "mcp_melious_rest_rest_scrape_url"
+        assert declaration.parameters is not None
+        assert declaration.parameters.any_of is not None
+        assert [branch.required for branch in declaration.parameters.any_of] == [["url"], ["urls"]]
+    finally:
+        RegisteredChibiTools.deregister_tools(["mcp_melious_rest_rest_scrape_url"])
