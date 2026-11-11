@@ -36,7 +36,7 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         if image_generation:
             return [
                 ModelChangeSchema(
@@ -57,6 +57,8 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
                 ),
             ]
         models = await super().get_available_models(image_generation=False, video_generation=video_generation)
+        if models is None:
+            return None
 
         additional_models = [
             ModelChangeSchema(

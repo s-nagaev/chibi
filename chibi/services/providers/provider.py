@@ -418,7 +418,15 @@ class Provider(ABC):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
+        """Enumerate the models exposed by the provider.
+
+        Returns:
+            A list of models, or ``None`` when the fetch failed (network
+            error, API error, unparsable response). An empty list means the
+            fetch succeeded but the provider genuinely exposes zero models
+            (or none matching the requested generation kind).
+        """
         raise NotImplementedError
 
     def get_model_display_name(self, model_name: str) -> str:
@@ -440,10 +448,10 @@ class Provider(ABC):
 
     async def api_key_is_valid(self) -> bool:
         try:
-            await self.get_available_models()
+            models = await self.get_available_models()
         except Exception:  # Some providers return 403, others - 400... Okay..
             return False
-        return True
+        return models is not None
 
     async def ocr(self, pdf: bytes, model: str | None = None) -> VisionResultSchema:
         raise NotImplementedError
@@ -1342,12 +1350,12 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         try:
             models = await self.client.models.list()
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
-            return []
+            return None
 
         all_models = [
             ModelChangeSchema(
@@ -2160,7 +2168,18 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
+        """Enumerate the models exposed by the provider.
+
+        Args:
+            image_generation: When True, only image-generation models are returned.
+            video_generation: When True, only video-generation models are returned.
+
+        Returns:
+            A list of models, or ``None`` when the fetch failed (network
+            error, API error, unparsable response). An empty list means the
+            fetch succeeded but the provider exposes no matching models.
+        """
         if image_generation or video_generation:
             return []
 
@@ -2168,7 +2187,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             response = await self._request(method="GET", url=urljoin(self.base_url, "v1/models"))
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
-            return []
+            return None
 
         response_data = response.json().get("data", [])
         all_models = [

@@ -1093,13 +1093,13 @@ class Gemini(RestApiFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         try:
             async with Client(api_key=gpt_settings.gemini_key, http_options=self.client_http_options).aio as aclient:
                 models = await aclient.models.list()
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
-            return []
+            return None
 
         all_models = [
             ModelChangeSchema(

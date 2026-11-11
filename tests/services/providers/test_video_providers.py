@@ -174,6 +174,7 @@ class TestAlibabaVideo:
         ):
             models = await Alibaba("test_token").get_available_models(video_generation=True)
 
+        assert models is not None
         assert {model.name for model in models} == {"wan2.6-t2v"}
         assert all(model.video_generation for model in models)
 
@@ -344,6 +345,7 @@ class TestZhipuAIVideo:
     async def test_get_available_models_declares_video_models(self) -> None:
         models = await ZhipuAI("test_token").get_available_models(video_generation=True)
 
+        assert models is not None
         assert [model.name for model in models] == ["cogvideox-3"]
         assert models[0].video_generation
 
@@ -568,6 +570,7 @@ class TestMinimaxVideo:
     async def test_get_available_models_declares_video_models(self) -> None:
         models = await Minimax("test_token").get_available_models(video_generation=True)
 
+        assert models is not None
         assert {model.name for model in models} == {"MiniMax-H3", "MiniMax-H3-Max"}
         assert all(model.video_generation for model in models)
 

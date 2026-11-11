@@ -500,8 +500,12 @@ class FailoverModelRegistry(metaclass=SingletonMeta):
     in-memory map, NOT a live per-request enumeration (provider model-list
     APIs can be slow or fail). The map is filled lazily from
     ``provider.get_available_models()`` and cached with a TTL. When the
-    enumeration fails for a provider, that provider is skipped (marker
-    cached for a shorter TTL) and the ladder continues.
+    enumeration fails (the provider returns ``None``, or an empty list
+    despite declaring a default model), the previous good model map, if
+    any, is preserved and served stale, and the failed state is cached
+    for a shorter TTL so the provider is not re-enumerated on every
+    request. With no previous good map the provider is skipped (marker
+    cached for the same shorter TTL) and the ladder continues.
     """
 
     _TTL_SECONDS = 60 * 60
@@ -518,7 +522,9 @@ class FailoverModelRegistry(metaclass=SingletonMeta):
 
         Returns:
             A set of exact model names, or None when the enumeration is
-            unavailable/failed (caller must skip this provider).
+            unavailable/failed and no previous good map exists (caller must
+            skip this provider). A previous good map is preserved and served
+            stale for ``_FAILURE_TTL_SECONDS`` after a failed enumeration.
         """
         key = provider.name.lower()
         now = time.monotonic()
@@ -531,6 +537,16 @@ class FailoverModelRegistry(metaclass=SingletonMeta):
             logger.warning(f"Failover model registry: failed to enumerate models of {provider.name}: {e}")
             self._cache[key] = (now + self._FAILURE_TTL_SECONDS, None)
             return None
+        # A declared default model means the provider is known to serve at
+        # least one model, so an empty listing can only be a failed or
+        # truncated enumeration, not a genuine "zero models" answer.
+        declares_models = bool(getattr(provider, "default_model", None))
+        if models is None or (not models and declares_models):
+            previous = entry[1] if entry else None
+            self._cache[key] = (now + self._FAILURE_TTL_SECONDS, previous)
+            if previous is None:
+                logger.warning(f"Failover model registry: {provider.name} model enumeration failed")
+            return previous
         names = {model.name for model in models}
         self._cache[key] = (now + self._TTL_SECONDS, names)
         return names

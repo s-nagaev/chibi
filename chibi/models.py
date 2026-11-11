@@ -5,9 +5,8 @@ import itertools
 import json
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, cast
 
-from aiocache import cached
 from anthropic.types import (
     MessageParam,
     TextBlockParam,
@@ -55,6 +54,22 @@ from chibi.schemas.app import ModelChangeSchema
 if TYPE_CHECKING:
     from chibi.services.providers import RegisteredProviders
     from chibi.services.providers.provider import Provider
+
+MODELS_CACHE_TTL_SECONDS = 60 * 60
+MODELS_FAILURE_COOLDOWN_SECONDS = 45
+
+# Cache key for the user-level model listing: (user id, image flag, video
+# flag). The key is stable per user id, so two User instances built for the
+# same account share one cache entry instead of fragmenting it per object
+# repr. The dicts holding these keys live on the User class and are used
+# exclusively by User.get_available_models, which is why the method name is
+# not part of the key.
+ModelsCacheKey = tuple[int, bool, bool]
+
+
+class ModelsUnavailableError(Exception):
+    """Every provider failed to enumerate its models and no cached listing exists."""
+
 
 CHAT_COMPLETION_CLASSES = {
     "assistant": ChatCompletionAssistantMessageParam,
@@ -580,6 +595,17 @@ class User(BaseModel):
         default_factory=dict, description="Thread ID to the last provider-measured prompt size recorded in it."
     )
 
+    # Failure-aware cache for User.get_available_models, shared by every
+    # User instance of the same account (keyed by user id, not object repr).
+    # ``_models_cache`` holds (expires_at, models) for successful aggregates,
+    # ``_models_cache_backup`` keeps the last successful aggregate without a
+    # TTL so it can be served stale when every provider later fails, and
+    # ``_models_failure_cooldowns`` holds cooldown deadlines after a
+    # total-enumeration failure.
+    _models_cache: ClassVar[dict[ModelsCacheKey, tuple[float, list[ModelChangeSchema]]]] = {}
+    _models_cache_backup: ClassVar[dict[ModelsCacheKey, list[ModelChangeSchema]]] = {}
+    _models_failure_cooldowns: ClassVar[dict[ModelsCacheKey, float]] = {}
+
     def __init__(self, **kwargs: Any) -> None:
         if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
             kwargs["selected_gpt_model_name"] = kwargs["gpt_model"]
@@ -775,10 +801,60 @@ class User(BaseModel):
             return self.working_dir
         return application_settings.working_dir
 
-    @cached(ttl=60 * 60)
+    def _models_cache_key(self, image_generation: bool, video_generation: bool) -> ModelsCacheKey:
+        """Build the stable cache key for this user's model listing."""
+        return (self.id, image_generation, video_generation)
+
+    def invalidate_models_cache(self) -> None:
+        """Drop every cached models listing belonging to this user."""
+        for cache in (self._models_cache, self._models_cache_backup, self._models_failure_cooldowns):
+            for key in [cache_key for cache_key in cache if cache_key[0] == self.id]:
+                cache.pop(key, None)
+
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema]:
+        """Enumerate the models of every provider configured for the user.
+
+        Results are cached per user id for ``MODELS_CACHE_TTL_SECONDS``. A
+        provider that returned None failed to enumerate its models.
+
+        Partial failure (at least one provider failed): the successful
+        subset is served but NOT cached, so a transient provider failure is
+        never persisted as an incomplete listing.
+
+        Total failure (every provider failed): the last successful
+        aggregate is served stale, even past its TTL, and a short cooldown
+        suppresses re-fetching the providers. With no previous good value a
+        ``ModelsUnavailableError`` is raised and nothing is cached.
+
+        Args:
+            image_generation: Whether to list image-generation models.
+            video_generation: Whether to list video-generation models.
+
+        Returns:
+            The aggregated model listing.
+
+        Raises:
+            ModelsUnavailableError: If every provider failed and no previous
+                good listing is available.
+        """
+        key = self._models_cache_key(image_generation=image_generation, video_generation=video_generation)
+        now = time.monotonic()
+        entry = self._models_cache.get(key)
+        if entry and entry[0] > now:
+            return entry[1]
+        if self._models_failure_cooldowns.get(key, 0.0) > now:
+            # Providers are in an outage cooldown: do not re-fetch them and
+            # serve the previous good listing (fresh or stale) instead.
+            if entry:
+                return entry[1]
+            if key in self._models_cache_backup:
+                return self._models_cache_backup[key]
+            raise ModelsUnavailableError(
+                f"Model listing for user {self.id} is unavailable: every provider failed to enumerate its models"
+            )
+
         providers = self.providers.available_instances
         tasks = [
             provider.get_available_models(image_generation=image_generation, video_generation=video_generation)
@@ -786,7 +862,32 @@ class User(BaseModel):
         ]
         results = await asyncio.gather(*tasks)
 
-        return list(itertools.chain.from_iterable(results))
+        failed_results = [result for result in results if result is None]
+        models = list(itertools.chain.from_iterable(result for result in results if result is not None))
+
+        if not failed_results:
+            expires_at = time.monotonic() + MODELS_CACHE_TTL_SECONDS
+            self._models_cache[key] = (expires_at, models)
+            self._models_cache_backup[key] = models
+            self._models_failure_cooldowns.pop(key, None)
+            return models
+
+        if len(failed_results) == len(results):
+            # Total failure: serve the last good aggregate stale and enter
+            # the cooldown so an outage does not re-fetch every provider on
+            # each request. Nothing is written to the fresh cache.
+            self._models_failure_cooldowns[key] = time.monotonic() + MODELS_FAILURE_COOLDOWN_SECONDS
+            if entry:
+                return entry[1]
+            if key in self._models_cache_backup:
+                return self._models_cache_backup[key]
+            raise ModelsUnavailableError(
+                f"Model listing for user {self.id} is unavailable: every provider failed to enumerate its models"
+            )
+
+        # Partial failure: serve the successful subset this round without
+        # caching it, so the next call retries the failed providers.
+        return models
 
     @property
     def has_reached_image_limits(self) -> bool:

@@ -1075,7 +1075,7 @@ class MistralAI(RestApiFriendlyProvider):
 
     async def get_available_models(
         self, image_generation: bool = False, video_generation: bool = False
-    ) -> list[ModelChangeSchema]:
+    ) -> list[ModelChangeSchema] | None:
         if image_generation or video_generation:
             return []
 
@@ -1084,7 +1084,7 @@ class MistralAI(RestApiFriendlyProvider):
             mistral_models = response.data or []
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
-            return []
+            return None
 
         model_cards = [model for model in mistral_models if isinstance(model, (BaseModelCard, FTModelCard))]
         all_models = [
