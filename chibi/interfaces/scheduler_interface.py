@@ -4,7 +4,7 @@ import asyncio
 import random
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable
 
 import telegramify_markdown
 from loguru import logger
@@ -607,7 +607,7 @@ class SchedulerInterface(UserInterface):
                 await self._send_image_buffers(images=local_buffers, bot=bot, message_thread_id=message_thread_id)
             return
 
-        await self._send_image_buffers(images=cast(list[BytesIO], images), bot=bot, message_thread_id=message_thread_id)
+        await self._send_image_buffers(images=images, bot=bot, message_thread_id=message_thread_id)
 
     async def send_document(
         self,

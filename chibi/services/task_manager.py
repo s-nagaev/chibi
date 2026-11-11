@@ -59,11 +59,12 @@ class BackgroundTaskManager(metaclass=SingletonMeta):
             return None
 
         task_id = self._get_task_id(user_id=user_id, thread_id=thread_id)
+        task_name = getattr(coro, "__name__", str(coro))
 
         # Wrap with timeout if specified
         if timeout is not None:
             coro = self._wrap_with_timeout(coro, timeout)
-        logger.info(f"Starting background task {coro.__name__} for user {user_id}...")
+        logger.info(f"Starting background task {task_name} for user {user_id}...")
         task = asyncio.create_task(coro)
         if self._tasks.get(task_id):
             self._tasks[task_id].add(task)
