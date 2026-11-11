@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.3] - 2026-11-11
+
+### Fixed
+- **Model listing survives provider outages:** failed provider fetches are no longer cached as empty listings; the listing serves the last known-good set, partial results stay live, and users get a clear error instead of silently missing models for an hour.
+- **Gemini tools with unsupported JSON-Schema keywords no longer crash the provider:** `oneOf` schemas are normalized to `anyOf`, other rejected keywords are stripped, and a single un-convertible MCP tool is skipped with a warning instead of taking down the whole Gemini tool list.
+
 ## [1.21.2] - 2026-11-10
 
 ### Fixed
