@@ -646,7 +646,7 @@ async def send_images(
             await _send_image_buffers(images=local_buffers, update=update, context=context)
         return None
 
-    await _send_image_buffers(images=cast(list[BytesIO], images), update=update, context=context)
+    await _send_image_buffers(images=images, update=update, context=context)
 
 
 async def send_text_file(file_content: str, file_name: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
