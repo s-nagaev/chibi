@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from anthropic.types import MessageParam, ToolResultBlockParam, ToolUseBlockParam
+from anthropic.types import AssistantMessageParam, ToolResultBlockParam, ToolUseBlockParam, UserMessageParam
 from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDict, PartDict
 from mistralai.client import UNSET
 from mistralai.client.models import TextChunk, ThinkChunk
@@ -362,7 +362,7 @@ class TestMistralContentToText:
 class TestMessageAnthropicConversion:
     def test_anthropic_to_chibi_tool_call(self) -> None:
         args = {"max_results": 5, "search_phrase": "weather forecast Krakow February 15 2026"}
-        source = MessageParam(
+        source = AssistantMessageParam(
             role="assistant",
             content=[
                 ToolUseBlockParam(id="call_function_npanp5e9uv0s_1", input=args, name="get_weather", type="tool_use")
@@ -384,7 +384,7 @@ class TestMessageAnthropicConversion:
     def test_anthropic_to_chibi_tool_result(self) -> None:
         tool_result = {"tool_name": "ddgs_web_search", "status": "ok", "result": "some data here"}
 
-        source = MessageParam(
+        source = UserMessageParam(
             role="user",
             content=[
                 ToolResultBlockParam(

@@ -8,10 +8,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, cast
 
 from anthropic.types import (
+    AssistantMessageParam,
     MessageParam,
     TextBlockParam,
     ToolResultBlockParam,
     ToolUseBlockParam,
+    UserMessageParam,
 )
 from google.genai.types import ContentDict, FunctionCallDict, PartDict
 from loguru import logger
@@ -177,7 +179,7 @@ class Message(BaseModel):
 
     def to_anthropic(self) -> MessageParam:
         if self.role == "tool" and self.tool_call_id:
-            return MessageParam(
+            return UserMessageParam(
                 role="user",
                 content=[
                     ToolResultBlockParam(
@@ -188,7 +190,7 @@ class Message(BaseModel):
                 ],
             )
         if self.role == "user":
-            return MessageParam(
+            return UserMessageParam(
                 role="user",
                 content=[
                     TextBlockParam(
@@ -214,7 +216,7 @@ class Message(BaseModel):
                         input=json.loads(tool.function.arguments) if tool.function.arguments else {},
                     )
                 )
-        return MessageParam(
+        return AssistantMessageParam(
             role="assistant",
             content=assistant_content,
         )
@@ -222,7 +224,7 @@ class Message(BaseModel):
     @classmethod
     def from_anthropic(cls, anthropic_message: MessageParam) -> "Message":
         message_content = anthropic_message["content"]
-        role: Literal["user", "assistant", "tool"] = anthropic_message["role"]
+        role: Literal["user", "assistant", "tool", "system"] = anthropic_message["role"]
         tool_call_id: str | None = None
         content: str = ""
         tool_name: str | None = None
