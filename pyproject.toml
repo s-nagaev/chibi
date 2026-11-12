@@ -66,7 +66,7 @@ openai = "2.17.0"
 pydantic = "^2.14.3"
 pydantic-settings = "2.12.0"
 python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.8"}
-redis = {extras = ["hiredis"], version = "7.1.0"}
+redis = {extras = ["hiredis"], version = "^8.1"}
 rich = "^15"
 sqlalchemy = "^2.0"
 telegramify-markdown = "0.5.4"
