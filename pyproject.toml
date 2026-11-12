@@ -46,7 +46,7 @@ Changelog = "https://github.com/s-nagaev/chibi/releases"
 [tool.poetry.dependencies]
 python = "^3.11"
 
-anthropic = "0.88.0"
+anthropic = "^2.8"
 apscheduler = "^3.11"
 boto3 = "1.42.81"
 cachetools = "^8.0"

@@ -63,12 +63,12 @@ def _retry_policy(provider_cls: Any) -> Any:
 
 
 def _anthropic_connection_error() -> Exception:
-    return APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    return APIConnectionError(request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
 
 
 def _anthropic_status_error(error_cls: Any, status_code: int) -> Exception:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    return error_cls(message="transient error", response=httpx.Response(status_code, request=request), body=None)
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    return error_cls(message="transient error", response=httpx2.Response(status_code, request=request), body=None)
 
 
 def _gemini_server_error() -> GeminiServerError:

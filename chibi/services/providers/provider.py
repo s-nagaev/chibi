@@ -19,6 +19,7 @@ from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 from anthropic import omit as anthropic_omit
 from anthropic.types import (
+    AssistantMessageParam,
     CacheControlEphemeralParam,
     MessageParam,
     TextBlock,
@@ -29,6 +30,7 @@ from anthropic.types import (
     ToolParam,
     ToolResultBlockParam,
     ToolUseBlock,
+    UserMessageParam,
 )
 from anthropic.types import (
     Message as AnthropicMessage,
@@ -1569,6 +1571,21 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
     base_url: str = "https://api.anthropic.com"
 
     @property
+    def _temperature_extra_body(self) -> dict[str, Any]:
+        """Sampling parameters as an extra body payload.
+
+        The SDK removed the ``temperature`` argument from message methods;
+        the API itself still accepts the field, so it is merged into the
+        request JSON only when a concrete value is configured.
+
+        Returns:
+            A dict with ``temperature`` when set, or an empty dict to omit it.
+        """
+        if isinstance(self.temperature, Omit):
+            return {}
+        return {"temperature": self.temperature}
+
+    @property
     def tools_list(self) -> list[ToolParam]:
         anthropic_tools = [
             ToolParam(
@@ -1657,7 +1674,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                     response_message = await self.client.messages.create(
                         model=model,
                         max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                        temperature=self.temperature,
+                        extra_body=self._temperature_extra_body,
                         timeout=self.timeout,
                         tools=offered_tools(
                             tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]
@@ -1716,14 +1733,15 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         Returns:
             The final aggregated Anthropic message.
         """
+        offered = offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"])
         async with (
             AckSentinelStreamSession(interface) as deltas,
             self.client.messages.stream(
                 model=model,
                 max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
-                temperature=self.temperature,
+                extra_body=self._temperature_extra_body,
                 timeout=self.timeout,
-                tools=offered_tools(tools=self.tools_list, interface=interface, name_of=lambda tool: tool["name"]),
+                tools=offered,
                 tool_choice=tool_choice,
                 system=system,
                 messages=messages,
@@ -1849,7 +1867,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             if forced_choice_applicable(interface=interface):
                 # A forced request answered with prose: the force was ignored.
                 log_forced_choice_outcome(model=model, provider_name=self.name, interface=interface, outcome="ignored")
-            assistant_message = MessageParam(
+            assistant_message = AssistantMessageParam(
                 role="assistant",
                 content=[content.model_dump() for content in response_message.content],  # type: ignore
             )
@@ -1882,7 +1900,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                         nudge_text=nudge_text,
                         messages=messages,
                         conversation_messages=conversation_messages,
-                        to_wire=lambda text: MessageParam(
+                        to_wire=lambda text: UserMessageParam(
                             role="user", content=[TextBlockParam(type="text", text=text)]
                         ),
                     ),
@@ -2001,7 +2019,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
                             nudge_text=nudge_text,
                             messages=messages,
                             conversation_messages=conversation_messages,
-                            to_wire=lambda text: MessageParam(
+                            to_wire=lambda text: UserMessageParam(
                                 role="user", content=[TextBlockParam(type="text", text=text)]
                             ),
                         ),
@@ -2034,12 +2052,12 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         )
 
         for tool_call_part, result in zip(tool_call_parts, results):
-            tool_call_message = MessageParam(
+            tool_call_message = AssistantMessageParam(
                 role="assistant",
                 content=[part.model_dump() for part in (thoughts_part, tool_call_part) if part is not None],  # type: ignore
             )
 
-            tool_result_message = MessageParam(
+            tool_result_message = UserMessageParam(
                 role="user",
                 content=[
                     ToolResultBlockParam(
@@ -2097,7 +2115,7 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
         response_message: AnthropicMessage = await self.client.messages.create(
             model=moderator_model,
             max_tokens=1024,
-            temperature=0.1,
+            extra_body={"temperature": 0.1},
             timeout=self.timeout,
             system=[
                 TextBlockParam(

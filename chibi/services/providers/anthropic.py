@@ -7,11 +7,11 @@ from anthropic.types import (
     Base64PDFSourceParam,
     DocumentBlockParam,
     ImageBlockParam,
-    MessageParam,
     TextBlockParam,
     ToolChoiceToolParam,
     ToolParam,
     ToolUseBlock,
+    UserMessageParam,
 )
 from anthropic.types.tool_param import InputSchemaTyped
 from loguru import logger
@@ -118,13 +118,13 @@ class Anthropic(AnthropicFriendlyProvider):
             model=model,
             max_tokens=16384,
             messages=[
-                MessageParam(
+                UserMessageParam(
                     role="user",
                     content=content,
                 )
             ],
             timeout=self.timeout,
-            temperature=0.1,
+            extra_body={"temperature": 0.1},
             tools=[tool],
             tool_choice=ToolChoiceToolParam(type="tool", name="analyze_and_describe_image"),
         )
@@ -211,13 +211,13 @@ class Anthropic(AnthropicFriendlyProvider):
             model=model,
             max_tokens=16384,
             messages=[
-                MessageParam(
+                UserMessageParam(
                     role="user",
                     content=content,
                 )
             ],
             timeout=self.timeout,
-            temperature=0.1,
+            extra_body={"temperature": 0.1},
             tools=[tool],
             tool_choice=ToolChoiceToolParam(type="tool", name="print_pdf_ocr_result"),
         )

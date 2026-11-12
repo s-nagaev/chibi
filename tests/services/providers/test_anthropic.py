@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
 from anthropic import BadRequestError
 from anthropic.types import ToolUseBlock
@@ -352,8 +352,8 @@ async def test_ocr_mock_called_correctly():
 
 def _make_anthropic_bad_request_error(message: str) -> BadRequestError:
     """Build an Anthropic BadRequestError carrying the given body message."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(
         400,
         request=request,
         json={"type": "error", "error": {"type": "invalid_request_error", "message": message}},
