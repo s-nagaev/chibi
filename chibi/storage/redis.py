@@ -33,7 +33,8 @@ class RedisStorage(Database):
 
     async def connect(self) -> None:
         redis_dsn = self._combine_redis_dsn(base_dsn=self.url, password=self.password)
-        self.redis = await from_url(redis_dsn)
+        # Pin RESP2: redis-py 8.x negotiates RESP3 by default, while 7.x used RESP2.
+        self.redis = await from_url(redis_dsn, protocol=2)
 
     def _combine_redis_dsn(self, base_dsn: str, password: str | None) -> str:
         if not password:
@@ -99,7 +100,7 @@ class RedisStorage(Database):
         if not message_keys:
             return []
 
-        messages = [json.loads(await self.redis.get(message_key)) for message_key in message_keys]
+        messages = [json.loads(raw) for key in message_keys if (raw := await self.redis.get(key)) is not None]
         messages.sort(key=lambda msg: msg.get("id", 0))
         return messages
 

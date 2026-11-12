@@ -423,7 +423,7 @@ class TestRedisPasswordMerge:
             ChibiScheduler()
             kwargs = mock_store.call_args.kwargs
         SingletonMeta._instances.pop(ChibiScheduler, None)
-        assert kwargs == {"host": "redis-host", "port": 6380, "db": 2, "password": "envpass"}
+        assert kwargs == {"host": "redis-host", "port": 6380, "db": 2, "password": "envpass", "protocol": 2}
 
     def test_url_password_takes_priority(self):
         settings = SimpleNamespace(redis="redis://:urlpass@redis-host:6380/2", redis_password="envpass")

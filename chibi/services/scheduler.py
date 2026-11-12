@@ -391,6 +391,7 @@ class ChibiScheduler(metaclass=SingletonMeta):
                 port=parsed.port or 6379,
                 db=int(parsed.path.lstrip("/") or 0),
                 password=password,
+                protocol=2,
             )
             logger.info("Scheduler: using Redis job store ({}:{})", parsed.hostname, parsed.port)
         else:

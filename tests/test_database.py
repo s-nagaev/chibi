@@ -303,8 +303,9 @@ async def test_legacy_message_without_visibility_reads_back_visible(storage: Dat
 
     # No destructive backfill: the raw record still has no visibility field.
     if isinstance(storage, RedisStorage):
-        raw_record = _json.loads(await storage.redis.get(f"user:{user_id}:message:{legacy_id}"))
-        assert "visibility" not in raw_record
+        raw_record = await storage.redis.get(f"user:{user_id}:message:{legacy_id}")
+        assert raw_record is not None
+        assert "visibility" not in _json.loads(raw_record)
     elif isinstance(storage, DynamoDBStorage):
         item = await asyncio.to_thread(
             storage.messages_table.get_item, Key={"user_id": str(user_id), "message_id": str(legacy_id)}
