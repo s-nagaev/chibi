@@ -1,8 +1,22 @@
+import contextlib
 from typing import Any, AsyncIterator, Callable, Generator, Iterable
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from tenacity import AsyncRetrying
+
+# Warm up elevenlabs' PEP 562 lazy-import tree before any freezegun
+# activation. freezegun walks all sys.modules attributes on activate, and
+# triggering elevenlabs' lazy imports under the FakeDatetime patch makes
+# pydantic >= 2.14 raise PydanticSchemaGenerationError and poisons the
+# session (later async tests hang).
+with contextlib.suppress(Exception):
+    import elevenlabs
+    import elevenlabs.types
+
+    for _module in (elevenlabs, elevenlabs.types):
+        for _attr in dir(_module):
+            getattr(_module, _attr)
 
 
 class AsyncBytesIterator:
