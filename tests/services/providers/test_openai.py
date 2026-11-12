@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
 from openai import BadRequestError
 from openai.types.chat.chat_completion import ChatCompletion, Choice
@@ -452,8 +452,8 @@ async def test_ocr_includes_filename_in_file_block():
 
 def _make_bad_request_error(code: str | None) -> BadRequestError:
     """Build an OpenAI BadRequestError with the given error code."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx2.Response(
         status_code=400,
         request=request,
         json={"error": {"message": "test", "type": "invalid_request_error", "code": code}},

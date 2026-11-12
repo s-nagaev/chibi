@@ -14,7 +14,6 @@ from types import SimpleNamespace
 from typing import Any, Callable, cast
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
-import httpx
 import httpx2
 import pytest
 from anthropic.types import (
@@ -115,15 +114,15 @@ def _make_chunk(
 
 def _make_bad_request_error() -> BadRequestError:
     """Build a real openai.BadRequestError (400, non-context-length)."""
-    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
-    response = httpx.Response(400, request=request, json={"error": {"message": "stream_options unsupported"}})
+    request = httpx2.Request("POST", "https://api.example.com/v1/chat/completions")
+    response = httpx2.Response(400, request=request, json={"error": {"message": "stream_options unsupported"}})
     return BadRequestError("stream_options unsupported", response=response, body=None)
 
 
 def _make_rate_limit_error() -> RateLimitError:
     """Build a real openai.RateLimitError (429)."""
-    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
-    response = httpx.Response(429, request=request, json={"error": {"message": "rate limited"}})
+    request = httpx2.Request("POST", "https://api.example.com/v1/chat/completions")
+    response = httpx2.Response(429, request=request, json={"error": {"message": "rate limited"}})
     return RateLimitError("rate limited", response=response, body=None)
 
 

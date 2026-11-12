@@ -62,7 +62,7 @@ influxdb-client = "^1.49.0"
 loguru = "0.7.3"
 mcp = "2.3.0"
 mistralai = "3.3.0"
-openai = "2.17.0"
+openai = "^3.49"
 pydantic = "^2.14.3"
 pydantic-settings = "2.12.0"
 python-telegram-bot = {extras = ["socks", "job-queue"], version = "^22.8"}
