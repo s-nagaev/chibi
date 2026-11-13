@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Generic, Literal, Optional, ParamSp
 from urllib.parse import urljoin
 
 import httpx
+import httpx2
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import AsyncClient, NotGiven, Omit
 from anthropic import BadRequestError as AnthropicBadRequestError
@@ -1510,6 +1511,10 @@ class RestApiFriendlyProvider(Provider):
     def get_async_httpx_client(self) -> httpx.AsyncClient:
         transport = httpx.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
         return httpx.AsyncClient(transport=transport, timeout=gpt_settings.timeout)
+
+    def get_async_httpx2_client(self) -> httpx2.AsyncClient:
+        transport = httpx2.AsyncHTTPTransport(retries=gpt_settings.retries, proxy=gpt_settings.proxy)
+        return httpx2.AsyncClient(transport=transport, timeout=gpt_settings.timeout)
 
     async def _request(
         self,
