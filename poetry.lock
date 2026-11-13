@@ -6706,4 +6706,4 @@ legacymac = ["onnxruntime", "onnxruntime", "onnxruntime", "onnxruntime"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "cb004cb58b804cdd22e5797c27d751600eb24eccc94f8b6911040a6d201c834e"
+content-hash = "85a167340cd7b82141483817bd8aea7424922e4741d1fedde1ffa81ddc5f7e1a"
