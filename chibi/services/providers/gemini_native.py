@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import aiohttp
 import httpx
+import httpx2
 from google.genai.client import AsyncClient, Client
 from google.genai.errors import APIError
 from google.genai.errors import ServerError as GeminiServerError
@@ -267,20 +268,20 @@ class Gemini(RestApiFriendlyProvider):
 
     @property
     def client_http_options(self) -> HttpOptions:
-        """Build client-level HTTP options that force the httpx async backend.
+        """Build client-level HTTP options for every ``Client(...)`` constructor.
 
-        The google-genai SDK switches its async transport to aiohttp whenever aiohttp is
-        importable and no client-level ``httpx_async_client`` is supplied. Config-level
-        ``HttpOptions`` (e.g. inside ``GenerateContentConfig``) is consulted only for
-        per-request retry settings and never selects the transport, so these options MUST
-        be passed to every ``Client(...)`` constructor. A fresh ``httpx.AsyncClient`` is
-        built on every access: an httpx client is stateful and cannot be reused after its
-        context manager has closed it.
+        The SDK's default ``v1`` API version is used (no explicit
+        ``api_version`` pin). A configured ``httpx2.AsyncClient`` is injected so the
+        proxy, timeout and transport-retry settings from ``gpt_settings`` keep
+        applying (the SDK resolves the backend from the injected client's MRO
+        and uses it as-is). A fresh client is built on every access: an httpx2
+        client is stateful and cannot be reused after its context manager has
+        closed it.
 
         Returns:
-            Fresh ``HttpOptions`` carrying a new MITM-aware ``httpx.AsyncClient``.
+            Fresh ``HttpOptions`` carrying a new ``httpx2.AsyncClient``.
         """
-        return HttpOptions(httpx_async_client=self.get_async_httpx_client())
+        return HttpOptions(httpx_async_client=self.get_async_httpx2_client())
 
     @property
     def tools_list(self) -> list[Tool]:
@@ -912,7 +913,13 @@ class Gemini(RestApiFriendlyProvider):
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=20, min=30, max=180),
         retry=retry_if_exception_type(
-            (ConnectionError, aiohttp.ServerDisconnectedError, httpx.TransportError, GeminiServerError)
+            (
+                ConnectionError,
+                aiohttp.ServerDisconnectedError,
+                httpx.TransportError,
+                httpx2.TransportError,
+                GeminiServerError,
+            )
         ),
         reraise=True,
     )
