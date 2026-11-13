@@ -271,9 +271,10 @@ class Gemini(RestApiFriendlyProvider):
         """Build client-level HTTP options for every ``Client(...)`` constructor.
 
         google-genai 3.x defaults to the httpx2 backend and to the ``v1`` API
-        version. We pin ``api_version='v1beta'`` so the endpoint selection stays
-        identical to the pre-3.x behavior (``v1`` migration is out of scope for
-        this batch), and we inject a configured ``httpx2.AsyncClient`` so the
+        version. ``api_version='v1beta'`` keeps endpoint selection on the
+        pre-3.x default; behavior differences between ``v1beta`` and ``v1``
+        have not been validated, so the explicit pin preserves the tested
+        configuration. A configured ``httpx2.AsyncClient`` is injected so the
         proxy, timeout and transport-retry settings from ``gpt_settings`` keep
         applying (the SDK resolves the backend from the injected client's MRO
         and uses it as-is). A fresh client is built on every access: an httpx2
