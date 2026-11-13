@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any, Iterator, cast
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
-import httpx
+import httpx2
 import pytest
 from openai import BadRequestError
 from openai.types.chat.chat_completion import ChatCompletion, Choice
@@ -255,9 +255,9 @@ async def test_openai_chat_retry_never_retries_context_overflow(
     """An oversized request fails fast: the retry policy gives up after a single attempt."""
     overflow_error = BadRequestError(
         "context_length_exceeded",
-        response=httpx.Response(
+        response=httpx2.Response(
             400,
-            request=httpx.Request("POST", "https://api.moonshot.ai/v1/chat/completions"),
+            request=httpx2.Request("POST", "https://api.moonshot.ai/v1/chat/completions"),
             json={"error": {"message": "test", "type": "invalid_request_error", "code": "context_length_exceeded"}},
         ),
         body={"message": "test", "type": "invalid_request_error", "code": "context_length_exceeded"},

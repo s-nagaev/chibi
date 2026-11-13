@@ -9,7 +9,7 @@ by waiting through the real 30-180 s backoff.
 
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from openai import APIConnectionError
 from tenacity import wait_fixed
@@ -106,7 +106,7 @@ async def test_silent_turn_error_propagates_unchanged(monkeypatch: pytest.Monkey
 async def test_transport_error_is_retried_with_existing_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine transport failure must still be retried four times, then re-raised."""
     _zero_retry_wait(monkeypatch)
-    raw_error = APIConnectionError(request=httpx.Request("POST", "https://api.test.invalid/v1"))
+    raw_error = APIConnectionError(request=httpx2.Request("POST", "https://api.test.invalid/v1"))
     calls = _patch_chat_call(monkeypatch, raw_error)
     provider = MoonshotAI(token=TEST_TOKEN)
 
