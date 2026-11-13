@@ -270,11 +270,8 @@ class Gemini(RestApiFriendlyProvider):
     def client_http_options(self) -> HttpOptions:
         """Build client-level HTTP options for every ``Client(...)`` constructor.
 
-        google-genai 3.x defaults to the httpx2 backend and to the ``v1`` API
-        version. ``api_version='v1beta'`` keeps endpoint selection on the
-        pre-3.x default; behavior differences between ``v1beta`` and ``v1``
-        have not been validated, so the explicit pin preserves the tested
-        configuration. A configured ``httpx2.AsyncClient`` is injected so the
+        The SDK's default ``v1`` API version is used (no explicit
+        ``api_version`` pin). A configured ``httpx2.AsyncClient`` is injected so the
         proxy, timeout and transport-retry settings from ``gpt_settings`` keep
         applying (the SDK resolves the backend from the injected client's MRO
         and uses it as-is). A fresh client is built on every access: an httpx2
@@ -284,7 +281,7 @@ class Gemini(RestApiFriendlyProvider):
         Returns:
             Fresh ``HttpOptions`` carrying a new ``httpx2.AsyncClient``.
         """
-        return HttpOptions(api_version="v1beta", httpx_async_client=self.get_async_httpx2_client())
+        return HttpOptions(httpx_async_client=self.get_async_httpx2_client())
 
     @property
     def tools_list(self) -> list[Tool]:
