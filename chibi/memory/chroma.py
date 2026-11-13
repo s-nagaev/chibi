@@ -904,9 +904,11 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
             The lazily created fastembed model instance.
         """
         if self._model is None:
-            # Safe to ignore: fastembed is pinned to 0.8.0, so all stored
-            # embeddings already come from mean pooling (the upstream-canonical
-            # behavior for these models since fastembed 0.6.0).
+            # fastembed <0.9 emitted a "now uses mean pooling instead of CLS
+            # embedding" notice here; 0.9.1 removed it. Mean pooling remains the
+            # upstream-canonical behavior for this model, so stored embeddings
+            # stay compatible. The narrow filter is kept as a harmless defensive
+            # guard in case the notice returns in a future release.
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",
