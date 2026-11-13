@@ -8,7 +8,7 @@ anyio==4.13.0 ; python_version >= "3.11" and python_version < "4.0"
 apscheduler==3.11.3 ; python_version >= "3.11" and python_version < "4.0"
 ast-serialize==0.13.1 ; python_version >= "3.11" and python_version < "4.0"
 asttokens==3.0.1 ; python_version >= "3.11" and python_version < "4.0"
-async-timeout==5.0.1 ; python_version == "3.11" and python_full_version < "3.11.3"
+async-timeout==5.0.1 ; python_version >= "3.11" and python_full_version < "3.11.3" and (python_full_version == "3.11.*" or sys_platform != "linux" and sys_platform != "win32" and sys_platform != "darwin" or platform_machine != "arm64") and (python_full_version == "3.11.*" or sys_platform != "linux" and sys_platform != "win32")
 attrs==26.1.0 ; python_version >= "3.11" and python_version < "4.0"
 babel==2.18.0 ; python_version >= "3.11" and python_version < "4.0"
 bcrypt==5.0.0 ; python_version >= "3.11" and python_version < "4.0"
@@ -39,7 +39,7 @@ factory-boy==3.3.3 ; python_version >= "3.11" and python_version < "4.0"
 fake-useragent==2.2.0 ; python_version >= "3.11" and python_version < "4.0"
 faker==40.23.0 ; python_version >= "3.11" and python_version < "4.0"
 fakeredis==2.36.1 ; python_version >= "3.11" and python_version < "4.0"
-fastembed==0.8.0 ; python_version >= "3.11" and python_version < "4.0" and (platform_machine == "arm64" or sys_platform == "linux" or sys_platform == "win32") and (sys_platform == "darwin" or sys_platform == "linux" or sys_platform == "win32")
+fastembed==0.9.1 ; python_version >= "3.11" and python_version < "4.0" and (platform_machine == "arm64" or sys_platform == "linux" or sys_platform == "win32") and (sys_platform == "darwin" or sys_platform == "linux" or sys_platform == "win32")
 filelock==3.29.4 ; python_version >= "3.11" and python_version < "4.0"
 flatbuffers==25.12.19 ; python_version >= "3.11" and python_version < "4.0"
 freezegun==1.5.5 ; python_version >= "3.11" and python_version < "4.0"

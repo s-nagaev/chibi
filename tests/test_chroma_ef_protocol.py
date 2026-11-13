@@ -145,8 +145,8 @@ class TestMeanPoolingWarningSuppression:
         ef._text_embedding_cls = emitting_cls
 
     def test_mean_pooling_notice_is_suppressed(self, fake_fastembed: types.ModuleType) -> None:
-        """The exact fastembed 0.8.0 mean-pooling UserWarning must not escape
-        _get_model (safe: fastembed is pinned, the store is homogeneous)."""
+        """The historical fastembed mean-pooling UserWarning must not escape
+        _get_model (safe: the filter is narrow and the store is homogeneous)."""
         ef = FastEmbedEmbeddingFunction(model_name=TEST_MODEL)
         self._ef_with_warning_emitting_model(
             ef,

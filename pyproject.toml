@@ -73,9 +73,9 @@ telegramify-markdown = "0.5.4"
 tenacity = "9.1.4"
 trafilatura = "2.0.0"
 fastembed = [
-    { version = "0.8.0", markers = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
-    { version = "0.8.0", markers = "sys_platform == 'linux'" },
-    { version = "0.8.0", markers = "sys_platform == 'win32'" }
+    { version = "0.9.1", markers = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
+    { version = "0.9.1", markers = "sys_platform == 'linux'" },
+    { version = "0.9.1", markers = "sys_platform == 'win32'" }
 ]
 
 onnxruntime = [
