@@ -78,17 +78,9 @@ fastembed = [
     { version = "0.9.1", markers = "sys_platform == 'win32'" }
 ]
 
-onnxruntime = [
-    { version = "1.23.1", markers = "sys_platform == 'darwin' and platform_machine == 'x86_64'", optional = true },
-    { version = ">=1.24.2", markers = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
-    { version = ">=1.24.2", markers = "sys_platform == 'linux'" },
-    { version = ">=1.24.2", markers = "sys_platform == 'win32'" }
-]
+onnxruntime = "1.31.1"
 chromadb = "1.5.9"
 uuid-utils = "^1.2"
-
-[tool.poetry.extras]
-legacymac = ["onnxruntime"]
 
 [tool.poetry.group.dev.dependencies]
 factory-boy = "^3.3.3"
