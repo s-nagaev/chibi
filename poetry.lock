@@ -2970,18 +2970,6 @@ files = [
 ]
 
 [[package]]
-name = "mistletoe"
-version = "1.4.0"
-description = "A fast, extensible Markdown parser in pure Python."
-optional = false
-python-versions = "~=3.5"
-groups = ["main"]
-files = [
-    {file = "mistletoe-1.4.0-py3-none-any.whl", hash = "sha256:44a477803861de1237ba22e375c6b617690a31d2902b47279d1f8f7ed498a794"},
-    {file = "mistletoe-1.4.0.tar.gz", hash = "sha256:1630f906e5e4bbe66fdeb4d29d277e2ea515d642bb18a9b49b136361a9818c9d"},
-]
-
-[[package]]
 name = "mistralai"
 version = "3.3.0"
 description = "Python Client SDK for the Mistral AI API."
@@ -4880,6 +4868,220 @@ files = [
 ]
 
 [[package]]
+name = "pyromark"
+version = "0.10.4"
+description = "Blazingly fast CommonMark-compliant Markdown pull parser"
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+files = [
+    {file = "pyromark-0.10.4-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:29865321c057e7aec65ca0fbfce06bf872a027ef87367cedbc367ac895dca59a"},
+    {file = "pyromark-0.10.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:f28aee549a3bfe1ce7ca91d4f091aa5325ecb2cfcad4e36e2d19a6c4421e3a5f"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:1eb9b3aa01c5db2d09a94ee893bb852194247815ed3972272ecc6b04d6ee2724"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:1fcce63d7e2018d33aba316644a2f28e6d47837fb46ae2afcbef11a70d1d49e0"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:266427ef8ae2e52016f9bc5c59e69ba106982d6b69af2a8d3031a03de5e9bfca"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:20d5e3faed9f4c15a05af114cd2029916f8e965a57d0903ab04f1ffe5d5f56d2"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:518d13afcc4a7e6cd5ca0487225cb3b4656e0aa9804cfe982fc75d86156ec78d"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:5b2edfbfaa51ddd7b96514156be58591c4164528c3909f82c51583e3dc502aad"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:29532e4f77d422cf7529631459b007a7833ae2edc5a1c5e1399f95350d31fafa"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:a00243fd16645f511ae00c99f6ed73ed8463ddaee50ed31ef78e57ede0d76494"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_armv7l.whl", hash = "sha256:71fa5887a7762eeed1ccf2183932f43a0b75d92a99b96336b47a46eb166cf2db"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_i686.whl", hash = "sha256:f6f1a5faf36edd079ace6f299d72d97b3651e9e397507e30b49b9b69daf749da"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_ppc64le.whl", hash = "sha256:a897010c290672a802fbef17fd8fc528addf33771146b5aea0960d1df819ea14"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_s390x.whl", hash = "sha256:fe5b7b9323711ea563469194ad2c556f7cc9ab0ac64c7426afccc6f8604b22c0"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:698ffccf6c02be978237ee918f93db0948940d79cbedbab429ea64cf612c75bd"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_31_riscv64.whl", hash = "sha256:3c2dbb23603981ab04796a9004f58a6ae38689b3a8d4c82a1bceee8a8b0d5eb8"},
+    {file = "pyromark-0.10.4-cp311-cp311-manylinux_2_39_riscv64.whl", hash = "sha256:08d2085d0d6c1335d2da9cfe10c0877942cf5123ef491c6cb7e78b463c8de1d1"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:a25b097dd312c3b2d5252341a4a23f463703374bd3da41a6bb7e78779630c20a"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_armv7l.whl", hash = "sha256:0c5cd2d97c2f3f60106ca1d789f9524a652ac7e4a48fb31374ee1494e29d7d76"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:3591eba0ee2a860b75172171226881081696254ba0cd16514a52b23a02b6505e"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_ppc64le.whl", hash = "sha256:1185f7ae5dc2e98399ded578614ae29e5e0c12ffbab5495b8da55140f14658ba"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_riscv64.whl", hash = "sha256:e1edef4b224ef5443935c1141d5d1c776fd736c6b62127ec0513bbbd4032994e"},
+    {file = "pyromark-0.10.4-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:15f960682a7e1ffe5c857c50cd943c633735c36c63e09f4ae9bb996addb3f0bd"},
+    {file = "pyromark-0.10.4-cp311-cp311-win32.whl", hash = "sha256:1a0455b56fdaedaf7d3d1eb230cc909fbeb63a9f465f434544c0ff33b3d97d84"},
+    {file = "pyromark-0.10.4-cp311-cp311-win_amd64.whl", hash = "sha256:00fa44308099cf692b8d06f023e431496ff656ad83c4d6707b9d4560f48925b5"},
+    {file = "pyromark-0.10.4-cp311-cp311-win_arm64.whl", hash = "sha256:a88964bf704c3e5243507a70a7510336a58d19c378ab6c441c39bd624c09099a"},
+    {file = "pyromark-0.10.4-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:d842d30bbf08ea610f9c95eb49c338281f9d435d2297d3780eaf2db57e003b55"},
+    {file = "pyromark-0.10.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:f348281d91031630146eab164b2c812eb7246440aca19e458d7b1c63457ff366"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d0bbf8f3bfdbe1fffa6fc7b6dcecec113cadeec256756afd7ef05ccd1d2ef446"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:75019f8a8a6c0d401d6f6b84ba8287bc671e21ebf79346903ccff0f61c3c370d"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:9a79ab4fa7ec1cda17f963767c5e44bb8cefc0aefc52040fa65c39db9c61cdd5"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:8fefb2a44e5f2625ebf4cfcfb3bf790b49f4eaa2afe8ded5ecbc0052b0d21db1"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:63d6769bed0f1bf5cb461fe3d26b9d26b7a06d31e491d2942a8305cc66c69175"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:4ee79b5a982f5df1c2e994fa3abff33e8f24c08265c354f3c734cd46ba781f34"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:60251d5b33fbdb40f704584896a5b719953f7ff7e9486659ac13525f4717f2b8"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:7ba9abcfc115fdccb3eb87d44296be06550d8a695d44a6044d075cbd474b362c"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_armv7l.whl", hash = "sha256:de5b28c0b76379b9acf6863f06173e7db2fca58f0ea737c1205ddd392826da78"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_i686.whl", hash = "sha256:8c3114aaeebb9c11c0fc666a4e8ea433ee9dd78656ab5846b68c70e0f7562766"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_ppc64le.whl", hash = "sha256:7358d66dad5dbabd92e69462d73991f177ae9233671aa9b2f4e523eb5060ece1"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_s390x.whl", hash = "sha256:be15081f2e9f91b1b66c7b5fb1e37dabf48dc145602ec3441dff1cce39c8a7c2"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:37743e89413ccf1aba9a96f3facee0b7b93715da3764099985a0815cc051000c"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_31_riscv64.whl", hash = "sha256:ad3604a7db284834c6f0e09de7ccd0d22c645a17ea6cd6ec24b729fbfc16c851"},
+    {file = "pyromark-0.10.4-cp312-cp312-manylinux_2_39_riscv64.whl", hash = "sha256:b7a3f420fcfb15df87b408d0c0c5e83ffe06033d96809074afd0b19867b17611"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:9f74591bc732a39433fdb3c3111b804ba9833a3d4348b9c1d6deda48e92d58de"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_armv7l.whl", hash = "sha256:fc724086b4d4fe3f357b31fa230161706bddd310c7be921dce458f4df620b0ee"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:36b06c5c5296d05e9acb0c152cd012447f37c3b86228f02724dfb32b1733b037"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_ppc64le.whl", hash = "sha256:c0d93a52091266a0169283fae62eac70c7c3b09406b582b758457c73e3bf4bde"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_riscv64.whl", hash = "sha256:757d651b38819bd82d629ca34c57f310eb752b0cbe1e55a1bcaab77e3fa4d142"},
+    {file = "pyromark-0.10.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:c709a506d44bf2f92df5291647984d7ab66202991ef6e59a30b23da4b1859567"},
+    {file = "pyromark-0.10.4-cp312-cp312-win32.whl", hash = "sha256:40bff88401a3bc68a7c4bb371d35d0f90308af90fcfc7c89832444c201df9306"},
+    {file = "pyromark-0.10.4-cp312-cp312-win_amd64.whl", hash = "sha256:0ee782258d34b5447abca6b8fabb4f559a14d3d0634cc8c5e43afe76a590a6a5"},
+    {file = "pyromark-0.10.4-cp312-cp312-win_arm64.whl", hash = "sha256:3d1cc36f57826550a194ec1f32c8270c07407a6320ade6084b602f7dd882e916"},
+    {file = "pyromark-0.10.4-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:890f27b645610e463e0c861b76990742883bfc13c7e5af4451c504056543d47b"},
+    {file = "pyromark-0.10.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:35c3dae79ca491909d2dbebb26af7ad1bef84e7a919cadb1ec15d79d8966d835"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f806b1c77c5645746c099407a22aeb71a3b5347db501ba1bd828d8d1300f20e5"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:2f5fc05072a8343e0272faa8a72944886a194a33576aac787c4bbf989522488e"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:1b34c201339c59700adc0f945f66f8fef600694ae22c8b3a87e17534a99dd46f"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:454c1c6de69244016e5129961fa70b8b8fc8d3753851b0a9a30925525c232cff"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:d3cbedd203f5b56862a1e73724096ab9b234bb6db4b09e6d7046ff7d8966bea6"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:c31e8161f25c63497f2510002c6bf7fb6828754f8edf59595f9f83b12d031ab5"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:682b561388cf541fa5384183cf61957adcb235d773a38503aa3733b2fdd89edf"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:aba9e23021e08b7a9362e45f00802c35b41ccafd3fb776d4aeac4cfdb43f5ba2"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_armv7l.whl", hash = "sha256:554194fe01777dd0fb12c6f26fb5c46297348f8005a8528c0627dbb0710097be"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_i686.whl", hash = "sha256:1fd75fde7052aa2907f77b28d6c8c23987229b1fc4c94ad213a1f768f0834218"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_ppc64le.whl", hash = "sha256:830e27cfc22e0a18b531a734a040aa4fff93dd6907a1085c48000469fb72bf11"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_s390x.whl", hash = "sha256:6384145ed0a7cc2b4f976a9bd84b6878bc36c34bcb88f6b29d97277501dcd1de"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:a122795431cb4ae9d89842f7b8b1410168f066463c0e19e758f91c4cefee745c"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_31_riscv64.whl", hash = "sha256:4dfe2a049b8e8ba2ab94309650ad645eb67676d428f41856faf83f7ea134294b"},
+    {file = "pyromark-0.10.4-cp313-cp313-manylinux_2_39_riscv64.whl", hash = "sha256:008b872a8c3147d551b3bd62f71642432980e46e47d2b3461260eb8331070cac"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:510f441d06d193d57aa3566e79cc3eb8c651ef1325dc228b08415a37e93bc09b"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_armv7l.whl", hash = "sha256:f628f26980d9266c0fbc5a334bec53e2ecd108c38d3e0ed29e20fa67be712cf9"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:785887bc3ab0b07f29a1f76c1a54b479d2b2cb3ad177c29eb778e7d22654db07"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_ppc64le.whl", hash = "sha256:ed8b468b4dd6879eb60fe1e4265f5c1b9383f371cc0f9b0488153127e0113b3f"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_riscv64.whl", hash = "sha256:21613a72cec360a3a78c54b94074c9b455fd8b9842fa138ca71d1ffa216b78fd"},
+    {file = "pyromark-0.10.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:2e54bb60faed7a65985761556f2ae5d876936e059b97d119f9eca9cf4f2ed9de"},
+    {file = "pyromark-0.10.4-cp313-cp313-win32.whl", hash = "sha256:218ee6e18f160d377e8a8d0512c0cdf6444072be3b111c379313eccd75e3226b"},
+    {file = "pyromark-0.10.4-cp313-cp313-win_amd64.whl", hash = "sha256:9d9a77dba66d6ccb4f59fd3cea135f3cf76a4474eb787674ac3bf3e2adbffa83"},
+    {file = "pyromark-0.10.4-cp313-cp313-win_arm64.whl", hash = "sha256:10e2b5b650ba2effc6e0e57e6324c6c9393068732cb019e4535e33c6b6e23e2f"},
+    {file = "pyromark-0.10.4-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:17398c8092be8c90d8c2d18f307cc6105fb4f81e63d933d361298cf744522d40"},
+    {file = "pyromark-0.10.4-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:3e41d668110c5cba70d905ec45142b75f88403143d03de81d811deba14ed3158"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f87e93a4d631d6ad2ea95f6014b9d4bcf6c5724a3cbeea3a19bd1afe24c49fab"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:42616e36abdc16312375023d8e55ea1caea7fc43647b5aa70265d0f35fdbeb8b"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:8b25c64277fb3faf44dd27a242589c0fc82c1f9eabbdceb5e841b4fc4a279b41"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:07c16af74255b0b4d9a7a1950750106f968aa39c683e47cc5e52f136eb2d17ae"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:36ba847dd0ac18c1e70f833d44b7b23f9e251465ffa1f8b4341d92018ab4fa65"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:749737a6da967f2894fce33f87de397a9f36e394cdaffe37e9f720e16b07fa35"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:c9344e748f63bae7f9dde088681d69d9b78ed48c87b23dd11badfe41389b552c"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:8ffc777a6ab68dbcb53955d426b837b804eee17c1711ef87da4255de5650c1a2"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_armv7l.whl", hash = "sha256:d6a51c9bace201cac1bced361b6bf3732155d01a3d94f917b58915be847db55c"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_i686.whl", hash = "sha256:5806f57135ca95a012a84ece12ab44efb3c083fd51b1e88aeb84214892cf0d0e"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_ppc64le.whl", hash = "sha256:70ed181e81b9037e4bf76d3969a5c1eac5929ef9d31d14a5f3ef9a123613551c"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_s390x.whl", hash = "sha256:8c6881d5ffc45ef5bda0026055099e90f76dba6f734fe8bbf1513d847dfdde07"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:3bf533472240b5684ad9dd41a3b960a57f53de5a41b7f1cb364df77eb6b3eeab"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_31_riscv64.whl", hash = "sha256:81ce1149b9384a7138ef4db894d2a39db897604fd4538243879367dff244c407"},
+    {file = "pyromark-0.10.4-cp314-cp314-manylinux_2_39_riscv64.whl", hash = "sha256:55ce4aa895f735b1d54c44fe4fc04d17c0dfc372255bdd666c957e1247cd77d2"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:2a39391b58db6e7dbdc038ece67b68e297bf4e83ff1a3ace88c30e0c9af49bfe"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_armv7l.whl", hash = "sha256:da9f6b7e0de98cacbc5295625c5ffc7d3f8d7918d4df0d3ce806b6dd513ab075"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:85d0bbf522d37b08569f80eaf611e50a668b1bae12e3232d58de45af7c968367"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_ppc64le.whl", hash = "sha256:849e69b0c199c382148783f2d5e44c1770489bca5aab96ea16692f7917641078"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_riscv64.whl", hash = "sha256:f87f4914a3a0fca4086d481bde28f29a7105a074aa3d72b2202a2f973dc0d7bc"},
+    {file = "pyromark-0.10.4-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:dad9f555df5ec165602c96410342cc316c86e67d39f9d29433f3236b11005325"},
+    {file = "pyromark-0.10.4-cp314-cp314-win32.whl", hash = "sha256:051ff5a9005a72dd133ba9c09e337cbb943ca0c549ec38dbe0cb294cd3735ac9"},
+    {file = "pyromark-0.10.4-cp314-cp314-win_amd64.whl", hash = "sha256:1e8223c23b0bdb5fab7511fe1ced61198b4ec3551889f8890eff4a10409630e4"},
+    {file = "pyromark-0.10.4-cp314-cp314-win_arm64.whl", hash = "sha256:4964c2b1233967845170aa80e7fea25b1f5987bbcbe9602c805a1aed219e17f9"},
+    {file = "pyromark-0.10.4-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:7d585e2cdfd6e8053d873153659cb50412c77cca02bd8f1ec7ec957321ef482a"},
+    {file = "pyromark-0.10.4-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:8c9c24cd5cbd22367556719abd0ccc381d7bba450217d705ad936726eff1fa20"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:f7cf25abf8b5034889236f63c0127e65b767f8bdfb880f25dc6c4e7ee068efc9"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:a42eed40348a42b005104173ede2d3c93221009716b037ef7cff8ae913f42675"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:4942a5952bd5fa964d238abad913dedd57cc6e7ba60393d87494f3d097430e0b"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:89958d87882af89ae998a5a9b7089a8a68e561ea480d63acb103934c65d971e5"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:c257fdd1dbc981be07add8dd4a2a11b96c38fdcf82199c670266468f77383ff9"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:aab00483c46300e3e1b4f4476f5aa3404cf834b675ad5d3780c9192f07ad84f0"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:6dd99e812f2dc6165296e77e8cc4af44ed4d5a4ed8043d75d62f0d5c2ae9af02"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:e2808ace8546a79d3d0f54f7cc0d5fb9b199c390285f689f059f3fc4b0017799"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_armv7l.whl", hash = "sha256:dacff6d68a649ad8d50987816350c4f4d629da0f34aeeac6c0803382839214da"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_i686.whl", hash = "sha256:3618da10fed00da83fb353f912782704cfb0dd59c2e48b38d031eb069ccb0f1a"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_ppc64le.whl", hash = "sha256:378e10fe031ced16d1ee90c83a6c08db3c53eb722b39a1bc79835dd8e3a0167e"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_s390x.whl", hash = "sha256:e1addfbd89bc8ed0032f1770651371e10ad7eea697d9caed81e4a274ef32424e"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:4c9b14796ca8f12976dba33c6566cb67d34663e7a5c76b9fc3482d97902e2239"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_31_riscv64.whl", hash = "sha256:8c0b4fcda194c56917ea2301d96f5dd7c7fb1d3c4839bb94e2be2a6d202f1733"},
+    {file = "pyromark-0.10.4-cp314-cp314t-manylinux_2_39_riscv64.whl", hash = "sha256:5d89e8bd84f1ba88b2b9de3a030aa83636048f8a4424e25d17c042ceca4a07fd"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:72873f320e119db9e299123bf35f1efe83ab15563879df24c469495f74341381"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_armv7l.whl", hash = "sha256:887728c630b67e67d09481392466ab07bfae6263ac94047579b78ca08d93d108"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_i686.whl", hash = "sha256:27a73295ae26dc17a9ee7f7eab69799cdff4c0f8812ba47553235725bae3b2b5"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_ppc64le.whl", hash = "sha256:fae5d73eb4147b42966e26c08e2c2fcc7252a34207bda19df0293cfe84859e36"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_riscv64.whl", hash = "sha256:a8b7a0724ae3ba06be5d3504e6b59fadb85e225390c2d66a8c3227c72d8af65b"},
+    {file = "pyromark-0.10.4-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:dd05a4365552fe58a6e25f0a137a4f6f41adde277956c10ec002d09576c02a97"},
+    {file = "pyromark-0.10.4-cp314-cp314t-win32.whl", hash = "sha256:16741879b1c7df7d9ec61448734c479eca630a95bff0a2ad8d7a6b8df6f75019"},
+    {file = "pyromark-0.10.4-cp314-cp314t-win_amd64.whl", hash = "sha256:950bbad023767f3eddb6e0f8a62b06bb0dbe1707c6afc5ad45061739e2fe8d47"},
+    {file = "pyromark-0.10.4-cp314-cp314t-win_arm64.whl", hash = "sha256:e22337c948821f00f2327916d3e8e2a565cd8163c79be93e29ee67faba17428f"},
+    {file = "pyromark-0.10.4-cp315-cp315-macosx_10_12_x86_64.whl", hash = "sha256:750af1dafd2a1f257733658d35818b0ad5e1e4da65aa1998e0f54e2114592537"},
+    {file = "pyromark-0.10.4-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:a229cfcb0924862a2c2cf3c77a4de17212d833028cfd28194fa17efca73809b3"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:a6347448a98a8dbe2f4a3cb21dea46fb9578d2f4228790bd2aa0f211f92c1a03"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:de132367c4117fae46504cb8795456e484f372944e4d716fc0e109ea28c59567"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:95d05b3cc36b48ec76c97277b2c353f31f40afcc2bfec75af37280eec9b80441"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:09bc8dab9cf3f81325b687512b7f652ed08cc7212d7b36d9e4ef3d5d92a394cf"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:4e152b2ff14ee85ad8a6c9272ab3877acec5f6a92174cae77d2f223e7fb8da90"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:11d736b77657c239b6794edc2fc12dde4fba406da814c44bd510bdd7cce95f0d"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:7aac6d51f4266b7aeaaef077972c0ae3590925e4580c3c632d7052fe9c0b7276"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:bdf18abf17dec83a61fa0078b6a2802bfd411139c54ca879dded1689fcece805"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_armv7l.whl", hash = "sha256:501274fb6758566f80297d30057962a9ffc6d7ab12c385a8261f99867df5ca3b"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_i686.whl", hash = "sha256:fefb94aea0c4228a91b19bfb877172ac649e882c179d7beeb20ebd3013531c4e"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_ppc64le.whl", hash = "sha256:ec49311df67beff4ab1ca6b53d290a9da5523fbf5a87f988b02292653524e9c9"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_s390x.whl", hash = "sha256:8c73a19ece9d53207c722825130acd203c57c871e8e7723e925453ec532eeff4"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:fb006c4a3f16e6328bf3e733a3c7eb66510d1f2cc09505d6f120c582f7f42e6b"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_31_riscv64.whl", hash = "sha256:4243ffef547f23a9587e5bda1755945ea95c637692c1293d6257710ec446f327"},
+    {file = "pyromark-0.10.4-cp315-cp315-manylinux_2_39_riscv64.whl", hash = "sha256:2ae2eb45d7e69d58ba1c2739a08d27af9ef37bed2b45316b91570eeb83b46a7f"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:af58914d8d8d1d8f6b3ac6a7788f403a7125fc4b79168fbcf2b7cb9ac03a26a8"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_armv7l.whl", hash = "sha256:fb4f1e26e7d76578633a75ffb10fcf8cc92a9dd35ea00a4ac65b8cd000842fe1"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_i686.whl", hash = "sha256:808a66db225695c14ce885e26abbcf8fa1abe422b0d28a4e79270473a484ef57"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_ppc64le.whl", hash = "sha256:911f40788a8cd20a9b3bedeb09b593240f8e5cf82e874a2911d5446d1342cc91"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_riscv64.whl", hash = "sha256:d46acfc82c188e6e13f47eb4d609a825c4ea4c8fb435adc093b71c2535b1d284"},
+    {file = "pyromark-0.10.4-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:630e358ac8d9857a357ebd124e69d49c9e3170805c910acbdce1276c0daa3a01"},
+    {file = "pyromark-0.10.4-cp315-cp315-win32.whl", hash = "sha256:6826c8a778987ea1efffeae738739b1eabd8e9cbe657dc2026dae03dc79dec86"},
+    {file = "pyromark-0.10.4-cp315-cp315-win_amd64.whl", hash = "sha256:86729e18906bb21498d534856f03549f8eb9e41f943cdfbbb03dc5889ec68919"},
+    {file = "pyromark-0.10.4-cp315-cp315-win_arm64.whl", hash = "sha256:e8b93fb2cb9ba493e2527177d5f4814da71a8df3749509789e35f116307abf42"},
+    {file = "pyromark-0.10.4-cp315-cp315t-macosx_10_12_x86_64.whl", hash = "sha256:9c90265823157f7f7d9cf6d9df373c1bea00f78054d4a7fa95f4e9b43f3587d9"},
+    {file = "pyromark-0.10.4-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:ce7edc8c8c23aeeeeab099fa003d074279908b45f0ba47c362b20aed824b5a18"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b64ca2a7669dea4e65ac42a2d0ecc82d18d058fd27ebdde9cc2735c04553a605"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_armv7l.manylinux_2_17_armv7l.whl", hash = "sha256:b1b2aed36de981ec78c8f1bf239d394890231dee7c3e5c2b854172af0750bc0f"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:4d411a35662650df9a0a9ccc133955077c48d36ab863340a1dba86625ffbc131"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_ppc64.manylinux_2_17_ppc64.whl", hash = "sha256:0bf41f58e5906769e1909deab5f32b012958e1086f7548f4c924eb76b2434166"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_ppc64le.manylinux_2_17_ppc64le.whl", hash = "sha256:f8713449c609485917fde5b63822937e93d236bb0e3e4444ac34e9f2fa19bed8"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_s390x.manylinux_2_17_s390x.whl", hash = "sha256:89e5da89a32a6d944950fce05b33bc50106965b4271ff032ffcfe8514eeacc42"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:33fdf4b97f8d2bce6b7896297b9b052bf3a3f83b32741626ffdbb97bb7ab3cdc"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_aarch64.whl", hash = "sha256:ff5b322109ffa310e78ab620bb5d63a1258cc3ebbe55c6ba0afe4a4e497e245a"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_armv7l.whl", hash = "sha256:f01758985a16dade0b89df802d949016ee7209ef42dd36d2f99ccf135980b4c7"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_i686.whl", hash = "sha256:703d5dd398dea2d0941234826ea3f3f92cd57e86abeafe47a5d0d355fd0fae3b"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_ppc64le.whl", hash = "sha256:8fae3bc2578bba49eab1da05964f8306bf28192f1ade1321dd0c7aaa8ce24e86"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_s390x.whl", hash = "sha256:c89ec1dafc9756af8440addf3d4a5d578118f82e69476211218155a001a73b36"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_28_x86_64.whl", hash = "sha256:2abe47729da438d20e0b4a645a5b9ce490bfe1c75dafe83461d4b54bc4a8bd75"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_31_riscv64.whl", hash = "sha256:96c467489d22ac22c5bc150a5ef62653a4b215fb13cdbc0a05c976198e0bade6"},
+    {file = "pyromark-0.10.4-cp315-cp315t-manylinux_2_39_riscv64.whl", hash = "sha256:bcd8701e3dd9b8670695bf4821c425c1007ed77ba24c3bbdee46b7e4f8956e0d"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:97f7dff8e7a3486c6611313317dc5189a62480cbfda6f94614ee04fcd8f4debf"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_armv7l.whl", hash = "sha256:b4b59ca40366e2ccd7ad050b21374756cb0d8ee7323e9951250c1d186d5dc6b3"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_i686.whl", hash = "sha256:2d666055fea5e510e65367f1b1db019da486c8512f3493946d5591ffcde20030"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_ppc64le.whl", hash = "sha256:f7be233845ba98258a22cb2f672cb16d59eac97ad608c172ca078fa7bc60627d"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_riscv64.whl", hash = "sha256:7531a549ea9b375896b878618a7fd69244fdef8ae8aff65778e3e8adbaf9f2e5"},
+    {file = "pyromark-0.10.4-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:c6a595f004677af9c0301be3d276f05fe46c6bf6179d353aa06340eab926ee53"},
+    {file = "pyromark-0.10.4-cp315-cp315t-win32.whl", hash = "sha256:b206e77c1e80141cfc1c92d6ddb60904173d02fc0e7700d623c6e84612d99359"},
+    {file = "pyromark-0.10.4-cp315-cp315t-win_amd64.whl", hash = "sha256:e9c35400de9586228c34f60351be75702f8b12526cc0de531a97d36a3bc21ffd"},
+    {file = "pyromark-0.10.4-cp315-cp315t-win_arm64.whl", hash = "sha256:9a1142dcf7e832ea315538783374ce340b856df57607d35c1b0e3d8f779fa650"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp73-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:6c9822080acd8afc2db287fccee77d3c96e0a10b1945334bf145f88ba7643ca7"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp73-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:366b8a644841091894dca1051890c28fe3cdd8b57629c2ad754883e66a506547"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:94b4075a59d403250a641c0038567c59eb5fdf41205e351ed2fc620adbf396d7"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-macosx_10_12_x86_64.whl", hash = "sha256:c88f5e32538d3978576bd75b1f2ba62c0521564de007630dc0986c194b1ecef3"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-macosx_11_0_arm64.whl", hash = "sha256:821b6c4774a7cbd1a0159af71db9c55b7205e5f893ca6442f8ca3ec780f0f7c9"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-manylinux_2_28_aarch64.whl", hash = "sha256:b89055754674854b941beab06cf57aef29bbbda63a37af86a7e44ce09440d3c3"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-manylinux_2_28_i686.whl", hash = "sha256:14ff4d7fe4b61d8e342dbea94ddbb933ba01f5a77e66c64f0aed34086e744e41"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-manylinux_2_28_x86_64.whl", hash = "sha256:0e03e16ca953c209de6557accbd4153fb7974376fc4337c056ad70d3fb8dd623"},
+    {file = "pyromark-0.10.4-pp311-pypy311_pp80-win_amd64.whl", hash = "sha256:cf99878d38a7347fc457c3d29157a9c46ad44677d7a2224b0fe80d932d68e8d0"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-macosx_10_12_x86_64.whl", hash = "sha256:d5f78a935d1d6a70d2bff73a7dbf4e4d19b8d66dc0278581766102ef994d678e"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-macosx_11_0_arm64.whl", hash = "sha256:61e51cad6fbc47193b7b628d70a25e77eb1fecc15124a6e2f6dc9ce0121cda22"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:cd6da5c0a0f1e3d599638e40ed758f758fcb80680cf7f6fc01f196448c6fffed"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:9d26499de2489e37c5c56997782dd8c0e3f1d99c7b89199bad6acde0d4d9ab73"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3bc1ea8f8a53d72efadf6906cea02ab5be263f42bf3927056cddc8346ac1bc05"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux_2_28_aarch64.whl", hash = "sha256:7335f25ff810636c2d959383345af8c23badadc1c823f84a36baadfb107e6a0a"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux_2_28_i686.whl", hash = "sha256:4632dc5358f7c5746d35decfb8a2184159fda770619f3383464e5e66d5bd18cb"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-manylinux_2_28_x86_64.whl", hash = "sha256:66fc95c41c5af5ee933396632a1068a0f478eed988db3eb320c1638870ab180e"},
+    {file = "pyromark-0.10.4-pp312-pypy312_pp80-win_amd64.whl", hash = "sha256:13fe505b7b4dd27199d45f5124759e81a3aa92f09a2a8dd9e025555b6e4ca065"},
+    {file = "pyromark-0.10.4.tar.gz", hash = "sha256:0eeed7ef2bb651785375329993a8ffbb7597704b1cee7be01e81513b2d4211ef"},
+]
+
+[package.dependencies]
+typing-extensions = ">=4.4.0"
+
+[[package]]
 name = "pytest"
 version = "9.2.0"
 description = "pytest: simple powerful testing with Python"
@@ -5819,22 +6021,22 @@ full = ["httpx (>=0.27.0,<0.29.0)", "httpx2 (>=2.0.0)", "itsdangerous", "jinja2"
 
 [[package]]
 name = "telegramify-markdown"
-version = "0.5.4"
-description = "Makes it easy to send Markdown in Telegram MarkdownV2 style"
+version = "1.4.2"
+description = "Convert Markdown to Telegram plain text + MessageEntity pairs"
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "telegramify_markdown-0.5.4-py3-none-any.whl", hash = "sha256:7c806e12b6c7045d7723e064a0ff25afcb16c92c0d95385b61a57b8c53a430d3"},
-    {file = "telegramify_markdown-0.5.4.tar.gz", hash = "sha256:c32bd04e5a1c22519c011ccf7350a01b6d162e6cc9a9d89c83eff964d491007e"},
+    {file = "telegramify_markdown-1.4.2-py3-none-any.whl", hash = "sha256:590001fe4da043a7d3c4907541279e4e389bf9412762ac5d996145ce1fbdda1a"},
+    {file = "telegramify_markdown-1.4.2.tar.gz", hash = "sha256:02546f785020ac0b897eb0b139f9d42c530f1053b0a34418e973e0eab01fbf5d"},
 ]
 
 [package.dependencies]
-mistletoe = "1.4.0"
+pyromark = ">=0.7.0"
 
 [package.extras]
 mermaid = ["Pillow (>=10.4.0)", "aiohttp (>=3.10.11)"]
-tests = ["mock (>=1.0.1,<4) ; python_version < \"3.4\"", "pytelegrambotapi (>=4.22.0)", "pytest (<6)", "python-dotenv (>=1.0.1)"]
+tests = ["PyYAML (>=6.0.3)", "pyTelegramBotAPI (>=4.22.0)", "pytest (>=8.0)", "pytest-asyncio (>=0.23)", "python-dotenv (>=1.0.1)"]
 
 [[package]]
 name = "tenacity"
@@ -6735,4 +6937,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "64814b65a33930f220de811e65ecc71f3db5b41114988dc23bd982b6417c79f2"
+content-hash = "5148fac1464816ea25d2c1c9cf8c15019de1c9aac4d6ab7d26f4af96270d1796"
