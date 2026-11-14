@@ -78,7 +78,7 @@ fastembed = [
     { version = "0.9.1", markers = "sys_platform == 'win32'" }
 ]
 
-onnxruntime = "1.31.1"
+onnxruntime = "1.32.0"
 chromadb = "1.5.9"
 uuid-utils = "^1.2"
 
