@@ -2971,14 +2971,14 @@ files = [
 
 [[package]]
 name = "mistralai"
-version = "3.3.0"
+version = "3.7.0"
 description = "Python Client SDK for the Mistral AI API."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "mistralai-3.3.0-py3-none-any.whl", hash = "sha256:bc4d1acbc034787c741ede0517e45726d58262d062e824df487f78d6576eb788"},
-    {file = "mistralai-3.3.0.tar.gz", hash = "sha256:87af36e1a0bcc54acf5c02dbc7a7a2723b7fe802abd97ee317557de494828267"},
+    {file = "mistralai-3.7.0-py3-none-any.whl", hash = "sha256:23ceda7ae52557578427af5a9caffb2222cd11dd7d43eb1792ded35b2a84d939"},
+    {file = "mistralai-3.7.0.tar.gz", hash = "sha256:97cc525b8ddc96fb8b5bb08f466dd3d22f904f21ddfe45103da76c25fe601bf2"},
 ]
 
 [package.dependencies]
@@ -6937,4 +6937,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "740ea426e28a4423a177b212172deb23e505453db91ce8b2a74297cc1539b115"
+content-hash = "5d17eeac510be2cadd95582c7e18ee04a2706ff46a5c804da6d810de306ba1a7"

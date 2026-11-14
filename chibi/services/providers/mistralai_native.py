@@ -94,7 +94,7 @@ _TTS_URL: str = "https://api.mistral.ai/v1/audio/speech"
 def _is_retryable_mistral_error(exception: BaseException) -> bool:
     """Return True for transient errors worth retrying: connection issues and HTTP 429/5xx.
 
-    The Mistral SDK (3.3.0) exposes no per-status exception classes: any failed
+    The Mistral SDK (3.7.0) exposes no per-status exception classes: any failed
     HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
     the raw ``httpx2.Response``, so the status code is classified in
     ``chibi.services.mistral_errors`` instead. The client's own transport
@@ -939,10 +939,11 @@ class MistralAI(RestApiFriendlyProvider):
     async def transcribe(self, audio: BytesIO, model: str | None = None) -> str:
         """Transcribe an audio recording with Mistral's Voxtral STT API.
 
-        The Mistral SDK (3.3.0) exposes no audio namespace, so the call goes
-        through raw ``httpx``: a multipart ``POST /v1/audio/transcriptions``
-        with the model name as a form field and the recording as the ``file``
-        field (the API requires exactly one of ``file|file_url|file_id``).
+        The call goes through raw ``httpx``: a multipart
+        ``POST /v1/audio/transcriptions`` with the model name as a form field
+        and the recording as the ``file`` field (the API requires exactly one
+        of ``file|file_url|file_id``). The SDK (3.7.0) also exposes
+        ``audio.transcriptions.complete_async``, which this path does not use.
 
         Args:
             audio: The audio recording as a byte stream.
@@ -1002,11 +1003,12 @@ class MistralAI(RestApiFriendlyProvider):
     async def speech(self, text: str, voice: str | None = None, model: str | None = None) -> bytes:
         """Generate speech audio from text with Mistral's Voxtral TTS API.
 
-        The Mistral SDK (3.3.0) exposes no usable audio namespace for this
-        flow, so the call goes through raw ``httpx``: a JSON ``POST
+        The call goes through raw ``httpx``: a JSON ``POST
         /v1/audio/speech`` carrying ``model``, ``input``, ``voice_id`` and
-        ``response_format``. The response carries the rendered audio as a
-        base64 string in ``audio_data``, which is decoded to raw bytes.
+        ``response_format``. The SDK (3.7.0) also exposes
+        ``audio.speech.complete_async``, which this path does not use. The
+        response carries the rendered audio as a base64 string in
+        ``audio_data``, which is decoded to raw bytes.
 
         Args:
             text: The text to convert to speech.

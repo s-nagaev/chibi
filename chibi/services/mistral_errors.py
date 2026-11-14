@@ -1,6 +1,6 @@
 """Status-code classification of Mistral SDK errors.
 
-The Mistral SDK (3.3.0) exposes no per-status exception classes: every failed
+The Mistral SDK (3.7.0) exposes no per-status exception classes: every failed
 HTTP response surfaces as ``SDKError`` (a ``MistralError`` subclass) carrying
 the raw ``httpx2.Response``, and transport-level failures inside the client
 surface as plain ``httpx2`` exceptions. Both consumers, the provider adapter's
