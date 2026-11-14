@@ -572,9 +572,6 @@ class User(BaseModel):
     videos: list[VideoMeta] = Field(
         default_factory=list, description="Video generations counted toward the monthly limit."
     )
-    gpt_model: str | None = None  # TODO: Deprecated
-    selected_gpt_model_name: str | None = None  # TODO: Deprecated
-    selected_gpt_provider_name: str | None = None  # TODO: Deprecated
     selected_image_model_name: str | None = None  # TODO: Deprecated
     selected_image_provider_name: str | None = None  # TODO: Deprecated
     info: str = "No info provided"
@@ -607,11 +604,6 @@ class User(BaseModel):
     _models_cache: ClassVar[dict[ModelsCacheKey, tuple[float, list[ModelChangeSchema]]]] = {}
     _models_cache_backup: ClassVar[dict[ModelsCacheKey, list[ModelChangeSchema]]] = {}
     _models_failure_cooldowns: ClassVar[dict[ModelsCacheKey, float]] = {}
-
-    def __init__(self, **kwargs: Any) -> None:
-        if kwargs.get("gpt_model", None) and not kwargs.get("selected_gpt_model_name", None):
-            kwargs["selected_gpt_model_name"] = kwargs["gpt_model"]
-        super().__init__(**kwargs)
 
     @property
     def providers(self) -> "RegisteredProviders":
@@ -754,12 +746,25 @@ class User(BaseModel):
         return None
 
     def get_active_llm_provider(self, thread_id: int) -> "Provider":
+        """Resolve the provider a thread's LLM requests go to.
+
+        Falls back from the thread-level selection to the configured default
+        provider and, finally, to the first provider that is ready for chat.
+
+        Args:
+            thread_id: The ID of the thread to resolve the provider for.
+
+        Returns:
+            The resolved provider.
+
+        Raises:
+            NoProviderSelectedError: If no provider name resolves to a usable provider.
+        """
         provider: Optional["Provider"] = None
 
         thread_selected_provider_name = self.get_thread_selected_provider_name(thread_id=thread_id)
         for provider_name in [
             thread_selected_provider_name,
-            self.selected_gpt_provider_name,
             gpt_settings.default_provider,
             self.first_chat_ready_provider_name,
         ]:
@@ -769,19 +774,25 @@ class User(BaseModel):
             if provider := self.providers.get(provider_name=provider_name):
                 break
 
-        if not thread_selected_provider_name and self.selected_gpt_provider_name and self.selected_gpt_model_name:
-            self.thread_selected_llm[thread_id] = SelectedModel(
-                name=self.selected_gpt_model_name, provider_name=self.selected_gpt_provider_name
-            )
         if not provider:
             raise NoProviderSelectedError
 
         return provider
 
     def get_active_llm_model(self, thread_id: int) -> str | None:
+        """Resolve the model a thread's LLM requests use.
+
+        Args:
+            thread_id: The ID of the thread to resolve the model for.
+
+        Returns:
+            The thread-selected model name, the configured default model, or
+            None when neither is set. Call sites fall back to the resolved
+            provider's default model in that case.
+        """
         if selected_model := self.thread_selected_llm.get(thread_id):
             return selected_model.name
-        return None
+        return gpt_settings.default_model
 
     def get_effective_working_dir(self, thread_id: int | None) -> str:
         """Resolve the working directory for a thread.
