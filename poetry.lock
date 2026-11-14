@@ -1093,14 +1093,14 @@ files = [
 
 [[package]]
 name = "elevenlabs"
-version = "2.34.0"
+version = "2.78.0"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.8"
 groups = ["main"]
 files = [
-    {file = "elevenlabs-2.34.0-py3-none-any.whl", hash = "sha256:3a46b40e69ac2841b2183a00d651a68bd11733d95d32a5ed8163d3aa6a0b13be"},
-    {file = "elevenlabs-2.34.0.tar.gz", hash = "sha256:ddd35b25cb7b419ec13c40fab88e0de697db4f763779ae53ecd7794446d5f7ac"},
+    {file = "elevenlabs-2.78.0-py3-none-any.whl", hash = "sha256:a09f59beb73a9805f90ff719182e2f91e4d418ef9327fd984d8aa97a51004351"},
+    {file = "elevenlabs-2.78.0.tar.gz", hash = "sha256:8b33e5a51ea04f89e47e0d08b1709a837e9208dc84076c692aefeeb492c59378"},
 ]
 
 [package.dependencies]
@@ -1109,7 +1109,7 @@ pydantic = ">=1.9.2"
 pydantic-core = ">=2.18.2"
 requests = ">=2.20"
 typing_extensions = ">=4.0.0"
-websockets = ">=11.0"
+websockets = ">=13.0"
 
 [package.extras]
 pyaudio = ["pyaudio (>=0.2.14)"]
@@ -6735,4 +6735,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "da9ea02ab6505a69a3a13ebf50e2d436b65de42ca4ae8e27b8f0182413915412"
+content-hash = "64814b65a33930f220de811e65ecc71f3db5b41114988dc23bd982b6417c79f2"
