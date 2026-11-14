@@ -22,7 +22,7 @@ click==8.4.1 ; python_version >= "3.11" and python_version < "4.0"
 colorama==0.4.6 ; python_version >= "3.11" and python_version < "4.0" and (platform_system == "Windows" or os_name == "nt" or sys_platform == "win32")
 courlan==1.4.0 ; python_version >= "3.11" and python_version < "4.0"
 cryptography==49.0.0 ; python_version >= "3.11" and python_version < "4.0"
-dashscope==2.0.4 ; python_version >= "3.11" and python_version < "4.0"
+dashscope==2.1.0 ; python_version >= "3.11" and python_version < "4.0"
 dateparser==1.4.0 ; python_version >= "3.11" and python_version < "4.0"
 ddgs==9.14.2 ; python_version >= "3.11" and python_version < "4.0"
 distro==1.9.0 ; python_version >= "3.11" and python_version < "4.0"

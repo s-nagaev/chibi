@@ -955,14 +955,14 @@ ssh = ["bcrypt (>=3.1.5)"]
 
 [[package]]
 name = "dashscope"
-version = "2.0.4"
+version = "2.1.0"
 description = "dashscope client sdk library"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "dashscope-2.0.4-py3-none-any.whl", hash = "sha256:cc34136a8dd27e0b0c77064387e85d3d6a58aaa1be1ff4be8226d193b01babe7"},
-    {file = "dashscope-2.0.4.tar.gz", hash = "sha256:c420f9f4d826d6df5ddc976b41953dc87ebd83a3685016b61aca4eb3fa1b16a1"},
+    {file = "dashscope-2.1.0-py3-none-any.whl", hash = "sha256:501c3e2c05d5f65867fba47478a96213e585cdcd8a31cbf595ceead29947d430"},
+    {file = "dashscope-2.1.0.tar.gz", hash = "sha256:8750cf471a0d1290c2837b481839e9b47dcc29724eb0acd48d0022033f58b978"},
 ]
 
 [package.dependencies]
@@ -985,8 +985,8 @@ uvicorn = ">=0.20"
 websocket-client = "*"
 
 [package.extras]
-acli = ["PyYAML (>=6.0)", "prompt-toolkit (>=3.0)", "textual (>=0.50,<9)", "tomli (>=2.0) ; python_version < \"3.11\""]
-acli-all = ["PyYAML (>=6.0)", "anthropic (>=0.40,<2)", "numpy (>=1.20)", "openai (>=1.30,<4)", "opencv-python-headless (>=4.5)", "prompt-toolkit (>=3.0)", "sounddevice (>=0.4)", "textual (>=0.50,<9)", "tomli (>=2.0) ; python_version < \"3.11\""]
+acli = ["dashscope-agenticx[tui] (>=1.0.0,<2)"]
+acli-all = ["anthropic (>=0.40,<2)", "dashscope-agenticx[tui] (>=1.0.0,<2)", "numpy (>=1.20)", "openai (>=1.30,<4)", "opencv-python-headless (>=4.5)", "sounddevice (>=0.4)"]
 acli-anthropic = ["anthropic (>=0.40,<2)"]
 acli-camera = ["opencv-python-headless (>=4.5)"]
 acli-openai = ["openai (>=1.30,<4)"]
@@ -6735,4 +6735,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "7e1a7448f4aae2a7ff13a1f6400d7401870d9be4d59570ae3c9d7507b7809fca"
+content-hash = "da9ea02ab6505a69a3a13ebf50e2d436b65de42ca4ae8e27b8f0182413915412"
