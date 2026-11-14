@@ -1535,14 +1535,14 @@ urllib3 = ["packaging (>=20.0)", "urllib3 (>=1.26.15,<3.0.0)"]
 
 [[package]]
 name = "google-genai"
-version = "3.1.0"
+version = "3.3.0"
 description = "GenAI Python SDK"
 optional = false
 python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "google_genai-3.1.0-py3-none-any.whl", hash = "sha256:e28aea20f9c20ef3f7d3d923d19980099a910e865512f343a060f78a4754fb1d"},
-    {file = "google_genai-3.1.0.tar.gz", hash = "sha256:08f482dea818a06068303e02fc2073ba5a2fd1312407ed9914e810a5cf179fea"},
+    {file = "google_genai-3.3.0-py3-none-any.whl", hash = "sha256:86bd1830fec4b12e474237414fa52383aa0f49458910f6c9c938c207715559b5"},
+    {file = "google_genai-3.3.0.tar.gz", hash = "sha256:c0ab7bfbf13d4a24a5798ec9e4200773b2fa150eb620317db337f751a9c9576c"},
 ]
 
 [package.dependencies]
@@ -6937,4 +6937,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "1d23c4686e58664092d054bfe301afeee470d5fa5d43b5dcefaefef7429f057f"
+content-hash = "740ea426e28a4423a177b212172deb23e505453db91ce8b2a74297cc1539b115"
