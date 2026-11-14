@@ -1,5 +1,6 @@
 """Tests for chibi.models module."""
 
+import functools
 import json
 
 import pytest
@@ -8,8 +9,9 @@ from google.genai.types import ContentDict, FunctionCallDict, FunctionResponseDi
 from mistralai.client import UNSET
 from mistralai.client.models import TextChunk, ThinkChunk
 
-from chibi.config import application_settings
-from chibi.models import FunctionSchema, Message, ToolSchema, User, mistral_content_to_text
+from chibi.config import application_settings, gpt_settings
+from chibi.exceptions import NoProviderSelectedError
+from chibi.models import FunctionSchema, Message, SelectedModel, ToolSchema, User, mistral_content_to_text
 
 
 class TestMessageGoogleConversion:
@@ -450,3 +452,165 @@ class TestUserEffectiveWorkingDir:
 
         assert user.thread_working_dirs == {}
         assert user.get_effective_working_dir(thread_id=1) == "/legacy"
+
+
+class _FakeProvider:
+    """Provider stand-in exposing only what user-level LLM resolution reads."""
+
+    def __init__(self, name: str, default_model: str | None = None) -> None:
+        """Create a fake provider.
+
+        Args:
+            name: Name the fake registry resolves this provider by.
+            default_model: Model the provider reports as its own default.
+        """
+        self.name = name
+        self.default_model = default_model
+
+
+class _FakeProviderRegistry:
+    """RegisteredProviders stand-in limited to the lookups User performs."""
+
+    def __init__(self, providers: list[_FakeProvider], user_api_keys: dict[str, str] | None = None) -> None:
+        """Store the providers this registry exposes.
+
+        Args:
+            providers: Providers visible to lookups, in registration order.
+            user_api_keys: Accepted for signature compatibility with RegisteredProviders.
+        """
+        self.providers = providers
+
+    def get(self, provider_name: str) -> _FakeProvider | None:
+        """Resolve a provider by name.
+
+        Args:
+            provider_name: Name to resolve.
+
+        Returns:
+            The matching provider, or None when it is not registered.
+        """
+        for provider in self.providers:
+            if provider.name == provider_name.lower():
+                return provider
+        return None
+
+    @property
+    def first_chat_ready(self) -> _FakeProvider | None:
+        """Return the first chat-ready provider.
+
+        Returns:
+            The first registered provider, or None when the registry is empty.
+        """
+        if self.providers:
+            return self.providers[0]
+        return None
+
+
+def _install_fake_providers(monkeypatch: pytest.MonkeyPatch, providers: list[_FakeProvider]) -> None:
+    """Replace the provider registry with a deterministic fake.
+
+    Args:
+        monkeypatch: Active pytest monkeypatch fixture.
+        providers: Providers the fake registry exposes.
+    """
+    monkeypatch.setattr(
+        "chibi.services.providers.RegisteredProviders",
+        functools.partial(_FakeProviderRegistry, providers=providers),
+    )
+
+
+class TestUserLlmDefaultFallback:
+    """Test LLM provider and model resolution after the user-level fields were removed."""
+
+    def test_new_thread_resolves_provider_from_settings_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a thread without a selection resolves the configured default provider."""
+        alpha = _FakeProvider(name="alpha")
+        beta = _FakeProvider(name="beta")
+        _install_fake_providers(monkeypatch, [beta, alpha])
+        monkeypatch.setattr(gpt_settings, "default_provider", "alpha")
+        user = User(id=1)
+
+        assert user.get_active_llm_provider(thread_id=42) is alpha
+
+    def test_provider_falls_back_to_first_chat_ready_without_settings_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that provider resolution ends at the first chat-ready provider."""
+        beta = _FakeProvider(name="beta")
+        _install_fake_providers(monkeypatch, [beta])
+        monkeypatch.setattr(gpt_settings, "default_provider", None)
+        user = User(id=1)
+
+        assert user.get_active_llm_provider(thread_id=42) is beta
+
+    def test_no_provider_raises_when_nothing_resolves(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that an empty registry and an unset default leave no provider to resolve."""
+        _install_fake_providers(monkeypatch, [])
+        monkeypatch.setattr(gpt_settings, "default_provider", None)
+        user = User(id=1)
+
+        with pytest.raises(NoProviderSelectedError):
+            user.get_active_llm_provider(thread_id=42)
+
+    def test_model_falls_back_to_settings_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a thread without a selection resolves the configured default model."""
+        _install_fake_providers(monkeypatch, [_FakeProvider(name="alpha")])
+        monkeypatch.setattr(gpt_settings, "default_model", "alpha-model")
+        user = User(id=1)
+
+        assert user.get_active_llm_model(thread_id=42) == "alpha-model"
+
+    def test_model_is_none_without_settings_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that no selection and no configured default leaves the model unset."""
+        _install_fake_providers(monkeypatch, [_FakeProvider(name="alpha")])
+        monkeypatch.setattr(gpt_settings, "default_model", None)
+        user = User(id=1)
+
+        assert user.get_active_llm_model(thread_id=42) is None
+
+    def test_unset_model_lets_call_site_use_provider_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that the unset-model contract leaves the provider default to the call site."""
+        provider = _FakeProvider(name="alpha", default_model="alpha-builtin-model")
+        _install_fake_providers(monkeypatch, [provider])
+        monkeypatch.setattr(gpt_settings, "default_provider", "alpha")
+        monkeypatch.setattr(gpt_settings, "default_model", None)
+        user = User(id=1)
+        active_provider = user.get_active_llm_provider(thread_id=42)
+
+        assert (user.get_active_llm_model(thread_id=42) or active_provider.default_model) == "alpha-builtin-model"
+
+    def test_legacy_record_with_removed_fields_ignores_them(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a stored record carrying the removed fields loads and its stale values are ignored."""
+        stale = _FakeProvider(name="stale-provider")
+        alpha = _FakeProvider(name="alpha")
+        _install_fake_providers(monkeypatch, [stale, alpha])
+        monkeypatch.setattr(gpt_settings, "default_provider", "alpha")
+        monkeypatch.setattr(gpt_settings, "default_model", "alpha-model")
+        legacy_record = {
+            "id": 7,
+            "gpt_model": "stale-model",
+            "selected_gpt_model_name": "stale-model",
+            "selected_gpt_provider_name": "stale-provider",
+        }
+
+        user = User.model_validate_json(json.dumps(legacy_record))
+
+        assert not hasattr(user, "gpt_model")
+        assert not hasattr(user, "selected_gpt_model_name")
+        assert not hasattr(user, "selected_gpt_provider_name")
+        assert user.thread_selected_llm == {}
+        assert user.get_active_llm_provider(thread_id=42) is alpha
+        assert user.get_active_llm_model(thread_id=42) == "alpha-model"
+
+    def test_thread_selection_wins_over_settings_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a thread-level selection beats both configured defaults."""
+        alpha = _FakeProvider(name="alpha")
+        beta = _FakeProvider(name="beta")
+        _install_fake_providers(monkeypatch, [alpha, beta])
+        monkeypatch.setattr(gpt_settings, "default_provider", "alpha")
+        monkeypatch.setattr(gpt_settings, "default_model", "alpha-model")
+        user = User(id=1)
+        user.thread_selected_llm[42] = SelectedModel(name="thread-model", provider_name="beta")
+
+        assert user.get_active_llm_provider(thread_id=42) is beta
+        assert user.get_active_llm_model(thread_id=42) == "thread-model"
