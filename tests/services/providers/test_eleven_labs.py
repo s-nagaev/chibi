@@ -46,3 +46,20 @@ async def test_generate_music(eleven_labs: Mock) -> None:
     assert result == b"Helloworld!"
     assert eleven_labs.call_args_list == [call(api_key="test_token")]
     cast(Mock, provider.client.music.compose).assert_called_once_with(prompt="Some prompt", music_length_ms=1000)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_raises_on_empty_transcription(eleven_labs: Mock) -> None:
+    provider = ElevenLabs("test_token")
+    audio = BytesIO()
+    cast(Mock, provider.client.speech_to_text.convert).return_value = Mock(text=None)
+
+    with pytest.raises(ValueError, match="Could not transcribe audio message"):
+        await provider.transcribe(audio=audio, model="some_stt_model")
+
+    cast(Mock, provider.client.speech_to_text.convert).assert_called_once_with(
+        file=audio,
+        model_id="some_stt_model",
+        tag_audio_events=ElevenLabs.tag_audio_events,
+        language_code=ElevenLabs.language_code,
+    )

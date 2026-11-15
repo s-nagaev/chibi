@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **A thread without an explicit selection now follows `DEFAULT_PROVIDER` and `DEFAULT_MODEL`.** The deprecated user-level LLM selection was removed from the user record, so it can no longer override the configured defaults for new threads.
 - **Threads pinned to that removed user-level selection keep it for now.** A follow-up data cleanup drops those entries, after which the threads follow the configured defaults as well.
+- **The dependency stack moved forward across the board:** pydantic 2.14.3, pydantic-settings 2.16.3, redis-py 8.1.0 (still forced to RESP2), anthropic 2.8.0, openai 3.51.0, google-genai 3.3.0, dashscope 2.1.0, elevenlabs 2.78.0, mistralai 3.7.0, httpx2 2.16.0, telegramify-markdown 1.4.2, and minor updates of ddgs, click and trafilatura. On the dev side, `respx` was dropped from the test dependencies.
+- **Gemini async traffic runs on `httpx2` instead of the SDK's opportunistic `aiohttp` fallback.** The `google-genai` client receives an injected `httpx2.AsyncClient` (a maintained `httpx` fork), so corporate-proxy, timeout and retry settings apply to Gemini requests just as they do for the other providers.
+- **fastembed 0.9.1 with onnxruntime 1.32.0 drops Intel Mac support for semantic memory.** The embedding backend installs on macOS with Apple silicon, Linux (x86_64 or arm64) and Windows; on Intel Macs semantic memory is now disabled.
+
+### Fixed
+- **Speech-to-text reports a clear error on empty transcriptions.** `transcribe` raises an error instead of returning `None` when the ElevenLabs API returns no text (behavior aligned with elevenlabs 2.78).
 
 ## [1.21.3] - 2026-11-11
 
