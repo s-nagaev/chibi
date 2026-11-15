@@ -33,7 +33,8 @@ class RedisStorage(Database):
 
     async def connect(self) -> None:
         redis_dsn = self._combine_redis_dsn(base_dsn=self.url, password=self.password)
-        # Pin RESP2: redis-py 8.x negotiates RESP3 by default, while 7.x used RESP2.
+        # redis-py 8.x negotiates RESP3 by default; protocol=2 keeps the RESP2
+        # behavior of redis-py 7.x that the rest of the stack expects.
         self.redis = await from_url(redis_dsn, protocol=2)
 
     def _combine_redis_dsn(self, base_dsn: str, password: str | None) -> str:

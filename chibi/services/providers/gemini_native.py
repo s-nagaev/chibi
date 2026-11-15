@@ -270,13 +270,12 @@ class Gemini(RestApiFriendlyProvider):
     def client_http_options(self) -> HttpOptions:
         """Build client-level HTTP options for every ``Client(...)`` constructor.
 
-        The SDK's default ``v1`` API version is used (no explicit
-        ``api_version`` pin). A configured ``httpx2.AsyncClient`` is injected so the
-        proxy, timeout and transport-retry settings from ``gpt_settings`` keep
-        applying (the SDK resolves the backend from the injected client's MRO
-        and uses it as-is). A fresh client is built on every access: an httpx2
-        client is stateful and cannot be reused after its context manager has
-        closed it.
+        The SDK's default ``v1`` API version applies. A configured
+        ``httpx2.AsyncClient`` is injected so the proxy, timeout and
+        transport-retry settings from ``gpt_settings`` keep applying (the SDK
+        resolves the backend from the injected client's MRO and uses it as-is).
+        A fresh client is built on every access: an httpx2 client is stateful
+        and cannot be reused after its context manager has closed it.
 
         Returns:
             Fresh ``HttpOptions`` carrying a new ``httpx2.AsyncClient``.
