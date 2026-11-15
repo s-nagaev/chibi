@@ -312,7 +312,7 @@ Chibi: *analisa mudanças, sugere melhorias, atualiza docs via MCP*
 - **Auto-hospedado:** seus dados ficam na sua infraestrutura
 - **Modo público:** usuários podem trazer suas próprias chaves de API (não é necessária uma chave mestra compartilhada)
 - **Controle de acesso:** whitelist de usuários/grupos/modelos
-- **Opções de armazenamento:** volumes locais, Redis ou DynamoDB
+- **Opções de armazenamento:** volumes locais ou Redis
 - **Segurança de ferramentas:** ferramentas do agente são configuráveis; execução no terminal é moderada e pode ser restrita
 
 ---

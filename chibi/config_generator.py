@@ -174,16 +174,6 @@ LOCAL_DATA_PATH={DATA_DIR.absolute()}
 # File storage backend for uploaded files: local or telegram (default: telegram)
 FILE_STORAGE=telegram
 
-# AWS DYNAMODB STORAGE (if set, the local storage and redis setting will be ignored)
-AWS_REGION=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-
-# DynamoDB table name for users
-DDB_USERS_TABLE=
-# DynamoDB table name for messages
-DDB_MESSAGES_TABLE=
-
 
 # ============================================================================
 # 4.1 INFINITE CONTEXT (ChromaDB)

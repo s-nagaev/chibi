@@ -5,7 +5,6 @@ from typing import Awaitable, Callable, Concatenate, Generic, Optional, ParamSpe
 from chibi.config.app import application_settings
 from chibi.memory.chroma import memory, with_chroma_archival
 from chibi.storage.abstract import Database
-from chibi.storage.dynamodb import DynamoDBStorage
 from chibi.storage.local import LocalStorage
 from chibi.storage.redis import RedisStorage
 
@@ -40,7 +39,7 @@ class InjectedCallable(Generic[P, R]):
 class DatabaseCache:
     """
     Caches a Database instance according to application settings.
-    Supports 'local', 'redis', and 'dynamodb' backends.
+    Supports 'local' and 'redis' backends.
     """
 
     def __init__(self) -> None:
@@ -60,18 +59,9 @@ class DatabaseCache:
             backend = application_settings.storage_backend.lower()
             if backend == "redis":
                 # RedisStorage.create expects URL and password
-                inner: RedisStorage | DynamoDBStorage | LocalStorage = await RedisStorage.create(
+                inner: RedisStorage | LocalStorage = await RedisStorage.create(
                     url=cast(str, application_settings.redis),
                     password=application_settings.redis_password,
-                )
-            elif backend == "dynamodb":
-                # DynamoDBStorage.create expects region, access_key, secret_key, tables
-                inner = await DynamoDBStorage.create(
-                    region=application_settings.aws_region or "",
-                    access_key=application_settings.aws_access_key_id,
-                    secret_access_key=application_settings.aws_secret_access_key,
-                    users_table=application_settings.ddb_users_table or "",
-                    messages_table=application_settings.ddb_messages_table or "",
                 )
             else:
                 # default to local storage

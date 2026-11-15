@@ -316,7 +316,7 @@ Chibi: *analyzes changes, suggests improvements, updates docs via MCP*
 - **Self-hosted:** your data stays on your infrastructure
 - **Public Mode:** users can bring their own API keys (no shared master key required)
 - **Access control:** whitelist users/groups/models
-- **Storage options:** local volumes, Redis, or DynamoDB
+- **Storage options:** local volumes or Redis
 - **Tool safety:** agent tools are configurable; terminal execution is moderated and can be restricted
 
 ---

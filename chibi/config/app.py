@@ -19,11 +19,6 @@ class ApplicationSettings(BaseSettings):
     Attributes:
         redis: Redis connection URL.
         redis_password: Password for Redis.
-        aws_region: AWS region for DynamoDB.
-        aws_access_key_id: AWS access key ID.
-        aws_secret_access_key: AWS secret access key.
-        ddb_users_table: DynamoDB table name for users.
-        ddb_messages_table: DynamoDB table name for messages.
         local_data_path: Filesystem path for local storage.
         log_prompt_data: Whether to log prompt data.
         hide_models: Hide model options in UI.
@@ -56,13 +51,6 @@ class ApplicationSettings(BaseSettings):
     # Redis settings
     redis: str | None = Field(default=None)
     redis_password: str | None = Field(default=None)
-
-    # DynamoDB settings
-    aws_region: str | None = Field(default=None)
-    aws_access_key_id: str | None = Field(default=None)
-    aws_secret_access_key: str | None = Field(default=None)
-    ddb_users_table: str | None = Field(default=None)
-    ddb_messages_table: str | None = Field(default=None)
 
     # Local storage settings
     local_data_path: str = Field(default="/app/data")
@@ -126,11 +114,9 @@ class ApplicationSettings(BaseSettings):
         return all((self.influxdb_url, self.influxdb_token, self.influxdb_org, self.influxdb_bucket))
 
     @property
-    def storage_backend(self) -> Literal["local", "redis", "dynamodb"]:
+    def storage_backend(self) -> Literal["local", "redis"]:
         if self.redis:
             return "redis"
-        if self.aws_access_key_id and self.aws_secret_access_key:
-            return "dynamodb"
         return "local"
 
     @property

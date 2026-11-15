@@ -46,7 +46,7 @@ Chibi currently supports models from the following providers:
 *   **Context Management:**
     *   Automatic conversation summarization (optional) to save tokens on long conversations by replacing older parts of the history with a summary.
     *   Manual context reset (`/reset` command) to start fresh and save tokens.
-*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or DynamoDB, or simply keep it in memory (lost on restart).
+*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or simply keep it in memory (lost on restart).
 *   **Optional "Public Mode":** Run the bot without master API keys. Each user will be prompted to provide their own key via private message to the bot.
 *   **Granular Access Control:** Restrict bot access to specific users or chat groups, whitelist allowed models, and control image generation limits for certain users.
 *   **Dynamic Proxy Support:** Configure HTTP/SOCKS proxies for AI provider API requests and heartbeat pings, separate from the Telegram proxy.
@@ -273,11 +273,6 @@ Please, visit the [examples](examples) directory of the current repository for m
 |:----------------------|:--------------------------------------------------------------------------------------------------------|:--------------|
 | `REDIS`               | Redis connection URL.                                                                                   | `None`        |
 | `REDIS_PASSWORD`      | Password for Redis.                                                                                     | `None`        |
-| `AWS_REGION`          | AWS region for DynamoDB.                                                                                | `None`        |
-| `AWS_ACCESS_KEY_ID`   | AWS access key ID.                                                                                      | `None`        |
-| `AWS_SECRET_ACCESS_KEY`| AWS secret access key.                                                                                  | `None`        |
-| `DDB_USERS_TABLE`     | DynamoDB table name for users.                                                                          | `None`        |
-| `DDB_MESSAGES_TABLE`  | DynamoDB table name for messages.                                                                       | `None`        |
 | `LOCAL_DATA_PATH`     | Filesystem path for local storage.                                                                      | `/app/data`   |
 ### API Keys (Master Keys)
 These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
