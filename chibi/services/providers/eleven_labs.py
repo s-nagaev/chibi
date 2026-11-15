@@ -67,9 +67,11 @@ class ElevenLabs(Provider):
             file=audio, model_id=model, tag_audio_events=self.tag_audio_events, language_code=self.language_code
         )
         if response:
-            if application_settings.log_prompt_data:
-                logger.info(f"Transcribed text: {response.text}")
-            return response.text
+            text = getattr(response, "text", None)
+            if text is not None:
+                if application_settings.log_prompt_data:
+                    logger.info(f"Transcribed text: {text}")
+                return text
         raise ValueError("Could not transcribe audio message")
 
     async def generate_music(self, prompt: str, music_length_ms: int = music_length_ms) -> bytes:

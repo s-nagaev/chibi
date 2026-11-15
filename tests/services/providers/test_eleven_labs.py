@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import cast
 from unittest.mock import Mock, call
 
 import pytest
@@ -29,7 +30,7 @@ async def test_transcribe(eleven_labs: Mock) -> None:
 
     assert result == "Hello world!"
     assert eleven_labs.call_args_list == [call(api_key="test_token")]
-    provider.client.speech_to_text.convert.assert_called_once_with(
+    cast(Mock, provider.client.speech_to_text.convert).assert_called_once_with(
         file=audio,
         model_id="some_stt_model",
         tag_audio_events=ElevenLabs.tag_audio_events,
@@ -44,4 +45,4 @@ async def test_generate_music(eleven_labs: Mock) -> None:
 
     assert result == b"Helloworld!"
     assert eleven_labs.call_args_list == [call(api_key="test_token")]
-    provider.client.music.compose.assert_called_once_with(prompt="Some prompt", music_length_ms=1000)
+    cast(Mock, provider.client.music.compose).assert_called_once_with(prompt="Some prompt", music_length_ms=1000)
