@@ -312,7 +312,7 @@ Chibi: *değişiklikleri analiz eder, iyileştirme önerir, MCP ile dokümanlar�
 - **Self-hosted:** veriniz kendi altyapınızda kalır
 - **Public Mode:** kullanıcılar kendi API anahtarlarını getirebilir (paylaşılan master key gerekmez)
 - **Erişim kontrolü:** kullanıcı/grup/model whitelist
-- **Depolama seçenekleri:** yerel volume’lar, Redis veya DynamoDB
+- **Depolama seçenekleri:** yerel volume’lar veya Redis
 - **Araç güvenliği:** ajan araçları yapılandırılabilir; terminal çalıştırma denetlenir ve kısıtlanabilir
 
 ---

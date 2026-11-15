@@ -312,7 +312,7 @@ Chibi: *menganalisis perubahan, menyarankan perbaikan, memperbarui docs via MCP*
 - **Self-hosted:** data Anda tetap di infrastruktur Anda
 - **Mode publik:** pengguna bisa memakai API key mereka sendiri (tanpa master key bersama)
 - **Kontrol akses:** whitelist user/grup/model
-- **Opsi penyimpanan:** volume lokal, Redis, atau DynamoDB
+- **Opsi penyimpanan:** volume lokal atau Redis
 - **Keamanan tools:** tools agen dapat dikonfigurasi; eksekusi terminal dimoderasi dan bisa dibatasi
 
 ---

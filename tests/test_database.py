@@ -1,25 +1,17 @@
-import asyncio
 from typing import cast
 
-import boto3  # Import boto3
 import pytest
 from fakeredis import FakeAsyncRedis
 from freezegun import freeze_time
-from moto import mock_aws
 
 from chibi.models import Message, SelectedModel, User
 from chibi.storage.database import Database
-from chibi.storage.dynamodb import DynamoDBStorage
 from chibi.storage.local import LocalStorage
 from chibi.storage.redis import RedisStorage
 
-TABLE_USERS = "TestUsers"
-TABLE_MESSAGES = "TestMessages"
-REGION = "us-east-1"
-
 
 # Fixture to provide different storage instances
-@pytest.fixture(params=["local", "redis", "dynamodb"])
+@pytest.fixture(params=["local", "redis"])
 async def storage(request, tmp_path, monkeypatch):
     """Provides instances of different Database implementations."""
     if request.param == "local":
@@ -40,46 +32,6 @@ async def storage(request, tmp_path, monkeypatch):
         await redis_storage.redis.flushdb()
         yield redis_storage
         await redis_storage.close()
-
-    if request.param == "dynamodb":
-        with mock_aws(config={"core": {"service_whitelist": ["dynamodb"]}}):
-            resource = boto3.resource("dynamodb", region_name=REGION)
-            # Create users table (PK = user_id)
-            resource.create_table(
-                TableName=TABLE_USERS,
-                KeySchema=[{"AttributeName": "user_id", "KeyType": "HASH"}],
-                AttributeDefinitions=[{"AttributeName": "user_id", "AttributeType": "S"}],
-                BillingMode="PAY_PER_REQUEST",
-            ).wait_until_exists()
-            # Create messages table (PK = user_id, SK = message_id)
-            resource.create_table(
-                TableName=TABLE_MESSAGES,
-                KeySchema=[
-                    {"AttributeName": "user_id", "KeyType": "HASH"},
-                    {"AttributeName": "message_id", "KeyType": "RANGE"},
-                ],
-                AttributeDefinitions=[
-                    {"AttributeName": "user_id", "AttributeType": "S"},
-                    {"AttributeName": "message_id", "AttributeType": "S"},
-                ],
-                BillingMode="PAY_PER_REQUEST",
-            ).wait_until_exists()
-            # client = boto3.client("dynamodb", region_name=REGION)
-            # client.update_time_to_live(
-            #     TableName=TABLE_MESSAGES,
-            #     TimeToLiveSpecification={
-            #         "Enabled": True,
-            #         "AttributeName": "expire_at",
-            #     }
-            # )
-            dynamo_storage = await DynamoDBStorage.create(
-                region=REGION,
-                access_key=None,
-                secret_access_key=None,
-                users_table=TABLE_USERS,
-                messages_table=TABLE_MESSAGES,
-            )
-            yield dynamo_storage
 
 
 async def test_create_user(storage: Database) -> None:
@@ -273,16 +225,6 @@ async def test_legacy_message_without_visibility_reads_back_visible(storage: Dat
     if isinstance(storage, RedisStorage):
         message_key = f"user:{user_id}:message:{legacy_id}"
         await storage.redis.set(name=message_key, value=_json.dumps({"role": "assistant", "content": "legacy"}))
-    elif isinstance(storage, DynamoDBStorage):
-        await asyncio.to_thread(
-            storage.messages_table.put_item,
-            Item={
-                "user_id": str(user_id),
-                "message_id": str(legacy_id),
-                "thread_id": 0,
-                "data": _json.dumps({"role": "assistant", "content": "legacy", "id": legacy_id}),
-            },
-        )
     else:
         # LocalStorage: rewrite the persisted user pickle with a fieldless
         # message dict, mimicking a record written before the field existed.
@@ -306,11 +248,6 @@ async def test_legacy_message_without_visibility_reads_back_visible(storage: Dat
         raw_record = await storage.redis.get(f"user:{user_id}:message:{legacy_id}")
         assert raw_record is not None
         assert "visibility" not in _json.loads(raw_record)
-    elif isinstance(storage, DynamoDBStorage):
-        item = await asyncio.to_thread(
-            storage.messages_table.get_item, Key={"user_id": str(user_id), "message_id": str(legacy_id)}
-        )
-        assert "visibility" not in _json.loads(item["Item"]["data"])
     else:
         from pickle import load
 
