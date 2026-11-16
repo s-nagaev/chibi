@@ -13,6 +13,7 @@ from chibi.config import application_settings, gpt_settings, telegram_settings
 from chibi.constants import SETTING_DISABLED, SETTING_ENABLED, SETTING_SET, SETTING_UNSET
 from chibi.exceptions import (
     ContextLengthExceededError,
+    ModelNotAllowedError,
     NoApiKeyProvidedError,
     NoModelSelectedError,
     NoProviderSelectedError,
@@ -125,6 +126,11 @@ def log_application_settings() -> None:
     models_blacklist = (
         f"<cyan>{', '.join(gpt_settings.models_blacklist)}</cyan>" if gpt_settings.models_blacklist else SETTING_UNSET
     )
+    image_models_whitelist = (
+        f"<cyan>{', '.join(gpt_settings.image_models_whitelist)}</cyan>"
+        if gpt_settings.image_models_whitelist
+        else SETTING_UNSET
+    )
     images_whitelist = (
         f"<cyan>{','.join(gpt_settings.image_generations_whitelist)}</cyan>"
         if gpt_settings.image_generations_whitelist
@@ -156,6 +162,7 @@ def log_application_settings() -> None:
         f"Groups whitelist: {groups_whitelist}",
         f"Models whitelist: {models_whitelist}",
         f"Models blacklist: {models_blacklist}",
+        f"Image models whitelist: {image_models_whitelist}",
         "<magenta> Heartbeat: </magenta>".center(90, "="),
         f"Heartbeat mechanism: {SETTING_SET if application_settings.heartbeat_url else SETTING_UNSET}",
         "<magenta> Infinite Context </magenta>".center(90, "="),
@@ -288,6 +295,18 @@ def handle_gpt_exceptions(func: Callable[..., Any]) -> Callable[..., Any]:
             logger.error(f"{error_msg_prefix}: {e}")
             _set_ide_error(interface, "missing_provider", "Select a provider before sending a request.")
             text = "Please, select your provider first."
+
+        except ModelNotAllowedError as e:
+            logger.error(f"{error_msg_prefix}: {e}")
+            _set_ide_error(
+                interface,
+                "model_not_allowed",
+                f"The {e.model} model is not allowed by the administrator. Select an allowed model.",
+            )
+            text = (
+                "Sorry, this model is not allowed by the administrator. "
+                "Please select one of the allowed models and try again."
+            )
 
         except RecursionLimitExceeded as e:
             logger.error(f"{error_msg_prefix}: {e}")

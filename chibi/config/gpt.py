@@ -142,6 +142,15 @@ class GPTSettings(BaseSettings):
     )
     models_whitelist_raw: str | None = Field(alias="MODELS_WHITELIST", default=None)
     models_blacklist_raw: str | None = Field(alias="MODELS_BLACKLIST", default=None)
+    image_models_whitelist_raw: str | None = Field(
+        alias="IMAGE_MODELS_WHITELIST",
+        default=None,
+        description=(
+            "Comma-separated list of image generation models the bot is allowed to use. When set, image model "
+            "listings and image generation are limited to these models, and MODELS_WHITELIST / MODELS_BLACKLIST "
+            "do not apply to image models. When unset, image models follow MODELS_WHITELIST / MODELS_BLACKLIST."
+        ),
+    )
     proxy: str | None = Field(default=None)
     public_mode: bool = Field(default=False)
     show_llm_thoughts: bool = Field(default=False)
@@ -212,6 +221,12 @@ class GPTSettings(BaseSettings):
     @property
     def models_blacklist(self) -> list[str]:
         return [x.strip() for x in self.models_blacklist_raw.split(",")] if self.models_blacklist_raw else []
+
+    @property
+    def image_models_whitelist(self) -> list[str]:
+        return (
+            [x.strip() for x in self.image_models_whitelist_raw.split(",")] if self.image_models_whitelist_raw else []
+        )
 
     @property
     def image_generations_whitelist(self) -> list[str]:

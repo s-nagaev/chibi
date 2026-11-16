@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A scheduled command survives an unavailable command moderator.** HTTP errors, connection failures and unparseable moderator responses surface to the agent as one standardized error message instead of an unhandled failure or a misleading "declined" verdict; the command is not run, and the agent job wakes itself with the same message so it can decide what to do next.
 
+## [1.21.5] - 2026-11-16
+
+### Added
+- **`IMAGE_MODELS_WHITELIST` limits which image generation models the bot offers and uses.** Comma-separated and optional: when set, image model listings and image generation are restricted to the listed models, and `MODELS_WHITELIST` / `MODELS_BLACKLIST` no longer apply to image models. Left unset, image models keep following the global whitelist and blacklist.
+
+### Fixed
+- **Edited messages no longer re-trigger the agent.** An edit arrives as an `edited_message` update, which the prompt and file-upload handlers now ignore, so editing or reacting to a message that quotes the agent no longer starts a new turn. Fresh messages, including replies to the agent, are handled as before.
+- **Command messages carrying an attachment are no longer handled as uploads.** The file-upload filter now excludes commands across the whole media expression.
+
 ## [1.21.4] - 2026-11-14
 
 ### Changed
