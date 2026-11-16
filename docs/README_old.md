@@ -287,6 +287,8 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.        | `http://localhost:1234/v1` |
 | `OPENAICOMPATIBLE_<NAME>_API_KEY` | Registers an extra OpenAI-compatible provider instance named `<NAME>` (chat, TTS and STT). | `None`                     |
 | `OPENAICOMPATIBLE_<NAME>_URL`     | Endpoint URL for the `<NAME>` instance.    | `http://localhost:1234/v1` |
+| `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` | Registers an extra Anthropic-compatible provider instance named `<NAME>` (chat). | `None`                     |
+| `ANTHROPICCOMPATIBLE_<NAME>_URL`     | Endpoint URL for the `<NAME>` instance.    | `https://api.anthropic.com` |
 | `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                      | `None`                     |
 | `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.      | `None`                     |
 | `GOOGLE_SEARCH_API_KEY` | API key for Google Custom Search.                 | `None`                     |

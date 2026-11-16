@@ -2,6 +2,7 @@
 
 from chibi.services.providers.alibaba import Alibaba
 from chibi.services.providers.anthropic import Anthropic
+from chibi.services.providers.anthropic_compatible import register_anthropic_compatible_instances
 from chibi.services.providers.baseten import Baseten
 from chibi.services.providers.cheaperinference import Cheaperinference
 from chibi.services.providers.cloudflare import Cloudflare
@@ -37,4 +38,5 @@ from chibi.services.providers.xiaomi import Xiaomi
 from chibi.services.providers.zhipuai import ZhipuAI
 
 register_openai_compatible_instances()
+register_anthropic_compatible_instances()
 sync_video_tool_registration()

@@ -154,6 +154,14 @@ CUSTOMOPENAI_URL=http://localhost:1234/v1
 # OPENAICOMPATIBLE_MYPROXY_API_KEY=
 # OPENAICOMPATIBLE_MYPROXY_URL=https://myproxy.example.com/v1
 
+# Named Anthropic-compatible instances. Each ANTHROPICCOMPATIBLE_<NAME>_API_KEY
+# registers an extra chat provider named <NAME> (letters, digits and
+# underscores; the lowercase name must be unique across providers).
+# ANTHROPICCOMPATIBLE_<NAME>_URL overrides the endpoint
+# (default: https://api.anthropic.com).
+# ANTHROPICCOMPATIBLE_MYPROXY_API_KEY=
+# ANTHROPICCOMPATIBLE_MYPROXY_URL=https://myproxy.example.com
+
 
 # ============================================================================
 # 3. MEDIA PROVIDERS
