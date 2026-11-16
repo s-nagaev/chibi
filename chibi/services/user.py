@@ -2353,9 +2353,10 @@ async def generate_image(
     Raises:
         NoProviderSelectedError: If no image provider is available.
         ModelNotAllowedError: If ``IMAGE_MODELS_WHITELIST`` is configured and the
-            resolved model is not on it. A request without a resolved model (the
-            provider default) is refused as well, because its name cannot be
-            checked against the allowlist.
+            effective model is not on it. The effective model is the explicit or
+            thread-selected one, or the provider's ``default_image_model`` when
+            the request carries no model at all; a request that resolves to no
+            model name is refused as well.
     """
     user = await db.get_or_create_user(user_id=interface.user_id)
 
@@ -2369,15 +2370,19 @@ async def generate_image(
     if not provider:
         raise NoProviderSelectedError("No image provider available")
 
+    # The effective model is what the provider will actually use: the explicit
+    # or thread-selected model when there is one, otherwise the provider default
+    # that ``get_images`` falls back to when ``model`` is None.
+    effective_model = selected_model or provider.default_image_model
     image_models_whitelist = gpt_settings.image_models_whitelist
-    if image_models_whitelist and selected_model not in image_models_whitelist:
+    if image_models_whitelist and effective_model not in image_models_whitelist:
         logger.bind(user_id=interface.user_id).warning(
-            f"Refused image generation: model '{selected_model}' of provider '{provider.name}' is not on "
+            f"Refused image generation: model '{effective_model}' of provider '{provider.name}' is not on "
             f"IMAGE_MODELS_WHITELIST."
         )
         raise ModelNotAllowedError(
             provider=provider.name,
-            model=selected_model or "default",
+            model=effective_model or "default",
             detail=(
                 "The requested image model is not allowed by the administrator. "
                 "Please select one of the allowed image models and try again."

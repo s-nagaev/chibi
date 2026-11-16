@@ -8,10 +8,15 @@ import pytest
 
 from chibi.config.gpt import GPTSettings
 from chibi.exceptions import ModelNotAllowedError
+from chibi.interfaces.interface import UserInterface
 from chibi.schemas.app import ModelChangeSchema
+from chibi.services.bot import handle_image_generation
+from chibi.services.providers.alibaba import Alibaba
 from chibi.services.providers.openai import OpenAI
+from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.tools import media
 from chibi.services.providers.tools.media import GenerateImageTool
+from chibi.services.providers.zhipuai import ZhipuAI
 from chibi.services.user import generate_image
 
 TEST_TOKEN = "test-image-models-whitelist"
@@ -116,14 +121,19 @@ class TestImageListingSemantics:
         assert _filter_image_models(settings) == ["image-allowed"]
 
 
-def _mock_provider() -> Mock:
+def _mock_provider(default_image_model: str | None = "image-allowed") -> Mock:
     """Build a mock image provider accepting every generation call.
+
+    Args:
+        default_image_model: Model the provider falls back to when the request
+            carries no model name.
 
     Returns:
         A mock provider with an async image call returning one URL.
     """
     provider = Mock()
     provider.name = "OpenAI"
+    provider.default_image_model = default_image_model
     provider.get_images = AsyncMock(return_value=["https://example.com/result.png"])
     return provider
 
@@ -192,17 +202,50 @@ async def test_override_path_rejects_model_outside_whitelist() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unresolved_default_model_is_rejected_when_whitelist_is_set() -> None:
-    """With the whitelist set a request without a resolved model is refused, since it cannot be verified."""
-    provider = _mock_provider()
+async def test_thread_without_selection_uses_whitelisted_provider_default() -> None:
+    """A thread with no explicit image model falls back to the provider default, which is allowed when whitelisted."""
+    provider = _mock_provider(default_image_model="image-allowed")
     db = _mock_db(active_provider=provider, active_model=None)
     interface = _mock_interface()
 
     with patch("chibi.services.user.gpt_settings", _settings(image_models_whitelist=["image-allowed"])):
-        with pytest.raises(ModelNotAllowedError):
+        result = await generate_image.__wrapped__(db, interface=interface, prompt="a cat")
+
+    provider.get_images.assert_awaited_once_with(prompt="a cat", model=None, images=None)
+    db.count_image.assert_awaited_once_with(42)
+    assert result == ["https://example.com/result.png"]
+
+
+@pytest.mark.asyncio
+async def test_provider_default_model_outside_whitelist_is_rejected() -> None:
+    """A fallback model that is not whitelisted is refused before the provider call."""
+    provider = _mock_provider(default_image_model="image-blocked")
+    db = _mock_db(active_provider=provider, active_model=None)
+    interface = _mock_interface()
+
+    with patch("chibi.services.user.gpt_settings", _settings(image_models_whitelist=["image-allowed"])):
+        with pytest.raises(ModelNotAllowedError) as error:
             await generate_image.__wrapped__(db, interface=interface, prompt="a cat")
 
+    assert error.value.model == "image-blocked"
     provider.get_images.assert_not_awaited()
+    db.count_image.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_request_resolving_to_no_model_is_rejected_when_whitelist_is_set() -> None:
+    """Nothing to compare with the allowlist (no selection, no provider default) stays fail-closed."""
+    provider = _mock_provider(default_image_model=None)
+    db = _mock_db(active_provider=provider, active_model=None)
+    interface = _mock_interface()
+
+    with patch("chibi.services.user.gpt_settings", _settings(image_models_whitelist=["image-allowed"])):
+        with pytest.raises(ModelNotAllowedError) as error:
+            await generate_image.__wrapped__(db, interface=interface, prompt="a cat")
+
+    assert error.value.model == "default"
+    provider.get_images.assert_not_awaited()
+    db.count_image.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -265,3 +308,147 @@ async def test_media_tool_turns_the_rejection_into_an_error_result(
     assert response.status == "error"
     assert "Image model is not allowed." in str(response.result)
     interface.send_images.assert_not_awaited()
+
+
+class _FakeImagineInterface(UserInterface):
+    """Minimal interface driving the decorated ``/imagine`` handler."""
+
+    error_code: str | None = None
+    error_message: str | None = None
+
+    def __init__(self) -> None:
+        """Initialize empty capture buffers and a clear IDE error state."""
+        self.sent_messages: list[str] = []
+        self.sent_images: list[Any] = []
+
+    @property
+    def chat_id(self) -> int:
+        """Return the fake chat identifier."""
+        return 42
+
+    @property
+    def user_id(self) -> int:
+        """Return the fake user identifier."""
+        return 42
+
+    @property
+    def storage_id(self) -> int:
+        """Return the fake storage key."""
+        return 42
+
+    @property
+    def thread_id(self) -> int:
+        """Return the fake thread identifier."""
+        return 1
+
+    @property
+    def user_data(self) -> str:
+        """Return the fake user description used in log lines."""
+        return "User 42"
+
+    @property
+    def chat_data(self) -> str:
+        """Return the fake chat description used in log lines."""
+        return "chat 42, thread 1"
+
+    async def send_message(self, message: str, reply: bool = True, **kwargs: Any) -> None:
+        """Record an outgoing chat message.
+
+        Args:
+            message: Message text.
+            reply: Ignored by the fake.
+            **kwargs: Ignored by the fake.
+        """
+        self.sent_messages.append(message)
+
+    async def send_images(self, images: Any, reply: bool = True, **kwargs: Any) -> None:
+        """Record an outgoing image batch.
+
+        Args:
+            images: Image payloads.
+            reply: Ignored by the fake.
+            **kwargs: Ignored by the fake.
+        """
+        self.sent_images.append(images)
+
+    async def send_action_uploading_photo(self) -> None:
+        """Accept the upload indicator ping used by the handler."""
+
+
+@pytest.mark.asyncio
+async def test_imagine_command_reports_rejection_without_propagating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``/imagine`` turns a whitelist rejection into the specific message and an IDE error state."""
+    interface = _FakeImagineInterface()
+    monkeypatch.setattr("chibi.services.bot.user_has_reached_images_generation_limit", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "chibi.services.bot.generate_image",
+        AsyncMock(
+            side_effect=ModelNotAllowedError(provider="OpenAI", model="image-blocked", detail="Image model refused.")
+        ),
+    )
+
+    await handle_image_generation(prompt="a cat", interface=interface)
+
+    assert interface.sent_images == []
+    assert len(interface.sent_messages) == 1
+    message = interface.sent_messages[0].lower()
+    assert "not allowed by the administrator" in message
+    assert "hiccup" not in message
+    assert interface.error_code == "model_not_allowed"
+    assert interface.error_message
+
+
+class TestProviderImageListingsHonorTheWhitelist:
+    """Tests for providers that build their image listing outside the shared filter."""
+
+    @pytest.mark.asyncio
+    async def test_zhipuai_image_listing_honors_the_whitelist(self) -> None:
+        """The hardcoded ZhipuAI image listing is filtered by IMAGE_MODELS_WHITELIST."""
+        provider = ZhipuAI(token=TEST_TOKEN)
+        settings = _settings(image_models_whitelist=["glm-image"])
+
+        with patch("chibi.services.providers.provider.gpt_settings", settings):
+            models = await provider.get_available_models(image_generation=True)
+
+        assert models is not None
+        assert [model.name for model in models] == ["glm-image"]
+
+    @pytest.mark.asyncio
+    async def test_alibaba_image_listing_filters_the_appended_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The Alibaba model appended after the base listing is whitelist-filtered as well."""
+        provider = Alibaba(token=TEST_TOKEN)
+        base_listing = [
+            ModelChangeSchema(
+                provider="Alibaba", name="qwen-image-plus", display_name="Qwen Image", image_generation=True
+            )
+        ]
+        monkeypatch.setattr(OpenAIFriendlyProvider, "get_available_models", AsyncMock(return_value=list(base_listing)))
+        settings = _settings(image_models_whitelist=["qwen-image-plus"])
+
+        with patch("chibi.services.providers.provider.gpt_settings", settings):
+            models = await provider.get_available_models(image_generation=True)
+
+        assert models is not None
+        assert [model.name for model in models] == ["qwen-image-plus"]
+
+    @pytest.mark.asyncio
+    async def test_alibaba_image_listing_keeps_a_whitelisted_appended_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A whitelisted hand-listed Alibaba model survives the listing filter."""
+        provider = Alibaba(token=TEST_TOKEN)
+        base_listing = [
+            ModelChangeSchema(
+                provider="Alibaba", name="qwen-image-plus", display_name="Qwen Image", image_generation=True
+            )
+        ]
+        monkeypatch.setattr(OpenAIFriendlyProvider, "get_available_models", AsyncMock(return_value=list(base_listing)))
+        settings = _settings(image_models_whitelist=["qwen-image-plus", "wan2.6-t2i"])
+
+        with patch("chibi.services.providers.provider.gpt_settings", settings):
+            models = await provider.get_available_models(image_generation=True)
+
+        assert models is not None
+        assert sorted(model.name for model in models) == ["qwen-image-plus", "wan2.6-t2i"]
