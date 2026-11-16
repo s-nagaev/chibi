@@ -16,7 +16,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.constants import get_model_context_window
-from chibi.exceptions import ContextLengthExceededError, NoProviderSelectedError
+from chibi.exceptions import ContextLengthExceededError, ModelNotAllowedError, NoProviderSelectedError
 from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema, VideoResult, VisionResultSchema
@@ -2352,6 +2352,10 @@ async def generate_image(
 
     Raises:
         NoProviderSelectedError: If no image provider is available.
+        ModelNotAllowedError: If ``IMAGE_MODELS_WHITELIST`` is configured and the
+            resolved model is not on it. A request without a resolved model (the
+            provider default) is refused as well, because its name cannot be
+            checked against the allowlist.
     """
     user = await db.get_or_create_user(user_id=interface.user_id)
 
@@ -2364,6 +2368,22 @@ async def generate_image(
 
     if not provider:
         raise NoProviderSelectedError("No image provider available")
+
+    image_models_whitelist = gpt_settings.image_models_whitelist
+    if image_models_whitelist and selected_model not in image_models_whitelist:
+        logger.bind(user_id=interface.user_id).warning(
+            f"Refused image generation: model '{selected_model}' of provider '{provider.name}' is not on "
+            f"IMAGE_MODELS_WHITELIST."
+        )
+        raise ModelNotAllowedError(
+            provider=provider.name,
+            model=selected_model or "default",
+            detail=(
+                "The requested image model is not allowed by the administrator. "
+                "Please select one of the allowed image models and try again."
+            ),
+        )
+
     result = await provider.get_images(prompt=prompt, model=selected_model, images=images)
     if interface.user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(interface.user_id)

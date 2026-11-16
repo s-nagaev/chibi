@@ -255,6 +255,12 @@ MODELS_WHITELIST=
 # Example: "gpt-5.1,gpt-5.3"
 MODELS_BLACKLIST=
 
+# Comma-separated list of allowed image generation models
+# When set, image model listings and image generation are limited to these models,
+# and MODELS_WHITELIST / MODELS_BLACKLIST do not apply to image models
+# Example: "dall-e-3,gpt-image-2,models/imagen-4.0-generate-001"
+IMAGE_MODELS_WHITELIST=
+
 # Comma-separated list of allowed tools
 # Example: "run_command_in_terminal,delegate_task,create_file"
 TOOLS_WHITELIST=

@@ -108,6 +108,7 @@ def test_model_filtering_image_generation() -> None:
     with patch("chibi.services.providers.provider.gpt_settings") as mock_settings:
         mock_settings.models_whitelist = []
         mock_settings.models_blacklist = []
+        mock_settings.image_models_whitelist = []
         filtered = provider.filter_and_return_list_of_models(models, image_generation=True)
 
     assert [model.name for model in filtered] == ["black-forest-labs/FLUX-1-schnell"]
