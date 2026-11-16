@@ -140,10 +140,19 @@ CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.
 CLOUDFLARE_ACCOUNT_ID=
 
-# Custom OpenAI API key (for local/self-hosted models)
+# Custom OpenAI API key. Legacy alias that feeds the built-in "CustomOpenAI"
+# instance; prefer the OPENAICOMPATIBLE_<NAME>_* scheme below.
 CUSTOMOPENAI_API_KEY=
 # Custom OpenAI URL (default: http://localhost:1234/v1)
 CUSTOMOPENAI_URL=http://localhost:1234/v1
+
+# Named OpenAI-compatible instances. Each OPENAICOMPATIBLE_<NAME>_API_KEY
+# registers an extra chat/TTS/STT provider named <NAME> (letters, digits and
+# underscores; the lowercase name must be unique across providers).
+# OPENAICOMPATIBLE_<NAME>_URL overrides the endpoint
+# (default: http://localhost:1234/v1).
+# OPENAICOMPATIBLE_MYPROXY_API_KEY=
+# OPENAICOMPATIBLE_MYPROXY_URL=https://myproxy.example.com/v1
 
 
 # ============================================================================

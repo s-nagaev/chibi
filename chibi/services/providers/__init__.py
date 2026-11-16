@@ -24,6 +24,7 @@ from chibi.services.providers.nebius import Nebius
 from chibi.services.providers.novita import Novita
 from chibi.services.providers.open_router import OpenRouter
 from chibi.services.providers.openai import OpenAI
+from chibi.services.providers.openai_compatible import register_openai_compatible_instances
 from chibi.services.providers.parasail import Parasail
 from chibi.services.providers.provider import RegisteredProviders
 from chibi.services.providers.sambanova import SambaNova
@@ -35,4 +36,5 @@ from chibi.services.providers.tools.video import sync_video_tool_registration
 from chibi.services.providers.xiaomi import Xiaomi
 from chibi.services.providers.zhipuai import ZhipuAI
 
+register_openai_compatible_instances()
 sync_video_tool_registration()
