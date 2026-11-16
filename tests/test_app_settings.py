@@ -1,11 +1,13 @@
 """Tests for ApplicationSettings."""
 
+import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from chibi.config.app import ApplicationSettings, ClientType
+from chibi.config.app import ApplicationSettings, ClientType, _get_application_settings
 
 
 @pytest.fixture
@@ -88,3 +90,80 @@ class TestSchedulerSettings:
         monkeypatch.setenv(env_var, str(expected))
         settings = ApplicationSettings()
         assert getattr(settings, env_var.lower()) == expected
+
+
+class TestLocalDataPathFallback:
+    """Tests for the host fallback of the local data path."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+        """Bind ``HOME`` and the working directory to ``tmp_path`` for one test.
+
+        ``_get_application_settings`` merges ``~/chibi-bot/settings`` into
+        ``os.environ``, so the process environment is snapshotted and restored
+        around every test. The cached settings object is dropped on entry and on
+        exit, so each test resolves the configuration from scratch.
+        """
+        environment = dict(os.environ)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LOCAL_DATA_PATH", raising=False)
+        monkeypatch.setenv("CHIBI_ENV", "dev")
+        _get_application_settings.cache_clear()
+        yield
+        os.environ.clear()
+        os.environ.update(environment)
+        _get_application_settings.cache_clear()
+
+    def test_host_run_without_configuration_falls_back_to_home_data_dir(self, tmp_path: Path) -> None:
+        """A bare host install resolves to ``~/chibi-bot/data`` and the directory is created."""
+        settings = _get_application_settings()
+
+        expected = tmp_path / "chibi-bot" / "data"
+        assert settings.local_data_path == expected.as_posix()
+        assert expected.is_dir()
+
+    def test_environment_value_wins_over_the_fallback(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """An explicit environment variable is never replaced by the host fallback."""
+        configured = tmp_path / "explicit-data"
+        monkeypatch.setenv("LOCAL_DATA_PATH", str(configured))
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)
+        assert not (tmp_path / "chibi-bot" / "data").exists()
+
+    def test_working_directory_dotenv_value_wins_over_the_fallback(self, tmp_path: Path) -> None:
+        """``LOCAL_DATA_PATH`` from the working directory ``.env`` disables the fallback."""
+        configured = tmp_path / "dotenv-data"
+        (tmp_path / ".env").write_text(f"LOCAL_DATA_PATH={configured}\n")
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)
+        assert not (tmp_path / "chibi-bot" / "data").exists()
+
+    def test_settings_file_value_wins_over_the_fallback(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """``LOCAL_DATA_PATH`` merged from ``~/chibi-bot/settings`` disables the fallback."""
+        monkeypatch.setenv("CHIBI_ENV", "no-dev")
+        configured = tmp_path / "settings-data"
+        settings_dir = tmp_path / "chibi-bot"
+        settings_dir.mkdir()
+        (settings_dir / "settings").write_text(f"LOCAL_DATA_PATH={configured}\n")
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)
+        assert not (settings_dir / "data").exists()
+
+    @pytest.mark.parametrize("runtime", ["docker", "podman"])
+    def test_container_runtime_keeps_the_image_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runtime: str
+    ) -> None:
+        """Container runtimes keep the image path ``/app/data``."""
+        monkeypatch.setattr(ApplicationSettings, "runtime_environment", property(lambda self: runtime))
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == "/app/data"
+        assert not (tmp_path / "chibi-bot" / "data").exists()
