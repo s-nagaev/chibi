@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **IDE clients can select the model per request:** the stdio protocol `request` frame accepts an optional `model` field (model id, 1-based listing index or display name), applied to the thread before the prompt runs; an unknown selection answers an `invalid_request` error and the prompt is skipped, while an absent, null or empty field changes nothing.
+- **IDE clients can list the selectable models:** a new `models` request is answered by a `models_result` frame carrying the same models the `/model` command lists, in the same order, each with its provider, the active flag for the requesting thread and the image-generation capability, plus the account-level default provider and model; `ready.capabilities.models` advertises the frame.
 
 ## [1.21.3] - 2026-11-11
 

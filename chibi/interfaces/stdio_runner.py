@@ -29,6 +29,7 @@ from chibi.services.task_manager import task_manager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
     clone_thread_messages,
+    get_default_chat_model,
     get_info,
     get_models_available,
     get_thread_name,
@@ -54,6 +55,8 @@ MAX_THOUGHTS_BYTES = 256 * 1024
 THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
 DELTA_FLUSH_INTERVAL = 0.2
 DELTA_FLUSH_CHARS = 512
+ACTIVE_MODEL_MARKER = "🟢"
+ACTIVE_MODEL_MARKER_VARIATION_SELECTOR = "\ufe0f"
 
 
 class _SubagentRequestState(TypedDict):
@@ -246,6 +249,51 @@ async def _apply_model_selection(
         return []
     await set_active_model(interface=interface, model=selected)
     return [f"Selected model: {selected.display_name} ({selected.provider})"]
+
+
+def _clean_display_name(display_name: str) -> str:
+    """Return a model display name without the active-selection marker.
+
+    The listing prefixes the active model's display name with the ``🟢``
+    marker and appends a variation selector right after the name (see
+    :func:`chibi.services.user.get_models_available`). The protocol frame
+    carries the same information as a boolean ``active`` flag, so the marker
+    and its variation selector are stripped from the wire name. A name
+    without the marker is returned unchanged.
+
+    Args:
+        display_name: Display name as produced by the model listing.
+
+    Returns:
+        The display name without the active-selection marker.
+    """
+    if not display_name.startswith(ACTIVE_MODEL_MARKER):
+        return display_name
+    stripped = display_name[len(ACTIVE_MODEL_MARKER) :].lstrip(" ")
+    if stripped.endswith(ACTIVE_MODEL_MARKER_VARIATION_SELECTOR):
+        stripped = stripped[: -len(ACTIVE_MODEL_MARKER_VARIATION_SELECTOR)]
+    return stripped
+
+
+def _models_result_entry(model: ModelChangeSchema) -> dict[str, Any]:
+    """Shape one listing entry into its ``models_result`` representation.
+
+    Args:
+        model: Model as returned by the listing; the entry of the model
+            active on the requesting thread carries the ``🟢`` marker in its
+            display name, which is what the ``active`` flag is derived from.
+
+    Returns:
+        The wire entry: model id, provider, marker-free display name, the
+        active flag, and the image-generation capability.
+    """
+    return {
+        "name": model.name,
+        "provider": model.provider,
+        "display_name": _clean_display_name(model.display_name),
+        "active": ACTIVE_MODEL_MARKER in model.display_name,
+        "image_generation": model.image_generation,
+    }
 
 
 class StdioRunner:
@@ -742,6 +790,40 @@ class StdioRunner:
         """Wait until every in-flight thread_renamed emission task has finished."""
         if self._thread_name_emissions:
             await asyncio.gather(*list(self._thread_name_emissions), return_exceptions=True)
+
+    async def _emit_models_result(self, request_id: str, thread_id: int) -> None:
+        """Write one ``models_result`` frame answering a ``models`` request.
+
+        The listing is the one ``/model`` renders, in the same order, with
+        the active-selection marker turned into the ``active`` flag.
+        ``default`` is the account-level fallback (the configured default
+        provider, then the first chat-ready provider), never the thread
+        override: it answers what a fresh thread would run on. A listing
+        failure answers the request with an error frame rather than an empty
+        list, so the client can tell an outage from "no models available".
+
+        Args:
+            request_id: Identifier of the ``models`` request being answered.
+            thread_id: Thread the ``active`` flag is computed for.
+        """
+        try:
+            models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
+            default_selection = await get_default_chat_model(user_id=IDE_STORAGE_ID)
+        except Exception:
+            logger.exception("Failed to list models for thread {}", thread_id)
+            await self._error("request_failed", "The model listing is not available right now.", request_id)
+            return
+        default: dict[str, str] | None = None
+        if default_selection is not None:
+            default = {"provider": default_selection[0], "model": default_selection[1]}
+        await self._write(
+            {
+                "type": "models_result",
+                "request_id": request_id,
+                "models": [_models_result_entry(model) for model in models],
+                "default": default,
+            }
+        )
 
     async def _emit_delta(self, request_id: str, thread_id: int, text: str) -> None:
         """Append one live response chunk to the request's delta buffer.
@@ -1254,7 +1336,7 @@ class StdioRunner:
                         "type": "ready",
                         "protocol_version": PROTOCOL_VERSION,
                         "server": {"name": "chibi", "version": "1.0.0"},
-                        "capabilities": {"commands": COMMANDS},
+                        "capabilities": {"commands": COMMANDS, "models": True},
                     }
                 )
         elif message_type == "request":
@@ -1302,6 +1384,15 @@ class StdioRunner:
                 await self._error("malformed_request", "get_cwd requires a non-negative integer thread_id.", request_id)
             else:
                 await self._emit_cwd_update(message["thread_id"])
+        elif message_type == "models":
+            if not self._initialized:
+                await self._error("not_initialized", "Not initialized.", request_id)
+            elif not request_id:
+                await self._error("malformed_request", "models requires a non-empty string request_id.", None)
+            elif not isinstance(message.get("thread_id", 0), int) or message.get("thread_id", 0) < 0:
+                await self._error("malformed_request", "models requires a non-negative integer thread_id.", request_id)
+            else:
+                await self._emit_models_result(request_id, int(message.get("thread_id", 0)))
         elif message_type == "shutdown":
             self._stopping = True
         else:

@@ -18,7 +18,7 @@ READY_FRAME: dict[str, Any] = {
     "type": "ready",
     "protocol_version": PROTOCOL_VERSION,
     "server": {"name": "chibi", "version": "1.0.0"},
-    "capabilities": {"commands": COMMANDS},
+    "capabilities": {"commands": COMMANDS, "models": True},
 }
 
 RUNNERS: list[StdioRunner] = []
