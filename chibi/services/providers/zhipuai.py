@@ -38,7 +38,7 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
         self, image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema] | None:
         if image_generation:
-            return [
+            image_models = [
                 ModelChangeSchema(
                     provider=self.name, name="glm-image", display_name="GLM Image", image_generation=True
                 ),
@@ -46,6 +46,9 @@ class ZhipuAI(OpenAIFriendlyProvider, RestApiFriendlyProvider):
                     provider=self.name, name="cogview-4-250304", display_name="CogView 4", image_generation=True
                 ),
             ]
+            # The hardcoded listing must pass through the shared filter, otherwise
+            # IMAGE_MODELS_WHITELIST cannot restrict what the model menu offers.
+            return self.filter_and_return_list_of_models(models=image_models, image_generation=image_generation)
         if video_generation:
             return [
                 ModelChangeSchema(

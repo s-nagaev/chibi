@@ -124,6 +124,13 @@ thread_commands = [
 
 
 class ChibiBot:
+    prompt_message_filters = (
+        (filters.TEXT | filters.VOICE | filters.AUDIO) & (~filters.COMMAND) & filters.UpdateType.MESSAGE
+    )
+    file_upload_message_filters = (
+        (filters.ATTACHMENT | filters.PHOTO | filters.Document.ALL) & (~filters.COMMAND) & filters.UpdateType.MESSAGE
+    )
+
     def __init__(self, telegram_token: str | None) -> None:
         if not telegram_token:
             raise RuntimeError("No telegram token provider")
@@ -826,12 +833,8 @@ class ChibiBot:
         app.add_handler(CommandHandler("stop", self.stop))
         app.add_handler(CommandHandler("start", self.help))
 
-        app.add_handler(MessageHandler(filters.TEXT | filters.VOICE | filters.AUDIO & (~filters.COMMAND), self.prompt))
-        app.add_handler(
-            MessageHandler(
-                filters.ATTACHMENT | filters.PHOTO | filters.Document.ALL & (~filters.COMMAND), self.file_upload
-            )
-        )
+        app.add_handler(MessageHandler(self.prompt_message_filters, self.prompt))
+        app.add_handler(MessageHandler(self.file_upload_message_filters, self.file_upload))
 
         app.add_handler(
             InlineQueryHandler(

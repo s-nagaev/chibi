@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.5] - 2026-11-16
+
+### Added
+- **`IMAGE_MODELS_WHITELIST` limits which image generation models the bot offers and uses.** Comma-separated and optional: when set, image model listings and image generation are restricted to the listed models, and `MODELS_WHITELIST` / `MODELS_BLACKLIST` no longer apply to image models. Left unset, image models keep following the global whitelist and blacklist.
+
+### Fixed
+- **Edited messages no longer re-trigger the agent.** An edit arrives as an `edited_message` update, which the prompt and file-upload handlers now ignore, so editing or reacting to a message that quotes the agent no longer starts a new turn. Fresh messages, including replies to the agent, are handled as before.
+- **Command messages carrying an attachment are no longer handled as uploads.** The file-upload filter now excludes commands across the whole media expression.
+
 ## [1.21.4] - 2026-11-14
 
 ### Changed

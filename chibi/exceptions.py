@@ -50,6 +50,10 @@ class ServiceConnectionError(GptException): ...
 class NoModelSelectedError(GptException): ...
 
 
+class ModelNotAllowedError(GptException):
+    """A model was requested that the operator's allowlist does not permit."""
+
+
 class NoProviderSelectedError(GptException): ...
 
 

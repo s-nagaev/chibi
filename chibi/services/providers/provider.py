@@ -650,10 +650,28 @@ class Provider(ABC):
     def filter_and_return_list_of_models(
         self, models: list[ModelChangeSchema], image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema]:
+        """Filter a provider's model listing for the requested model kind.
+
+        Image listings honor ``IMAGE_MODELS_WHITELIST`` exclusively: when the
+        setting is non-empty, only its models survive and the global
+        ``MODELS_WHITELIST`` / ``MODELS_BLACKLIST`` are not applied to image
+        models. When it is unset, image listings follow the same global
+        whitelist/blacklist rules as every other model kind.
+
+        Args:
+            models: Models reported by the provider.
+            image_generation: Restrict the listing to image generation models.
+            video_generation: Restrict the listing to video generation models.
+
+        Returns:
+            The filtered models, sorted by name in descending order.
+        """
         all_models = sorted(models, key=lambda model: model.name, reverse=True)
 
         if image_generation:
             filtered_models = [model for model in all_models if model.image_generation]
+            if gpt_settings.image_models_whitelist:
+                return [model for model in filtered_models if model.name in gpt_settings.image_models_whitelist]
         elif video_generation:
             filtered_models = [model for model in all_models if model.video_generation]
         else:

@@ -238,6 +238,10 @@ class Alibaba(OpenAIFriendlyProvider):
             ]
 
             models += wan_models
+            # The hand-listed model is appended after the base listing was already
+            # filtered, so the merged listing has to pass through the filter again
+            # for IMAGE_MODELS_WHITELIST to restrict it.
+            models = self.filter_and_return_list_of_models(models=models, image_generation=image_generation)
 
         if video_generation:
             wan_video_models = [
