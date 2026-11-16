@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-11-16
+
+### Added
+- **Extra compatible provider instances can be defined with environment variables.** Each `OPENAICOMPATIBLE_<NAME>_API_KEY` registers a provider named `<NAME>` that serves chat, speech-to-text and text-to-speech, with the endpoint taken from `OPENAICOMPATIBLE_<NAME>_URL`. The number of instances is not limited.
+- **Anthropic-compatible endpoints follow the same scheme.** `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` registers a chat provider per name, and `ANTHROPICCOMPATIBLE_<NAME>_URL` points it at the endpoint. Left unset, the URL stays `https://api.anthropic.com`.
+
+### Changed
+- **The built-in `CustomOpenAI` instance keeps its name and its variables.** `CUSTOMOPENAI_API_KEY` and `CUSTOMOPENAI_URL` still configure it, so stored selections and existing configuration need no change.
+
 ## [1.21.5] - 2026-11-16
 
 ### Added
