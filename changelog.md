@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **IDE clients can select the model per request:** the stdio protocol `request` frame accepts an optional `model` field (model id, 1-based listing index or display name), applied to the thread before the prompt runs; an unknown selection answers an `invalid_request` error and the prompt is skipped, while an absent, null or empty field changes nothing.
+
 ## [1.21.3] - 2026-11-11
 
 ### Fixed

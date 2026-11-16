@@ -18,7 +18,7 @@ from chibi.exceptions import ConfigurationError, StorageError
 from chibi.interfaces.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.interfaces.stdio_interface import MAX_THREAD_NAME_LENGTH, StdioInterface
 from chibi.models import Message
-from chibi.schemas.app import UsageSchema
+from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.events.cwd_events import cwd_tracker
 from chibi.services.events.subagent_events import subagent_tracker
@@ -202,6 +202,50 @@ async def _get_thread_cwd(db: Database, storage_id: int, thread_id: int) -> str:
     """
     user = await db.get_or_create_user(user_id=storage_id)
     return str(Path(user.get_effective_working_dir(thread_id=thread_id)).expanduser())
+
+
+async def _apply_model_selection(
+    interface: StdioInterface, models: list[ModelChangeSchema], selection: str
+) -> list[str]:
+    """Resolve a model selection token against the listing and activate the model.
+
+    The token is read exactly as the ``/model`` command documents it: an empty
+    token answers the numbered listing, a 1-based index addresses a listing
+    position, and any other token selects a model. Ids (``name``) are matched
+    before display names, because the active model's display name carries the
+    ``🟢`` marker prepended by the listing (see
+    :func:`chibi.services.user.get_models_available`), which makes the id the
+    reliable way to address a model from a client.
+
+    Args:
+        interface: Request-local interface the activation is persisted on.
+        models: Models available on the interface thread, in listing order.
+        selection: Selection token: empty string, 1-based index, model id or
+            display name.
+
+    Returns:
+        The response lines describing the outcome. An empty list means the
+        selection was rejected and ``interface.error_code`` carries the error.
+    """
+    if not selection:
+        return [
+            "\n".join(f"{index}. {model.display_name} ({model.provider})" for index, model in enumerate(models, 1))
+            or "No models available."
+        ]
+    selected: ModelChangeSchema | None = None
+    if selection.isdigit() and 1 <= int(selection) <= len(models):
+        selected = models[int(selection) - 1]
+    else:
+        selected = next((model for model in models if model.name == selection), None)
+        if selected is None:
+            selected = next((model for model in models if model.display_name == selection), None)
+    if selected is None:
+        available_models = ", ".join(model.display_name for model in models) or "none"
+        interface.error_code = "invalid_argument"
+        interface.error_message = f"Unknown model selection. Available models: {available_models}."
+        return []
+    await set_active_model(interface=interface, model=selected)
+    return [f"Selected model: {selected.display_name} ({selected.provider})"]
 
 
 class StdioRunner:
@@ -851,6 +895,7 @@ class StdioRunner:
             and isinstance(message.get("selection"), (dict, type(None)))
             and isinstance(message.get("cursor_position"), (dict, type(None)))
             and isinstance(message.get("language_id"), (str, type(None)))
+            and isinstance(message.get("model"), (str, type(None)))
         )
 
     async def _handle_new_thread_with_current_context(
@@ -1015,6 +1060,17 @@ class StdioRunner:
             self._thread_name_emitted_threads.add(thread_id)
             await self._emit_stored_thread_name(thread_id)
         try:
+            requested_model = message.get("model")
+            if isinstance(requested_model, str) and requested_model:
+                # A request-level selection is applied before anything runs, so an
+                # unknown model fails the request; the /model confirmation text is
+                # not part of the answer it produces.
+                models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
+                await _apply_model_selection(interface=interface, models=models, selection=requested_model)
+                if interface.error_code is not None:
+                    self._drop_deltas(request_id)
+                    await self._error(interface.error_code, interface.error_message or "Request failed.", request_id)
+                    return
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
                 command, args = parts[0].lower(), parts[1] if len(parts) > 1 else ""
@@ -1041,30 +1097,7 @@ class StdioRunner:
                     responses.append(f"User ID: {IDE_STORAGE_ID}\nActive model: {active}\nUser info: {user_info}")
                 elif command == "/model":
                     models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
-                    if args.isdigit() and 1 <= int(args) <= len(models):
-                        await set_active_model(interface=interface, model=models[int(args) - 1])
-                        responses.append(
-                            f"Selected model: {models[int(args) - 1].display_name} ({models[int(args) - 1].provider})"
-                        )
-                    elif args:
-                        selected = next(
-                            (model for model in models if model.name == args or model.display_name == args), None
-                        )
-                        if selected is None:
-                            available_models = ", ".join(model.display_name for model in models) or "none"
-                            interface.error_code = "invalid_argument"
-                            interface.error_message = f"Unknown model selection. Available models: {available_models}."
-                        else:
-                            await set_active_model(interface=interface, model=selected)
-                            responses.append(f"Selected model: {selected.display_name} ({selected.provider})")
-                    else:
-                        responses.append(
-                            "\n".join(
-                                f"{index}. {model.display_name} ({model.provider})"
-                                for index, model in enumerate(models, 1)
-                            )
-                            or "No models available."
-                        )
+                    responses.extend(await _apply_model_selection(interface=interface, models=models, selection=args))
                 else:
                     # Unmatched slash-prefixed prompt: treat as a plain user prompt.
                     await handle_user_prompt(interface=interface)
