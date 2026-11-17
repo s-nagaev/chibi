@@ -25,6 +25,10 @@ from chibi.schemas.scheduler import (
     SelfActionPayload,
 )
 from chibi.services.bot import handle_scheduler_trigger
+from chibi.services.providers.tools._moderation import (
+    ModeratorUnavailableError,
+    moderate_command_standardized,
+)
 from chibi.services.providers.tools.cmd import _decode_output
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.scheduler import AGENT_JOB_PREFIX, ChibiScheduler, StdioScheduler
@@ -233,11 +237,13 @@ async def _wake_agent_with_command_result(
 async def _run_command_action(payload: AgentJobPayload, action: CommandActionPayload) -> None:
     """Run the pre-moderated shell command of a `command` action and wake the agent.
 
-    The command is re-moderated before every run; on a declined
-    verdict the run is skipped and the job is kept. Execution follows the
-    ``cmd.py`` pattern: ``create_subprocess_shell`` with a fresh process group
-    and ``killpg`` on timeout. The agent is ALWAYS woken with the result —
-    success or failure, empty or non-empty output — through the self-wake
+    The command is re-moderated before every run; on a declined verdict the
+    run is skipped and the job is kept, while an unavailable moderator (HTTP
+    error, connection problem, unparsable response) wakes the agent with the
+    standardized error message instead of failing the job. Execution follows
+    the ``cmd.py`` pattern: ``create_subprocess_shell`` with a fresh process
+    group and ``killpg`` on timeout. The agent is ALWAYS woken with the result
+    — success or failure, empty or non-empty output — through the self-wake
     pipeline; it owns communication with the user. Only a failed wake (LLM
     error) falls back to a direct, anti-flooded user notification.
 
@@ -253,9 +259,21 @@ async def _run_command_action(payload: AgentJobPayload, action: CommandActionPay
         return
 
     moderation_provider = await get_moderation_provider(user_id=payload.user_id)
-    moderator_answer = await moderation_provider.moderate_command(
-        cmd=action.command, model=gpt_settings.moderation_model
-    )
+    try:
+        moderator_answer = await moderate_command_standardized(
+            moderation_provider, cmd=action.command, model=gpt_settings.moderation_model
+        )
+    except ModeratorUnavailableError as e:
+        logger.bind(user_id=payload.user_id).warning(
+            f"Scheduler: moderator unavailable for job '{payload.job_id}' (HTTP {e.code}, {e.error_type}). "
+            f"Command not run, waking the agent with the standardized error. Job is kept."
+        )
+        await _wake_agent_with_command_result(
+            payload,
+            _build_command_result_trigger(payload, action, error_note=e.message),
+            _build_interface(payload),
+        )
+        return
     if moderator_answer.verdict == "declined":
         logger.bind(user_id=payload.user_id).warning(
             f"Scheduler: moderator declined the command of job '{payload.job_id}' "

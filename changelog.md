@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **The built-in `CustomOpenAI` instance keeps its name and its variables.** `CUSTOMOPENAI_API_KEY` and `CUSTOMOPENAI_URL` still configure it, so stored selections and existing configuration need no change.
 
+## [1.21.6] - 2026-11-16
+
+### Fixed
+- **A scheduled command survives an unavailable command moderator.** HTTP errors, connection failures and unparseable moderator responses surface to the agent as one standardized error message instead of an unhandled failure or a misleading "declined" verdict; the command is not run, and the agent job wakes itself with the same message so it can decide what to do next.
+
 ## [1.21.5] - 2026-11-16
 
 ### Added

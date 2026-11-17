@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from chibi.config import application_settings, gpt_settings
 from chibi.exceptions import SchedulerJobError
 from chibi.schemas.scheduler import AgentJobPayload, CommandActionPayload
+from chibi.services.providers.tools._moderation import moderate_command_for_tool
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
 from chibi.services.providers.tools.utils import AdditionalOptions, resolve_session_context
@@ -561,15 +562,18 @@ class ScheduleTaskTool(ChibiTool):
             caller_model: Name of the model that requested the task (for logs).
 
         Raises:
-            ToolException: If the moderator declines the command.
+            ToolException: If the moderator declines the command or is unavailable.
         """
         if not isinstance(payload.action, CommandActionPayload):
             return
 
         moderation_provider = await get_moderation_provider(user_id=user_id)
         logger.log("MODERATOR", f"[{caller_model}] Pre-moderating scheduled command: '{payload.action.command}'")
-        moderator_answer = await moderation_provider.moderate_command(
-            cmd=payload.action.command, model=gpt_settings.moderation_model
+        moderator_answer = await moderate_command_for_tool(
+            moderation_provider,
+            cmd=payload.action.command,
+            model=gpt_settings.moderation_model,
+            caller_model=caller_model,
         )
         if moderator_answer.verdict == "declined":
             raise ToolException(
