@@ -9,6 +9,7 @@ swallowing raw SDK errors) actually fail the suite. Pure-logic unit tests
 """
 
 import asyncio
+import json
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, Callable, cast
@@ -17,9 +18,7 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 import httpx2
 import pytest
 from anthropic.types import (
-    Message as AnthropicMessage,
-)
-from anthropic.types import (
+    InputJSONDelta,
     RawContentBlockDeltaEvent,
     RawContentBlockStartEvent,
     TextBlock,
@@ -28,11 +27,15 @@ from anthropic.types import (
     ToolUseBlock,
 )
 from anthropic.types import (
+    Message as AnthropicMessage,
+)
+from anthropic.types import (
     Usage as AnthropicUsage,
 )
 from google.genai.types import (
     Candidate,
     Content,
+    FunctionCall,
     GenerateContentConfig,
     GenerateContentResponse,
     GenerateContentResponseUsageMetadata,
@@ -51,7 +54,12 @@ from openai import BadRequestError, RateLimitError
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from openai.types.completion_usage import CompletionUsage
-from openai.types.responses import ResponseTextDeltaEvent
+from openai.types.responses import (
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
+    ResponseTextDeltaEvent,
+)
 from tenacity import wait_fixed
 
 from chibi.config import gpt_settings
@@ -76,10 +84,12 @@ from chibi.services.providers.provider import (
 )
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    SayAnswerDeltaStreamer,
     delta_latched,
     delta_streaming_allowed,
     mark_non_streaming_fallback_spent,
     non_streaming_fallback_spent_error,
+    partial_json_string_argument,
 )
 from chibi.utils.app import SingletonMeta
 from tests.conftest import retrying_policy
@@ -168,6 +178,50 @@ def _text_delta_event(delta: str) -> ResponseTextDeltaEvent:
         delta=delta,
         logprobs=[],
     )
+
+
+def _function_call_item_added(name: str, output_index: int = 0) -> ResponseOutputItemAddedEvent:
+    """Build a real Responses API output-item-added event for a function call."""
+    return ResponseOutputItemAddedEvent(
+        sequence_number=0,
+        type="response.output_item.added",
+        output_index=output_index,
+        item=ResponseFunctionToolCall(
+            arguments="",
+            call_id=f"call-{output_index}",
+            name=name,
+            type="function_call",
+            id=f"item-{output_index}",
+        ),
+    )
+
+
+def _function_call_arguments_delta(delta: str, output_index: int = 0) -> Any:
+    """Build a real Responses API function-call-arguments delta event."""
+    return ResponseFunctionCallArgumentsDeltaEvent(
+        sequence_number=1,
+        type="response.function_call_arguments.delta",
+        item_id=f"item-{output_index}",
+        output_index=output_index,
+        delta=delta,
+    )
+
+
+def _tool_call_chunk(index: int, name: str | None, arguments: str, call_id: str | None = None) -> Any:
+    """Build an OpenAI Chat Completions chunk carrying one tool-call fragment."""
+    return _make_chunk(
+        tool_calls=[SimpleNamespace(index=index, id=call_id, function=SimpleNamespace(name=name, arguments=arguments))]
+    )
+
+
+def _say_argument_fragments(text: str, size: int = 7) -> list[str]:
+    """Split a ``say`` call's arguments JSON into the fragments a streaming gateway sends.
+
+    The split is deliberately blind: it cuts inside escapes and unicode
+    escapes, which is exactly what a real gateway does.
+    """
+    encoded = json.dumps({"text": text})
+    return [encoded[offset : offset + size] for offset in range(0, len(encoded), size)]
 
 
 def _fake_responses_api_response(text: str) -> Any:
@@ -1722,3 +1776,341 @@ class TestAckSentinelStreamSession:
     async def test_none_interface_is_safe_for_the_session(self) -> None:
         async with AckSentinelStreamSession(None) as deltas:
             await deltas.emit("chunk")
+
+
+class TestPartialJsonStringArgument:
+    """The partial-JSON reader behind the say() answer streaming."""
+
+    def test_complete_document_decodes_exactly_like_json_loads(self) -> None:
+        value = 'Hello "quoted"\nsecond\tline, slash \\ and dash -, é, 😀'
+        raw = json.dumps({"text": value})
+        assert partial_json_string_argument(raw, "text") == json.loads(raw)["text"] == value
+
+    def test_unparsable_prefix_returns_none(self) -> None:
+        assert partial_json_string_argument('{"te', "text") is None
+        assert partial_json_string_argument('{"text"', "text") is None
+        assert partial_json_string_argument('{"text":', "text") is None
+        assert partial_json_string_argument('{"text": ', "text") is None
+        assert partial_json_string_argument("", "text") is None
+
+    def test_truncated_value_decodes_the_ready_prefix(self) -> None:
+        assert partial_json_string_argument('{"text": "Hel', "text") == "Hel"
+        assert partial_json_string_argument('{"text":"', "text") == ""
+
+    def test_truncated_escape_is_held_back(self) -> None:
+        assert partial_json_string_argument('{"text": "a\\', "text") == "a"
+        assert partial_json_string_argument('{"text": "a\\n', "text") == "a\n"
+        assert partial_json_string_argument('{"text": "a\\\\', "text") == "a\\"
+        assert partial_json_string_argument('{"text": "a\\"b', "text") == 'a"b'
+
+    def test_truncated_unicode_escape_is_held_back(self) -> None:
+        assert partial_json_string_argument('{"text": "a\\u00', "text") == "a"
+        assert partial_json_string_argument('{"text": "a\\u00e9', "text") == "aé"
+        assert partial_json_string_argument('{"text": "a\\u00e9b', "text") == "aéb"
+
+    def test_surrogate_pair_is_decoded_only_when_complete(self) -> None:
+        assert partial_json_string_argument('{"text": "\\ud83d', "text") == ""
+        assert partial_json_string_argument('{"text": "\\ud83d\\ude00', "text") == "😀"
+
+    def test_key_quoted_inside_an_earlier_value_is_not_the_argument(self) -> None:
+        raw = '{"note": "say \\"text\\": not the argument", "text": "real"}'
+        assert partial_json_string_argument(raw, "text") == "real"
+
+    def test_whitespace_around_the_colon_is_tolerated(self) -> None:
+        assert partial_json_string_argument('{"text" :  "spaced"}', "text") == "spaced"
+
+
+class TestSayAnswerDeltaStreamer:
+    """A turn answering through the say() tool call must stream that answer."""
+
+    def test_fragmented_arguments_stream_progressively(self) -> None:
+        answer = "1 - first step\n2 - second step\n3 - third"
+        streamer = SayAnswerDeltaStreamer()
+        accumulated = ""
+        emitted: list[str] = []
+        for fragment in _say_argument_fragments(answer):
+            accumulated += fragment
+            emitted.append(streamer.update(tool_name="say", raw_arguments=accumulated, index=0))
+        assert "".join(emitted) == answer
+        assert len([chunk for chunk in emitted if chunk]) > 1
+
+    def test_whole_call_in_one_fragment_is_emitted_once(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        raw = json.dumps({"text": "Hello"})
+        assert streamer.update(tool_name="say", raw_arguments=raw, index=0) == "Hello"
+        assert streamer.update(tool_name="say", raw_arguments=raw, index=0) == ""
+
+    def test_work_call_blocks_a_later_say_call(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        assert streamer.update(tool_name="read_file", raw_arguments='{"path": "a"}', index=0) == ""
+        assert streamer.update(tool_name="say", raw_arguments=json.dumps({"text": "late"}), index=1) == ""
+        assert streamer.blocked is True
+
+    def test_ack_silently_does_not_block_a_say_call_of_the_same_response(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        assert streamer.update(tool_name="ack_silently", raw_arguments="{}", index=0) == ""
+        assert streamer.update(tool_name="say", raw_arguments=json.dumps({"text": "answer"}), index=1) == "answer"
+        assert streamer.blocked is False
+
+    def test_only_the_first_say_call_is_followed(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        assert streamer.update(tool_name="say", raw_arguments=json.dumps({"text": "first"}), index=0) == "first"
+        assert streamer.update(tool_name="say", raw_arguments=json.dumps({"text": "second"}), index=1) == ""
+
+    def test_unidentified_call_is_ignored_until_its_name_arrives(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        assert streamer.update(tool_name=None, raw_arguments='{"text": "Hel', index=0) == ""
+        assert streamer.update(tool_name="say", raw_arguments='{"text": "Hel', index=0) == "Hel"
+
+    def test_arguments_of_a_foreign_call_never_reach_the_answer(self) -> None:
+        streamer = SayAnswerDeltaStreamer()
+        assert streamer.update(tool_name="read_file", raw_arguments='{"path": "secret"}', index=0) == ""
+        assert streamer.update(tool_name=None, raw_arguments='{"path": "secret"}', index=0) == ""
+
+
+class TestSayAnswerStreamingAcrossAdapters:
+    """Every adapter's stream loop must lift the say() answer onto the delta channel."""
+
+    ANSWER = "1 - first step\n2 - second step, é and 😀"
+
+    async def test_openai_chat_completions_streams_fragmented_say_arguments(self) -> None:
+        fragments = _say_argument_fragments(self.ANSWER)
+        chunks = [
+            _tool_call_chunk(index=0, name="say" if offset == 0 else None, arguments=fragment, call_id="call-1")
+            for offset, fragment in enumerate(fragments)
+        ]
+        stream = _FakeOpenAIStream(chunks)
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            response = await provider._stream_chat_completion(
+                completion_kwargs={"model": "m-1", "messages": []},
+                interface=interface,
+            )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == self.ANSWER
+        assert len(emitted) > 1
+        tool_calls = cast(Any, response.choices[0].message.tool_calls)
+        assert json.loads(tool_calls[0].function.arguments)["text"] == self.ANSWER
+        assert interface.delta_emitted is True
+
+    async def test_openai_chat_completions_does_not_stream_a_mixed_turn(self) -> None:
+        chunks = [
+            _tool_call_chunk(index=0, name="read_file", arguments='{"path": "a"}', call_id="call-1"),
+            _tool_call_chunk(index=1, name="say", arguments=json.dumps({"text": "folded"}), call_id="call-2"),
+        ]
+        stream = _FakeOpenAIStream(chunks)
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            await provider._stream_chat_completion(
+                completion_kwargs={"model": "m-1", "messages": []},
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+
+    async def test_openai_chat_completions_ack_silently_never_streams(self) -> None:
+        stream = _FakeOpenAIStream([_tool_call_chunk(index=0, name="ack_silently", arguments="{}", call_id="call-1")])
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            await provider._stream_chat_completion(
+                completion_kwargs={"model": "m-1", "messages": []},
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+
+    async def test_anthropic_streams_fragmented_say_input_json(self) -> None:
+        events: list[Any] = [
+            RawContentBlockStartEvent(
+                type="content_block_start",
+                index=0,
+                content_block=ToolUseBlock(id="t1", name="say", input={}, type="tool_use"),
+            ),
+            *[
+                RawContentBlockDeltaEvent(
+                    type="content_block_delta",
+                    index=0,
+                    delta=InputJSONDelta(type="input_json_delta", partial_json=fragment),
+                )
+                for fragment in _say_argument_fragments(self.ANSWER)
+            ],
+        ]
+        final = SimpleNamespace(
+            content=[ToolUseBlock(id="t1", name="say", input={"text": self.ANSWER}, type="tool_use")]
+        )
+        fake_stream = _FakeAnthropicStream(events, final)
+        fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kwargs: fake_stream))
+        provider = AnthropicFriendlyProvider(token=TEST_TOKEN)
+        interface = _make_interface()
+
+        with patch.object(AnthropicFriendlyProvider, "client", new_callable=PropertyMock, return_value=fake_client):
+            await provider._stream_generate_content(model="claude", system=[], messages=[], interface=interface)
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == self.ANSWER
+        assert len(emitted) > 1
+
+    async def test_gemini_streams_the_whole_say_call_as_one_delta(self) -> None:
+        chunks = [
+            GenerateContentResponse(
+                candidates=[
+                    Candidate(
+                        content=Content(
+                            role="model",
+                            parts=[Part(function_call=FunctionCall(name="say", args={"text": self.ANSWER}))],
+                        )
+                    )
+                ]
+            ),
+            GenerateContentResponse(
+                usage_metadata=GenerateContentResponseUsageMetadata(
+                    prompt_token_count=1,
+                    candidates_token_count=2,
+                    total_token_count=3,
+                )
+            ),
+        ]
+        provider = Gemini(token=TEST_TOKEN)
+        interface = _make_interface()
+        fake_client = _FakeGeminiClient(chunks)
+
+        response = await provider._generate_content_streamed(
+            client=cast(Any, fake_client),
+            model="models/gemini-3.8-flash",
+            contents=Content(role="user", parts=[Part(text="hi")]),
+            config=GenerateContentConfig(),
+            interface=interface,
+        )
+
+        assert [call.args[0] for call in interface.send_delta.await_args_list] == [self.ANSWER]
+        assert response.function_calls is not None
+        assert response.function_calls[0].args == {"text": self.ANSWER}
+
+    async def test_gemini_work_call_never_streams(self) -> None:
+        chunks = [
+            GenerateContentResponse(
+                candidates=[
+                    Candidate(
+                        content=Content(
+                            role="model",
+                            parts=[Part(function_call=FunctionCall(name="read_file", args={"path": "a"}))],
+                        )
+                    )
+                ]
+            ),
+        ]
+        provider = Gemini(token=TEST_TOKEN)
+        interface = _make_interface()
+        fake_client = _FakeGeminiClient(chunks)
+
+        await provider._generate_content_streamed(
+            client=cast(Any, fake_client),
+            model="models/gemini-3.8-flash",
+            contents=Content(role="user", parts=[Part(text="hi")]),
+            config=GenerateContentConfig(),
+            interface=interface,
+        )
+
+        interface.send_delta.assert_not_awaited()
+
+    async def test_mistral_streams_fragmented_say_arguments(self) -> None:
+        fragments = _say_argument_fragments(self.ANSWER)
+        events = [
+            _mistral_stream_chunk(
+                tool_calls=[
+                    SimpleNamespace(
+                        index=0,
+                        id="call-1" if offset == 0 else None,
+                        function=SimpleNamespace(name="say" if offset == 0 else None, arguments=fragment),
+                    )
+                ]
+            )
+            for offset, fragment in enumerate(fragments)
+        ]
+        events.append(
+            _mistral_stream_chunk(
+                finish_reason="tool_calls",
+                usage=UsageInfo(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+            )
+        )
+        fake_stream = _FakeMistralStream(events)
+
+        async def _stream_async(**kwargs: Any) -> Any:
+            return fake_stream
+
+        provider = MistralAI(token=TEST_TOKEN)
+        provider.__dict__["_client"] = SimpleNamespace(chat=SimpleNamespace(stream_async=_stream_async))
+        interface = _make_interface()
+
+        await provider._stream_generate_content(
+            model="mistral-medium-latest",
+            messages=[],
+            interface=interface,
+        )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == self.ANSWER
+        assert len(emitted) > 1
+
+    async def test_responses_api_streams_fragmented_say_arguments(self) -> None:
+        events: list[Any] = [_function_call_item_added("say", 0)]
+        events.extend(_function_call_arguments_delta(fragment, 0) for fragment in _say_argument_fragments(self.ANSWER))
+        final = _fake_responses_api_response("")
+        stream = _FakeResponsesStream(events, final)
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        mock_client = SimpleNamespace(responses=SimpleNamespace(stream=lambda **kwargs: stream))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            await provider._stream_response_completion(
+                request_kwargs={"model": "gpt-5-mini"},
+                interface=interface,
+            )
+
+        emitted = [call.args[0] for call in interface.send_delta.await_args_list]
+        assert "".join(emitted) == self.ANSWER
+        assert len(emitted) > 1
+
+    async def test_pure_ack_say_answer_never_emits_a_delta(self) -> None:
+        answer = "<chibi>ACK</chibi>"
+        stream = _FakeOpenAIStream(
+            [_tool_call_chunk(index=0, name="say", arguments=json.dumps({"text": answer}), call_id="call-1")]
+        )
+        interface = _make_interface()
+        provider = OpenAI(token=TEST_TOKEN)
+        completions = SimpleNamespace(create=AsyncMock(return_value=stream))
+        mock_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+        with patch.object(OpenAI, "client", new_callable=PropertyMock, return_value=mock_client):
+            await provider._stream_chat_completion(
+                completion_kwargs={"model": "m-1", "messages": []},
+                interface=interface,
+            )
+
+        interface.send_delta.assert_not_awaited()
+        assert interface.delta_emitted is False
+
+
+def _mistral_stream_chunk(
+    content: str | None = None,
+    tool_calls: list[Any] | None = None,
+    usage: Any = None,
+    finish_reason: str | None = None,
+) -> Any:
+    """Build a Mistral stream event carrying the given delta."""
+    delta = SimpleNamespace(content=content, tool_calls=tool_calls)
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(data=SimpleNamespace(id="cmpl-1", model="mistral", created=7, choices=[choice], usage=usage))

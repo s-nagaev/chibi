@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **A host install without `LOCAL_DATA_PATH` no longer writes to the container path:** outside Docker and Podman the data directory falls back to `~/chibi-bot/data`, which is created when missing, instead of failing on the image-only `/app/data`; an explicit environment variable, working directory `.env` or `~/chibi-bot/settings` value still wins.
+- **Answers delivered through the `say` tool call stream to IDE clients instead of arriving only at the end:** the text argument of the turn-ending `say` call is now sent on the live delta channel, so a client that declared the `streaming` capability shows the answer while the turn is still running.
 
 ## [1.21.3] - 2026-11-11
 
