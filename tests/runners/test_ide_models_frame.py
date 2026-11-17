@@ -14,7 +14,9 @@ import pytest
 import chibi.config  # noqa: F401
 from chibi.config import gpt_settings
 from chibi.interfaces.stdio_runner import COMMANDS, PROTOCOL_VERSION, StdioRunner
+from chibi.models import ModelsUnavailableError
 from chibi.schemas.app import ModelChangeSchema
+from chibi.services.providers import RegisteredProviders
 from chibi.services.user import get_default_chat_model
 from chibi.storage.local import LocalStorage
 
@@ -409,6 +411,85 @@ class TestModelsResult:
         assert models_result(output)["default"] is None
 
     @pytest.mark.asyncio
+    async def test_empty_default_model_serializes_as_null(self) -> None:
+        """A default selection with an empty model string is advertised as null."""
+        instance, output = runner()
+
+        with listing_patch(), default_patch(("openai", "")):
+            await instance._handle_message(initialize())
+            await instance._handle_message(models_message())
+
+        assert models_result(output)["default"] is None
+
+    @pytest.mark.asyncio
+    async def test_empty_listing_without_providers_carries_the_cause(self) -> None:
+        """An empty listing with no provider configured carries ``no_providers_configured``."""
+        instance, output = runner()
+        REGISTRY.models = []
+
+        with (
+            listing_patch(),
+            default_patch(None),
+            patch.object(RegisteredProviders, "available", {}),
+        ):
+            await instance._handle_message(initialize())
+            await instance._handle_message(models_message())
+
+        result = models_result(output)
+        assert result["models"] == []
+        assert result["default"] is None
+        assert result["cause"] == "no_providers_configured"
+
+    @pytest.mark.asyncio
+    async def test_empty_listing_with_providers_has_no_cause(self) -> None:
+        """An empty listing with providers configured stays a plain empty answer."""
+        instance, output = runner()
+        REGISTRY.models = []
+
+        with (
+            listing_patch(),
+            default_patch(None),
+            patch.object(RegisteredProviders, "available", {"openai": object()}),
+        ):
+            await instance._handle_message(initialize())
+            await instance._handle_message(models_message())
+
+        result = models_result(output)
+        assert result["models"] == []
+        assert "cause" not in result
+
+    @pytest.mark.asyncio
+    async def test_total_listing_failure_reports_the_failed_provider_count(self) -> None:
+        """A total listing outage keeps the error frame and names the failed provider count."""
+        instance, output = runner()
+
+        async def unavailable(user_id: int, thread_id: int = 0, **kwargs: Any) -> list[ModelChangeSchema]:
+            """Raise the total listing outage under test.
+
+            Args:
+                user_id: Storage identity the listing is requested for.
+                thread_id: Thread the listing is requested for.
+                **kwargs: Additional listing flags ignored by the fake.
+
+            Raises:
+                ModelsUnavailableError: Always.
+            """
+            raise ModelsUnavailableError("every provider failed")
+
+        with (
+            patch("chibi.interfaces.stdio_runner.get_models_available", new=unavailable),
+            default_patch(),
+            patch.object(RegisteredProviders, "available", {"openai": object(), "alibaba": object()}),
+        ):
+            await instance._handle_message(initialize())
+            await instance._handle_message(models_message())
+
+        failure = errors(output)
+        assert [frame["code"] for frame in failure] == ["request_failed"]
+        assert failure[0]["request_id"] == "01HXY9K5MODELS0"
+        assert failure[0]["failed_providers"] == 2
+
+    @pytest.mark.asyncio
     async def test_listing_failure_answers_an_error_frame(self) -> None:
         """A failing listing answers request_failed instead of an empty list."""
         instance, output = runner()
@@ -592,5 +673,39 @@ class TestDefaultChatModelResolution:
         with (
             patch("chibi.models.User.providers", new_callable=PropertyMock, return_value=providers),
             patch.object(gpt_settings, "default_provider", None),
+        ):
+            assert await get_default_chat_model.__wrapped__(db, user_id=1) is None
+
+    @pytest.mark.asyncio
+    async def test_empty_default_model_provider_is_skipped(self, tmp_path: Path) -> None:
+        """A resolvable provider with an empty default model is not advertised as the default."""
+        db = LocalStorage(storage_path=str(tmp_path))
+        await db.get_or_create_user(user_id=1)
+        providers = StubProviders(
+            {
+                "customopenai": StubProvider("customopenai", ""),
+                "alibaba": StubProvider("alibaba", "qwen-fake"),
+            },
+            first=StubProvider("alibaba", "qwen-fake"),
+        )
+
+        with (
+            patch("chibi.models.User.providers", new_callable=PropertyMock, return_value=providers),
+            patch.object(gpt_settings, "default_provider", "customopenai"),
+        ):
+            assert await get_default_chat_model.__wrapped__(db, user_id=1) == ("alibaba", "qwen-fake")
+
+    @pytest.mark.asyncio
+    async def test_only_empty_default_providers_resolve_to_none(self, tmp_path: Path) -> None:
+        """When every candidate has an empty default model the resolution reports nothing."""
+        db = LocalStorage(storage_path=str(tmp_path))
+        await db.get_or_create_user(user_id=1)
+        providers = StubProviders(
+            {"customopenai": StubProvider("customopenai", " ")}, first=StubProvider("customopenai", " ")
+        )
+
+        with (
+            patch("chibi.models.User.providers", new_callable=PropertyMock, return_value=providers),
+            patch.object(gpt_settings, "default_provider", "customopenai"),
         ):
             assert await get_default_chat_model.__wrapped__(db, user_id=1) is None

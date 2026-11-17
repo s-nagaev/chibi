@@ -90,7 +90,7 @@ from chibi.exceptions import (
     SilentTurnError,
 )
 from chibi.interfaces.interface import UserInterface
-from chibi.models import Message, User
+from chibi.models import MODELS_DISCOVERY_TIMEOUT_SECONDS, Message, User
 from chibi.schemas.app import (
     ChatResponseSchema,
     ModelChangeSchema,
@@ -180,6 +180,7 @@ async def download_media(url: str, timeout: float = 120.0) -> bytes:
 class RegisteredProviders:
     all: dict[str, type["Provider"]] = {}
     available: dict[str, type["Provider"]] = {}
+    _availability_logged: bool = False
 
     def __init__(self, user_api_keys: dict[str, str] | None = None) -> None:
         self.tokens = {} if not user_api_keys else user_api_keys
@@ -189,6 +190,30 @@ class RegisteredProviders:
                 for provider in RegisteredProviders.all.values()
                 if provider.name in self.tokens
             }
+        self._log_availability_once()
+
+    @classmethod
+    def _log_availability_once(cls) -> None:
+        """Log the registered provider names once per process.
+
+        Names only are logged, never key material, so the first registry
+        construction makes the discovery situation diagnosable from the log.
+        """
+        if cls._availability_logged:
+            return
+        cls._availability_logged = True
+        if not cls.available:
+            logger.warning(
+                "No providers are available: {} provider classes registered, none has an API key configured: {}",
+                len(cls.all),
+                ", ".join(sorted(cls.all)) or "none",
+            )
+            return
+        logger.info(
+            "Available providers ({}): {}",
+            len(cls.available),
+            ", ".join(sorted(cls.available)),
+        )
 
     @classmethod
     def register(cls, provider: type["Provider"]) -> None:
@@ -301,7 +326,11 @@ class RegisteredProviders:
 
     @property
     def first_chat_ready(self) -> Optional["Provider"]:
-        if provider := next(iter(self.chat_ready.values()), None):
+        for provider in self.chat_ready.values():
+            if not (provider.default_model or "").strip():
+                # A provider without a default model cannot back the implicit
+                # chat fallback: selecting it would resolve to an empty model.
+                continue
             return self.get_instance(provider=provider)
         return None
 
@@ -1383,7 +1412,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         self, image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema] | None:
         try:
-            models = await self.client.models.list()
+            models = await self.client.models.list(timeout=MODELS_DISCOVERY_TIMEOUT_SECONDS)
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return None

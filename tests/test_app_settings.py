@@ -167,3 +167,96 @@ class TestLocalDataPathFallback:
 
         assert settings.local_data_path == "/app/data"
         assert not (tmp_path / "chibi-bot" / "data").exists()
+class TestSettingsFileLoading:
+    """The ``~/chibi-bot/settings`` file is merged into the environment in every mode."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_home(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+        """Bind ``HOME`` to ``tmp_path`` and snapshot the environment around one test.
+
+        ``_get_application_settings`` merges the settings file into
+        ``os.environ``, so the process environment is snapshotted and restored
+        around every test. The cached settings object is dropped on entry and
+        on exit, so each test resolves the configuration from scratch.
+        """
+        environment = dict(os.environ)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LOCAL_DATA_PATH", raising=False)
+        monkeypatch.delenv("CHIBI_SETTINGS_FILE", raising=False)
+        monkeypatch.setenv("CHIBI_ENV", "dev")
+        _get_application_settings.cache_clear()
+        yield
+        os.environ.clear()
+        os.environ.update(environment)
+        _get_application_settings.cache_clear()
+
+    def test_dev_mode_reads_the_settings_file(self, tmp_path: Path) -> None:
+        """In dev mode the settings file exists and its values land in the environment."""
+        settings_dir = tmp_path / "chibi-bot"
+        settings_dir.mkdir()
+        configured = tmp_path / "dev-mode-data"
+        (settings_dir / "settings").write_text(f"LOCAL_DATA_PATH={configured}\n")
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)
+        assert os.environ["LOCAL_DATA_PATH"] == str(configured)
+
+    def test_chibi_settings_file_override_points_at_a_custom_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """``CHIBI_SETTINGS_FILE`` redirects the settings file away from the default path."""
+        custom = tmp_path / "custom-settings"
+        configured = tmp_path / "custom-data"
+        custom.write_text(f"LOCAL_DATA_PATH={configured}\n")
+        monkeypatch.setenv("CHIBI_SETTINGS_FILE", str(custom))
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)
+        assert not (tmp_path / "chibi-bot" / "settings").exists()
+
+    def test_process_environment_values_absent_from_the_file_survive(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Variables set in the process environment but missing from the file are kept."""
+        settings_dir = tmp_path / "chibi-bot"
+        settings_dir.mkdir()
+        (settings_dir / "settings").write_text("SCHEDULER_TOOL_ENABLED=false\n")
+        monkeypatch.setenv("SCHEDULER_FAILURE_NOTIFY", "false")
+
+        settings = _get_application_settings()
+
+        assert os.environ["SCHEDULER_FAILURE_NOTIFY"] == "false"
+        assert settings.scheduler_failure_notify is False
+        assert settings.scheduler_tool_enabled is False
+
+    def test_dev_mode_process_environment_wins_over_the_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """In dev mode a variable set in the process environment beats the file value."""
+        settings_dir = tmp_path / "chibi-bot"
+        settings_dir.mkdir()
+        (settings_dir / "settings").write_text(f"LOCAL_DATA_PATH={tmp_path / 'file-data'}\n")
+        monkeypatch.setenv("LOCAL_DATA_PATH", str(tmp_path / "env-data"))
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(tmp_path / "env-data")
+        assert os.environ["LOCAL_DATA_PATH"] == str(tmp_path / "env-data")
+
+    def test_no_dev_mode_keeps_the_historical_file_precedence(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Outside dev a variable present in both the file and the environment resolves to the file value."""
+        monkeypatch.setenv("CHIBI_ENV", "no-dev")
+        settings_dir = tmp_path / "chibi-bot"
+        settings_dir.mkdir()
+        configured = tmp_path / "file-data"
+        (settings_dir / "settings").write_text(f"LOCAL_DATA_PATH={configured}\n")
+        monkeypatch.setenv("LOCAL_DATA_PATH", str(tmp_path / "env-data"))
+
+        settings = _get_application_settings()
+
+        assert settings.local_data_path == str(configured)

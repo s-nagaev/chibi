@@ -17,7 +17,7 @@ from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
 from chibi.interfaces.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.interfaces.stdio_interface import MAX_THREAD_NAME_LENGTH, StdioInterface
-from chibi.models import Message
+from chibi.models import Message, ModelsUnavailableError
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.events.cwd_events import cwd_tracker
@@ -798,32 +798,49 @@ class StdioRunner:
         the active-selection marker turned into the ``active`` flag.
         ``default`` is the account-level fallback (the configured default
         provider, then the first chat-ready provider), never the thread
-        override: it answers what a fresh thread would run on. A listing
-        failure answers the request with an error frame rather than an empty
-        list, so the client can tell an outage from "no models available".
+        override: it answers what a fresh thread would run on, and it is
+        null unless the resolved model string is usable. A listing failure
+        answers the request with an error frame rather than an empty list,
+        so the client can tell an outage from "no models available". An
+        empty listing with no provider configured at all carries an
+        explicit ``cause`` of ``no_providers_configured``.
 
         Args:
             request_id: Identifier of the ``models`` request being answered.
             thread_id: Thread the ``active`` flag is computed for.
         """
+        from chibi.services.providers import RegisteredProviders
+
         try:
             models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
             default_selection = await get_default_chat_model(user_id=IDE_STORAGE_ID)
+        except ModelsUnavailableError:
+            logger.exception("Failed to list models for thread {}", thread_id)
+            # Every registered provider was attempted and failed on a total
+            # listing outage, so the registry size is the failed count.
+            await self._error(
+                "request_failed",
+                "The model listing is not available right now.",
+                request_id,
+                failed_providers=len(RegisteredProviders.available),
+            )
+            return
         except Exception:
             logger.exception("Failed to list models for thread {}", thread_id)
             await self._error("request_failed", "The model listing is not available right now.", request_id)
             return
         default: dict[str, str] | None = None
-        if default_selection is not None:
+        if default_selection is not None and (default_selection[1] or "").strip():
             default = {"provider": default_selection[0], "model": default_selection[1]}
-        await self._write(
-            {
-                "type": "models_result",
-                "request_id": request_id,
-                "models": [_models_result_entry(model) for model in models],
-                "default": default,
-            }
-        )
+        frame: dict[str, Any] = {
+            "type": "models_result",
+            "request_id": request_id,
+            "models": [_models_result_entry(model) for model in models],
+            "default": default,
+        }
+        if not models and not RegisteredProviders.available:
+            frame["cause"] = "no_providers_configured"
+        await self._write(frame)
 
     async def _emit_delta(self, request_id: str, thread_id: int, text: str) -> None:
         """Append one live response chunk to the request's delta buffer.

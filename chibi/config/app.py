@@ -192,11 +192,20 @@ def _apply_host_local_data_fallback(settings: ApplicationSettings) -> None:
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
-    if os.getenv("CHIBI_ENV", "no-dev").lower() != "dev":
-        settings_path = Path.home() / "chibi-bot" / "settings"
-        if settings_path.exists():
-            overrides = dotenv_values(settings_path)
-            os.environ.update({k: v for k, v in overrides.items() if v is not None})
+    dev_mode = os.getenv("CHIBI_ENV", "no-dev").lower() == "dev"
+    settings_path = Path(os.getenv("CHIBI_SETTINGS_FILE") or Path.home() / "chibi-bot" / "settings")
+    if settings_path.exists():
+        overrides = {k: v for k, v in dotenv_values(settings_path).items() if v is not None}
+        if dev_mode:
+            # Dev mode treats the process environment as the source of truth:
+            # the settings file only fills the variables the caller left
+            # unset, so explicit dev overrides keep winning.
+            for key, value in overrides.items():
+                os.environ.setdefault(key, value)
+        else:
+            # Outside dev the file keeps its historical precedence over the
+            # process environment.
+            os.environ.update(overrides)
     settings = ApplicationSettings()
     _apply_host_local_data_fallback(settings)
     return settings

@@ -2491,6 +2491,10 @@ async def get_default_chat_model(db: Database, user_id: int) -> tuple[str, str] 
         if not provider_name:
             continue
         if provider := user.providers.get(provider_name=provider_name):
+            if not (provider.default_model or "").strip():
+                # An empty default model cannot back a new thread, so the
+                # candidate is skipped and the chain keeps walking.
+                continue
             return provider.name, provider.default_model
     return None
 
