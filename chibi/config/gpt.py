@@ -16,6 +16,8 @@ class GPTSettings(BaseSettings):
     open_router_key: str | None = Field(alias="OPENROUTER_API_KEY", default=None)
     cloudflare_account_id: str | None = Field(alias="CLOUDFLARE_ACCOUNT_ID", default=None)
     cloudflare_key: str | None = Field(alias="CLOUDFLARE_API_KEY", default=None)
+    # Legacy aliases feeding the built-in "CustomOpenAI" compatible instance;
+    # prefer the OPENAICOMPATIBLE_<NAME>_* scheme.
     customopenai_key: str | None = Field(alias="CUSTOMOPENAI_API_KEY", default=None)
     customopenai_url: str = Field(alias="CUSTOMOPENAI_URL", default="http://localhost:1234/v1")
     deepseek_key: str | None = Field(alias="DEEPSEEK_API_KEY", default=None)

@@ -1,13 +1,10 @@
 from chibi.config import gpt_settings
-from chibi.services.providers.provider import OpenAIFriendlyProvider
+from chibi.services.providers.openai_compatible import create_openai_compatible
 
-
-class CustomOpenAI(OpenAIFriendlyProvider):
-    api_key = gpt_settings.customopenai_key
-    chat_ready = True
-    tts_ready = True
-    stt_ready = True
-
-    name = "CustomOpenAI"
-    base_url = gpt_settings.customopenai_url
-    default_model = ""
+CustomOpenAI = create_openai_compatible(
+    name="CustomOpenAI",
+    api_key=gpt_settings.customopenai_key,
+    base_url=gpt_settings.customopenai_url,
+    class_name="CustomOpenAI",
+    dynamic=False,
+)
