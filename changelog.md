@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.6] - 2026-11-16
+
+### Fixed
+- **A scheduled command survives an unavailable command moderator.** HTTP errors, connection failures and unparseable moderator responses surface to the agent as one standardized error message instead of an unhandled failure or a misleading "declined" verdict; the command is not run, and the agent job wakes itself with the same message so it can decide what to do next.
+
 ## [1.21.5] - 2026-11-16
 
 ### Added
