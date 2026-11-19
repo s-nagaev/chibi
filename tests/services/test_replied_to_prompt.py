@@ -19,12 +19,6 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from chibi.interfaces.telegram_interface import (
-    _MEDIA_PLACEHOLDERS,
-    _UNAVAILABLE_QUOTED_MESSAGE,
-    TelegramInterface,
-    UserInterface,
-)
 from telegram import (
     Animation,
     Audio,
@@ -48,6 +42,12 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 import chibi.config  # noqa: F401
+from chibi.interfaces.telegram_interface import (
+    _MEDIA_PLACEHOLDERS,
+    _UNAVAILABLE_QUOTED_MESSAGE,
+    TelegramInterface,
+    UserInterface,
+)
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
 from chibi.services.user import get_llm_chat_completion_answer
 
@@ -559,7 +559,6 @@ class TestHandleUserPromptWiring:
 
         with (
             patch("chibi.services.bot.get_llm_chat_completion_answer", new=llm_call),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
         ):
             await handle_user_prompt(interface=cast(UserInterface, _PromptInterface("Bot (Chibi): 1. test1 2. test2")))
 
@@ -575,7 +574,6 @@ class TestHandleUserPromptWiring:
 
         with (
             patch("chibi.services.bot.get_llm_chat_completion_answer", new=llm_call),
-            patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
         ):
             await handle_user_prompt(interface=cast(UserInterface, _PromptInterface(None)))
 
@@ -599,7 +597,6 @@ class TestQuotedMessageLogging:
         try:
             with (
                 patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=chat_response)),
-                patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
                 patch("chibi.services.bot.application_settings.log_prompt_data", new=True),
             ):
                 await handle_user_prompt(
@@ -624,7 +621,6 @@ class TestQuotedMessageLogging:
         try:
             with (
                 patch("chibi.services.bot.get_llm_chat_completion_answer", new=AsyncMock(return_value=chat_response)),
-                patch("chibi.services.bot.check_history_and_summarize", new=AsyncMock(return_value=False)),
                 patch("chibi.services.bot.application_settings.log_prompt_data", new=False),
             ):
                 await handle_user_prompt(
