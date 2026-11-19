@@ -15,7 +15,7 @@ from loguru import logger
 from chibi.config import gpt_settings
 from chibi.constants import get_sub_executor_prompt
 from chibi.interfaces.interface import UserInterface
-from chibi.models import Message
+from chibi.models import Message, ModelsUnavailableError
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema
 from chibi.services.failover import (
     FailoverPair,
@@ -329,7 +329,24 @@ class CallTracker(metaclass=SingletonMeta):
 
 
 async def get_models_available_to_user(user_id: int, image_generation: bool = False) -> list[ModelChangeSchema]:
+    """List the models available to a user for the delegate tool.
+
+    A model-listing outage must never break the delegate flow, so an
+    unavailable listing degrades to an empty result with a warning instead of
+    propagating the failure.
+
+    Args:
+        user_id: The user identifier used to fetch the model listing.
+        image_generation: Whether to list image-generation models.
+
+    Returns:
+        The available models, or an empty list when the listing is unavailable.
+    """
     from chibi.services.user import get_models_available
 
-    data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=image_generation)
+    try:
+        data: list[ModelChangeSchema] = await get_models_available(user_id=user_id, image_generation=image_generation)
+    except ModelsUnavailableError as e:
+        logger.warning(f"Model listing is unavailable for the delegate tool, returning an empty list: {e}")
+        return []
     return data
