@@ -19,6 +19,12 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from chibi.interfaces.telegram_interface import (
+    _MEDIA_PLACEHOLDERS,
+    _UNAVAILABLE_QUOTED_MESSAGE,
+    TelegramInterface,
+    UserInterface,
+)
 from telegram import (
     Animation,
     Audio,
@@ -43,12 +49,6 @@ from telegram.ext import ContextTypes
 
 import chibi.config  # noqa: F401
 from chibi.schemas.app import ChatResponseSchema, UsageSchema
-from chibi.services.interface import (
-    _MEDIA_PLACEHOLDERS,
-    _UNAVAILABLE_QUOTED_MESSAGE,
-    TelegramInterface,
-    UserInterface,
-)
 from chibi.services.user import get_llm_chat_completion_answer
 
 _CHAT = Chat(id=12345, type=Chat.PRIVATE)
@@ -210,12 +210,14 @@ class TestGetRepliedToPrompt:
                     "poll": Poll(
                         id="1",
                         question="q",
-                        options=[PollOption(text="a", voter_count=0)],
+                        options=[PollOption(text="a", voter_count=0, persistent_id="123")],
                         total_voter_count=0,
                         is_closed=False,
                         is_anonymous=True,
                         type="regular",
                         allows_multiple_answers=False,
+                        allows_revoting=True,
+                        members_only=False,
                     )
                 },
                 "[poll]",

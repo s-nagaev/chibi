@@ -320,3 +320,18 @@ class UserInterface(ABC):
         continuation snapshot.
         """
         return None
+
+    async def get_replied_to_prompt(self) -> str | None:
+        """Retrieve the content of the message the current message replies to.
+
+        Some transports (Telegram) deliver the whole quoted message together
+        with the update, which lets the agent understand a short follow-up
+        such as "tell me more about that one" without any extra API calls.
+        Interfaces without reply semantics return None, so the prompt shape
+        stays unchanged for them.
+
+        Returns:
+            A short human-readable description of the quoted message
+            (author and content), or None when the message is not a reply.
+        """
+        return None
