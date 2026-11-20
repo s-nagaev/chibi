@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from contextlib import contextmanager
 from typing import Any, Iterator, cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
@@ -136,42 +135,26 @@ class TestRegistration:
         Guards the actual wiring of sync_video_tool_registration() at the end
         of chibi.services.providers.__init__: deleting the call must turn these
         tests red.
-
-        The subprocess runs in an empty working directory with
-        ``CHIBI_ENV=dev`` so that neither the repository ``.env`` nor the
-        operator settings file (``~/chibi-bot/settings``) leaks provider API
-        keys into the child process: a key found there would make a
-        video-ready provider appear and register the video tools even though
-        the test asks for a key-free environment.
-
-        Args:
-            env_overrides: Environment variables to set in the child process.
-
-        Returns:
-            The sorted tool names the child process registered.
         """
         env = {
             key: value for key, value in os.environ.items() if not key.endswith("_KEY") and not key.endswith("_TOKEN")
         }
         env["PUBLIC_MODE"] = "false"
-        env["CHIBI_ENV"] = "dev"
         env.update(env_overrides)
-        with tempfile.TemporaryDirectory() as working_dir:
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    "import chibi.services.providers; "
-                    "from chibi.services.providers.tools.tool import RegisteredChibiTools; "
-                    "import json; print(json.dumps(sorted(RegisteredChibiTools.tools_map)))",
-                ],
-                capture_output=True,
-                text=True,
-                env=env,
-                cwd=working_dir,
-                timeout=120,
-                check=True,
-            )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import chibi.services.providers; "
+                "from chibi.services.providers.tools.tool import RegisteredChibiTools; "
+                "import json; print(json.dumps(sorted(RegisteredChibiTools.tools_map)))",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+            check=True,
+        )
         return json.loads(result.stdout)
 
     def test_fresh_interpreter_without_keys_has_no_video_tools(self) -> None:
