@@ -4,28 +4,79 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from loguru import logger
 
 from chibi.models import MODELS_DISCOVERY_TIMEOUT_SECONDS
 from chibi.services.providers import DeepSeek, RegisteredProviders
 
 
-def test_availability_logged_once_with_names_only() -> None:
-    """The first registry construction logs provider names once and never logs again."""
-    records: list[Any] = []
-    handler_id = logger.add(lambda message: records.append(str(message)), level="INFO")
-    RegisteredProviders._availability_logged = False
+class _LogCollector:
+    """Collect loguru records as strings for the availability assertions."""
+
+    def __init__(self) -> None:
+        """Start with no collected records."""
+        self.records: list[str] = []
+
+    def __call__(self, message: Any) -> None:
+        """Append one stringified log record.
+
+        Args:
+            message: The loguru message object passed to the sink.
+        """
+        self.records.append(str(message))
+
+
+class _FakeProvider:
+    """Minimal stand-in for a provider class in the availability logging tests."""
+
+    name = "FakeProvider"
+
+
+def _capture_availability_logs(monkeypatch: pytest.MonkeyPatch, available: dict[str, Any]) -> list[str]:
+    """Capture the records produced by two consecutive availability log attempts.
+
+    The registry availability mapping is replaced for the duration of the test
+    and restored by the monkeypatch fixture, so the outcome no longer depends
+    on the provider keys present on the machine running the suite and no other
+    test observes a mutated registry.
+
+    Args:
+        monkeypatch: The active monkeypatch fixture.
+        available: The availability mapping the logging must observe.
+
+    Returns:
+        The captured log record texts.
+    """
+    collector = _LogCollector()
+    handler_id = logger.add(collector, level="INFO")
+    monkeypatch.setattr(RegisteredProviders, "available", available)
+    monkeypatch.setattr(RegisteredProviders, "_availability_logged", False)
     try:
         RegisteredProviders._log_availability_once()
         RegisteredProviders._log_availability_once()
     finally:
         logger.remove(handler_id)
-        RegisteredProviders._availability_logged = False
+    return collector.records
 
-    expected = ", ".join(sorted(RegisteredProviders.available))
+
+def test_availability_logged_once_with_names_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With available providers the registry logs their names once and never again."""
+    records = _capture_availability_logs(monkeypatch, {"fake_provider": _FakeProvider})
+
     matching = [record for record in records if "Available providers" in record]
     assert len(matching) == 1
-    assert expected in matching[0]
+    assert "fake_provider" in matching[0]
+    assert not any("No providers are available" in record for record in records)
+
+
+def test_availability_warns_once_when_no_providers_are_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no available providers the registry logs the warning branch once."""
+    records = _capture_availability_logs(monkeypatch, {})
+
+    matching = [record for record in records if "No providers are available" in record]
+    assert len(matching) == 1
+    assert not any("Available providers" in record for record in records)
 
 
 def test_first_chat_ready_skips_empty_default_providers() -> None:
