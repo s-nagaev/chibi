@@ -46,7 +46,7 @@ Chibi currently supports models from the following providers:
 *   **Context Management:**
     *   Automatic conversation summarization (optional) to save tokens on long conversations by replacing older parts of the history with a summary.
     *   Manual context reset (`/reset` command) to start fresh and save tokens.
-*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or DynamoDB, or simply keep it in memory (lost on restart).
+*   **Flexible Session Storage:** Store conversation history locally (requires mounting a volume for persistence), in Redis, or simply keep it in memory (lost on restart).
 *   **Optional "Public Mode":** Run the bot without master API keys. Each user will be prompted to provide their own key via private message to the bot.
 *   **Granular Access Control:** Restrict bot access to specific users or chat groups, whitelist allowed models, and control image generation limits for certain users.
 *   **Dynamic Proxy Support:** Configure HTTP/SOCKS proxies for AI provider API requests and heartbeat pings, separate from the Telegram proxy.
@@ -273,11 +273,6 @@ Please, visit the [examples](examples) directory of the current repository for m
 |:----------------------|:--------------------------------------------------------------------------------------------------------|:--------------|
 | `REDIS`               | Redis connection URL.                                                                                   | `None`        |
 | `REDIS_PASSWORD`      | Password for Redis.                                                                                     | `None`        |
-| `AWS_REGION`          | AWS region for DynamoDB.                                                                                | `None`        |
-| `AWS_ACCESS_KEY_ID`   | AWS access key ID.                                                                                      | `None`        |
-| `AWS_SECRET_ACCESS_KEY`| AWS secret access key.                                                                                  | `None`        |
-| `DDB_USERS_TABLE`     | DynamoDB table name for users.                                                                          | `None`        |
-| `DDB_MESSAGES_TABLE`  | DynamoDB table name for messages.                                                                       | `None`        |
 | `LOCAL_DATA_PATH`     | Filesystem path for local storage.                                                                      | `/app/data`   |
 ### API Keys (Master Keys)
 These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, these are ignored (users provide their own keys).
@@ -288,8 +283,12 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `ANTHROPIC_API_KEY`     | API key for Anthropic (Claude) models.            | `None`                     |
 | `CLOUDFLARE_API_KEY`    | API key for Cloudflare (44+ open-source models).  | `None`                     |
 | `CLOUDFLARE_ACCOUNT_ID` | Account ID in the Cloudflare platform.            | `None`                     |
-| `CUSTOMOPENAI_API_KEY`  | API key for custom OpenAI-compatible endpoints.   | `None`                     |
-| `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.       | `http://localhost:1234/v1` |
+| `CUSTOMOPENAI_API_KEY`  | API key for custom OpenAI-compatible endpoints (legacy alias for the built-in "CustomOpenAI" instance). | `None`                     |
+| `CUSTOMOPENAI_URL`      | URL for custom OpenAI-compatible endpoints.        | `http://localhost:1234/v1` |
+| `OPENAICOMPATIBLE_<NAME>_API_KEY` | Registers an extra OpenAI-compatible provider instance named `<NAME>` (chat, TTS and STT). | `None`                     |
+| `OPENAICOMPATIBLE_<NAME>_URL`     | Endpoint URL for the `<NAME>` instance.    | `http://localhost:1234/v1` |
+| `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` | Registers an extra Anthropic-compatible provider instance named `<NAME>` (chat). | `None`                     |
+| `ANTHROPICCOMPATIBLE_<NAME>_URL`     | Endpoint URL for the `<NAME>` instance.    | `https://api.anthropic.com` |
 | `DEEPSEEK_API_KEY`      | API key for DeepSeek models.                      | `None`                     |
 | `GEMINI_API_KEY`        | API key for Google (Gemini & Imagen) models.      | `None`                     |
 | `GOOGLE_SEARCH_API_KEY` | API key for Google Custom Search.                 | `None`                     |
@@ -325,6 +324,7 @@ These keys are used when `PUBLIC_MODE` is `False`. If `PUBLIC_MODE` is `True`, t
 | `FREQUENCY_PENALTY`            | Penalty applied to tokens based on their frequency in the text so far (positive values decrease repetition). Range: -2.0 to 2.0.                | `0.0`                                                                                             |
 | `PRESENCE_PENALTY`             | Penalty applied to tokens based on whether they appear in the text so far (positive values encourage exploring new topics). Range: -2.0 to 2.0. | `0.0`                                                                                             |
 | `MODELS_WHITELIST`             | Comma-separated list of specific model IDs users are allowed to switch to. If empty or unset, all available models are allowed.                  | `None`                                                                                            |
+| `IMAGE_MODELS_WHITELIST`       | Comma-separated list of image generation models the bot is allowed to use. When set, it applies to image models exclusively (`MODELS_WHITELIST`/`MODELS_BLACKLIST` are ignored for them). If empty or unset, image models follow the global whitelist/blacklist. | `None`  |
 | `FILESYSTEM_ACCESS`            | If `True`, enables file system access for the bot.                                                                                              | `False`                                                                                           || `ALLOW_DELEGATION`           | If `True`, the agent can spawn sub-agents to handle complex tasks.                                                                              | `True`                                                                                            |
 | `TOOLS_WHITELIST`              | Comma-separated list of specific tools the agent is allowed to use. If not set, all available tools are enabled.                                | `None`                                                                                            |
 | `SHOW_LLM_THOUGHTS`            | If `True`, shows the bot\'s internal thoughts in the chat.                                                                                       | `False`                                                                                           |

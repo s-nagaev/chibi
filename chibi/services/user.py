@@ -16,7 +16,7 @@ from loguru import logger
 
 from chibi.config import gpt_settings
 from chibi.constants import get_model_context_window
-from chibi.exceptions import ContextLengthExceededError, NoProviderSelectedError
+from chibi.exceptions import ContextLengthExceededError, ModelNotAllowedError, NoProviderSelectedError
 from chibi.interfaces.interface import EditorContextProvider, UserInterface
 from chibi.models import Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema, VideoResult, VisionResultSchema
@@ -79,7 +79,7 @@ async def replace_thread_history(db: Database, storage_id: int, thread_id: int, 
     backend, there is no range delete and no per-message delete), then the
     seed is written back message by message. On the local backend the write
     half is atomic (the user pickle is written to a temp file and moved into
-    place with ``os.replace``); on Redis and DynamoDB it is the whole-thread
+    place with ``os.replace``); on Redis it is the whole-thread
     delete followed by the seed write, exactly as the reset path does.
     Seed marking (``Message.source``) is the caller's job: the helper is a
     pure replacement primitive shared by the emergency summarization, the
@@ -2352,6 +2352,11 @@ async def generate_image(
 
     Raises:
         NoProviderSelectedError: If no image provider is available.
+        ModelNotAllowedError: If ``IMAGE_MODELS_WHITELIST`` is configured and the
+            effective model is not on it. The effective model is the explicit or
+            thread-selected one, or the provider's ``default_image_model`` when
+            the request carries no model at all; a request that resolves to no
+            model name is refused as well.
     """
     user = await db.get_or_create_user(user_id=interface.user_id)
 
@@ -2364,6 +2369,26 @@ async def generate_image(
 
     if not provider:
         raise NoProviderSelectedError("No image provider available")
+
+    # The effective model is what the provider will actually use: the explicit
+    # or thread-selected model when there is one, otherwise the provider default
+    # that ``get_images`` falls back to when ``model`` is None.
+    effective_model = selected_model or provider.default_image_model
+    image_models_whitelist = gpt_settings.image_models_whitelist
+    if image_models_whitelist and effective_model not in image_models_whitelist:
+        logger.bind(user_id=interface.user_id).warning(
+            f"Refused image generation: model '{effective_model}' of provider '{provider.name}' is not on "
+            f"IMAGE_MODELS_WHITELIST."
+        )
+        raise ModelNotAllowedError(
+            provider=provider.name,
+            model=effective_model or "default",
+            detail=(
+                "The requested image model is not allowed by the administrator. "
+                "Please select one of the allowed image models and try again."
+            ),
+        )
+
     result = await provider.get_images(prompt=prompt, model=selected_model, images=images)
     if interface.user_id not in gpt_settings.image_generations_whitelist:
         await db.count_image(interface.user_id)

@@ -9,6 +9,7 @@ from openai.types.shared_params import FunctionDefinition
 
 from chibi.config import gpt_settings
 from chibi.schemas.app import ModeratorsAnswer
+from chibi.services.providers.tools._moderation import moderate_command_for_tool
 from chibi.services.providers.tools.constants import CMD_STDOUT_LIMIT
 from chibi.services.providers.tools.exceptions import ToolException
 from chibi.services.providers.tools.tool import ChibiTool
@@ -102,8 +103,8 @@ class RunCommandInTerminalTool(ChibiTool):
         moderation_provider = await get_moderation_provider(user_id=user_id)
 
         logger.log("MODERATOR", f"[{caller_model}] Pre-moderating command: '{cmd}'. CWD: {cwd}")
-        moderator_answer: ModeratorsAnswer = await moderation_provider.moderate_command(
-            cmd=cmd, model=gpt_settings.moderation_model
+        moderator_answer: ModeratorsAnswer = await moderate_command_for_tool(
+            moderation_provider, cmd=cmd, model=gpt_settings.moderation_model, caller_model=caller_model
         )
         if moderator_answer.verdict == "declined":
             raise ToolException(

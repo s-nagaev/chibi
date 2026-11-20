@@ -356,6 +356,8 @@ class GenerateImageTool(ChibiTool):
                 does not accept image input, filesystem access is disabled, the number of
                 reference images exceeds the limit, a reference file is missing, or any
                 image violates the MIME or size constraints.
+            ModelNotAllowedError: If ``IMAGE_MODELS_WHITELIST`` is configured and the
+                requested image model is not on it.
         """
         interface = cls.get_interface(kwargs=kwargs)
 

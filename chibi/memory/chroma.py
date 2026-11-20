@@ -861,8 +861,9 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
     """ChromaDB-compatible EmbeddingFunction backed by qdrant/fastembed.
 
     fastembed ships pure-Python wheels and bundles its own onnxruntime, so it
-    works across platforms where chromadb's ``DefaultEmbeddingFunction`` cannot
-    be installed.
+    installs on macOS (Apple silicon), Linux (x86_64 and arm64) and Windows,
+    platforms where chromadb's ``DefaultEmbeddingFunction`` cannot be
+    installed.
 
     Implements the chromadb 1.5+ embedding-function protocol (static ``name()``,
     instance ``get_config()``, static ``build_from_config()``) so that chromadb
@@ -904,9 +905,11 @@ class FastEmbedEmbeddingFunction(EmbeddingFunction):
             The lazily created fastembed model instance.
         """
         if self._model is None:
-            # Safe to ignore: fastembed is pinned to 0.8.0, so all stored
-            # embeddings already come from mean pooling (the upstream-canonical
-            # behavior for these models since fastembed 0.6.0).
+            # fastembed 0.9+ embeds with mean pooling, the upstream-canonical
+            # behavior for this model, so stored embeddings stay compatible.
+            # The filter suppresses the "now uses mean pooling instead of CLS
+            # embedding" notice that fastembed versions before 0.9.1 printed
+            # here.
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",

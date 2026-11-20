@@ -8,7 +8,7 @@
 
 ## 1. Project Identity
 
-**Chibi** — open-source, self-hosted Telegram bot (MIT License). Orchestrates multiple AI providers, tools, MCP integrations, and sub-agents for autonomous task execution. Built with `python-telegram-bot` v22.7+, Pydantic v2, Redis, DynamoDB.
+**Chibi** — open-source, self-hosted Telegram bot (MIT License). Orchestrates multiple AI providers, tools, MCP integrations, and sub-agents for autonomous task execution. Built with `python-telegram-bot` v22.7+, Pydantic v2, Redis.
 
 - Repository: `https://github.com/s-nagaev/chibi`
 - Docs: `https://chibi.bot`
@@ -43,7 +43,7 @@ chibi/                    # Main package
 │   ├── providers/        # LLM provider adapters
 │   │   └── tools/        # ChibiTools exposed to LLMs
 │   └── ...
-├── storage/              # Persistence: redis.py, dynamodb.py, local.py, database.py (factory)
+├── storage/              # Persistence: redis.py, local.py, database.py (factory)
 └── utils/                # Utility functions
 data/                     # Runtime data & skills
 docs/                     # Documentation
@@ -68,6 +68,7 @@ Every function, method, and class MUST have a Google-style docstring. Document `
 # Correct — no Returns: for None
 def save_user(user: User) -> None:
     """Persist the user to the active backend."""
+
 
 # Correct — Returns: present for non-None
 def get_user(user_id: int) -> User | None:
@@ -129,12 +130,15 @@ if TYPE_CHECKING:
 def outer(x: int) -> int:
     def inner(y: int) -> int:  # NO
         return y * 2
+
     return inner(x)
+
 
 # Correct
 def _double(y: int) -> int:
     """Double a number."""
     return y * 2
+
 
 def outer(x: int) -> int:
     """Apply doubling to x."""
@@ -151,7 +155,7 @@ def outer(x: int) -> int:
 
 ALL function signatures must have explicit type annotations. For variable declarations: annotate any variable mypy cannot infer, plus all module-level and class-level attributes. Local variables with obvious literal RHS (`x = 42`, `name = "Chibi"`) need no annotation — defer to mypy's output, not human judgment.
 
-- **`Any` — avoid in internal logic.** `Any` is permitted ONLY at external I/O boundaries (JSON payloads, third-party untyped APIs, MCP tool inputs, DynamoDB item dicts). Narrow via `cast()` or Pydantic model validation before the value enters business logic.
+- **`Any` — avoid in internal logic.** `Any` is permitted ONLY at external I/O boundaries (JSON payloads, third-party untyped APIs, MCP tool inputs). Narrow via `cast()` or Pydantic model validation before the value enters business logic.
 - **Annotate collections fully:** `list[str]`, `dict[str, int]`, `tuple[int, str]`.
 - **`| None` instead of `Optional`:** `str | None`, not `Optional[str]`.
 - **`|` instead of `Union`:** `int | str`, not `Union[int, str]`.
@@ -201,7 +205,7 @@ Tests are first-class code. All rules in sections 3.1–3.8 apply identically to
 
 - **Async tests:** Use `pytest-asyncio` (`@pytest.mark.asyncio` or `pytestmark = pytest.mark.asyncio`). Never call `asyncio.run()` in a test.
 - **Fixtures:** Shared fixtures in root `conftest.py`, test-suite-local fixtures in `tests/conftest.py`. Scope them explicitly (`function`/`session`/`module`).
-- **External mocking:** Mock all external calls — Telegram API, LLM providers, Redis, DynamoDB. Use `fakeredis` for Redis, `freezegun` for time-dependent tests.
+- **External mocking:** Mock all external calls — Telegram API, LLM providers, Redis. Use `fakeredis` for Redis, `freezegun` for time-dependent tests.
 - **File naming:** `tests/test_<module>.py`.
 - **No coverage threshold specified** — but every new feature must have at least one happy-path test and one edge-case/failure test.
 
@@ -291,12 +295,11 @@ Chibi is async at its core. Strict rules:
 
 ### 5.7 Storage
 
-Three interchangeable backends implement the `Database` ABC (`chibi/storage/abstract.py`). All three store the same data: **users** (`save_user`, `create_user`, `get_user`) and **messages** (`add_message`, `get_messages`, `drop_messages`). The active backend is selected at runtime via `application_settings.storage_backend`:
+Two interchangeable backends implement the `Database` ABC (`chibi/storage/abstract.py`). Both store the same data: **users** (`save_user`, `create_user`, `get_user`) and **messages** (`add_message`, `get_messages`, `drop_messages`). The active backend is selected at runtime via `application_settings.storage_backend`:
 
 | Backend | Module | 
 |---------|--------|
 | Redis | `chibi/storage/redis.py` |
-| DynamoDB | `chibi/storage/dynamodb.py` |
 | Local (JSON files) | `chibi/storage/local.py` |
 
 - `chibi/storage/database.py` provides `DatabaseCache` — the singleton factory that picks and initializes the active backend. Also exports `@inject_database` decorator for injecting the `Database` instance into async functions.

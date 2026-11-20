@@ -2,10 +2,8 @@
 
 from collections.abc import AsyncIterator
 
-import boto3
 import pytest
 from fakeredis import FakeAsyncRedis
-from moto import mock_aws
 
 from chibi.models import FunctionSchema, Message, ThreadUsageRecord, ToolSchema, User
 from chibi.schemas.app import UsageSchema
@@ -23,18 +21,14 @@ from chibi.services.context_measurement import (
 )
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.storage.database import Database
-from chibi.storage.dynamodb import DynamoDBStorage
 from chibi.storage.local import LocalStorage
 from chibi.storage.redis import RedisStorage
 
-TABLE_USERS = "TestUsers"
-TABLE_MESSAGES = "TestMessages"
-REGION = "us-east-1"
 MODEL = "test-model"
 OTHER_MODEL = "other-model"
 
 
-@pytest.fixture(params=["local", "redis", "dynamodb"])
+@pytest.fixture(params=["local", "redis"])
 async def storage(request: pytest.FixtureRequest, tmp_path, monkeypatch) -> AsyncIterator[Database]:
     """Provide instances of different Database implementations."""
     if request.param == "local":
@@ -53,35 +47,6 @@ async def storage(request: pytest.FixtureRequest, tmp_path, monkeypatch) -> Asyn
         await redis_storage.redis.flushdb()
         yield redis_storage
         await redis_storage.close()
-
-    if request.param == "dynamodb":
-        with mock_aws(config={"core": {"service_whitelist": ["dynamodb"]}}):
-            resource = boto3.resource("dynamodb", region_name=REGION)
-            resource.create_table(
-                TableName=TABLE_USERS,
-                KeySchema=[{"AttributeName": "user_id", "KeyType": "HASH"}],
-                AttributeDefinitions=[{"AttributeName": "user_id", "AttributeType": "S"}],
-                BillingMode="PAY_PER_REQUEST",
-            ).wait_until_exists()
-            resource.create_table(
-                TableName=TABLE_MESSAGES,
-                KeySchema=[
-                    {"AttributeName": "user_id", "KeyType": "HASH"},
-                    {"AttributeName": "message_id", "KeyType": "RANGE"},
-                ],
-                AttributeDefinitions=[
-                    {"AttributeName": "user_id", "AttributeType": "S"},
-                    {"AttributeName": "message_id", "AttributeType": "S"},
-                ],
-                BillingMode="PAY_PER_REQUEST",
-            ).wait_until_exists()
-            yield await DynamoDBStorage.create(
-                region=REGION,
-                access_key=None,
-                secret_access_key=None,
-                users_table=TABLE_USERS,
-                messages_table=TABLE_MESSAGES,
-            )
 
 
 def _record(prompt_tokens: int = 1000, model: str = MODEL, message_count: int = 2) -> ThreadUsageRecord:

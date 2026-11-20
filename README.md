@@ -316,7 +316,7 @@ Chibi: *analyzes changes, suggests improvements, updates docs via MCP*
 - **Self-hosted:** your data stays on your infrastructure
 - **Public Mode:** users can bring their own API keys (no shared master key required)
 - **Access control:** whitelist users/groups/models
-- **Storage options:** local volumes, Redis, or DynamoDB
+- **Storage options:** local volumes or Redis
 - **Tool safety:** agent tools are configurable; terminal execution is moderated and can be restricted
 
 ---
@@ -354,7 +354,7 @@ The agent's working directory - used for terminal commands and reported to the m
 
 On corporate networks with TLS-inspecting (MITM) proxies, long single-shot LLM requests (30–120 s with no visible traffic) can be killed as "idle" — you see `ConnectionResetError` / `WinError 64` in the logs or a generic connection error in the chat. Chibi automatically retries such failures **4 times with growing waits (~30 s → 180 s)** on every provider family and, if all retries fail, reports a clear "connection was interrupted" message instead of a generic error. If the problem persists, set `HTTPS_PROXY` to your corporate proxy (if it whitelists the AI API hosts) or ask IT to whitelist the provider hosts (`api.openai.com`, `api.anthropic.com`, `*.googleapis.com`, `api.mistral.ai`).
 
-**A note on Gemini specifically:** the `google-genai` SDK silently switches its async transport to `aiohttp` whenever `aiohttp` happens to be importable in the environment. In a Chibi install that is always the case — `aiohttp` arrives as a hard dependency via two independent chains (`dashscope`, and `chromadb → kubernetes`), so the issue is not dashscope-only. The bare `aiohttp` session has no MITM-aware proxy/transport handling, and its keep-alive connections get killed by TLS-inspecting proxies with raw `aiohttp.client_exceptions.ServerDisconnectedError` tracebacks. Chibi now forces all Gemini async traffic onto its MITM-aware `httpx` client (client-level `HttpOptions(httpx_async_client=...)` on every `google.genai.Client` construction), so Gemini connections go through the same proxy-aware, retrying transport as the other providers.
+**A note on Gemini specifically:** the `google-genai` SDK silently switches its async transport to `aiohttp` whenever `aiohttp` happens to be importable in the environment. In a Chibi install that is always the case — `aiohttp` arrives as a hard dependency via two independent chains (`dashscope`, and `chromadb → kubernetes`), so the issue is not dashscope-only. The bare `aiohttp` session has no MITM-aware proxy/transport handling, and its keep-alive connections get killed by TLS-inspecting proxies with raw `aiohttp.client_exceptions.ServerDisconnectedError` tracebacks. Chibi now forces all Gemini async traffic onto its MITM-aware `httpx2` client (a maintained `httpx` fork, injected via client-level `HttpOptions(httpx_async_client=...)` on every `google.genai.Client` construction), so Gemini connections go through the same proxy-aware, retrying transport as the other providers.
 
 ---
 

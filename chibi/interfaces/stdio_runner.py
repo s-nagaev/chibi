@@ -149,6 +149,7 @@ _FRONTEND_CODE_MAP: dict[str, str] = {
     "invalid_argument": "invalid_request",
     "missing_model": "invalid_request",
     "missing_provider": "invalid_request",
+    "model_not_allowed": "invalid_request",
     # Provider-side failures surfaced by the shared exception handler.
     "provider_error": "backend_error",
     "provider_configuration": "backend_error",

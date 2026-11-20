@@ -16,12 +16,51 @@ from chibi.services.providers.suno import Suno
 from chibi.services.providers.xiaomi import Xiaomi
 from chibi.services.providers.zhipuai import ZhipuAI
 
-ALL_PROVIDERS: list[type[Provider]] = list(RegisteredProviders.all.values())
+ALL_PROVIDERS: list[type[Provider]] = [
+    provider_cls
+    for provider_cls in RegisteredProviders.all.values()
+    if not getattr(provider_cls, "is_dynamic_provider", False)
+]
 BASE_URL_PROVIDERS: list[type[Provider]] = [
     provider_cls for provider_cls in ALL_PROVIDERS if getattr(provider_cls, "base_url", None) is not None
 ]
 
-EXPECTED_PROVIDER_COUNT = 32
+STATIC_REGISTRY_KEYS = frozenset(
+    {
+        "alibaba",
+        "anthropic",
+        "baseten",
+        "cheaper inference",
+        "cloudflare",
+        "customopenai",
+        "deepinfra",
+        "deepseek",
+        "elevenlabs",
+        "entrim",
+        "featherless",
+        "fireworks",
+        "gemini",
+        "greenpt",
+        "grok",
+        "lyceum",
+        "melious",
+        "minimax",
+        "mistralai",
+        "moonshotai",
+        "nebius",
+        "novita",
+        "openai",
+        "openrouter",
+        "parasail",
+        "sambanova",
+        "siliconflow",
+        "stepfun",
+        "suno",
+        "together",
+        "xiaomi",
+        "zhipuai",
+    }
+)
 
 KNOWN_EMPTY_DEFAULT_MODEL = frozenset({"CustomOpenAI"})
 KNOWN_MISSING_TTS_DEFAULTS = frozenset({"CustomOpenAI"})
@@ -31,12 +70,20 @@ KNOWN_NON_HTTPS_BASE_URL = frozenset({"CustomOpenAI"})
 
 
 def test_registry_contains_all_providers() -> None:
-    """The registry must hold every provider imported by the package.
+    """The static registry slice must equal the frozen provider baseline.
 
-    The count is exact on purpose: registering a new provider or losing a
-    registration silently must both fail here and force a deliberate update.
+    Named compatible instances created from the environment are dynamic and
+    excluded. The static set is exact on purpose: registering a new static
+    provider or losing a registration silently must both fail here and force
+    a deliberate update, independently of the developer's environment.
     """
-    assert len(ALL_PROVIDERS) == EXPECTED_PROVIDER_COUNT
+    static_keys = {
+        key
+        for key, provider_cls in RegisteredProviders.all.items()
+        if not getattr(provider_cls, "is_dynamic_provider", False)
+    }
+    assert static_keys == STATIC_REGISTRY_KEYS
+    assert len(ALL_PROVIDERS) == len(STATIC_REGISTRY_KEYS)
 
 
 @pytest.mark.parametrize("provider_cls", ALL_PROVIDERS, ids=lambda provider_cls: provider_cls.name)

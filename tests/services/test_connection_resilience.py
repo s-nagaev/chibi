@@ -171,6 +171,7 @@ def test_retry_predicates_match_connection_shaped_errors() -> None:
     assert ConnectionError in gemini_exceptions
     assert aiohttp.ServerDisconnectedError in gemini_exceptions
     assert httpx.TransportError in gemini_exceptions
+    assert httpx2.TransportError in gemini_exceptions
     assert GeminiServerError in gemini_exceptions
 
 
@@ -447,7 +448,7 @@ def test_client_http_options_property_builds_a_fresh_client_per_access() -> None
 async def test_all_gemini_client_construction_sites_receive_http_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """All Client() constructor sites get client-level http_options (which alone selects the httpx backend)."""
+    """All Client() constructor sites get client-level http_options (which alone selects the httpx2 backend)."""
     provider = Gemini(token="test-token")
     monkeypatch.setattr("chibi.services.providers.gemini_native.Client", _RecordingGenaiClient)
     _RecordingGenaiClient.init_kwargs = []
@@ -459,7 +460,7 @@ async def test_all_gemini_client_construction_sites_receive_http_options(
     assert len(_RecordingGenaiClient.init_kwargs) == 3
     for kwargs in _RecordingGenaiClient.init_kwargs:
         assert isinstance(kwargs["http_options"], HttpOptions)
-        assert isinstance(kwargs["http_options"].httpx_async_client, httpx.AsyncClient)
+        assert isinstance(kwargs["http_options"].httpx_async_client, httpx2.AsyncClient)
 
 
 @pytest.mark.asyncio

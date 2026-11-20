@@ -140,10 +140,27 @@ CLOUDFLARE_API_KEY=
 # Cloudflare account ID. Required if CLOUDFLARE_API_KEY set.
 CLOUDFLARE_ACCOUNT_ID=
 
-# Custom OpenAI API key (for local/self-hosted models)
+# Custom OpenAI API key. Legacy alias that feeds the built-in "CustomOpenAI"
+# instance; prefer the OPENAICOMPATIBLE_<NAME>_* scheme below.
 CUSTOMOPENAI_API_KEY=
 # Custom OpenAI URL (default: http://localhost:1234/v1)
 CUSTOMOPENAI_URL=http://localhost:1234/v1
+
+# Named OpenAI-compatible instances. Each OPENAICOMPATIBLE_<NAME>_API_KEY
+# registers an extra chat/TTS/STT provider named <NAME> (letters, digits and
+# underscores; the lowercase name must be unique across providers).
+# OPENAICOMPATIBLE_<NAME>_URL overrides the endpoint
+# (default: http://localhost:1234/v1).
+# OPENAICOMPATIBLE_MYPROXY_API_KEY=
+# OPENAICOMPATIBLE_MYPROXY_URL=https://myproxy.example.com/v1
+
+# Named Anthropic-compatible instances. Each ANTHROPICCOMPATIBLE_<NAME>_API_KEY
+# registers an extra chat provider named <NAME> (letters, digits and
+# underscores; the lowercase name must be unique across providers).
+# ANTHROPICCOMPATIBLE_<NAME>_URL overrides the endpoint
+# (default: https://api.anthropic.com).
+# ANTHROPICCOMPATIBLE_MYPROXY_API_KEY=
+# ANTHROPICCOMPATIBLE_MYPROXY_URL=https://myproxy.example.com
 
 
 # ============================================================================
@@ -173,16 +190,6 @@ LOCAL_DATA_PATH={DATA_DIR.absolute()}
 
 # File storage backend for uploaded files: local or telegram (default: telegram)
 FILE_STORAGE=telegram
-
-# AWS DYNAMODB STORAGE (if set, the local storage and redis setting will be ignored)
-AWS_REGION=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-
-# DynamoDB table name for users
-DDB_USERS_TABLE=
-# DynamoDB table name for messages
-DDB_MESSAGES_TABLE=
 
 
 # ============================================================================
@@ -264,6 +271,12 @@ MODELS_WHITELIST=
 # Comma-separated list of disallowed models (ignored if MODELS_WHITELIST is also set)
 # Example: "gpt-5.1,gpt-5.3"
 MODELS_BLACKLIST=
+
+# Comma-separated list of allowed image generation models
+# When set, image model listings and image generation are limited to these models,
+# and MODELS_WHITELIST / MODELS_BLACKLIST do not apply to image models
+# Example: "dall-e-3,gpt-image-2,models/imagen-4.0-generate-001"
+IMAGE_MODELS_WHITELIST=
 
 # Comma-separated list of allowed tools
 # Example: "run_command_in_terminal,delegate_task,create_file"
