@@ -178,19 +178,26 @@ def _apply_host_local_data_fallback(settings: ApplicationSettings) -> None:
 
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
-    dev_mode = os.getenv("CHIBI_ENV", "no-dev").lower() == "dev"
-    settings_path = Path(os.getenv("CHIBI_SETTINGS_FILE") or Path.home() / "chibi-bot" / "settings")
-    if settings_path.exists():
-        overrides = {k: v for k, v in dotenv_values(settings_path).items() if v is not None}
-        if dev_mode:
-            # Dev mode treats the process environment as the source of truth:
-            # the settings file only fills the variables the caller left
-            # unset, so explicit dev overrides keep winning.
-            for key, value in overrides.items():
-                os.environ.setdefault(key, value)
-        else:
-            # Outside dev the file keeps its historical precedence over the
-            # process environment.
+    """Resolve the application settings for the current process.
+
+    ``CHIBI_ENV=dev`` isolates a development run from production
+    configuration: the settings file is never read, so neither
+    ``~/chibi-bot/settings`` nor a ``CHIBI_SETTINGS_FILE`` path can inject
+    values into the process environment and outrank the working directory
+    ``.env``. Outside dev the file keeps its historical precedence over the
+    process environment.
+
+    Returns:
+        The resolved application settings, cached for the process lifetime.
+    """
+    if os.getenv("CHIBI_ENV", "no-dev").lower() != "dev":
+        # The settings file is a production source only. A dev run reads it
+        # never, even though stdio model discovery once relied on it: discovery
+        # now runs from the dev configuration alone and, like any other failed
+        # model listing, degrades gracefully when no provider is configured.
+        settings_path = Path(os.getenv("CHIBI_SETTINGS_FILE") or Path.home() / "chibi-bot" / "settings")
+        if settings_path.exists():
+            overrides = {k: v for k, v in dotenv_values(settings_path).items() if v is not None}
             os.environ.update(overrides)
     settings = ApplicationSettings()
     _apply_host_local_data_fallback(settings)
