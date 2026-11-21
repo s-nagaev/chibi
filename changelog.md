@@ -4,8 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.22.1] - 2026-11-20
-- **Telegram "reply to" context reaches the model:** when the user replies to a message, the quoted message (author + content) is now delivered to the LLM as a `replied_to_message` field of the turn's JSON prompt, so a short follow-up like "tell me more about that one" is finally unambiguous. The quoted content is attributed ("Bot (Chibi): ...", the user's name, or "unknown author" for channel posts), media-only quoted messages are represented by a placeholder (`[photo]`, `[voice message]`, `[audio]`, `[video message]`, `[video]`, `[document]`, `[sticker]`, `[GIF]`, `[location]`, `[contact]`, `[venue]`, `[poll]`), and the quoted text is flattened to a single line. A partial quote (the user selected only a fragment of the original message) takes precedence over the full quoted message, since it is the most precise context. Deleted (or too old to deliver) quoted messages are reported as unavailable instead of an empty "unknown author: [non-text message]" string. The quoted message is attached to every turn the user initiates — a plain message, a voice message and a file upload with a caption alike — and never to internal turns (tool responses and scheduler triggers), which are not replies. The field is documented in the system prompt, and the quoted message is logged alongside the prompt when `LOG_PROMPT_DATA` is enabled. Transports without reply semantics (terminal, IDE stdio, scheduler) are unaffected: the new `UserInterface.get_replied_to_prompt()` defaults to `None`.
+## [Unreleased]
+
+### Added
+- **Replying to a message in Telegram now sends the quoted message to the model.** When you reply to a message, the agent receives the quoted message together with its author, so a short follow-up such as "tell me more about that one" keeps the context it answers. A quoted message that contains only media is described by a placeholder, a fragment selected from a longer message takes precedence over the whole message, and a quote that was deleted or is too old to deliver is reported as unavailable.
+
+### Changed
+- **The default moderation model for the MiniMax provider is now `MiniMax-M3`.** Instances that do not set `MODERATION_MODEL` themselves get it.
 
 ## [1.22.0] - 2026-11-16
 

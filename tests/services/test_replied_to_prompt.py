@@ -5,7 +5,7 @@ The user's flow under test:
 1. the bot answers with several messages;
 2. the user replies to one of them with "tell me more about that one";
 3. the agent must see BOTH the follow-up prompt and the quoted message it
-   answers — otherwise the follow-up is ambiguous.
+   answers, otherwise the follow-up is ambiguous.
 
 The tests build real ``telegram`` objects (``Message``, ``Update``, ``User``,
 ``Chat``) instead of stand-ins: the interface reads a documented slice of the

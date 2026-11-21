@@ -1878,7 +1878,7 @@ async def get_llm_chat_completion_answer(
             meaningful together with ``scheduler_trigger_text``.
         replied_to_message: Description of the message the user replied to
             (author and quoted content), if the transport provides it. Only
-            attached to turns the user initiates — plain messages, voice
+            attached to turns the user initiates: plain messages, voice
             messages and file uploads with a caption; it is meaningless for
             tool responses and scheduler triggers, which are not replies.
 
