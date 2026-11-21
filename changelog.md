@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Replying to a message in Telegram now sends the quoted message to the model.** When you reply to a message, the agent receives the quoted message together with its author, so a short follow-up such as "tell me more about that one" keeps the context it answers. A quoted message that contains only media is described by a placeholder, a fragment selected from a longer message takes precedence over the whole message, and a quote that was deleted or is too old to deliver is reported as unavailable.
+
+### Changed
+- **The default moderation model for the MiniMax provider is now `MiniMax-M3`.** Instances that do not set `MODERATION_MODEL` themselves get it.
+
 ## [1.22.0] - 2026-11-16
 
 ### Added

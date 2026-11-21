@@ -44,6 +44,7 @@ def _make_interface() -> Any:
         get_text_prompt=AsyncMock(return_value="hello"),
         get_voice_prompt=AsyncMock(return_value=None),
         get_caption=AsyncMock(return_value=None),
+        get_replied_to_prompt=AsyncMock(return_value=None),
         send_action_typing=AsyncMock(),
         send_message=AsyncMock(),
         send_reaction=AsyncMock(),
