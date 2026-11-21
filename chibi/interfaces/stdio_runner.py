@@ -17,8 +17,8 @@ from chibi.constants import IDE_STORAGE_ID, get_model_context_window
 from chibi.exceptions import ConfigurationError, StorageError
 from chibi.interfaces.scheduler_interface import clear_stdio_delivery_emitter, set_stdio_delivery_emitter
 from chibi.interfaces.stdio_interface import MAX_THREAD_NAME_LENGTH, StdioInterface
-from chibi.models import Message
-from chibi.schemas.app import UsageSchema
+from chibi.models import Message, ModelsUnavailableError
+from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.services.bot import handle_image_generation, handle_reset, handle_stop, handle_user_prompt
 from chibi.services.events.cwd_events import cwd_tracker
 from chibi.services.events.subagent_events import subagent_tracker
@@ -29,6 +29,7 @@ from chibi.services.task_manager import task_manager
 from chibi.services.usage_cache import UsageCacheStore
 from chibi.services.user import (
     clone_thread_messages,
+    get_default_chat_model,
     get_info,
     get_models_available,
     get_thread_name,
@@ -54,6 +55,8 @@ MAX_THOUGHTS_BYTES = 256 * 1024
 THOUGHTS_TRUNCATION_MARKER = "\n[... LLM reasoning truncated: 256 KB limit reached ...]"
 DELTA_FLUSH_INTERVAL = 0.2
 DELTA_FLUSH_CHARS = 512
+ACTIVE_MODEL_MARKER = "🟢"
+ACTIVE_MODEL_MARKER_VARIATION_SELECTOR = "\ufe0f"
 
 
 class _SubagentRequestState(TypedDict):
@@ -203,6 +206,95 @@ async def _get_thread_cwd(db: Database, storage_id: int, thread_id: int) -> str:
     """
     user = await db.get_or_create_user(user_id=storage_id)
     return str(Path(user.get_effective_working_dir(thread_id=thread_id)).expanduser())
+
+
+async def _apply_model_selection(
+    interface: StdioInterface, models: list[ModelChangeSchema], selection: str
+) -> list[str]:
+    """Resolve a model selection token against the listing and activate the model.
+
+    The token is read exactly as the ``/model`` command documents it: an empty
+    token answers the numbered listing, a 1-based index addresses a listing
+    position, and any other token selects a model. Ids (``name``) are matched
+    before display names, because the active model's display name carries the
+    ``🟢`` marker prepended by the listing (see
+    :func:`chibi.services.user.get_models_available`), which makes the id the
+    reliable way to address a model from a client.
+
+    Args:
+        interface: Request-local interface the activation is persisted on.
+        models: Models available on the interface thread, in listing order.
+        selection: Selection token: empty string, 1-based index, model id or
+            display name.
+
+    Returns:
+        The response lines describing the outcome. An empty list means the
+        selection was rejected and ``interface.error_code`` carries the error.
+    """
+    if not selection:
+        return [
+            "\n".join(f"{index}. {model.display_name} ({model.provider})" for index, model in enumerate(models, 1))
+            or "No models available."
+        ]
+    selected: ModelChangeSchema | None = None
+    if selection.isdigit() and 1 <= int(selection) <= len(models):
+        selected = models[int(selection) - 1]
+    else:
+        selected = next((model for model in models if model.name == selection), None)
+        if selected is None:
+            selected = next((model for model in models if model.display_name == selection), None)
+    if selected is None:
+        available_models = ", ".join(model.display_name for model in models) or "none"
+        interface.error_code = "invalid_argument"
+        interface.error_message = f"Unknown model selection. Available models: {available_models}."
+        return []
+    await set_active_model(interface=interface, model=selected)
+    return [f"Selected model: {selected.display_name} ({selected.provider})"]
+
+
+def _clean_display_name(display_name: str) -> str:
+    """Return a model display name without the active-selection marker.
+
+    The listing prefixes the active model's display name with the ``🟢``
+    marker and appends a variation selector right after the name (see
+    :func:`chibi.services.user.get_models_available`). The protocol frame
+    carries the same information as a boolean ``active`` flag, so the marker
+    and its variation selector are stripped from the wire name. A name
+    without the marker is returned unchanged.
+
+    Args:
+        display_name: Display name as produced by the model listing.
+
+    Returns:
+        The display name without the active-selection marker.
+    """
+    if not display_name.startswith(ACTIVE_MODEL_MARKER):
+        return display_name
+    stripped = display_name[len(ACTIVE_MODEL_MARKER) :].lstrip(" ")
+    if stripped.endswith(ACTIVE_MODEL_MARKER_VARIATION_SELECTOR):
+        stripped = stripped[: -len(ACTIVE_MODEL_MARKER_VARIATION_SELECTOR)]
+    return stripped
+
+
+def _models_result_entry(model: ModelChangeSchema) -> dict[str, Any]:
+    """Shape one listing entry into its ``models_result`` representation.
+
+    Args:
+        model: Model as returned by the listing; the entry of the model
+            active on the requesting thread carries the ``🟢`` marker in its
+            display name, which is what the ``active`` flag is derived from.
+
+    Returns:
+        The wire entry: model id, provider, marker-free display name, the
+        active flag, and the image-generation capability.
+    """
+    return {
+        "name": model.name,
+        "provider": model.provider,
+        "display_name": _clean_display_name(model.display_name),
+        "active": ACTIVE_MODEL_MARKER in model.display_name,
+        "image_generation": model.image_generation,
+    }
 
 
 class StdioRunner:
@@ -700,6 +792,57 @@ class StdioRunner:
         if self._thread_name_emissions:
             await asyncio.gather(*list(self._thread_name_emissions), return_exceptions=True)
 
+    async def _emit_models_result(self, request_id: str, thread_id: int) -> None:
+        """Write one ``models_result`` frame answering a ``models`` request.
+
+        The listing is the one ``/model`` renders, in the same order, with
+        the active-selection marker turned into the ``active`` flag.
+        ``default`` is the account-level fallback (the configured default
+        provider, then the first chat-ready provider), never the thread
+        override: it answers what a fresh thread would run on, and it is
+        null unless the resolved model string is usable. A listing failure
+        answers the request with an error frame rather than an empty list,
+        so the client can tell an outage from "no models available". An
+        empty listing with no provider configured at all carries an
+        explicit ``cause`` of ``no_providers_configured``.
+
+        Args:
+            request_id: Identifier of the ``models`` request being answered.
+            thread_id: Thread the ``active`` flag is computed for.
+        """
+        from chibi.services.providers import RegisteredProviders
+
+        try:
+            models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
+            default_selection = await get_default_chat_model(user_id=IDE_STORAGE_ID)
+        except ModelsUnavailableError:
+            logger.exception("Failed to list models for thread {}", thread_id)
+            # Every registered provider was attempted and failed on a total
+            # listing outage, so the registry size is the failed count.
+            await self._error(
+                "request_failed",
+                "The model listing is not available right now.",
+                request_id,
+                failed_providers=len(RegisteredProviders.available),
+            )
+            return
+        except Exception:
+            logger.exception("Failed to list models for thread {}", thread_id)
+            await self._error("request_failed", "The model listing is not available right now.", request_id)
+            return
+        default: dict[str, str] | None = None
+        if default_selection is not None and (default_selection[1] or "").strip():
+            default = {"provider": default_selection[0], "model": default_selection[1]}
+        frame: dict[str, Any] = {
+            "type": "models_result",
+            "request_id": request_id,
+            "models": [_models_result_entry(model) for model in models],
+            "default": default,
+        }
+        if not models and not RegisteredProviders.available:
+            frame["cause"] = "no_providers_configured"
+        await self._write(frame)
+
     async def _emit_delta(self, request_id: str, thread_id: int, text: str) -> None:
         """Append one live response chunk to the request's delta buffer.
 
@@ -852,6 +995,7 @@ class StdioRunner:
             and isinstance(message.get("selection"), (dict, type(None)))
             and isinstance(message.get("cursor_position"), (dict, type(None)))
             and isinstance(message.get("language_id"), (str, type(None)))
+            and isinstance(message.get("model"), (str, type(None)))
         )
 
     async def _handle_new_thread_with_current_context(
@@ -1016,6 +1160,17 @@ class StdioRunner:
             self._thread_name_emitted_threads.add(thread_id)
             await self._emit_stored_thread_name(thread_id)
         try:
+            requested_model = message.get("model")
+            if isinstance(requested_model, str) and requested_model:
+                # A request-level selection is applied before anything runs, so an
+                # unknown model fails the request; the /model confirmation text is
+                # not part of the answer it produces.
+                models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
+                await _apply_model_selection(interface=interface, models=models, selection=requested_model)
+                if interface.error_code is not None:
+                    self._drop_deltas(request_id)
+                    await self._error(interface.error_code, interface.error_message or "Request failed.", request_id)
+                    return
             if prompt.startswith("/"):
                 parts = prompt.split(maxsplit=1)
                 command, args = parts[0].lower(), parts[1] if len(parts) > 1 else ""
@@ -1042,30 +1197,7 @@ class StdioRunner:
                     responses.append(f"User ID: {IDE_STORAGE_ID}\nActive model: {active}\nUser info: {user_info}")
                 elif command == "/model":
                     models = await get_models_available(user_id=IDE_STORAGE_ID, thread_id=thread_id)
-                    if args.isdigit() and 1 <= int(args) <= len(models):
-                        await set_active_model(interface=interface, model=models[int(args) - 1])
-                        responses.append(
-                            f"Selected model: {models[int(args) - 1].display_name} ({models[int(args) - 1].provider})"
-                        )
-                    elif args:
-                        selected = next(
-                            (model for model in models if model.name == args or model.display_name == args), None
-                        )
-                        if selected is None:
-                            available_models = ", ".join(model.display_name for model in models) or "none"
-                            interface.error_code = "invalid_argument"
-                            interface.error_message = f"Unknown model selection. Available models: {available_models}."
-                        else:
-                            await set_active_model(interface=interface, model=selected)
-                            responses.append(f"Selected model: {selected.display_name} ({selected.provider})")
-                    else:
-                        responses.append(
-                            "\n".join(
-                                f"{index}. {model.display_name} ({model.provider})"
-                                for index, model in enumerate(models, 1)
-                            )
-                            or "No models available."
-                        )
+                    responses.extend(await _apply_model_selection(interface=interface, models=models, selection=args))
                 else:
                     # Unmatched slash-prefixed prompt: treat as a plain user prompt.
                     await handle_user_prompt(interface=interface)
@@ -1222,7 +1354,7 @@ class StdioRunner:
                         "type": "ready",
                         "protocol_version": PROTOCOL_VERSION,
                         "server": {"name": "chibi", "version": "1.0.0"},
-                        "capabilities": {"commands": COMMANDS},
+                        "capabilities": {"commands": COMMANDS, "models": True},
                     }
                 )
         elif message_type == "request":
@@ -1270,6 +1402,15 @@ class StdioRunner:
                 await self._error("malformed_request", "get_cwd requires a non-negative integer thread_id.", request_id)
             else:
                 await self._emit_cwd_update(message["thread_id"])
+        elif message_type == "models":
+            if not self._initialized:
+                await self._error("not_initialized", "Not initialized.", request_id)
+            elif not request_id:
+                await self._error("malformed_request", "models requires a non-empty string request_id.", None)
+            elif not isinstance(message.get("thread_id", 0), int) or message.get("thread_id", 0) < 0:
+                await self._error("malformed_request", "models requires a non-negative integer thread_id.", request_id)
+            else:
+                await self._emit_models_result(request_id, int(message.get("thread_id", 0)))
         elif message_type == "shutdown":
             self._stopping = True
         else:

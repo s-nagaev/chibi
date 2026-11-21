@@ -51,6 +51,7 @@ from chibi.services.mistral_errors import classify_mistral_exception
 from chibi.services.providers.provider import RestApiFriendlyProvider, ServiceResponseError
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    SayAnswerDeltaStreamer,
     delta_latched,
     delta_streaming_allowed,
     mark_non_streaming_fallback_spent,
@@ -290,7 +291,10 @@ class MistralAI(RestApiFriendlyProvider):
 
         Emits one live delta per non-empty content chunk via the interface
         until the earliest tool-call signal in the stream (the full
-        ``tool_calls`` typically arrive only on the final chunk). Delta
+        ``tool_calls`` typically arrive only on the final chunk). The ``text``
+        argument of the first ``say`` tool call is streamed as well, so a turn
+        that ends through ``say`` still delivers its visible answer live even
+        though it carries no body text. Delta
         content is normalized with ``mistral_content_to_text`` first, so a
         reasoning-capable model's list-form chunks (``ThinkChunk`` et al.)
         flatten to body text before the accumulator or the ACK gate sees
@@ -323,6 +327,7 @@ class MistralAI(RestApiFriendlyProvider):
         content_parts: list[str] = []
         tool_call_slots: dict[int, dict[str, str]] = {}
         tool_call_signal = False
+        say_answer = SayAnswerDeltaStreamer()
         finish_reason: str | None = None
         usage: UsageInfo | None = None
         completion_id = ""
@@ -392,6 +397,13 @@ class MistralAI(RestApiFriendlyProvider):
                             slot["arguments"] += arguments
                         elif arguments:
                             slot["arguments"] = json.dumps(arguments)
+                    say_answer_delta = say_answer.update(
+                        tool_name=slot["name"] or None,
+                        raw_arguments=slot["arguments"],
+                        index=index,
+                    )
+                    if say_answer_delta:
+                        await deltas.emit(say_answer_delta)
         tool_calls = [
             ToolCall(
                 id=slot["id"] or str(uuid4()),

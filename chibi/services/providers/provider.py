@@ -22,6 +22,7 @@ from anthropic import omit as anthropic_omit
 from anthropic.types import (
     AssistantMessageParam,
     CacheControlEphemeralParam,
+    InputJSONDelta,
     MessageParam,
     TextBlock,
     TextBlockParam,
@@ -90,7 +91,7 @@ from chibi.exceptions import (
     SilentTurnError,
 )
 from chibi.interfaces.interface import UserInterface
-from chibi.models import Message, User
+from chibi.models import MODELS_DISCOVERY_TIMEOUT_SECONDS, Message, User
 from chibi.schemas.app import (
     ChatResponseSchema,
     ModelChangeSchema,
@@ -103,6 +104,7 @@ from chibi.services.context_note import attach_context_note
 from chibi.services.metrics import MetricsService
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    SayAnswerDeltaStreamer,
     delta_latched,
     delta_streaming_allowed,
     mark_non_streaming_fallback_spent,
@@ -179,6 +181,7 @@ async def download_media(url: str, timeout: float = 120.0) -> bytes:
 class RegisteredProviders:
     all: dict[str, type["Provider"]] = {}
     available: dict[str, type["Provider"]] = {}
+    _availability_logged: bool = False
 
     def __init__(self, user_api_keys: dict[str, str] | None = None) -> None:
         self.tokens = {} if not user_api_keys else user_api_keys
@@ -188,6 +191,30 @@ class RegisteredProviders:
                 for provider in RegisteredProviders.all.values()
                 if provider.name in self.tokens
             }
+        self._log_availability_once()
+
+    @classmethod
+    def _log_availability_once(cls) -> None:
+        """Log the registered provider names once per process.
+
+        Names only are logged, never key material, so the first registry
+        construction makes the discovery situation diagnosable from the log.
+        """
+        if cls._availability_logged:
+            return
+        cls._availability_logged = True
+        if not cls.available:
+            logger.warning(
+                "No providers are available: {} provider classes registered, none has an API key configured: {}",
+                len(cls.all),
+                ", ".join(sorted(cls.all)) or "none",
+            )
+            return
+        logger.info(
+            "Available providers ({}): {}",
+            len(cls.available),
+            ", ".join(sorted(cls.available)),
+        )
 
     @classmethod
     def register(cls, provider: type["Provider"]) -> None:
@@ -300,7 +327,11 @@ class RegisteredProviders:
 
     @property
     def first_chat_ready(self) -> Optional["Provider"]:
-        if provider := next(iter(self.chat_ready.values()), None):
+        for provider in self.chat_ready.values():
+            if not (provider.default_model or "").strip():
+                # A provider without a default model cannot back the implicit
+                # chat fallback: selecting it would resolve to an empty model.
+                continue
             return self.get_instance(provider=provider)
         return None
 
@@ -694,7 +725,10 @@ class _OpenAIChatStreamAccumulator:
     ``reasoning_content`` split out of the body text, captures the usage
     carried by the usage-only final chunk (which has empty ``choices``) and
     tracks the earliest tool-call signal so the consumer can stop emitting
-    live deltas for the rest of the turn (plan D2).
+    live deltas for the rest of the turn (plan D2). The same accumulation also
+    feeds a :class:`SayAnswerDeltaStreamer`, so a turn whose answer travels in
+    the ``say`` tool call's ``text`` argument still streams that answer (see
+    ``take_say_answer_delta``).
     """
 
     def __init__(self) -> None:
@@ -702,12 +736,25 @@ class _OpenAIChatStreamAccumulator:
         self.content_parts: list[str] = []
         self.reasoning_parts: list[str] = []
         self.tool_call_signal: bool = False
+        self.say_answer = SayAnswerDeltaStreamer()
+        self._pending_say_answer: str = ""
         self._tool_calls: dict[int, dict[str, str]] = {}
         self._finish_reason: str | None = None
         self._usage: CompletionUsage | None = None
         self._completion_id: str = ""
         self._model: str = ""
         self._created: int = 0
+
+    def take_say_answer_delta(self) -> str:
+        """Return the ``say`` answer text the last chunk revealed, and forget it.
+
+        Returns:
+            The not-yet-emitted suffix of the followed ``say`` call's ``text``
+            argument, or an empty string when the last chunk revealed none.
+        """
+        pending = self._pending_say_answer
+        self._pending_say_answer = ""
+        return pending
 
     def process_chunk(self, chunk: ChatCompletionChunk) -> str:
         """Consume one stream chunk and return the body-text delta to emit.
@@ -745,6 +792,11 @@ class _OpenAIChatStreamAccumulator:
                         slot["name"] = tool_call_delta.function.name
                     if tool_call_delta.function.arguments:
                         slot["arguments"] += tool_call_delta.function.arguments
+                self._pending_say_answer += self.say_answer.update(
+                    tool_name=slot["name"] or None,
+                    raw_arguments=slot["arguments"],
+                    index=tool_call_delta.index,
+                )
         text_delta = delta.content or ""
         if text_delta:
             self.content_parts.append(text_delta)
@@ -928,6 +980,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         still complete into a pure ACK sentinel are buffered by the gate owned
         by this streaming attempt's ``AckSentinelStreamSession``, so a
         pure-ACK answer never emits a delta.
+        The ``text`` argument of the first ``say`` tool call is streamed too
+        (through the same gate), so a turn whose visible answer travels in
+        that call still reaches the client live while the turn runs.
         The accumulated chunks are rebuilt into a ChatCompletion equivalent to
         the non-streaming response (fragmented tool-call arguments, parallel
         tool calls, ``reasoning_content`` split and the usage-only final
@@ -992,6 +1047,9 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
                     text_delta = accumulator.process_chunk(chunk=chunk)
                     if text_delta and not accumulator.tool_call_signal:
                         await deltas.emit(text_delta)
+                    say_answer_delta = accumulator.take_say_answer_delta()
+                    if say_answer_delta:
+                        await deltas.emit(say_answer_delta)
             finally:
                 await stream.close()
         return accumulator.build_response()
@@ -1373,7 +1431,7 @@ class OpenAIFriendlyProvider(Provider, Generic[P, R]):
         self, image_generation: bool = False, video_generation: bool = False
     ) -> list[ModelChangeSchema] | None:
         try:
-            models = await self.client.models.list()
+            models = await self.client.models.list(timeout=MODELS_DISCOVERY_TIMEOUT_SECONDS)
         except Exception as e:
             logger.error(f"Failed to get available models for provider {self.name} due to exception: {e}")
             return None
@@ -1738,8 +1796,11 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
 
         Emits one live delta per non-empty text delta via the interface until
         the earliest tool-use block signal in the stream; thinking deltas are
-        accumulated by the SDK and never streamed. The stream is always
-        closed explicitly, also on cancellation.
+        accumulated by the SDK and never streamed. The streamed
+        ``input_json_delta`` fragments of the first ``say`` tool call are
+        decoded as well, so the answer of a turn that ends through ``say``
+        reaches the client live instead of only in the result frame. The
+        stream is always closed explicitly, also on cancellation.
 
         Args:
             model: The Anthropic model identifier.
@@ -1771,13 +1832,28 @@ class AnthropicFriendlyProvider(RestApiFriendlyProvider):
             ) as stream,
         ):
             tool_call_signal = False
+            say_answer = SayAnswerDeltaStreamer()
+            call_names: dict[int, str] = {}
+            call_arguments: dict[int, str] = {}
             async for event in stream:
                 if event.type == "content_block_start":
                     if isinstance(event.content_block, ToolUseBlock):
                         tool_call_signal = True
-                elif event.type == "content_block_delta" and not tool_call_signal:
-                    if isinstance(event.delta, TextDelta) and event.delta.text:
+                        call_names[event.index] = event.content_block.name
+                        call_arguments.setdefault(event.index, "")
+                elif event.type == "content_block_delta":
+                    if isinstance(event.delta, TextDelta) and event.delta.text and not tool_call_signal:
                         await deltas.emit(event.delta.text)
+                    elif isinstance(event.delta, InputJSONDelta):
+                        accumulated = call_arguments.get(event.index, "") + event.delta.partial_json
+                        call_arguments[event.index] = accumulated
+                        say_answer_delta = say_answer.update(
+                            tool_name=call_names.get(event.index),
+                            raw_arguments=accumulated,
+                            index=event.index,
+                        )
+                        if say_answer_delta:
+                            await deltas.emit(say_answer_delta)
             return await stream.get_final_message()
 
     @retry(
