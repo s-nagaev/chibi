@@ -9,9 +9,10 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import httpx
 import pytest
+from loguru import logger
 
-from chibi.models import User
-from chibi.schemas.app import ChatResponseSchema, ModeratorsAnswer
+from chibi.models import ModelsUnavailableError, User
+from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, ModeratorsAnswer
 from chibi.services.providers.provider import Provider
 from chibi.services.providers.tools.cmd import RunCommandInTerminalTool
 from chibi.services.providers.tools.memory import GetCurrentWorkingDirTool, SetWorkingDirTool
@@ -19,6 +20,7 @@ from chibi.services.providers.tools.schemas import ToolCallSchema
 from chibi.services.providers.tools.tool import ChibiTool, RegisteredChibiTools
 from chibi.services.providers.tools.utils import (
     _get_url,
+    get_models_available_to_user,
     get_sub_agent_response,
     resolve_session_context,
 )
@@ -314,3 +316,32 @@ class TestGetUrlAcceptEncoding:
         assert "br" not in accept_encoding.split(", ")
         assert "zstd" not in accept_encoding.split(", ")
         assert response.text == "decodable body"
+
+
+class TestGetModelsAvailableToUser:
+    @pytest.mark.asyncio
+    async def test_degrades_to_empty_list_when_listing_is_unavailable(self) -> None:
+        """A total model-listing failure returns an empty list instead of raising into the delegate flow."""
+        records: list[str] = []
+        sink_id = logger.add(records.append, level="WARNING")
+        try:
+            with patch(
+                "chibi.services.user.get_models_available",
+                new=AsyncMock(side_effect=ModelsUnavailableError("every provider failed")),
+            ):
+                result = await get_models_available_to_user(user_id=1)
+        finally:
+            logger.remove(sink_id)
+
+        assert result == []
+        assert any("model listing is unavailable" in record.lower() for record in records)
+
+    @pytest.mark.asyncio
+    async def test_returns_listing_on_success(self) -> None:
+        """The happy path returns the provider listing unchanged."""
+        listing = [ModelChangeSchema(name="models/gemini-3.8-flash", provider="Gemini", image_generation=False)]
+
+        with patch("chibi.services.user.get_models_available", new=AsyncMock(return_value=listing)):
+            result = await get_models_available_to_user(user_id=1)
+
+        assert result == listing

@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **The built-in `CustomOpenAI` instance keeps its name and its variables.** `CUSTOMOPENAI_API_KEY` and `CUSTOMOPENAI_URL` still configure it, so stored selections and existing configuration need no change.
 
+### Fixed
+- **Model enumeration can no longer abort a chat response.** When every provider fails to list its models, `prepare_system_prompt` and the delegate tool now continue without the `available_models_to_delegate` section and log a warning, instead of letting `ModelsUnavailableError` escape the chat path. Listing availability degrades the same way the UI listing already did, so chat answers keep flowing.
+
 ## [1.21.6] - 2026-11-16
 
 ### Fixed
