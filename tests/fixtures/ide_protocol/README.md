@@ -61,6 +61,18 @@ drained before the terminal write of the request it was scheduled during. A sess
 `valid_session_*` scenario — no `thread_renamed` frames are ever emitted to a client that did not
 opt in.
 
+### `valid_models_input.jsonl` / `valid_models_output.jsonl`
+Structured model listing for a client that sees `ready.capabilities.models`:
+`initialize` → `ready` → `models` → `models_result`.
+
+The `models` frame is a correlated request/answer pair: `request_id` is mandatory and a frame without it answers
+`malformed_request`. The `models_result` listing is the same listing, in the same order, that the bare `/model`
+command renders as text, with the active-selection marker turned into the `active` boolean and the marker
+stripped from `display_name`. `thread_id` is optional and defaults to `0`; it only chooses the thread the
+`active` flag is computed for. `default` is the account-level fallback (the configured default provider, then
+the first chat-ready provider) and never the thread selection, so it stays `null` when no chat provider is
+configured.
+
 ## Invalid / edge cases
 
 ### `invalid_cases.jsonl`
@@ -85,3 +97,4 @@ stdout matches `expected_output` exactly.
 | `request_before_ready` | `request` before handshake → `not_initialized`. |
 | `cancel_unknown_request` | `cancel` for a non-existent request → `unknown_request`. |
 | `request_missing_request_id` | `request` without `request_id` → `malformed_request`. |
+| `models_without_request_id` | `models` without `request_id` → `malformed_request`. |

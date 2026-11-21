@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import math
 import random
 import wave
@@ -65,6 +66,7 @@ from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import RestApiFriendlyProvider
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    SayAnswerDeltaStreamer,
     delta_streaming_allowed,
 )
 from chibi.services.providers.terminal_calls import (
@@ -491,7 +493,11 @@ class Gemini(RestApiFriendlyProvider):
         The ``Client`` context stays open across the whole stream iteration.
         Emits one live delta per non-empty non-thought text part until the
         earliest function-call signal in the stream; thought parts are
-        filtered out and never streamed. The chunks are rebuilt into a
+        filtered out and never streamed. The text argument of the first
+        ``say`` tool call is streamed as well (Gemini delivers a function call
+        in a single part, so that answer arrives as one delta), because a turn
+        that ends through ``say`` carries its whole visible answer there and
+        has no body text left to stream. The chunks are rebuilt into a
         single GenerateContentResponse equivalent to the non-streaming
         response (body text, parallel function calls, thought signature,
         usage metadata and model version included). The stream is always
@@ -512,6 +518,8 @@ class Gemini(RestApiFriendlyProvider):
         """
         parts: list[Part] = []
         tool_call_signal = False
+        say_answer = SayAnswerDeltaStreamer()
+        call_ordinal = 0
         thought_signature: bytes | None = None
         usage_metadata: GenerateContentResponseUsageMetadata | None = None
         model_version: str | None = None
@@ -538,7 +546,16 @@ class Gemini(RestApiFriendlyProvider):
                     if part.function_call is None and (part.text is None or part.thought):
                         continue
                     parts.append(part)
-                    if part.text and not part.function_call and not tool_call_signal:
+                    if part.function_call is not None:
+                        say_answer_delta = say_answer.update(
+                            tool_name=part.function_call.name,
+                            raw_arguments=json.dumps(part.function_call.args or {}),
+                            index=call_ordinal,
+                        )
+                        call_ordinal += 1
+                        if say_answer_delta:
+                            await deltas.emit(say_answer_delta)
+                    elif part.text and not tool_call_signal:
                         await deltas.emit(part.text)
         if thought_signature:
             for part in parts:

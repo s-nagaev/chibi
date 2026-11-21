@@ -4,10 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.22.1] - 2026-11-19
+## [Unreleased]
+
+### Added
+- **IDE clients can select the model per request:** the stdio protocol `request` frame accepts an optional `model` field (model id, 1-based listing index or display name), applied to the thread before the prompt runs; an unknown selection answers an `invalid_request` error and the prompt is skipped, while an absent, null or empty field changes nothing.
+- **IDE clients can list the selectable models:** a new `models` request is answered by a `models_result` frame carrying the same models the `/model` command lists, in the same order, each with its provider, the active flag for the requesting thread and the image-generation capability, plus the account-level default provider and model; `ready.capabilities.models` advertises the frame.
 
 ### Fixed
-- **Model enumeration can no longer abort a chat response.** When every provider fails to list its models, `prepare_system_prompt` and the delegate tool now continue without the `available_models_to_delegate` section and log a warning, instead of letting `ModelsUnavailableError` escape the chat path. Listing availability degrades the same way the UI listing already did, so chat answers keep flowing.
+- **`CHIBI_ENV=dev` runs no longer read the production settings file:** a development run ignores `~/chibi-bot/settings` and any `CHIBI_SETTINGS_FILE` path entirely and injects nothing from them into the environment, so the shell environment and the working directory `.env` stay the only dev sources; production runs keep loading the file with its usual precedence.
+- **A host install without `LOCAL_DATA_PATH` no longer writes to the container path:** outside Docker and Podman the data directory falls back to `~/chibi-bot/data`, which is created when missing, instead of failing on the image-only `/app/data`; an explicit environment variable, working directory `.env` or `~/chibi-bot/settings` value still wins.
+- **Answers delivered through the `say` tool call stream to IDE clients instead of arriving only at the end:** the text argument of the turn-ending `say` call is now sent on the live delta channel, so a client that declared the `streaming` capability shows the answer while the turn is still running.
 
 ## [1.22.0] - 2026-11-16
 
@@ -17,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **The built-in `CustomOpenAI` instance keeps its name and its variables.** `CUSTOMOPENAI_API_KEY` and `CUSTOMOPENAI_URL` still configure it, so stored selections and existing configuration need no change.
+
+### Fixed
+- **Model enumeration can no longer abort a chat response.** When every provider fails to list its models, `prepare_system_prompt` and the delegate tool now continue without the `available_models_to_delegate` section and log a warning, instead of letting `ModelsUnavailableError` escape the chat path. Listing availability degrades the same way the UI listing already did, so chat answers keep flowing.
 
 ## [1.21.6] - 2026-11-16
 

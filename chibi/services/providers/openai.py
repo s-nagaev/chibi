@@ -13,6 +13,7 @@ from openai.types.responses import (
     Response,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionToolCall,
+    ResponseOutputItemAddedEvent,
     ResponseTextDeltaEvent,
 )
 
@@ -27,6 +28,7 @@ from chibi.services.metrics import MetricsService
 from chibi.services.providers.provider import OpenAIFriendlyProvider
 from chibi.services.providers.streaming import (
     AckSentinelStreamSession,
+    SayAnswerDeltaStreamer,
     delta_latched,
     delta_streaming_allowed,
 )
@@ -305,7 +307,10 @@ class OpenAI(OpenAIFriendlyProvider):
 
         Emits one live delta per output-text delta event via the interface
         until the earliest function-call-arguments delta in the stream;
-        reasoning summary deltas are never streamed. The final aggregated
+        reasoning summary deltas are never streamed. The streamed arguments of
+        the first ``say`` function call are decoded as well, so the answer of a
+        turn that ends through ``say`` reaches the client live instead of only
+        in the result frame. The final aggregated
         Response is obtained from the stream itself, so the downstream
         non-streaming processing stays unchanged. The stream is always
         closed explicitly, also on cancellation. A mid-stream 400/404
@@ -330,15 +335,32 @@ class OpenAI(OpenAIFriendlyProvider):
         """
         stream_kwargs = {key: value for key, value in request_kwargs.items() if key != "stream"}
         tool_call_signal = False
+        say_answer = SayAnswerDeltaStreamer()
+        call_names: dict[int, str] = {}
+        call_arguments: dict[int, str] = {}
         try:
             async with AckSentinelStreamSession(interface) as deltas:
                 async with self.get_client().responses.stream(**stream_kwargs) as stream:
                     async for event in stream:
-                        if isinstance(event, ResponseTextDeltaEvent):
+                        if isinstance(event, ResponseOutputItemAddedEvent):
+                            item = event.item
+                            if isinstance(item, ResponseFunctionToolCall):
+                                call_names[event.output_index] = item.name
+                                call_arguments.setdefault(event.output_index, "")
+                        elif isinstance(event, ResponseTextDeltaEvent):
                             if not tool_call_signal and event.delta:
                                 await deltas.emit(event.delta)
                         elif isinstance(event, ResponseFunctionCallArgumentsDeltaEvent):
                             tool_call_signal = True
+                            accumulated = call_arguments.get(event.output_index, "") + event.delta
+                            call_arguments[event.output_index] = accumulated
+                            say_answer_delta = say_answer.update(
+                                tool_name=call_names.get(event.output_index),
+                                raw_arguments=accumulated,
+                                index=event.output_index,
+                            )
+                            if say_answer_delta:
+                                await deltas.emit(say_answer_delta)
                     return await stream.get_final_response()
         except (BadRequestError, NotFoundError) as stream_error:
             # Some gateways reject the streaming Responses request with a
