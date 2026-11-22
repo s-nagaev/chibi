@@ -9,38 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **IDE clients can select the model per request:** the stdio protocol `request` frame accepts an optional `model` field (model id, 1-based listing index or display name), applied to the thread before the prompt runs; an unknown selection answers an `invalid_request` error and the prompt is skipped, while an absent, null or empty field changes nothing.
 - **IDE clients can list the selectable models:** a new `models` request is answered by a `models_result` frame carrying the same models the `/model` command lists, in the same order, each with its provider, the active flag for the requesting thread and the image-generation capability, plus the account-level default provider and model; `ready.capabilities.models` advertises the frame.
-
-### Fixed
-- **`CHIBI_ENV=dev` runs no longer read the production settings file:** a development run ignores `~/chibi-bot/settings` and any `CHIBI_SETTINGS_FILE` path entirely and injects nothing from them into the environment, so the shell environment and the working directory `.env` stay the only dev sources; production runs keep loading the file with its usual precedence.
-- **A host install without `LOCAL_DATA_PATH` no longer writes to the container path:** outside Docker and Podman the data directory falls back to `~/chibi-bot/data`, which is created when missing, instead of failing on the image-only `/app/data`; an explicit environment variable, working directory `.env` or `~/chibi-bot/settings` value still wins.
-- **Answers delivered through the `say` tool call stream to IDE clients instead of arriving only at the end:** the text argument of the turn-ending `say` call is now sent on the live delta channel, so a client that declared the `streaming` capability shows the answer while the turn is still running.
-
-## [1.22.0] - 2026-11-16
-
-### Added
 - **Extra compatible provider instances can be defined with environment variables.** Each `OPENAICOMPATIBLE_<NAME>_API_KEY` registers a provider named `<NAME>` that serves chat, speech-to-text and text-to-speech, with the endpoint taken from `OPENAICOMPATIBLE_<NAME>_URL`. The number of instances is not limited.
 - **Anthropic-compatible endpoints follow the same scheme.** `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` registers a chat provider per name, and `ANTHROPICCOMPATIBLE_<NAME>_URL` points it at the endpoint. Left unset, the URL stays `https://api.anthropic.com`.
+- **`IMAGE_MODELS_WHITELIST` limits which image generation models the bot offers and uses.** Comma-separated and optional: when set, image model listings and image generation are restricted to the listed models, and `MODELS_WHITELIST` / `MODELS_BLACKLIST` no longer apply to image models. Left unset, image models keep following the global whitelist and blacklist.
 
 ### Changed
 - **The built-in `CustomOpenAI` instance keeps its name and its variables.** `CUSTOMOPENAI_API_KEY` and `CUSTOMOPENAI_URL` still configure it, so stored selections and existing configuration need no change.
-
-## [1.21.6] - 2026-11-16
-
-### Fixed
-- **A scheduled command survives an unavailable command moderator.** HTTP errors, connection failures and unparseable moderator responses surface to the agent as one standardized error message instead of an unhandled failure or a misleading "declined" verdict; the command is not run, and the agent job wakes itself with the same message so it can decide what to do next.
-
-## [1.21.5] - 2026-11-16
-
-### Added
-- **`IMAGE_MODELS_WHITELIST` limits which image generation models the bot offers and uses.** Comma-separated and optional: when set, image model listings and image generation are restricted to the listed models, and `MODELS_WHITELIST` / `MODELS_BLACKLIST` no longer apply to image models. Left unset, image models keep following the global whitelist and blacklist.
-
-### Fixed
-- **Edited messages no longer re-trigger the agent.** An edit arrives as an `edited_message` update, which the prompt and file-upload handlers now ignore, so editing or reacting to a message that quotes the agent no longer starts a new turn. Fresh messages, including replies to the agent, are handled as before.
-- **Command messages carrying an attachment are no longer handled as uploads.** The file-upload filter now excludes commands across the whole media expression.
-
-## [1.21.4] - 2026-11-14
-
-### Changed
 - **A thread without an explicit selection now follows `DEFAULT_PROVIDER` and `DEFAULT_MODEL`.** The deprecated user-level LLM selection was removed from the user record, so it can no longer override the configured defaults for new threads.
 - **Threads pinned to that removed user-level selection keep it for now.** A follow-up data cleanup drops those entries, after which the threads follow the configured defaults as well.
 - **The dependency stack moved forward across the board:** pydantic 2.14.3, pydantic-settings 2.16.3, redis-py 8.1.0 (still forced to RESP2), anthropic 2.8.0, openai 3.51.0, google-genai 3.3.0, dashscope 2.1.0, elevenlabs 2.78.0, mistralai 3.7.0, httpx2 2.16.0, telegramify-markdown 1.4.2, and minor updates of ddgs, click and trafilatura. On the dev side, `respx` was dropped from the test dependencies.
@@ -48,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **fastembed 0.9.1 with onnxruntime 1.32.0 drops Intel Mac support for semantic memory.** The embedding backend installs on macOS with Apple silicon, Linux (x86_64 or arm64) and Windows; on Intel Macs semantic memory is now disabled.
 
 ### Fixed
+- **`CHIBI_ENV=dev` runs no longer read the production settings file:** a development run ignores `~/chibi-bot/settings` and any `CHIBI_SETTINGS_FILE` path entirely and injects nothing from them into the environment, so the shell environment and the working directory `.env` stay the only dev sources; production runs keep loading the file with its usual precedence.
+- **A host install without `LOCAL_DATA_PATH` no longer writes to the container path:** outside Docker and Podman the data directory falls back to `~/chibi-bot/data`, which is created when missing, instead of failing on the image-only `/app/data`; an explicit environment variable, working directory `.env` or `~/chibi-bot/settings` value still wins.
+- **Answers delivered through the `say` tool call stream to IDE clients instead of arriving only at the end:** the text argument of the turn-ending `say` call is now sent on the live delta channel, so a client that declared the `streaming` capability shows the answer while the turn is still running.
+- **Model enumeration can no longer abort a chat response.** When every provider fails to list its models, `prepare_system_prompt` and the delegate tool now continue without the `available_models_to_delegate` section and log a warning, instead of letting `ModelsUnavailableError` escape the chat path. Listing availability degrades the same way the UI listing already did, so chat answers keep flowing.
+- **A scheduled command survives an unavailable command moderator.** HTTP errors, connection failures and unparseable moderator responses surface to the agent as one standardized error message instead of an unhandled failure or a misleading "declined" verdict; the command is not run, and the agent job wakes itself with the same message so it can decide what to do next.
+- **Edited messages no longer re-trigger the agent.** An edit arrives as an `edited_message` update, which the prompt and file-upload handlers now ignore, so editing or reacting to a message that quotes the agent no longer starts a new turn. Fresh messages, including replies to the agent, are handled as before.
+- **Command messages carrying an attachment are no longer handled as uploads.** The file-upload filter now excludes commands across the whole media expression.
 - **Speech-to-text reports a clear error on empty transcriptions.** `transcribe` raises an error instead of returning `None` when the ElevenLabs API returns no text (behavior aligned with elevenlabs 2.78).
 
 ## [1.21.3] - 2026-11-11

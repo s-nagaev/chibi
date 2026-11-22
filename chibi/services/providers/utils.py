@@ -8,6 +8,7 @@ from anthropic.types import (
     Message as AnthropicMessage,
 )
 from google.genai.types import GenerateContentResponse
+from loguru import logger
 from mistralai.client.models import ChatCompletionResponse
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion
@@ -16,7 +17,7 @@ from openai.types.responses import Response
 from chibi.config import application_settings, gpt_settings
 from chibi.constants import PERSISTENT_MEMORY_PROMPT, SCHEDULER_HINT_PROMPT, TOOL_RESULTS_SHARE_WARN_THRESHOLD
 from chibi.interfaces.interface import UserInterface
-from chibi.models import Message
+from chibi.models import Message, ModelsUnavailableError
 from chibi.schemas.app import ModelChangeSchema, UsageSchema
 from chibi.schemas.suno import SunoGetGenerationDetailsSchema
 from chibi.services.context_measurement import estimate_messages_tokens
@@ -315,6 +316,9 @@ async def prepare_system_prompt(
         non-empty, are injected as the LAST payload key (the tail of the
         serialized JSON) to minimize prompt-cache disturbance; an empty notes
         string is treated the same as an absent one and the key is omitted.
+        A model listing that cannot be enumerated degrades to an empty
+        ``available_models_to_delegate`` section instead of aborting the
+        prompt, so chat responses never depend on the listing being up.
     """
     user = await get_chibi_user(user_id=user_id)
     session_thread_id = interface.thread_id if interface else thread_id
@@ -352,7 +356,11 @@ async def prepare_system_prompt(
         storage: FileStorage = get_file_storage(interface=interface)
         prompt["last_uploaded_files"] = await storage.get_available_files(limit=10)
 
-    llms_data: list[ModelChangeSchema] = await user.get_available_models()
+    try:
+        llms_data: list[ModelChangeSchema] = await user.get_available_models()
+    except ModelsUnavailableError as e:
+        logger.warning(f"Model listing is unavailable, the system prompt is built without the models section: {e}")
+        llms_data = []
     prompt["available_models_to_delegate"] = convert_list_of_models_to_str(models=llms_data)
 
     prompt.update({"user_id": user.id, "user_info": user.info, "activated_skills": user.llm_skills})
