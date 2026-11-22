@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from anthropic.types import Message as AnthropicMessage
+from loguru import logger
 
 from chibi.config import application_settings
 from chibi.config.app import ClientType
 from chibi.constants import SCHEDULER_HINT_PROMPT
 from chibi.interfaces.interface import UserInterface
-from chibi.models import Message, User
+from chibi.models import Message, ModelsUnavailableError, User
 from chibi.schemas.app import UsageSchema
 from chibi.services.providers.utils import (
     _is_tool_response_message,
@@ -534,3 +535,37 @@ def test_is_context_overflow_signal_matches_provider_wordings(status_code: int, 
 def test_is_context_overflow_signal_rejects_non_overflow_errors(status_code: int, detail: Any) -> None:
     """Non-overflow errors (wrong status, unrelated message, missing payload) are not flagged."""
     assert not is_context_overflow_signal(status_code=status_code, detail=detail)
+
+
+@pytest.mark.asyncio
+async def test_prepare_system_prompt_survives_unavailable_model_listing() -> None:
+    """A total model-listing failure degrades to an empty section instead of aborting the prompt.
+
+    The chat path must never be blocked by an enumeration outage, so
+    ``prepare_system_prompt`` catches ``ModelsUnavailableError``, logs a warning and
+    builds the payload with an empty ``available_models_to_delegate``.
+    """
+    _reset_usage_cache()
+    user = _make_user()
+    interface = cast(UserInterface, SimpleNamespace(thread_id=0, uses_uploaded_file_storage=False))
+
+    records: list[str] = []
+    sink_id = logger.add(records.append, level="WARNING")
+    try:
+        with (
+            patch("chibi.services.providers.utils.get_chibi_user", new=AsyncMock(return_value=user)),
+            patch("chibi.services.providers.utils.get_available_skills", return_value=[]),
+            patch.object(
+                User,
+                "get_available_models",
+                new=AsyncMock(side_effect=ModelsUnavailableError("every provider failed")),
+            ),
+        ):
+            prompt_json = await prepare_system_prompt("base", 1, interface)
+    finally:
+        logger.remove(sink_id)
+
+    prompt = json.loads(prompt_json)
+    assert prompt["system_prompt"].startswith("base")
+    assert prompt["available_models_to_delegate"] == "{}"
+    assert any("model listing is unavailable" in record.lower() for record in records)

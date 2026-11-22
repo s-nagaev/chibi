@@ -59,6 +59,9 @@ if TYPE_CHECKING:
 
 MODELS_CACHE_TTL_SECONDS = 60 * 60
 MODELS_FAILURE_COOLDOWN_SECONDS = 45
+# Per-provider cap on one model-enumeration await: a dead or slow provider
+# must not stall the whole listing gather.
+MODELS_DISCOVERY_TIMEOUT_SECONDS = 10
 
 # Cache key for the user-level model listing: (user id, image flag, video
 # flag). The key is stable per user id, so two User instances built for the
@@ -869,11 +872,22 @@ class User(BaseModel):
             )
 
         providers = self.providers.available_instances
-        tasks = [
-            provider.get_available_models(image_generation=image_generation, video_generation=video_generation)
-            for provider in providers
-        ]
-        results = await asyncio.gather(*tasks)
+
+        async def enumerate_provider(provider: "Provider") -> list[ModelChangeSchema] | None:
+            try:
+                return await asyncio.wait_for(
+                    provider.get_available_models(image_generation=image_generation, video_generation=video_generation),
+                    timeout=MODELS_DISCOVERY_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Model enumeration for provider {} timed out after {} seconds",
+                    provider.name,
+                    MODELS_DISCOVERY_TIMEOUT_SECONDS,
+                )
+                return None
+
+        results = await asyncio.gather(*[enumerate_provider(provider) for provider in providers])
 
         failed_results = [result for result in results if result is None]
         models = list(itertools.chain.from_iterable(result for result in results if result is not None))

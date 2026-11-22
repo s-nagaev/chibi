@@ -2500,6 +2500,39 @@ async def ocr_pdf(
     return await provider.ocr(pdf=pdf, model=model)
 
 
+@inject_database
+async def get_default_chat_model(db: Database, user_id: int) -> tuple[str, str] | None:
+    """Resolve the account-level default chat provider and model.
+
+    The chain is the account half of
+    :meth:`chibi.models.User.get_active_llm_provider` with the thread and
+    legacy per-user overrides removed: the configured ``default_provider``
+    first, then the first chat-ready provider. The model is the resolved
+    provider's own default. It answers what a brand-new thread runs on when
+    nothing has been selected yet, which is what the IDE ``models_result``
+    frame advertises as ``default``.
+
+    Args:
+        db: Database instance injected by :func:`chibi.storage.database.inject_database`.
+        user_id: The storage identity the default is resolved for.
+
+    Returns:
+        A ``(provider, model)`` pair, or None when no chat provider carrying
+        an API key is configured.
+    """
+    user = await db.get_or_create_user(user_id=user_id)
+    for provider_name in (gpt_settings.default_provider, user.first_chat_ready_provider_name):
+        if not provider_name:
+            continue
+        if provider := user.providers.get(provider_name=provider_name):
+            if not (provider.default_model or "").strip():
+                # An empty default model cannot back a new thread, so the
+                # candidate is skipped and the chain keeps walking.
+                continue
+            return provider.name, provider.default_model
+    return None
+
+
 # @cached(ttl=3600)
 @inject_database
 async def get_user_cached_models(

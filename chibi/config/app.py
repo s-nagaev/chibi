@@ -19,7 +19,9 @@ class ApplicationSettings(BaseSettings):
     Attributes:
         redis: Redis connection URL.
         redis_password: Password for Redis.
-        local_data_path: Filesystem path for local storage.
+        local_data_path: Filesystem path for local storage. Defaults to the image
+            path ``/app/data`` inside a container and to ``~/chibi-bot/data`` on a host runtime that
+            configures it nowhere else.
         log_prompt_data: Whether to log prompt data.
         hide_models: Hide model options in UI.
         hide_imagine: Hide imagine commands.
@@ -136,14 +138,70 @@ class ApplicationSettings(BaseSettings):
         return self.runtime_environment in ("docker", "podman")
 
 
+def _local_data_path_is_configured() -> bool:
+    """Report whether any settings source provides a local data path.
+
+    The environment carries the process variables and the values merged from
+    ``~/chibi-bot/settings``; the working directory ``.env`` file is read by
+    pydantic-settings and is inspected separately here.
+
+    Returns:
+        True when ``LOCAL_DATA_PATH`` is present in the environment or in the
+        working directory ``.env`` file.
+    """
+    for source in (os.environ, dotenv_values(".env")):
+        if any(key.lower() == "local_data_path" for key in source):
+            return True
+    return False
+
+
+def _apply_host_local_data_fallback(settings: ApplicationSettings) -> None:
+    """Point local storage at ``~/chibi-bot/data`` when running on a host.
+
+    The field default ``/app/data`` only exists inside the container image, so a
+    bare host install (``pip install chibi-bot``) fails with ``Read-only file
+    system: '/app/data'`` as soon as the SQLite job store or the local storage
+    backend writes there. Container runtimes keep the image path and an explicit
+    ``LOCAL_DATA_PATH`` always wins. The fallback directory is the one the TUI
+    installers already provision, and it is created when missing.
+
+    Args:
+        settings: Settings object to adjust in place.
+    """
+    if settings.running_in_container or _local_data_path_is_configured():
+        return
+    data_path = Path.home() / "chibi-bot" / "data"
+    data_path.mkdir(parents=True, exist_ok=True)
+    settings.local_data_path = data_path.as_posix()
+    logger.info("LOCAL_DATA_PATH is not configured, using {}", data_path)
+
+
 @lru_cache()
 def _get_application_settings() -> ApplicationSettings:
+    """Resolve the application settings for the current process.
+
+    ``CHIBI_ENV=dev`` isolates a development run from production
+    configuration: the settings file is never read, so neither
+    ``~/chibi-bot/settings`` nor a ``CHIBI_SETTINGS_FILE`` path can inject
+    values into the process environment and outrank the working directory
+    ``.env``. Outside dev the file keeps its historical precedence over the
+    process environment.
+
+    Returns:
+        The resolved application settings, cached for the process lifetime.
+    """
     if os.getenv("CHIBI_ENV", "no-dev").lower() != "dev":
-        settings_path = Path.home() / "chibi-bot" / "settings"
+        # The settings file is a production source only. A dev run reads it
+        # never, even though stdio model discovery once relied on it: discovery
+        # now runs from the dev configuration alone and, like any other failed
+        # model listing, degrades gracefully when no provider is configured.
+        settings_path = Path(os.getenv("CHIBI_SETTINGS_FILE") or Path.home() / "chibi-bot" / "settings")
         if settings_path.exists():
-            overrides = dotenv_values(settings_path)
-            os.environ.update({k: v for k, v in overrides.items() if v is not None})
-    return ApplicationSettings()
+            overrides = {k: v for k, v in dotenv_values(settings_path).items() if v is not None}
+            os.environ.update(overrides)
+    settings = ApplicationSettings()
+    _apply_host_local_data_fallback(settings)
+    return settings
 
 
 def add_user_context(record) -> bool:
