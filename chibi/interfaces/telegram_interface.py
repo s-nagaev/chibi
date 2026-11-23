@@ -4,7 +4,8 @@ from typing import Any
 
 from loguru import logger
 from telegram import Chat as TelegramChat
-from telegram import File, Update
+from telegram import File, TextQuote, Update
+from telegram import Message as TelegramMessage
 from telegram.constants import ChatAction, ChatType
 from telegram.ext import ContextTypes
 
@@ -13,6 +14,100 @@ from chibi.utils.rich_message import RichMessageBuilder
 from chibi.utils.telegram import send_answer_message, send_images
 
 from .interface import UserInterface
+
+_MEDIA_PLACEHOLDERS: tuple[tuple[str, str], ...] = (
+    ("photo", "[photo]"),
+    ("voice", "[voice message]"),
+    ("audio", "[audio]"),
+    ("video_note", "[video message]"),
+    ("video", "[video]"),
+    ("document", "[document]"),
+    ("sticker", "[sticker]"),
+    ("animation", "[GIF]"),
+    ("location", "[location]"),
+    ("contact", "[contact]"),
+    ("venue", "[venue]"),
+    ("poll", "[poll]"),
+)
+
+# Placeholder used when Telegram reports the quoted message as unavailable
+# (deleted, or too old for Telegram to deliver it).
+_UNAVAILABLE_QUOTED_MESSAGE = "[quoted message is unavailable: it was deleted or is too old]"
+
+
+def _quoted_message_author(message: TelegramMessage) -> str:
+    """Describe the author of a quoted Telegram message.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        A short author label ("Bot (<name>)" for the assistant's own messages,
+        the user name otherwise, or "unknown author" when unavailable).
+    """
+    if not (from_user := getattr(message, "from_user", None)):
+        return "unknown author"
+    if from_user.is_bot:
+        return f"Bot ({from_user.name})"
+    return from_user.name
+
+
+def _quoted_message_text(message: TelegramMessage) -> str:
+    """Extract a textual representation of a quoted Telegram message.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        The message text or caption, or a media placeholder when the quoted
+        message carries no text at all.
+    """
+    if text := getattr(message, "text", None) or getattr(message, "caption", None):
+        return text
+
+    for attribute, placeholder in _MEDIA_PLACEHOLDERS:
+        if getattr(message, attribute, None):
+            return placeholder
+    return "[non-text message]"
+
+
+def _describe_quoted_message(message: TelegramMessage) -> str:
+    """Build the prompt fragment describing the message a user replied to.
+
+    Args:
+        message: The quoted Telegram message.
+
+    Returns:
+        A single-line description of the quoted message: its author and
+        content.
+    """
+    author = _quoted_message_author(message)
+    text = _quoted_message_text(message).replace("\r", " ").replace("\n", " ")
+    return f"{author}: {text}"
+
+
+def _describe_quoted_quote(quote: TextQuote, replied_to: object | None) -> str:
+    """Build the prompt fragment for a partial quote of a Telegram message.
+
+    Telegram delivers a partial quote (``Message.quote``) when the user
+    selects only a fragment of the original message to reply to. The quoted
+    fragment is the most precise context for such a turn, so it takes
+    precedence over the full quoted message.
+
+    Args:
+        quote: The partial quote delivered by Telegram.
+        replied_to: The message the quote belongs to, when Telegram delivers
+            it (may be inaccessible or missing).
+
+    Returns:
+        A single-line description of the quoted fragment: its author (when
+        known) and content.
+    """
+    author = "unknown author"
+    if isinstance(replied_to, TelegramMessage) and getattr(replied_to, "is_accessible", True):
+        author = _quoted_message_author(replied_to)
+    text = quote.text.replace("\r", " ").replace("\n", " ")
+    return f"{author}: {text}"
 
 
 class TelegramInterface(UserInterface):
@@ -383,6 +478,43 @@ class TelegramInterface(UserInterface):
             return message.caption
 
         return None
+
+    async def get_replied_to_prompt(self) -> str | None:
+        """Return the content of the Telegram message the user replied to.
+
+        The quoted message is delivered by Telegram inside the update itself,
+        so no extra API call is needed. Telegram omits it for messages that
+        were deleted or are too old to be quoted; in that case None is
+        returned and the prompt keeps its usual shape.
+
+        A partial quote (``Message.quote``) takes precedence: when the user
+        selects only a fragment of the original message, that fragment is the
+        most precise context for the turn.
+
+        Returns:
+            A short description of the quoted message (author and content),
+            or None when the current message is not a reply.
+        """
+        message = self.update.effective_message
+        if not message:
+            return None
+
+        replied = getattr(message, "reply_to_message", None)
+        quote = getattr(message, "quote", None)
+
+        if isinstance(quote, TextQuote):
+            return _describe_quoted_quote(quote, replied)
+
+        if not replied:
+            return None
+
+        if not getattr(replied, "is_accessible", True):
+            # Telegram reports deleted (or too old to deliver) messages as an
+            # inaccessible message. Saying so is more honest than an empty
+            # "unknown author: [non-text message]".
+            return _UNAVAILABLE_QUOTED_MESSAGE
+
+        return _describe_quoted_message(replied)
 
     def set_caption(self, caption: str) -> None:
         """Store a caption to associate with the next media message.

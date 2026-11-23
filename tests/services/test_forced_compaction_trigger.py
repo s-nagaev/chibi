@@ -44,16 +44,30 @@ RESERVATION = 32000
 # max_history_tokens (200000) exceeds WINDOW, so the cap is WINDOW.
 THRESHOLD = WINDOW
 FALLBACK_THRESHOLD = 5000
+DEFAULT_MAX_HISTORY_TOKENS = 200000
 
 
 @pytest.fixture(autouse=True)
 def _clean_stores() -> Iterator[None]:
-    """Isolate the process-lifetime stores per test."""
-    SingletonMeta._instances.pop(CompactionStateStore, None)
-    UsageCacheStore()._data.clear()
-    yield
-    SingletonMeta._instances.pop(CompactionStateStore, None)
-    UsageCacheStore()._data.clear()
+    """Isolate the process-lifetime stores and pin the threshold config per test.
+
+    The forced-compaction threshold is ``min(max_history_tokens, window)``, so
+    the suite must not depend on the ambient ``MAX_HISTORY_TOKENS`` of the
+    machine running it: an operator value below the window would move the
+    trigger point and break the pinned thresholds.
+
+    Args:
+        None.
+
+    Yields:
+        None.
+    """
+    with patch.object(gpt_settings, "max_history_tokens", DEFAULT_MAX_HISTORY_TOKENS):
+        SingletonMeta._instances.pop(CompactionStateStore, None)
+        UsageCacheStore()._data.clear()
+        yield
+        SingletonMeta._instances.pop(CompactionStateStore, None)
+        UsageCacheStore()._data.clear()
 
 
 def _history(messages: int = 4) -> list[Message]:
