@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from chibi.memory.chroma import with_chroma_archival
-from chibi.models import Message, User
+from chibi.models import COMPACTION_SEED_SOURCE, Message, User
 from chibi.services.context_note import CONTEXT_NOTE_OPEN, format_context_note
+from chibi.services.user import COMPACTION_QUESTION
 from chibi.utils.ack_sentinel import ACK_SENTINEL
 
 NOTE = format_context_note(["approximate_context_size: 42 tokens (0% of 200,000 limit)"])
@@ -210,6 +211,44 @@ class TestWithChromaArchival:
             await wrapped.add_message(user, mixed_message)
 
             mock_task_manager.run_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_compaction_seed_messages_are_not_archived(self, mock_inner, mock_memory, user):
+        """Both halves of a compaction seed must stay out of the permanent memory."""
+
+        seed = [
+            Message(role="user", content=COMPACTION_QUESTION, source=COMPACTION_SEED_SOURCE),
+            Message(role="assistant", content="A summary of the conversation so far.", source=COMPACTION_SEED_SOURCE),
+        ]
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            for message in seed:
+                await wrapped.add_message(user, message)
+
+            assert mock_inner.add_message_called is True
+            mock_task_manager.run_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_normal_message_is_archived_next_to_a_skipped_seed(self, mock_inner, mock_memory, user):
+        """A regular message written in the same batch as a seed still gets archived."""
+
+        seed = Message(role="user", content=COMPACTION_QUESTION, source=COMPACTION_SEED_SOURCE)
+        regular = Message(role="user", content="Tell me about ChromaDB")
+
+        with patch("chibi.memory.chroma.task_manager") as mock_task_manager:
+            mock_task_manager.run_task = MagicMock()
+
+            wrapped = with_chroma_archival(mock_memory)(mock_inner)
+            await wrapped.add_message(user, seed)
+            await wrapped.add_message(user, regular)
+
+            mock_task_manager.run_task.assert_called_once()
+            call_args = mock_task_manager.run_task.call_args
+            assert call_args[0][0].cr_code.co_name == "archive"
+            assert call_args[1]["user_id"] == user.id
 
 
 class CapturingDatabase(MockDatabase):
