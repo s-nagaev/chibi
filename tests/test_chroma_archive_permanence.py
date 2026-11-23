@@ -483,7 +483,7 @@ async def test_reset_drops_the_working_history_and_keeps_the_archive(
 async def test_summarize_history_tool_replaces_the_thread_and_keeps_the_archive(
     harness: ArchiveHarness, injected_db: Database
 ) -> None:
-    """The ``summarize_history`` tool's compaction is an addition to the archive."""
+    """The ``summarize_history`` tool's compaction leaves the archive untouched."""
     user_id, thread_id = 702, 7
     await harness.seed(user_id, thread_id, build_history())
     before = await harness.entries(user_id=user_id, thread_id=thread_id)
@@ -500,8 +500,7 @@ async def test_summarize_history_tool_replaces_the_thread_and_keeps_the_archive(
         ("assistant", SUMMARY_TEXT),
     ], "the tool did not replace the thread history with the seed"
     after = await assert_entries_survived(harness, user_id=user_id, thread_id=thread_id, before=before)
-    added = sorted(after[entry_id][0] for entry_id in set(after) - set(before))
-    assert added == sorted([COMPACTION_QUESTION, SUMMARY_TEXT]), "the archive changed by more than the seed"
+    assert set(after) == set(before), "the compaction seed leaked into the archive"
     results = await harness.search(user_id=user_id, thread_id=thread_id, query=SEARCH_QUERY)
     assert_old_memory_is_searchable(results, before)
 
@@ -532,7 +531,7 @@ async def test_clear_tool_call_history_tool_keeps_the_archive(harness: ArchiveHa
 async def test_automatic_compaction_replaces_the_thread_and_keeps_the_archive(
     harness: ArchiveHarness, injected_db: Database
 ) -> None:
-    """The automatic state machine's compaction is an addition to the archive."""
+    """The automatic state machine's compaction leaves the archive untouched."""
     user_id, thread_id = 704, 7
     await harness.seed(user_id, thread_id, build_history())
     before = await harness.entries(user_id=user_id, thread_id=thread_id)
@@ -566,12 +565,7 @@ async def test_automatic_compaction_replaces_the_thread_and_keeps_the_archive(
     assert stored[1].content.endswith(SUMMARY_TEXT)
     assert {message.source for message in stored} == {COMPACTION_SEED_SOURCE}
     after = await assert_entries_survived(harness, user_id=user_id, thread_id=thread_id, before=before)
-    added_contents = [after[entry_id][0] for entry_id in set(after) - set(before)]
-    assert COMPACTION_QUESTION in added_contents, "the archive changed by more than the seed"
-    assert any(
-        content.startswith(FORCED_COMPACTION_MARKER.split("{date}")[0]) and content.endswith(SUMMARY_TEXT)
-        for content in added_contents
-    ), "the archive changed by more than the seed"
+    assert set(after) == set(before), "the compaction seed leaked into the archive"
     results = await harness.search(user_id=user_id, thread_id=thread_id, query=SEARCH_QUERY)
     assert_old_memory_is_searchable(results, before)
 

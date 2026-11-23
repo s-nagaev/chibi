@@ -36,7 +36,7 @@ from chibi.memory.abstract import (
     LongConversationMemory,
     MemorySearchResult,
 )
-from chibi.models import Message, User
+from chibi.models import COMPACTION_SEED_SOURCE, Message, User
 from chibi.services.context_note import note_is_present, strip_context_note
 from chibi.services.lock_manager import LockManager
 from chibi.services.task_manager import task_manager
@@ -1083,6 +1083,15 @@ def with_chroma_archival(long_conv_memory: LongConversationMemory | None) -> Cal
             # memory is a render-time consumer, so hidden content must not be
             # laundered into it. The row itself stays in the primary storage.
             if message.visibility == "hidden":
+                return None
+            # Compaction seeds are re-inserted into the thread on every
+            # compaction event with fresh IDs, and the archive metadata
+            # stores no message source, so archived seed copies can neither
+            # be recognized nor deduped: they would pile up in the permanent
+            # memory and shadow genuine hits in the top-1 read path. The
+            # already-archived copies age out through the natural TTL. The
+            # row itself stays in the primary storage.
+            if message.source == COMPACTION_SEED_SOURCE:
                 return None
 
             if message.role == "user":

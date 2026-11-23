@@ -148,6 +148,16 @@ class ToolSchema(BaseModel):
 MessageVisibility = Literal["visible", "hidden"]
 
 
+# Marker written into ``Message.source`` for every message a compaction
+# writes as the new thread history (the emergency seed and the tool-side
+# seed alike). It is the only idempotency the seed needs: a repeated
+# compaction recognises its own seed and REPLACES the thread through
+# :func:`chibi.services.user.replace_thread_history` instead of appending
+# to it. Lives beside ``Message`` (not in chibi.services.user) so the
+# Chroma archival wrapper can read it without importing the service layer.
+COMPACTION_SEED_SOURCE = "compaction_seed"
+
+
 class Message(BaseModel):
     id: int = Field(default_factory=time.time_ns)
     role: str

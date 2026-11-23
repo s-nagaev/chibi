@@ -18,7 +18,7 @@ from chibi.config import gpt_settings
 from chibi.constants import get_model_context_window
 from chibi.exceptions import ContextLengthExceededError, ModelNotAllowedError, NoProviderSelectedError
 from chibi.interfaces.interface import EditorContextProvider, UserInterface
-from chibi.models import Message, SelectedModel, TelegramFileMeta, User
+from chibi.models import COMPACTION_SEED_SOURCE, Message, SelectedModel, TelegramFileMeta, User
 from chibi.schemas.app import ChatResponseSchema, ModelChangeSchema, UsageSchema, VideoResult, VisionResultSchema
 from chibi.services.context_counters import ContextDecisionCounters
 from chibi.services.context_measurement import estimate_messages_tokens, measure_request_size_with_provenance
@@ -122,13 +122,6 @@ async def replace_thread_history(db: Database, storage_id: int, thread_id: int, 
 # fallback so an unknown model still gets a working, bounded budget instead of
 # an unbounded request.
 EMERGENCY_SUMMARIZATION_INPUT_BUDGET = 0.6
-
-# Marker written into ``Message.source`` for every message a compaction
-# writes as the new thread history (the emergency seed and the tool-side
-# seed alike). It is the only idempotency the seed needs: a repeated
-# compaction recognises its own seed and REPLACES the thread through
-# :func:`replace_thread_history` instead of appending to it.
-COMPACTION_SEED_SOURCE = "compaction_seed"
 
 COMPACTION_QUESTION = "What we were talking about?"
 
