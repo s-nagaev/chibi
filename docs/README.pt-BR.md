@@ -93,6 +93,8 @@ O Chibi suporta múltiplos provedores por trás de uma única conversa. Adicione
 - **LM Studio**
 - **Qualquer** API compatível com OpenAI
 
+Além da instância integrada `CustomOpenAI`, você pode definir instâncias nomeadas adicionais com variáveis de ambiente. Cada `OPENAICOMPATIBLE_<NAME>_API_KEY` registra um provedor chamado `<NAME>` que serve chat, fala para texto e texto para fala, com o endpoint obtido de `OPENAICOMPATIBLE_<NAME>_URL`; `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` registra um provedor de chat da mesma forma (endpoint via `ANTHROPICCOMPATIBLE_<NAME>_URL`). O número de instâncias não é limitado.
+
 ### Provedores multimodais (opcional)
 
 - **Imagens:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), e qualquer revendedor-agregador que forneça acesso a modelos de geração de imagens
@@ -144,7 +146,9 @@ chibi stdio --pycharm
 chibi stdio --neovim
 ```
 
-O comando deve ser iniciado pelo cliente, não usado interativamente. O Chibi é proprietário do protocolo `v1` e oferece suporte a clientes compatíveis que negociam a mesma versão. O processo stdio grava somente frames do protocolo em stdout e diagnósticos em stderr. O comportamento existente do Chibi para comandos, ferramentas, permissões e moderação permanece autoritativo; o cliente não adiciona uma camada de políticas de ferramentas.
+O comando deve ser iniciado pelo cliente, não usado interativamente. O Chibi é proprietário do protocolo `v1` e oferece suporte a clientes compatíveis que negociam a mesma versão. O processo stdio grava somente frames do protocolo em stdout e diagnósticos em stderr. O comportamento existente do Chibi para comandos, ferramentas, permissões e moderação permanece autoritativo; o cliente não adiciona uma camada de políticas de ferramentas
+
+Os clientes podem enumerar os modelos selecionáveis por meio da requisição `models` e fixar um modelo por requisição com o campo opcional `model` no frame `request`; a seleção do modelo é aplicada à thread antes de o prompt ser executado, e as respostas chegam em streaming enquanto o turno ainda está em execução.
 
 ---
 ## 🚀 Começo rápido (Docker)

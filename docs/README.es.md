@@ -93,6 +93,8 @@ Chibi admite múltiples proveedores detrás de una sola conversación. Añade un
 - **LM Studio**
 - **Cualquier** API compatible con OpenAI
 
+Además de la instancia integrada `CustomOpenAI`, puedes definir instancias con nombre mediante variables de entorno. Cada `OPENAICOMPATIBLE_<NAME>_API_KEY` registra un proveedor llamado `<NAME>` que sirve chat, voz a texto y texto a voz, con el endpoint tomado de `OPENAICOMPATIBLE_<NAME>_URL`; `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` registra un proveedor de chat de la misma forma (endpoint vía `ANTHROPICCOMPATIBLE_<NAME>_URL`). El número de instancias no está limitado.
+
 ### Proveedores multimodales (opcional)
 
 - **Imágenes:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), y cualquier revendedor-agregador que proporcione acceso a modelos de generación de imágenes
@@ -144,7 +146,9 @@ chibi stdio --pycharm
 chibi stdio --neovim
 ```
 
-Este comando está pensado para que lo inicie el cliente, no para usarse de forma interactiva. Chibi es propietario del protocolo `v1` y admite clientes compatibles que negocien la misma versión. El proceso stdio escribe únicamente tramas de protocolo en stdout y diagnósticos en stderr. El comportamiento existente de Chibi para comandos, herramientas, permisos y moderación sigue siendo autoritativo; el cliente no añade una capa de políticas para herramientas.
+Este comando está pensado para que lo inicie el cliente, no para usarse de forma interactiva. Chibi es propietario del protocolo `v1` y admite clientes compatibles que negocien la misma versión. El proceso stdio escribe únicamente tramas de protocolo en stdout y diagnósticos en stderr. El comportamiento existente de Chibi para comandos, herramientas, permisos y moderación sigue siendo autoritativo; el cliente no añade una capa de políticas para herramientas
+
+Los clientes pueden enumerar los modelos seleccionables mediante la solicitud `models` y fijar un modelo por solicitud con el campo opcional `model` del frame `request`; la selección se aplica al hilo antes de ejecutar el prompt, y las respuestas llegan en streaming mientras el turno sigue en curso.
 
 ---
 ## 🚀 Inicio rápido (Docker)

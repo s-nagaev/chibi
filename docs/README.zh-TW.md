@@ -95,6 +95,8 @@ Chibi 在單一對話中支援多個提供商。可新增單一金鑰或多個�
 - **LM Studio**
 - **任何** OpenAI 相容 API
 
+除內建的 `CustomOpenAI` 實例外，還可以透過環境變數定義更多命名實例。每個 `OPENAICOMPATIBLE_<NAME>_API_KEY` 會註冊一個名為 `<NAME>` 的提供商，提供聊天、語音轉文字和文字轉語音服務，端點取自 `OPENAICOMPATIBLE_<NAME>_URL`；`ANTHROPICCOMPATIBLE_<NAME>_API_KEY` 以同樣的方式註冊聊天提供商（端點透過 `ANTHROPICCOMPATIBLE_<NAME>_URL`）。實例數量不受限制。
+
 ### 多模態提供商（選用）
 
 - **影像**：Google（Imagen、Nano Banana）、OpenAI（GPT Image）、Alibaba（Qwen Image、Wan）、xAI（Grok Imagine）、ZhipuAI（GLM Image、CogView）、MiniMax（Image-01），以及任何提供影像生成模型的轉售聚合商
@@ -146,7 +148,9 @@ chibi stdio --pycharm
 chibi stdio --neovim
 ```
 
-此命令由客戶端前端啟動，不供互動式使用。Chibi 負責維護 `v1` 協定，並支援協商相同版本的相容客戶端。stdio 程序僅將協定幀寫入 stdout，將診斷資訊寫入 stderr。現有的 Chibi 指令、工具、權限和審核行為仍具權威性；客戶端不會新增額外的工具策略層。
+此命令由客戶端前端啟動，不供互動式使用。Chibi 負責維護 `v1` 協定，並支援協商相同版本的相容客戶端。stdio 程序僅將協定幀寫入 stdout，將診斷資訊寫入 stderr。現有的 Chibi 指令、工具、權限和審核行為仍具權威性；客戶端不會新增額外的工具策略層
+
+客戶端可以透過 `models` 請求列舉可選模型，並透過 `request` 幀中可選的 `model` 欄位為每個請求固定模型；模型選擇會在提示詞執行前套用到執行緒，回答會在回合進行期間以串流方式送達。。
 
 ---
 
