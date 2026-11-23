@@ -93,6 +93,8 @@ Model resellers and inference aggregators:
 - **LM Studio**
 - **Any** OpenAI-compatible API
 
+Beyond the single built-in `CustomOpenAI` instance, you can define additional named instances with environment variables. Each `OPENAICOMPATIBLE_<NAME>_API_KEY` registers a provider named `<NAME>` that serves chat, speech-to-text and text-to-speech, with the endpoint taken from `OPENAICOMPATIBLE_<NAME>_URL`; `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` registers a chat provider the same way (endpoint via `ANTHROPICCOMPATIBLE_<NAME>_URL`). The number of instances is not limited.
+
 ### Multimodal providers (optional)
 
 - **Images:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), and any reseller-aggregator providing access to image generation models
@@ -148,6 +150,8 @@ The command is intended to be started by the client frontend, not used interacti
 protocol and supports compatible clients that negotiate the same version. The stdio process writes protocol
 frames only to stdout and diagnostics to stderr. Existing Chibi command, tool, permission and moderation
 behavior remains authoritative; the client adds no tool policy layer.
+
+Clients can enumerate the selectable models through the `models` request and pin a model per request with an optional `model` field on the `request` frame; the model selection applies to the thread before the prompt runs, and answers stream to the client while the turn is still running.
 
 ---
 
