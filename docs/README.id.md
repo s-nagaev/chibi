@@ -93,6 +93,8 @@ Chibi mendukung banyak penyedia dalam satu percakapan. Tambahkan satu API key at
 - **LM Studio**
 - **API kompatibel OpenAI apa pun**
 
+Selain instance bawaan `CustomOpenAI`, Anda dapat mendefinisikan instance bernama tambahan melalui variabel lingkungan. Setiap `OPENAICOMPATIBLE_<NAME>_API_KEY` mendaftarkan penyedia bernama `<NAME>` yang melayani chat, speech-to-text, dan text-to-speech, dengan endpoint dari `OPENAICOMPATIBLE_<NAME>_URL`; `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` mendaftarkan penyedia chat dengan cara yang sama (endpoint melalui `ANTHROPICCOMPATIBLE_<NAME>_URL`). Jumlah instance tidak dibatasi.
+
 ### Penyedia multimodal (opsional)
 
 - **Gambar:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), dan penjual kembali-agregator apa pun yang menyediakan akses ke model pembuatan gambar
@@ -144,7 +146,9 @@ chibi stdio --pycharm
 chibi stdio --neovim
 ```
 
-Perintah ini ditujukan untuk dijalankan oleh frontend klien, bukan digunakan secara interaktif. Chibi memiliki protokol `v1` dan mendukung klien kompatibel yang menegosiasikan versi sama. Proses stdio hanya menulis frame protokol ke stdout dan diagnostik ke stderr. Perilaku Chibi yang ada untuk perintah, tool, izin, dan moderasi tetap berwenang; klien tidak menambahkan lapisan kebijakan tool.
+Perintah ini ditujukan untuk dijalankan oleh frontend klien, bukan digunakan secara interaktif. Chibi memiliki protokol `v1` dan mendukung klien kompatibel yang menegosiasikan versi sama. Proses stdio hanya menulis frame protokol ke stdout dan diagnostik ke stderr. Perilaku Chibi yang ada untuk perintah, tool, izin, dan moderasi tetap berwenang; klien tidak menambahkan lapisan kebijakan tool
+
+Klien dapat mendaftar model yang dapat dipilih melalui permintaan `models` dan menetapkan model per permintaan dengan field opsional `model` pada frame `request`; pemilihan model diterapkan pada thread sebelum prompt dijalankan, dan jawaban dikirim secara streaming selagi giliran masih berjalan.
 
 ---
 ## 🚀 Quick start (Docker)

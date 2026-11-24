@@ -93,6 +93,8 @@ Chibi, tek bir sohbetin arkasında birden fazla sağlayıcıyı destekler. Bir a
 - **LM Studio**
 - **Herhangi bir** OpenAI uyumlu API
 
+Yerleşik `CustomOpenAI` örneğinin yanı sıra, ortam değişkenleriyle ek adlandırılmış örnekler tanımlayabilirsiniz. Her bir `OPENAICOMPATIBLE_<NAME>_API_KEY`, sohbet, konuşmadan metne ve metinden konuşmaya hizmet veren `<NAME>` adlı bir sağlayıcı kaydeder; uç nokta `OPENAICOMPATIBLE_<NAME>_URL` değişkeninden alınır. `ANTHROPICCOMPATIBLE_<NAME>_API_KEY` de aynı şekilde bir sohbet sağlayıcısı kaydeder (uç nokta `ANTHROPICCOMPATIBLE_<NAME>_URL` üzerinden). Örnek sayısı sınırlı değildir.
+
 ### Multimodal sağlayıcılar (opsiyonel)
 
 - **Görseller:** Google (Imagen, Nano Banana), OpenAI (GPT Image), Alibaba (Qwen Image, Wan), xAI (Grok Imagine), ZhipuAI (GLM Image, CogView), MiniMax (Image-01), ve görüntü oluşturma modellerine erişim sağlayan herhangi bir satıcı-toplayıcı
@@ -144,7 +146,9 @@ chibi stdio --pycharm
 chibi stdio --neovim
 ```
 
-Komut etkileşimli kullanım için değil, istemci arayüzü tarafından başlatılmak üzere tasarlanmıştır. Chibi `v1` protokolünün sahibidir ve aynı sürümü görüşen uyumlu istemcileri destekler. stdio işlemi stdout'a yalnızca protokol çerçevelerini, stderr'e ise tanıları yazar. Chibi'nin mevcut komut, araç, izin ve moderasyon davranışı yetkili olmaya devam eder; istemci herhangi bir araç politikası katmanı eklemez.
+Komut etkileşimli kullanım için değil, istemci arayüzü tarafından başlatılmak üzere tasarlanmıştır. Chibi `v1` protokolünün sahibidir ve aynı sürümü görüşen uyumlu istemcileri destekler. stdio işlemi stdout'a yalnızca protokol çerçevelerini, stderr'e ise tanıları yazar. Chibi'nin mevcut komut, araç, izin ve moderasyon davranışı yetkili olmaya devam eder; istemci herhangi bir araç politikası katmanı
+
+İstemciler, `models` isteği aracılığıyla seçilebilir modelleri listeleyebilir ve `request` çerçevesindeki isteğe bağlı `model` alanıyla istek başına bir model sabitleyebilir; model seçimi, prompt çalıştırılmadan önce iş parçacığına uygulanır ve yanıtlar, tur devam ederken akış halinde iletilir. eklemez.
 
 ---
 ## 🚀 Hızlı başlangıç (Docker)
