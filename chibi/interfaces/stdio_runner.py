@@ -5,7 +5,7 @@ import functools
 import json
 import sys
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from apscheduler.schedulers.base import STATE_STOPPED
 from loguru import logger
@@ -23,6 +23,7 @@ from chibi.services.bot import handle_image_generation, handle_reset, handle_sto
 from chibi.services.events.cwd_events import cwd_tracker
 from chibi.services.events.subagent_events import subagent_tracker
 from chibi.services.events.thread_name_events import thread_name_tracker
+from chibi.services.events.tool_events import tool_event_tracker
 from chibi.services.jobs import recover_agent_jobs
 from chibi.services.scheduler import StdioScheduler, get_stdio_scheduler, register_retention_cleanup_job
 from chibi.services.task_manager import task_manager
@@ -57,6 +58,8 @@ DELTA_FLUSH_INTERVAL = 0.2
 DELTA_FLUSH_CHARS = 512
 ACTIVE_MODEL_MARKER = "🟢"
 ACTIVE_MODEL_MARKER_VARIATION_SELECTOR = "\ufe0f"
+TOOL_EVENT_ARGS_MAX_CHARS = 2000
+TOOL_EVENT_RESULT_PREVIEW_MAX_CHARS = 2000
 
 
 class _SubagentRequestState(TypedDict):
@@ -138,6 +141,49 @@ def _cap_thoughts(thoughts: str) -> str:
         return thoughts
     budget = MAX_THOUGHTS_BYTES - len(THOUGHTS_TRUNCATION_MARKER.encode("utf-8"))
     return THOUGHTS_TRUNCATION_MARKER + encoded[-budget:].decode("utf-8", errors="ignore")
+
+
+def _cap_tool_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Bound tool-call arguments to the ``tool_event`` wire budget.
+
+    Values that are not JSON-serializable are stringified so the frame can
+    always be encoded. When the JSON rendering fits
+    :data:`TOOL_EVENT_ARGS_MAX_CHARS`, the normalized mapping is emitted as-is;
+    otherwise the arguments are replaced by a single explicit
+    ``{"_truncated": True}`` marker so the cap holds for any input rather than
+    an arbitrary substring of a serialized blob.
+
+    Args:
+        args: The tool-call arguments as supplied by the model.
+
+    Returns:
+        A JSON-safe argument mapping bounded to the budget.
+    """
+    try:
+        serialized = json.dumps(args, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        logger.warning("Dropping tool_event args: the payload is not JSON-serializable")
+        return {}
+    if len(serialized) <= TOOL_EVENT_ARGS_MAX_CHARS:
+        return cast(dict[str, Any], json.loads(serialized))
+    return {"_truncated": True}
+
+
+def _cap_result_preview(result_preview: str | None) -> str | None:
+    """Truncate a tool result preview to :data:`TOOL_EVENT_RESULT_PREVIEW_MAX_CHARS`.
+
+    Args:
+        result_preview: The textual result preview, if any.
+
+    Returns:
+        The preview unchanged when it fits the cap, its leading slice otherwise,
+        or None when there is nothing to preview.
+    """
+    if result_preview is None:
+        return None
+    if len(result_preview) <= TOOL_EVENT_RESULT_PREVIEW_MAX_CHARS:
+        return result_preview
+    return result_preview[:TOOL_EVENT_RESULT_PREVIEW_MAX_CHARS]
 
 
 # Maps backend-internal error codes to the closest frontend-facing code.
@@ -312,6 +358,7 @@ class StdioRunner:
         self._background_messages_enabled = False
         self._thoughts_enabled = False
         self._subagent_events_enabled = False
+        self._tool_events_enabled = False
         self._cwd_updates_enabled = False
         self._thread_renames_enabled = False
         self._streaming_enabled = False
@@ -322,6 +369,7 @@ class StdioRunner:
         self._thread_name_emissions: set[asyncio.Task[None]] = set()
         self._subagent_requests: dict[int, _SubagentRequestState] = {}
         self._subagent_emissions: set[asyncio.Task[None]] = set()
+        self._active_requests: dict[int, str] = {}
         self._delta_requests: dict[str, int] = {}
         self._delta_buffers: dict[str, list[str]] = {}
         self._delta_last_flush: dict[str, float] = {}
@@ -449,6 +497,7 @@ class StdioRunner:
         active: int,
         total: int,
         name: str | None,
+        subagent_id: str | None = None,
         force: bool = False,
     ) -> None:
         """Schedule one agent_event frame for fire-and-forget delivery.
@@ -465,13 +514,14 @@ class StdioRunner:
             active: Snapshot of running subagents for the request.
             total: Snapshot of spawned subagents for the request.
             name: Trivially available subagent label, if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
             force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
         """
         if not self._subagent_events_enabled:
             return
         try:
             task = asyncio.get_running_loop().create_task(
-                self._emit_agent_event(thread_id, request_id, event, active, total, name, force)
+                self._emit_agent_event(thread_id, request_id, event, active, total, name, subagent_id, force)
             )
         except RuntimeError:
             logger.debug("No running loop for an agent_event on thread {}", thread_id)
@@ -487,6 +537,7 @@ class StdioRunner:
         active: int,
         total: int,
         name: str | None,
+        subagent_id: str | None = None,
         force: bool = False,
     ) -> None:
         """Write one subagent lifecycle frame to stdout.
@@ -510,6 +561,7 @@ class StdioRunner:
             active: Snapshot of running subagents for the request.
             total: Snapshot of spawned subagents for the request.
             name: Trivially available subagent label, if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
             force: Bypass the per-thread accept check (kill-flush and the drained-state retirement finish).
         """
         frame: dict[str, Any] = {
@@ -521,6 +573,8 @@ class StdioRunner:
         }
         if name is not None:
             frame["name"] = name
+        if subagent_id is not None:
+            frame["id"] = subagent_id
         async with self._stdout_lock:
             if not self._subagent_events_enabled:
                 return
@@ -535,7 +589,14 @@ class StdioRunner:
                 logger.exception("Failed to deliver an agent_event for thread {}", thread_id)
 
     def begin_request(self, thread_id: int, request_id: str) -> None:
-        """Register fresh subagent counters for a request that starts running.
+        """Register the request that currently owns a thread.
+
+        The active-request map is populated for EVERY request, independently
+        of the ``subagents`` capability gate, because it is the resolution
+        source for ``tool_event`` frames: a client that opted in to
+        ``tool_events`` but not ``subagents`` must still see its tool calls, so
+        the map can never live behind the subagent counters. Reusing the gated
+        subagent state would silently drop every tool_event for such a client.
 
         A new request always counts from zero. An existing live state with
         non-zero counters is kept: it belongs to a still-running request on
@@ -550,6 +611,7 @@ class StdioRunner:
             thread_id: Thread the request runs on.
             request_id: Identifier of the starting request.
         """
+        self._active_requests[thread_id] = request_id
         if not self._subagent_events_enabled:
             return
         state = self._subagent_requests.get(thread_id)
@@ -581,23 +643,28 @@ class StdioRunner:
     def end_request(self, thread_id: int, request_id: str) -> None:
         """Retire the counters of a finished request.
 
-        A sealed state that still counts running background subagents is
-        retained instead of retired: their natural finishes keep emitting
-        lifecycle frames after the result, and the last finish retires the
-        state (:meth:`subagent_finished`), as do :meth:`kill_flush` and the
-        next :meth:`begin_request` on the thread.
+        The active-request map entry is dropped first (only when this request
+        still owns the thread, so a newer request on the same thread is never
+        evicted), which closes the ``tool_event`` emission gate for this
+        request. A sealed subagent state that still counts running background
+        subagents is retained instead of retired: their natural finishes keep
+        emitting lifecycle frames after the result, and the last finish
+        retires the state (:meth:`subagent_finished`), as do :meth:`kill_flush`
+        and the next :meth:`begin_request` on the thread.
 
         Args:
             thread_id: Thread the request ran on.
             request_id: Identifier of the finishing request.
         """
+        if self._active_requests.get(thread_id) == request_id:
+            self._active_requests.pop(thread_id, None)
         state = self._subagent_requests.get(thread_id)
         if state is not None and state["request_id"] == request_id:
             if state["sealed"] and state["active"] > 0:
                 return
             self._subagent_requests.pop(thread_id, None)
 
-    def subagent_started(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_started(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Count an accepted subagent start and emit the started event.
 
         Starts are also accepted on a retained post-result state, so a
@@ -607,15 +674,18 @@ class StdioRunner:
         Args:
             thread_id: Thread whose running or retained request owns the counters.
             name: Trivially available subagent label (the delegated model), if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
         """
         state = self._subagent_requests.get(thread_id)
         if state is None:
             return
         state["active"] += 1
         state["total"] += 1
-        self._spawn_agent_event(thread_id, state["request_id"], "started", state["active"], state["total"], name)
+        self._spawn_agent_event(
+            thread_id, state["request_id"], "started", state["active"], state["total"], name, subagent_id
+        )
 
-    def subagent_finished(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_finished(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Count a subagent finish and emit the finished event.
 
         The last natural finish emits the zero-active event the client uses
@@ -627,6 +697,7 @@ class StdioRunner:
         Args:
             thread_id: Thread whose running or retained request owns the counters.
             name: Trivially available subagent label, if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
         """
         state = self._subagent_requests.get(thread_id)
         if state is None or state["active"] <= 0:
@@ -634,9 +705,13 @@ class StdioRunner:
         state["active"] -= 1
         if state["sealed"] and state["active"] == 0:
             self._subagent_requests.pop(thread_id, None)
-            self._spawn_agent_event(thread_id, state["request_id"], "finished", 0, state["total"], name, force=True)
+            self._spawn_agent_event(
+                thread_id, state["request_id"], "finished", 0, state["total"], name, subagent_id, force=True
+            )
             return
-        self._spawn_agent_event(thread_id, state["request_id"], "finished", state["active"], state["total"], name)
+        self._spawn_agent_event(
+            thread_id, state["request_id"], "finished", state["active"], state["total"], name, subagent_id
+        )
 
     def kill_flush(self, thread_id: int) -> None:
         """Emit the single kill-flush event for a killed or reset request.
@@ -661,6 +736,78 @@ class StdioRunner:
         """Wait until every in-flight agent_event emission task has finished."""
         if self._subagent_emissions:
             await asyncio.gather(*list(self._subagent_emissions), return_exceptions=True)
+
+    async def tool_started(self, thread_id: int, name: str, args: dict[str, Any]) -> None:
+        """Write one ``tool_event`` start frame for the active request on a thread.
+
+        The owning request id is resolved from the dedicated active-request map,
+        never from the gated subagent state, so a client that declared
+        ``tool_events`` without ``subagents`` still receives its tool calls.
+        A call with no live request on the thread (a background continuation
+        after the request finished) resolves to nothing and is dropped: there
+        is no request context to attribute it to. The args payload is bounded
+        by :func:`_cap_tool_args`. On a write failure the frame is logged and
+        dropped, mirroring the background message policy.
+
+        Args:
+            thread_id: Thread whose active request owns the tool call.
+            name: The tool name being invoked.
+            args: The tool arguments, as supplied by the model.
+        """
+        if not self._tool_events_enabled:
+            return
+        request_id = self._active_requests.get(thread_id)
+        if request_id is None:
+            logger.debug("Dropping a tool_event start for thread {}: no active request", thread_id)
+            return
+        frame: dict[str, Any] = {
+            "type": "tool_event",
+            "request_id": request_id,
+            "phase": "start",
+            "name": name,
+            "args": _cap_tool_args(args),
+        }
+        try:
+            await self._write(frame)
+        except Exception:
+            logger.exception("Failed to deliver a tool_event start for thread {}", thread_id)
+
+    async def tool_finished(self, thread_id: int, name: str, ok: bool, result_preview: str | None) -> None:
+        """Write one ``tool_event`` end frame for the active request on a thread.
+
+        The owning request id is resolved from the dedicated active-request map
+        (:meth:`tool_started`). A call with no live request on the thread is
+        dropped. The result preview is truncated to
+        :data:`TOOL_EVENT_RESULT_PREVIEW_MAX_CHARS`; it is omitted only when
+        there is no result to preview. On a write failure the frame is logged
+        and dropped.
+
+        Args:
+            thread_id: Thread whose active request owns the tool call.
+            name: The tool name that finished.
+            ok: Whether the tool reported a successful result.
+            result_preview: A textual preview of the tool result, if any.
+        """
+        if not self._tool_events_enabled:
+            return
+        request_id = self._active_requests.get(thread_id)
+        if request_id is None:
+            logger.debug("Dropping a tool_event end for thread {}: no active request", thread_id)
+            return
+        frame: dict[str, Any] = {
+            "type": "tool_event",
+            "request_id": request_id,
+            "phase": "end",
+            "name": name,
+            "ok": ok,
+        }
+        preview = _cap_result_preview(result_preview)
+        if preview is not None:
+            frame["result_preview"] = preview
+        try:
+            await self._write(frame)
+        except Exception:
+            logger.exception("Failed to deliver a tool_event end for thread {}", thread_id)
 
     async def _emit_cwd_update(self, thread_id: int) -> None:
         """Write one ``cwd_update`` frame to stdout.
@@ -1326,6 +1473,10 @@ class StdioRunner:
                 subagent_tracker.set_sink(self if self._subagent_events_enabled else None)
                 if self._subagent_events_enabled:
                     logger.debug("client declared the subagents capability")
+                self._tool_events_enabled = capabilities.get("tool_events") is True
+                tool_event_tracker.set_sink(self if self._tool_events_enabled else None)
+                if self._tool_events_enabled:
+                    logger.debug("client declared the tool_events capability")
                 self._cwd_updates_enabled = capabilities.get("cwd_updates") is True
                 cwd_tracker.set_sink(self if self._cwd_updates_enabled else None)
                 if self._cwd_updates_enabled:
@@ -1474,6 +1625,7 @@ class StdioRunner:
         finally:
             self._stopping = True
             subagent_tracker.release(self)
+            tool_event_tracker.release(self)
             cwd_tracker.release(self)
             thread_name_tracker.release(self)
             clear_stdio_delivery_emitter()

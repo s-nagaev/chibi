@@ -103,6 +103,18 @@ def agent_events(frames: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [frame for frame in frames if frame.get("type") == "agent_event"]
 
 
+def without_id(frame: dict[str, Any]) -> dict[str, Any]:
+    """Return a frame copy without the subagent instance id.
+
+    Args:
+        frame: A captured protocol frame.
+
+    Returns:
+        The frame without its ``id`` key.
+    """
+    return {key: value for key, value in frame.items() if key != "id"}
+
+
 @pytest.fixture(autouse=True)
 async def subagent_event_cleanup() -> Any:
     """Release the tracker sink and settle emission tasks after each test."""
@@ -134,7 +146,8 @@ class TestDelegateLifecycleEvents:
             await subagent_tracker.drain()
 
         assert result == {"response": "delegated answer"}
-        assert agent_events(output) == [
+        events = agent_events(output)
+        assert [without_id(event) for event in events] == [
             {
                 "type": "agent_event",
                 "request_id": "r1",
@@ -152,6 +165,9 @@ class TestDelegateLifecycleEvents:
                 "name": "gpt-x",
             },
         ]
+        started_id = events[0]["id"]
+        assert started_id
+        assert events[1]["id"] == started_id
 
     @pytest.mark.asyncio
     async def test_failed_attempt_emits_nothing(self) -> None:
@@ -252,6 +268,68 @@ async def fake_subagent_slow(**kwargs: Any) -> ChatResponseSchema:
     """Fake subagent runner finishing well after its sibling."""
     await asyncio.sleep(0.15)
     return ChatResponseSchema(answer="delegated answer", provider="prov", model="gpt-x", usage=None)
+
+
+class TestSubagentInstanceIds:
+    """Unique per-instance identifiers carried by agent_event frames."""
+
+    @pytest.mark.asyncio
+    async def test_same_name_instances_get_distinct_ids(self) -> None:
+        """Two concurrent same-name subagents carry two distinct ids."""
+        _instance, output = counting_runner()
+
+        with (
+            patch(
+                "chibi.services.providers.tools.common.get_sub_agent_response",
+                side_effect=[fake_subagent_fast(), fake_subagent_slow()],
+            ),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", fake_models_available),
+        ):
+            tasks = [
+                asyncio.create_task(
+                    DelegateTool.function(
+                        prompt=f"task {index}",
+                        model_name="gpt-x",
+                        provider_name="prov",
+                        **delegate_kwargs(),
+                    )
+                )
+                for index in range(2)
+            ]
+            for _ in range(300):
+                if len([event for event in agent_events(output) if event["event"] == "started"]) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            await subagent_tracker.drain()
+            await asyncio.gather(*tasks)
+            await subagent_tracker.drain()
+
+        started = [event for event in agent_events(output) if event["event"] == "started"]
+        finished = [event for event in agent_events(output) if event["event"] == "finished"]
+        assert len(started) == 2
+        assert len(finished) == 2
+        started_ids = {event["id"] for event in started}
+        assert len(started_ids) == 2
+        assert {event["id"] for event in finished} == started_ids
+
+    @pytest.mark.asyncio
+    async def test_sequential_delegations_get_distinct_ids(self) -> None:
+        """Two successive delegations never reuse an instance id."""
+        _instance, output = counting_runner()
+
+        with (
+            patch("chibi.services.providers.tools.common.get_sub_agent_response", fake_subagent_ok),
+            patch("chibi.services.providers.tools.common.get_models_available_to_user", fake_models_available),
+        ):
+            for _ in range(2):
+                await DelegateTool.function(
+                    prompt="do something", model_name="gpt-x", provider_name="prov", **delegate_kwargs()
+                )
+                await subagent_tracker.drain()
+
+        ids = [event["id"] for event in agent_events(output) if event["event"] == "started"]
+        assert len(ids) == 2
+        assert ids[0] != ids[1]
 
 
 class TestBackgroundDelegationOutlivesRequest:

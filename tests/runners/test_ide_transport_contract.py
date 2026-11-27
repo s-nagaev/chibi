@@ -19,6 +19,9 @@ MODELS = [
     ModelChangeSchema(provider="openai", name="gpt-example", display_name="🟢 GPT-Example", image_generation=False),
     ModelChangeSchema(provider="alibaba", name="qwen-fake", display_name="Qwen-Fake", image_generation=False),
 ]
+# Deterministic subagent instance id shared by the subagent fixture and the
+# tool-event fixture (the production value is a uuid4 hex digest).
+SUBAGENT_ID = "5f0d6c1e4b8a4c2f8e7d3a1b9c0d2e4f"
 _gate: asyncio.Event | None = None
 
 
@@ -438,9 +441,9 @@ async def test_canonical_subagent_events_output() -> None:
         """Emit one deterministic started/finished pair before answering."""
         interface.response_model = "gpt-example"
         interface.response_provider = "openai"
-        subagent_tracker.subagent_started(interface.thread_id, "gpt-example")
+        subagent_tracker.subagent_started(interface.thread_id, "gpt-example", SUBAGENT_ID)
         await subagent_tracker.drain()
-        subagent_tracker.subagent_finished(interface.thread_id, "gpt-example")
+        subagent_tracker.subagent_finished(interface.thread_id, "gpt-example", SUBAGENT_ID)
         await subagent_tracker.drain()
         await interface.send_message("This function `foo` returns the integer `42`.")
 
@@ -463,6 +466,56 @@ async def test_canonical_subagent_events_output() -> None:
         assert output == fixture("valid_subagent_events_output.jsonl")
     finally:
         subagent_tracker.set_sink(None)
+        for item in active:
+            item.stop()
+
+
+@pytest.mark.asyncio
+async def test_canonical_tool_events_output() -> None:
+    """Replay the canonical tool-event scenario and compare every frame.
+
+    The fixture declares the `tool_events` and `subagents` opt-ins: a
+    foreground `read_file` call brackets its `tool_event` pair, and the
+    delegation that follows emits an id-bearing `agent_event` pair (a
+    background-default tool, so it emits no `tool_event` of its own).
+    """
+    from chibi.services.events.subagent_events import subagent_tracker
+    from chibi.services.events.tool_events import tool_event_tracker
+
+    async def tool_prompt(interface: Any) -> None:
+        """Emit a deterministic tool-event pair and one id-bearing delegation."""
+        interface.response_model = "gpt-example"
+        interface.response_provider = "openai"
+        await tool_event_tracker.tool_started(interface.thread_id, "read_file", {"file_path": "/tmp/notes.md"})
+        await tool_event_tracker.tool_finished(
+            interface.thread_id, "read_file", True, "# Notes\n\nThe deploy pipeline runs on tag push."
+        )
+        subagent_tracker.subagent_started(interface.thread_id, "gpt-example", SUBAGENT_ID)
+        await subagent_tracker.drain()
+        subagent_tracker.subagent_finished(interface.thread_id, "gpt-example", SUBAGENT_ID)
+        await subagent_tracker.drain()
+        await interface.send_message("This function `foo` returns the integer `42`.")
+
+    instance, output = runner()
+    active: list[Any] = [
+        patch("chibi.interfaces.stdio_runner.handle_user_prompt", tool_prompt),
+        patch("chibi.interfaces.stdio_runner.handle_reset", fake_reset),
+        patch("chibi.interfaces.stdio_runner.handle_image_generation", fake_imagine),
+        patch("chibi.interfaces.stdio_runner.get_models_available", fake_models),
+        patch("chibi.interfaces.stdio_runner.set_active_model", fake_select),
+        patch("chibi.interfaces.stdio_runner.get_info", fake_info),
+    ]
+    for item in active:
+        item.start()
+    try:
+        for message in fixture("valid_tool_events_input.jsonl"):
+            await instance._handle_message(message)
+        await wait_for(output, "01HXY9K7TOOLEVT", "result")
+        await instance.drain_subagent_events()
+        assert output == fixture("valid_tool_events_output.jsonl")
+    finally:
+        subagent_tracker.set_sink(None)
+        tool_event_tracker.set_sink(None)
         for item in active:
             item.stop()
 

@@ -35,6 +35,32 @@ Subagent lifecycle events (requires the `capabilities.subagents` opt-in):
 The final zero-active `finished` is the client's signal to hide its subagent spinner line; the result frame stays
 the implicit end of the request and no agent_event ever follows it.
 
+Each `agent_event` carries an optional `id`: a per-instance identifier unique to the subagent that produced the
+event. It is present on both the `started` and the `finished` event of one delegation, which is what lets a client
+keep two concurrently running same-name subagents apart. The field is additive: a client that does not know it
+ignores it, and an event without an instance context (the authoritative kill-flush `finished`) omits it. `name`
+stays the delegated model label and is display-only.
+
+### `valid_tool_events_input.jsonl` / `valid_tool_events_output.jsonl`
+Foreground tool-call lifecycle events (requires the `capabilities.tool_events` opt-in):
+`initialize(tool_events, subagents)` → `ready` → `request` → `status(running)` →
+`tool_event(start, read_file, args)` → `tool_event(end, read_file, ok true, result_preview)` →
+`agent_event(started, id)` → `agent_event(finished, id)` → `result`.
+
+A `tool_event` is a correlated, non-terminal frame carrying the request's `request_id` and `phase`:
+`start` carries `name` plus `args` (the model-supplied arguments, size-capped), `end` carries `name`, a boolean
+`ok` and a `result_preview` truncated to at most 2000 characters. Emission is gated on the
+`capabilities.tool_events` opt-in and requires a live request on the thread: background tool runs
+(`run_in_background`) and interface-less (sub-agent-internal) calls emit nothing at all. The args size cap
+replaces an oversized `args` mapping with `{"_truncated": true}` rather than an arbitrary substring.
+
+The opt-in is independent of `subagents`: a client that declares `tool_events` without `subagents` still receives
+its `tool_event` frames (the owning request is resolved from the transport's own active-request bookkeeping, never
+from the subagents-gated counters). The fixture declares both flags so it can also show an id-bearing
+`agent_event` pair, which is emitted by a delegation (a background-default tool, so the delegation itself emits
+no `tool_event`). A session without `capabilities.tool_events` in the `initialize` handshake is exactly the
+canonical `valid_session_*` scenario — no `tool_event` frames are ever emitted to a client that did not opt in.
+
 ### `valid_streaming_session_input.jsonl` / `valid_streaming_session_output.jsonl`
 Live response-delta streaming (requires the `capabilities.streaming` opt-in):
 `initialize(streaming)` → `ready` (identical to the canonical one — the server never advertises
