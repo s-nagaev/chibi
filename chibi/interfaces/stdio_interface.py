@@ -79,6 +79,16 @@ class StdioInterface(UserInterface, EditorContextProvider):
         self._closed = True
         self._thoughts_at_close = self.response_thoughts
 
+    @property
+    def is_closed(self) -> bool:
+        """Report whether the owning request has already finished.
+
+        Returns:
+            True once the request this interface belongs to has produced its
+            terminal frame; False while it is still running.
+        """
+        return self._closed
+
     def _continuation_thoughts(self) -> str | None:
         """Return the reasoning captured after the request closed.
 

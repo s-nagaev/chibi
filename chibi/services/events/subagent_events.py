@@ -19,11 +19,11 @@ from chibi.utils.app import SingletonMeta
 class SubagentEventSink(Protocol):
     """Structural interface the IDE stdio runner exposes to the tracker."""
 
-    def subagent_started(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_started(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Count one accepted subagent start for the request on this thread."""
         ...
 
-    def subagent_finished(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_finished(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Count one subagent finish for the request on this thread."""
         ...
 
@@ -61,25 +61,27 @@ class SubagentEventTracker(metaclass=SingletonMeta):
         if self._sink is sink:
             self._sink = None
 
-    def subagent_started(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_started(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Forward a subagent start to the active sink.
 
         Args:
             thread_id: Thread whose running request owns the counters.
             name: Trivially available subagent label (the delegated model), if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
         """
         if self._sink is not None:
-            self._sink.subagent_started(thread_id, name)
+            self._sink.subagent_started(thread_id, name, subagent_id)
 
-    def subagent_finished(self, thread_id: int, name: str | None = None) -> None:
+    def subagent_finished(self, thread_id: int, name: str | None = None, subagent_id: str | None = None) -> None:
         """Forward a subagent finish to the active sink.
 
         Args:
             thread_id: Thread whose running request owns the counters.
             name: Trivially available subagent label, if any.
+            subagent_id: Unique identifier of the subagent instance, if any.
         """
         if self._sink is not None:
-            self._sink.subagent_finished(thread_id, name)
+            self._sink.subagent_finished(thread_id, name, subagent_id)
 
     def kill_flush(self, thread_id: int) -> None:
         """Forward a kill-flush request to the active sink.

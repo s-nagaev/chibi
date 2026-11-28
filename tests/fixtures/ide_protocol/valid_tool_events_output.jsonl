@@ -1,0 +1,7 @@
+{"type":"ready","protocol_version":1,"server":{"name":"chibi","version":"1.0.0"},"capabilities":{"commands":["/reset","/stop","/new_thread_with_current_context","/rename_thread","/model","/imagine","/info","/help","/quit","/exit"],"models":true}}
+{"type":"status","request_id":"01HXY9K7TOOLEVT","state":"running"}
+{"type":"tool_event","request_id":"01HXY9K7TOOLEVT","phase":"start","name":"read_file","args":{"file_path":"/tmp/notes.md"}}
+{"type":"tool_event","request_id":"01HXY9K7TOOLEVT","phase":"end","name":"read_file","ok":true,"result_preview":"# Notes\n\nThe deploy pipeline runs on tag push."}
+{"type":"agent_event","request_id":"01HXY9K7TOOLEVT","event":"started","active":1,"total":1,"name":"gpt-example","id":"5f0d6c1e4b8a4c2f8e7d3a1b9c0d2e4f"}
+{"type":"agent_event","request_id":"01HXY9K7TOOLEVT","event":"finished","active":0,"total":1,"name":"gpt-example","id":"5f0d6c1e4b8a4c2f8e7d3a1b9c0d2e4f"}
+{"type":"result","request_id":"01HXY9K7TOOLEVT","content":"This function `foo` returns the integer `42`.","model":"gpt-example","provider":"openai"}

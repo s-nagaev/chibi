@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 from typing import Any, Unpack
+from uuid import uuid4
 
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
@@ -133,18 +134,23 @@ class DelegateTool(ChibiTool):
             caller_storage_id=caller_storage_id,
             caller_thread_id=caller_thread_id,
         )
+        # A fresh identifier per subagent instance: the IDE client keys its
+        # subagent rows by it, so two concurrent subagents sharing the same
+        # model label stay distinguishable. It travels on both the started and
+        # the finished event of this delegation.
+        subagent_id = uuid4().hex
         # Every validation failure above raised before this line, so a
         # failed delegation attempt (bad tool params and the like) is never
         # counted and never emits a started event. The matching finally
         # below guarantees the finished event on every exit path, including
         # the timeout and cancellation branches.
-        subagent_tracker.subagent_started(caller_thread_id, name=model_name)
+        subagent_tracker.subagent_started(caller_thread_id, name=model_name, subagent_id=subagent_id)
         try:
             response: ChatResponseSchema = await asyncio.wait_for(fut=coro, timeout=timeout)
         except asyncio.TimeoutError:
             raise ToolException("Timed out waiting for delegated task to complete!")
         finally:
-            subagent_tracker.subagent_finished(caller_thread_id, name=model_name)
+            subagent_tracker.subagent_finished(caller_thread_id, name=model_name, subagent_id=subagent_id)
 
         logger.log("SUBAGENT", f"[{model_name or caller_model}] Delegated task is done: {response.answer}")
 
