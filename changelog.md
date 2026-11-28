@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gemini async traffic runs on `httpx2` instead of the SDK's opportunistic `aiohttp` fallback.** The `google-genai` client receives an injected `httpx2.AsyncClient` (a maintained `httpx` fork), so corporate-proxy, timeout and retry settings apply to Gemini requests just as they do for the other providers.
 - **fastembed 0.9.1 with onnxruntime 1.32.0 drops Intel Mac support for semantic memory.** The embedding backend installs on macOS with Apple silicon, Linux (x86_64 or arm64) and Windows; on Intel Macs semantic memory is now disabled.
 - **The default moderation model for the MiniMax provider is now `MiniMax-M3`.** Instances that do not set `MODERATION_MODEL` themselves get it.
+- **Context compaction is now fully documented:** `docs/context-compaction.md` explains every layer, from the per-turn context note and the agent compaction tools to forced post-answer compaction, transient trim guards and reactive recovery.
 
 ### Fixed
 - **Semantic memory no longer fills up with copies of the compaction seed.** Every conversation compaction re-wrote the same "What we were talking about?" pair into the long-term Chroma memory under a fresh ID, so repeated compactions piled up duplicates that crowded out genuine memories in search results. Compaction seeds now stay out of the archive entirely; entries already stored age out through the normal TTL.
